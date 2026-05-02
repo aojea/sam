@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/sam/api"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestHandleJoinEvent(t *testing.T) {
@@ -99,5 +100,135 @@ func TestHandleKeyRotationEvent(t *testing.T) {
 
 	if len(node.trustedKeys) != 1 {
 		t.Errorf("Expected 1 trusted key, got %d", len(node.trustedKeys))
+	}
+}
+
+func TestSamNode_VerifyEvent(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	node := &SamNode{
+		trustedKeys: []TrustedKey{
+			{Key: pub, ReceivedAt: time.Now()},
+		},
+	}
+
+	event := &api.MeshEvent{
+		Type:      api.MeshEvent_JOIN,
+		PeerId:    "some-peer",
+		Timestamp: time.Now().Unix(),
+	}
+
+	// Sign event
+	event.Signature = nil
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig := ed25519.Sign(priv, data)
+	event.Signature = sig
+
+	// Test valid signature
+	if !node.verifyEvent(event) {
+		t.Error("Expected event to be verified")
+	}
+
+	// Test missing signature
+	event.Signature = nil
+	if node.verifyEvent(event) {
+		t.Error("Expected verification to fail with missing signature")
+	}
+
+	// Test invalid signature
+	event.Signature = []byte("invalid-sig")
+	if node.verifyEvent(event) {
+		t.Error("Expected verification to fail with invalid signature")
+	}
+
+	// Test no trusted keys
+	node.keysMu.Lock()
+	node.trustedKeys = nil
+	node.keysMu.Unlock()
+	event.Signature = sig
+	if node.verifyEvent(event) {
+		t.Error("Expected verification to fail with no trusted keys")
+	}
+
+	// Test with empty key in trustedKeys
+	node.keysMu.Lock()
+	node.trustedKeys = []TrustedKey{{Key: nil, ReceivedAt: time.Now()}}
+	node.keysMu.Unlock()
+	event.Signature = sig
+	if node.verifyEvent(event) {
+		t.Error("Expected verification to fail with empty key in trustedKeys")
+	}
+}
+
+func TestVerifyEvent_Concurrent(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	node := &SamNode{
+		trustedKeys: []TrustedKey{
+			{Key: pub, ReceivedAt: time.Now()},
+		},
+	}
+
+	event := &api.MeshEvent{
+		Type:      api.MeshEvent_JOIN,
+		PeerId:    "some-peer",
+		Timestamp: time.Now().Unix(),
+	}
+
+	// Sign event
+	event.Signature = nil
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig := ed25519.Sign(priv, data)
+	event.Signature = sig
+
+	done := make(chan bool)
+	
+	// Reader goroutines
+	for i := 0; i < 10; i++ {
+		go func() {
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					// Clone the event to simulate independent events being verified
+					eventCopy := proto.Clone(event).(*api.MeshEvent)
+					node.verifyEvent(eventCopy)
+				}
+			}
+		}()
+	}
+
+	// Writer goroutine
+	go func() {
+		for i := 0; i < 100; i++ {
+			newPub, _, _ := ed25519.GenerateKey(nil)
+			node.keysMu.Lock()
+			node.trustedKeys = append(node.trustedKeys, TrustedKey{Key: newPub, ReceivedAt: time.Now()})
+			if len(node.trustedKeys) > 5 {
+				node.trustedKeys = node.trustedKeys[1:] // Prune
+			}
+			node.keysMu.Unlock()
+			time.Sleep(1 * time.Millisecond)
+		}
+		for i := 0; i < 10; i++ {
+			done <- true
+		}
+	}()
+
+	for i := 0; i < 10; i++ {
+		<-done
 	}
 }

@@ -475,7 +475,7 @@ func (x *ModelProperty) GetQuantization() string {
 	return ""
 }
 
-type AgentCard struct {
+type NodeCard struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	PeerId        string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
@@ -484,24 +484,25 @@ type AgentCard struct {
 	McpTools      []string               `protobuf:"bytes,5,rep,name=mcp_tools,json=mcpTools,proto3" json:"mcp_tools,omitempty"`
 	Metadata      map[string]string      `protobuf:"bytes,6,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Signature     []byte                 `protobuf:"bytes,7,opt,name=signature,proto3" json:"signature,omitempty"`
+	Timestamp     int64                  `protobuf:"varint,8,opt,name=timestamp,proto3" json:"timestamp,omitempty"` // NEW: Epoch time to resolve version conflicts
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *AgentCard) Reset() {
-	*x = AgentCard{}
+func (x *NodeCard) Reset() {
+	*x = NodeCard{}
 	mi := &file_api_sam_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *AgentCard) String() string {
+func (x *NodeCard) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AgentCard) ProtoMessage() {}
+func (*NodeCard) ProtoMessage() {}
 
-func (x *AgentCard) ProtoReflect() protoreflect.Message {
+func (x *NodeCard) ProtoReflect() protoreflect.Message {
 	mi := &file_api_sam_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -513,58 +514,65 @@ func (x *AgentCard) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AgentCard.ProtoReflect.Descriptor instead.
-func (*AgentCard) Descriptor() ([]byte, []int) {
+// Deprecated: Use NodeCard.ProtoReflect.Descriptor instead.
+func (*NodeCard) Descriptor() ([]byte, []int) {
 	return file_api_sam_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *AgentCard) GetPeerId() string {
+func (x *NodeCard) GetPeerId() string {
 	if x != nil {
 		return x.PeerId
 	}
 	return ""
 }
 
-func (x *AgentCard) GetName() string {
+func (x *NodeCard) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *AgentCard) GetSkills() []string {
+func (x *NodeCard) GetSkills() []string {
 	if x != nil {
 		return x.Skills
 	}
 	return nil
 }
 
-func (x *AgentCard) GetModels() []*ModelProperty {
+func (x *NodeCard) GetModels() []*ModelProperty {
 	if x != nil {
 		return x.Models
 	}
 	return nil
 }
 
-func (x *AgentCard) GetMcpTools() []string {
+func (x *NodeCard) GetMcpTools() []string {
 	if x != nil {
 		return x.McpTools
 	}
 	return nil
 }
 
-func (x *AgentCard) GetMetadata() map[string]string {
+func (x *NodeCard) GetMetadata() map[string]string {
 	if x != nil {
 		return x.Metadata
 	}
 	return nil
 }
 
-func (x *AgentCard) GetSignature() []byte {
+func (x *NodeCard) GetSignature() []byte {
 	if x != nil {
 		return x.Signature
 	}
 	return nil
+}
+
+func (x *NodeCard) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
 }
 
 type RevocationMsg struct {
@@ -879,15 +887,16 @@ const file_api_sam_proto_rawDesc = "" +
 	"\rModelProperty\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
 	"\x0econtext_window\x18\x02 \x01(\x05R\rcontextWindow\x12\"\n" +
-	"\fquantization\x18\x03 \x01(\tR\fquantization\"\xb4\x02\n" +
-	"\tAgentCard\x12\x17\n" +
+	"\fquantization\x18\x03 \x01(\tR\fquantization\"\xd0\x02\n" +
+	"\bNodeCard\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
 	"\x06skills\x18\x03 \x03(\tR\x06skills\x12-\n" +
 	"\x06models\x18\x04 \x03(\v2\x15.sam.v1.ModelPropertyR\x06models\x12\x1b\n" +
-	"\tmcp_tools\x18\x05 \x03(\tR\bmcpTools\x12;\n" +
-	"\bmetadata\x18\x06 \x03(\v2\x1f.sam.v1.AgentCard.MetadataEntryR\bmetadata\x12\x1c\n" +
-	"\tsignature\x18\a \x01(\fR\tsignature\x1a;\n" +
+	"\tmcp_tools\x18\x05 \x03(\tR\bmcpTools\x12:\n" +
+	"\bmetadata\x18\x06 \x03(\v2\x1e.sam.v1.NodeCard.MetadataEntryR\bmetadata\x12\x1c\n" +
+	"\tsignature\x18\a \x01(\fR\tsignature\x12\x1c\n" +
+	"\ttimestamp\x18\b \x01(\x03R\ttimestamp\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x89\x01\n" +
@@ -945,18 +954,18 @@ var file_api_sam_proto_goTypes = []any{
 	(*PeerProfile)(nil),    // 5: sam.v1.PeerProfile
 	(*PeerRegistry)(nil),   // 6: sam.v1.PeerRegistry
 	(*ModelProperty)(nil),  // 7: sam.v1.ModelProperty
-	(*AgentCard)(nil),      // 8: sam.v1.AgentCard
+	(*NodeCard)(nil),       // 8: sam.v1.NodeCard
 	(*RevocationMsg)(nil),  // 9: sam.v1.RevocationMsg
 	(*MeshEvent)(nil),      // 10: sam.v1.MeshEvent
 	(*EnrollRequest)(nil),  // 11: sam.v1.EnrollRequest
 	(*EnrollResponse)(nil), // 12: sam.v1.EnrollResponse
 	nil,                    // 13: sam.v1.PeerRegistry.PeersEntry
-	nil,                    // 14: sam.v1.AgentCard.MetadataEntry
+	nil,                    // 14: sam.v1.NodeCard.MetadataEntry
 }
 var file_api_sam_proto_depIdxs = []int32{
 	13, // 0: sam.v1.PeerRegistry.peers:type_name -> sam.v1.PeerRegistry.PeersEntry
-	7,  // 1: sam.v1.AgentCard.models:type_name -> sam.v1.ModelProperty
-	14, // 2: sam.v1.AgentCard.metadata:type_name -> sam.v1.AgentCard.MetadataEntry
+	7,  // 1: sam.v1.NodeCard.models:type_name -> sam.v1.ModelProperty
+	14, // 2: sam.v1.NodeCard.metadata:type_name -> sam.v1.NodeCard.MetadataEntry
 	0,  // 3: sam.v1.MeshEvent.type:type_name -> sam.v1.MeshEvent.Type
 	5,  // 4: sam.v1.PeerRegistry.PeersEntry.value:type_name -> sam.v1.PeerProfile
 	5,  // [5:5] is the sub-list for method output_type

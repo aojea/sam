@@ -54,7 +54,7 @@ message ModelProperty {
   string quantization = 3;
 }
 
-message AgentCard {
+message NodeCard {
   string peer_id = 1;
   string name = 2;
   repeated string skills = 3;
@@ -62,6 +62,7 @@ message AgentCard {
   repeated string mcp_tools = 5;
   map<string, string> metadata = 6;
   bytes signature = 7;
+  int64 timestamp = 8; // NEW: Epoch time to resolve version conflicts
 }
 
 message RevocationMsg {

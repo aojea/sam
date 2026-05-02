@@ -22,6 +22,9 @@ import (
 	"time"
 
 	"github.com/google/sam/api"
+	"github.com/google/sam/internal/catalog"
+	"github.com/google/sam/internal/registry"
+	"github.com/google/sam/internal/router"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -59,6 +62,68 @@ func NewMCPHandler(node *SamNode) http.Handler {
 		Name:        "send_message",
 		Description: "Send a message to another agent in the mesh",
 	}, handleSendMessage)
+
+	// Add the search_nodes tool.
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "search_nodes",
+		Description: "Search the mesh for nodes providing specific skills or tools.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct {
+		Capability string `json:"capability" jsonschema:"The skill or tool name to search for"`
+	}) (*mcp.CallToolResult, any, error) {
+		cat := catalog.New(node.Host, node.DHT)
+		providers, err := cat.FindProviders(ctx, params.Capability)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		var matches []string
+		for _, p := range providers {
+			matches = append(matches, p.ID.String())
+		}
+
+		resultJSON, _ := json.Marshal(matches)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: string(resultJSON)},
+			},
+		}, nil, nil
+	})
+
+	// Add the inspect_node tool.
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "inspect_node",
+		Description: "Get the full NodeCard (tools, models, skills) for a specific peer ID.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct {
+		PeerID string `json:"peer_id" jsonschema:"The Peer ID of the target agent"`
+	}) (*mcp.CallToolResult, any, error) {
+		card, err := registry.ResolveNodeCard(ctx, node.DHT, params.PeerID)
+		if err != nil {
+			logger.Warnf("[MCP] Failed to resolve NodeCard for %s via GetValue: %v, trying search", params.PeerID, err)
+			// Fallback: try to find providers for the peer ID interpreted as a capability
+			// or just list providers if we can't find the specific card.
+			// For now, we return a descriptive error or try to find it in known peers.
+			
+			// Let's try to find it in known peers as a fallback
+			node.mu.Lock()
+			_, ok := node.knownPeers[params.PeerID]
+			node.mu.Unlock()
+			
+			if ok {
+				// We know the peer, but don't have its card in DHT.
+				// We could try to fetch it directly if we had a protocol for it.
+				return nil, nil, fmt.Errorf("node %s is known but card not found in DHT", params.PeerID)
+			}
+			
+			return nil, nil, fmt.Errorf("failed to resolve NodeCard: %w", err)
+		}
+
+		resultJSON, _ := json.Marshal(card)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: string(resultJSON)},
+			},
+		}, nil, nil
+	})
 
 	// Add the mesh_pubsub_broadcast tool.
 	mcp.AddTool(mcpServer, &mcp.Tool{
@@ -231,6 +296,51 @@ func NewMCPHandler(node *SamNode) http.Handler {
 	mux.Handle("/mcp/events", sseHandler)
 	mux.Handle("/mcp/message", sseHandler)
 
+	// Add /sam/register endpoint for dynamic tool registration
+	mux.HandleFunc("/sam/register", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var card api.NodeCard
+		if err := json.NewDecoder(r.Body).Decode(&card); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		// Ensure PeerID matches our host ID
+		card.PeerId = node.Host.ID().String()
+		card.Timestamp = time.Now().Unix()
+
+		// Load private key to sign the card
+		privKey := node.Host.Peerstore().PrivKey(node.Host.ID())
+		if privKey == nil {
+			http.Error(w, "Private key not found", http.StatusInternalServerError)
+			return
+		}
+
+		if err := registry.PublishMyCard(r.Context(), node.DHT, privKey, &card); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to publish card: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Also advertise skills in the catalog
+		cat := catalog.New(node.Host, node.DHT)
+		for _, skill := range card.Skills {
+			if err := cat.Advertise(r.Context(), skill); err != nil {
+				logger.Errorf("Failed to advertise skill %s: %v", skill, err)
+			}
+		}
+
+		w.WriteHeader(http.StatusOK)
+		if _, err := fmt.Fprintln(w, "NodeCard published successfully"); err != nil {
+			logger.Errorf("Failed to write response: %v", err)
+		}
+	})
+
+	// Wire up Tier 2 Proxy Routes
+	router.SetupProxyRoutes(mux, node.Host)
+
 	// Wrap in logging middleware to debug incoming requests
 	wrappedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.Debugf("MCP Request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
@@ -260,6 +370,17 @@ func (n *SamNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName 
 }
 
 func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolName string, params any) (*mcp.CallToolResult, error) {
+	// Add relay address as fallback if we have a hub
+	if n.HubPeerID != "" {
+		relayAddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p/%s/p2p-circuit", n.HubPeerID.String()))
+		if err == nil {
+			// AddAddr expects (peer.ID, []multiaddr.Multiaddr, time.Duration)
+			// We use a temporary TTL of 1 minute
+			n.Host.Peerstore().AddAddrs(targetPeer, []multiaddr.Multiaddr{relayAddr}, time.Minute)
+			logger.Infof("[MCP] Added relay fallback address for %s via %s", targetPeer, n.HubPeerID)
+		}
+	}
+
 	// Open stream
 	s, err := n.Host.NewStream(ctx, targetPeer, api.MCPProtocolID)
 	if err != nil {
