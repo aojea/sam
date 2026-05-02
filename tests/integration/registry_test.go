@@ -85,7 +85,7 @@ func TestRegistryIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to register capability: %v", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("Expected status OK, got %d. Body: %s", resp.StatusCode, string(body))
