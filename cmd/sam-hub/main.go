@@ -32,11 +32,9 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/sam/api"
-	"github.com/google/sam/internal/registry"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	record "github.com/libp2p/go-libp2p-record"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -145,13 +143,7 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig) (*Hub, error) {
 		return nil, err
 	}
 
-	val := record.NamespacedValidator{
-		"pk":   record.PublicKeyValidator{}, // Default required by libp2p
-		"sam":  registry.NodeCardValidator{}, // Our custom NodeCard validator
-		"ipns": record.PublicKeyValidator{}, // Added to satisfy libp2p requirement
-	}
-
-	kadDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeServer), dht.Validator(val), dht.ProtocolPrefix("/sam"))
+	kadDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeServer))
 	if err != nil {
 		return nil, err
 	}

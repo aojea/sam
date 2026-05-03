@@ -17,7 +17,6 @@ package integration_test
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -27,10 +26,8 @@ import (
 	"time"
 
 	"github.com/google/sam/api"
-	"github.com/google/sam/internal/registry"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
@@ -101,28 +98,20 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 		t.Fatalf("failed to create mock libp2p host: %v", err)
 	}
 
-	val := record.NamespacedValidator{
-		"pk":   record.PublicKeyValidator{}, // Default required by libp2p
-		"sam":  registry.NodeCardValidator{}, // Our custom NodeCard validator
-		"ipns": record.PublicKeyValidator{}, // Added to satisfy libp2p requirement
-	}
-
-	kdht, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer), dht.Validator(val), dht.ProtocolPrefix("/sam"))
+	kdht, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer))
 	if err != nil {
 		t.Fatalf("failed to create DHT on mock hub: %v", err)
-	}
-
-	pub, _, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	h.SetStreamHandler(api.EnrollProtocolID, func(s network.Stream) {
 		defer func() { _ = s.Close() }()
 
+		// The following constants are mock values used for testing.
+		// 'mock-biscuit-token' is a dummy token string.
+		// 'mock-hub-pub-key' is a dummy public key string.
 		resp := &api.EnrollResponse{
 			BiscuitToken: []byte("mock-biscuit-token"),
-			HubPublicKey: pub,
+			HubPublicKey: []byte("mock-hub-pub-key"),
 			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
 		}
 		data, err := proto.Marshal(resp)

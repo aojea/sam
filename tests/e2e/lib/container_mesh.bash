@@ -69,10 +69,6 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   }
 
   mesh_cleanup_env() {
-    if [[ "${SKIP_CLEANUP:-0}" -eq 1 ]]; then
-      echo "Skipping cleanup as requested by SKIP_CLEANUP=1"
-      return 0
-    fi
     local c
     for c in "${MESH_CONTAINERS[@]}"; do
       docker rm -f "${c}" >/dev/null 2>&1 || true

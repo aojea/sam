@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/google/sam/api"
-	"github.com/google/sam/internal/registry"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-msgio"
@@ -220,24 +219,6 @@ func main() {
 
 			// Start MCP Server
 			startMCPServer(node, mcpAddrFlag)
-
-			// Publish initial empty NodeCard on startup
-			go func() {
-				// Wait a bit for DHT to warm up
-				time.Sleep(5 * time.Second)
-				card := &registry.NodeCard{
-					PeerID:    node.Host.ID().String(),
-					Timestamp: time.Now().Unix(),
-				}
-				privKey := node.Host.Peerstore().PrivKey(node.Host.ID())
-				if privKey != nil {
-					if err := registry.PublishMyCard(context.Background(), node.DHT, privKey, card); err != nil {
-						logger.Errorf("Failed to publish initial NodeCard: %v", err)
-					} else {
-						logger.Info("Initial NodeCard published successfully")
-					}
-				}
-			}()
 
 			fmt.Printf("SAM Node Online.\nPeerID: %s\nListening on: %v\n", node.Host.ID(), node.Host.Addrs())
 
@@ -453,18 +434,12 @@ func (n *SamNode) Enroll(ctx context.Context, jwt string) error {
 		return fmt.Errorf("failed to save identity expiration: %v", err)
 	}
 
-	if len(resp.HubPublicKey) != ed25519.PublicKeySize {
-		return fmt.Errorf("received invalid hub public key size: %d", len(resp.HubPublicKey))
-	}
-
 	if err := n.Store.SaveHubConfig(resp.HubPublicKey, resp.HubAddresses); err != nil {
 		return fmt.Errorf("failed to save hub config: %v", err)
 	}
 
 	n.keysMu.Lock()
-	pubKeyCopy := make([]byte, ed25519.PublicKeySize)
-	copy(pubKeyCopy, resp.HubPublicKey)
-	n.trustedKeys = []TrustedKey{{Key: ed25519.PublicKey(pubKeyCopy), ReceivedAt: time.Now()}}
+	n.trustedKeys = append(n.trustedKeys, TrustedKey{Key: ed25519.PublicKey(resp.HubPublicKey), ReceivedAt: time.Now()})
 	n.keysMu.Unlock()
 
 	// Add known peers from response

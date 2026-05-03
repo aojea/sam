@@ -16,13 +16,12 @@ package main
 
 import (
 	"context"
+	"os"
+	"strings"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"os"
-	"strings"
 	"sync"
 
 	"time"
@@ -30,12 +29,10 @@ import (
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
-	"github.com/google/sam/internal/registry"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -43,7 +40,6 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	"github.com/libp2p/go-libp2p/p2p/discovery/util"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
-	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
@@ -68,31 +64,6 @@ const (
 type TrustedKey struct {
 	Key        ed25519.PublicKey
 	ReceivedAt time.Time
-}
-
-type customValidator struct {
-	pk  record.PublicKeyValidator
-	sam registry.NodeCardValidator
-}
-
-func (v customValidator) Validate(key string, value []byte) error {
-	if strings.HasPrefix(key, "/pk/") {
-		return v.pk.Validate(key, value)
-	}
-	if strings.HasPrefix(key, "/sam/") {
-		return v.sam.Validate(key, value)
-	}
-	return errors.New("unsupported namespace")
-}
-
-func (v customValidator) Select(key string, values [][]byte) (int, error) {
-	if strings.HasPrefix(key, "/pk/") {
-		return v.pk.Select(key, values)
-	}
-	if strings.HasPrefix(key, "/sam/") {
-		return v.sam.Select(key, values)
-	}
-	return 0, errors.New("unsupported namespace")
 }
 
 type SamNode struct {
@@ -189,13 +160,8 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	}
 	node.Host = h
 
-	val := customValidator{
-		pk:  record.PublicKeyValidator{},
-		sam: registry.NodeCardValidator{},
-	}
-
 	// Initialize Rendezvous (DHT Client)
-	kdht, err := dht.New(ctx, h, dht.Mode(dht.ModeAuto), dht.Validator(val), dht.ProtocolPrefix("/sam"))
+	kdht, err := dht.New(ctx, h, dht.Mode(dht.ModeAuto))
 	if err != nil {
 		return nil, err
 	}
@@ -231,20 +197,6 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 				node.HubPeerID = addrInfo.ID
 				logger.Infof("[AuthN] Connected to hub: %s", addrInfo.ID)
 			}
-
-			// Explicitly make a reservation on the hub for relaying
-			go func(hubID peer.ID) {
-				// Wait a bit for connection to stabilize
-				time.Sleep(2 * time.Second)
-				logger.Infof("[Relay] Attempting to make reservation on hub %s", hubID)
-				_, err := client.Reserve(ctx, h, peer.AddrInfo{ID: hubID})
-				if err != nil {
-					logger.Warnf("[Relay] Failed to make reservation on hub %s: %v", hubID, err)
-				} else {
-					logger.Infof("[Relay] Successfully made reservation on hub %s", hubID)
-				}
-			}(node.HubPeerID)
-
 			break
 		}
 	}
@@ -429,9 +381,7 @@ func (n *SamNode) handleBannedEvent(event *api.MeshEvent) {
 func (n *SamNode) handleKeyRotationEvent(event *api.MeshEvent) {
 	logger.Infof("[Mesh Event] Key rotation received")
 	n.keysMu.Lock()
-	pubKeyCopy := make([]byte, len(event.NewPublicKey))
-	copy(pubKeyCopy, event.NewPublicKey)
-	n.trustedKeys = append(n.trustedKeys, TrustedKey{Key: ed25519.PublicKey(pubKeyCopy), ReceivedAt: time.Now()})
+	n.trustedKeys = append(n.trustedKeys, TrustedKey{Key: ed25519.PublicKey(event.NewPublicKey), ReceivedAt: time.Now()})
 	n.keysMu.Unlock()
 }
 
@@ -464,36 +414,21 @@ func (n *SamNode) startKeyPruning(ctx context.Context, gracePeriod time.Duration
 }
 
 func (n *SamNode) verifyEvent(event *api.MeshEvent) bool {
-	n.keysMu.RLock()
-	keys := make([]TrustedKey, len(n.trustedKeys))
-	copy(keys, n.trustedKeys)
-	n.keysMu.RUnlock()
-
-	if len(keys) == 0 {
-		logger.Warnf("[Mesh Event] No trusted keys available for verification")
-		return false
-	}
-
 	sig := event.Signature
-	if len(sig) == 0 {
-		logger.Warnf("[Mesh Event] Event missing signature")
-		return false
-	}
-
-	// Mutate the event under a lock, or better, make a copy of the event to avoid racing with other verifiers!
-	// Protobuf clone is safer.
-	eventCopy := proto.Clone(event).(*api.MeshEvent)
-
-	eventCopy.Signature = nil
-	data, err := proto.Marshal(eventCopy)
+	event.Signature = nil
+	data, err := proto.Marshal(event)
+	event.Signature = sig // Restore
 	if err != nil {
 		logger.Errorf("[Mesh Event] Failed to marshal event for verification: %v", err)
 		return false
 	}
 
+	n.keysMu.RLock()
+	keys := n.trustedKeys
+	n.keysMu.RUnlock()
+
 	for _, tk := range keys {
 		if len(tk.Key) != ed25519.PublicKeySize {
-			logger.Warnf("[Mesh Event] Invalid trusted key size: %d", len(tk.Key))
 			continue
 		}
 		if ed25519.Verify(tk.Key, data, sig) {

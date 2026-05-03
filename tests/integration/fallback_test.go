@@ -255,7 +255,7 @@ func startMockHubDynamic(t *testing.T, pubA, pubB ed25519.PublicKey) (peer.ID, s
 		t.Fatalf("failed to create mock libp2p host: %v", err)
 	}
 
-	kdht, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	kdht, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer))
 	if err != nil {
 		t.Fatalf("failed to create DHT on mock hub: %v", err)
 	}
