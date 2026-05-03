@@ -18,6 +18,8 @@ teardown() {
   if [[ "${BATS_TEST_COMPLETED:-0}" -ne 1 ]]; then
     echo "Node 1 logs on failure (filtered):"
     docker logs "${MESH_PREFIX}-node-1" 2>&1 | grep -i -E 'mcp|request|error|fatal|panic' || true
+    echo "Node 2 logs on failure (filtered):"
+    docker logs "${MESH_PREFIX}-node-2" 2>&1 | grep -i -E 'mcp|request|error|fatal|panic' || true
   fi
   mesh_cleanup_env
 }
@@ -36,6 +38,21 @@ teardown() {
   mesh_wait_for_log "${node1_name}" "SAM Node Online" 20
   mesh_wait_for_mcp_ready 1 20
 
+  run mesh_start_node 2 "--discovery-interval 100ms --log-level debug"
+  [[ "$status" -eq 0 ]]
+
+  local node2_name="${MESH_PREFIX}-node-2"
+  mesh_wait_for_log "${node2_name}" "SAM Node Online" 20
+  mesh_wait_for_mcp_ready 2 20
+
+  # Get Node 2's peer ID from logs
+  local node2_peer_id
+  node2_peer_id=$(docker logs "${node2_name}" 2>&1 | grep -oE 'PeerID: 12D3Koo[a-zA-Z0-9]+' | head -n 1 | awk '{print $2}')
+  [[ -n "$node2_peer_id" ]]
+
+  # Wait for node 1 to connect to node 2
+  mesh_wait_for_peer_connection 1 "$node2_peer_id" 30
+
   # Run the agent_demo.py snippet inside a container
   run docker run --rm \
     --network "${MESH_NETWORK}" \
@@ -43,6 +60,7 @@ teardown() {
     -v "$(pwd)/docs/snippets:/snippets" \
     -e PYTHONPATH=/sam-mcp-python/src \
     -e SAM_MCP_URL="http://sam-node-1:8080/mcp/events" \
+    -e TARGET_PEER_ID="$node2_peer_id" \
     python:3.12 \
     bash -c 'pip install mcp httpx && python3 /snippets/agent_demo.py'
 
@@ -56,6 +74,8 @@ teardown() {
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"Connecting to SAM Node at"* ]]
   [[ "$output" == *"Discovered"* ]]
-  [[ "$output" == *"Calling get_mesh_info tool..."* ]]
-  [[ "$output" == *"Result:"* ]]
+  [[ "$output" == *"Calling local get_mesh_info tool..."* ]]
+  [[ "$output" == *"Local Result:"* ]]
+  [[ "$output" == *"Calling get_mesh_info tool remotely on peer "* ]]
+  [[ "$output" == *"Remote Result:"* ]]
 }
