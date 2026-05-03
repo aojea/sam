@@ -6,8 +6,8 @@ load "lib/container_mesh.bash"
 mesh_start_mock_oidc_custom() {
   local name="${MESH_PREFIX}-oidc"
   local cmd
-  read -r -d '' cmd <<'EOF' || true
-python3 - <<'PY'
+  read -r -d '' cmd <<'PY' || true
+python3 - <<'INNER'
 import json
 import time
 import jwt
@@ -110,8 +110,8 @@ class Handler(BaseHTTPRequestHandler):
 
 print("Mock OIDC server ready", flush=True)
 HTTPServer(('0.0.0.0', 18080), Handler).serve_forever()
+INNER
 PY
-EOF
 
     docker run -d \
       --name "${name}" \
@@ -128,9 +128,9 @@ mesh_call_remote_tool() {
   local caller_idx="$1"
   local target_peer_id="$2"
   local tool_name="$3"
-  
+
   local args="{\"peer_id\":\"${target_peer_id}\",\"tool_name\":\"${tool_name}\",\"arguments\":\"{}\"}"
-  
+
   docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-${caller_idx}:8080/mcp/events" -tool "call_remote_tool" -args "${args}"
 }
 
@@ -139,7 +139,7 @@ setup() {
     skip "docker not available or daemon not running"
   fi
 
-  if [[ ! -x "./bin/sam-node" || ! -x "./bin/sam-hub" ]]; then
+  if [[ ! -x "./bin/sam-node" || ! -x "./bin/sam-hub" || ! -x "./bin/mcp-client" ]]; then
     skip "missing binaries; run: make build"
   fi
 
@@ -150,12 +150,17 @@ setup() {
   export POLICY_VOL="${MESH_PREFIX}-policy"
   docker volume create "${POLICY_VOL}"
 
-  # Write policies to volume
+  # Write policies to volume allowing specific tools for data-scientist role (mcp_two_tier) + policy tools
   local hub_policy="version: \"v1alpha1\"
 roles:
   data-scientist:
     mcp:
       allowed_tools:
+        - \"send_message\"
+        - \"search_nodes\"
+        - \"inspect_node\"
+        - \"call_remote_tool\"
+        - \"connect_peer\"
         - \"query_database\"
         - \"delete_tables\""
 
@@ -164,99 +169,12 @@ attenuation:
   policies:
     - 'deny if operation(\"delete_tables\");'"
 
-  docker run --rm -v "${POLICY_VOL}:/policies" busybox sh -c "cat <<'EOF' > /policies/policies.yaml
+  docker run --rm -v "${POLICY_VOL}:/policies" busybox sh -c "cat <<'INNER' > /policies/policies.yaml
 ${hub_policy}
-EOF
-cat <<'EOF' > /policies/local_policy.yaml
+INNER
+cat <<'INNER' > /policies/local_policy.yaml
 ${node_policy}
-EOF"
-
-  # Start services
-  run mesh_start_mock_oidc_custom
-  [[ "$status" -eq 0 ]]
-
-  # Start Hub with policy file
-  local hub_name="${MESH_PREFIX}-hub"
-  local key
-  key="$(mesh_gen_hex32)"
-
-  docker run -d \
-    --name "${hub_name}" \
-    --network "${MESH_NETWORK}" \
-    --network-alias sam-hub \
-    -v "${POLICY_VOL}:/etc/sam" \
-    "sam-hub:local" \
-    --issuer "http://mock-oidc:18080" \
-    --client-id "sam-e2e" \
-    --key "${key}" \
-    --listen "/ip4/0.0.0.0/udp/4001/quic-v1" \
-    --listen "/ip4/0.0.0.0/tcp/4002" \
-    --mesh "e2e-mesh" \
-    --policy-file "/etc/sam/policies.yaml" >/dev/null
-
-  MESH_CONTAINERS+=("${hub_name}")
-  mesh_wait_for_log "${hub_name}" "PeerID:" 20
-  
-  local hub_peer_id
-  hub_peer_id=$(docker logs "${hub_name}" 2>&1 | grep -oE '12D3Koo[a-zA-Z0-9]+' | head -n 1)
-  echo "${hub_peer_id}" > "/tmp/${MESH_PREFIX}-hub-peer-id"
-
-  # Start Node 1 (Target) with local policy
-  docker run -d \
-    --name "${MESH_PREFIX}-node-1" \
-    --network "${MESH_NETWORK}" \
-    --network-alias "sam-node-1" \
-    -v "${POLICY_VOL}:/etc/sam" \
-    "sam-node:local" \
-    run \
-    --hub "/dns4/sam-hub/tcp/4002/p2p/${hub_peer_id}" \
-    --client-id "sam-e2e" \
-    --client-secret "sam-e2e-secret" \
-    --token-url "http://mock-oidc:18080/token" \
-    --listen "/ip4/0.0.0.0/udp/5001/quic-v1" \
-    --listen "/ip4/0.0.0.0/tcp/5002" \
-    --mcp-addr "0.0.0.0:8080" \
-    --mesh "e2e-mesh" \
-    --local-policy "/etc/sam/local_policy.yaml" >/dev/null
-
-  MESH_CONTAINERS+=("${MESH_PREFIX}-node-1")
-  mesh_wait_for_log "${MESH_PREFIX}-node-1" "Successfully enrolled" 20
-
-  # Start Node 2 (Caller) without specific local policy
-  mesh_start_node 2
-  mesh_wait_for_mcp_ready 2
-
-  mesh_wait_for_log "${MESH_PREFIX}-node-2" "SAM Node Online" 20
-  local node2_id
-  node2_id=$(docker logs "${MESH_PREFIX}-node-2" 2>&1 | grep -A 1 "SAM Node Online" | grep -oE '12D3Koo[a-zA-Z0-9]+' | head -n 1)
-
-  # Wait for discovery (Node 2 should see Node 1)
-  local i
-  local hub_id
-  hub_id="$(cat "/tmp/${MESH_PREFIX}-hub-peer-id")"
-  export TARGET_PEER_ID=""
-  
-  for ((i=0; i<30; i++)); do
-    local output
-    output="$(docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-2:8080/mcp/events" 2>/dev/null)"
-    TARGET_PEER_ID=$(echo "${output}" | grep -oE '12D3Koo[a-zA-Z0-9]+' | grep -v "${hub_id}" | grep -v "${node2_id}" | head -n 1)
-    if [[ -n "${TARGET_PEER_ID}" ]]; then
-      break
-    fi
-    sleep 1
-  done
-
-  echo "Node 2 logs after discovery loop:" >&3
-  docker logs "${MESH_PREFIX}-node-2" >&3
-  
-  if [[ -z "${TARGET_PEER_ID}" ]]; then
-    echo "Timeout waiting for discovery of Node 1"
-    return 1
-  fi
-
-  # Explicitly connect Node 2 to Node 1 to avoid "no addresses" error
-  local node1_addr="/dns4/sam-node-1/tcp/5002/p2p/${TARGET_PEER_ID}"
-  docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-2:8080/mcp/events" -tool "connect_peer" -args "{\"peer_addr\":\"${node1_addr}\"}" >/dev/null
+INNER"
 }
 
 teardown() {
@@ -274,20 +192,168 @@ teardown() {
   docker volume rm "${POLICY_VOL}" >/dev/null 2>&1 || true
 }
 
-@test "Policy E2E: Positive Path (Allowed by Hub, Not blocked by Node)" {
-  run mesh_call_remote_tool 2 "${TARGET_PEER_ID}" "query_database"
-  echo "Output: $output"
+@test "Advanced Mesh Flows: Two-Tier MCP, Policies, and Revocation" {
+  run mesh_start_mock_oidc_custom
+  [[ "$status" -eq 0 ]]
+
+  # Start Hub
+  local hub_name="${MESH_PREFIX}-hub"
+  local hub_key
+  hub_key="$(mesh_gen_hex32)"
+
+  docker run -d \
+    --name "${hub_name}" \
+    --network "${MESH_NETWORK}" \
+    --network-alias sam-hub \
+    -v "${POLICY_VOL}:/etc/sam" \
+    "sam-hub:local" \
+    --issuer "http://mock-oidc:18080" \
+    --client-id "sam-e2e" \
+    --key "${hub_key}" \
+    --listen "/ip4/0.0.0.0/udp/4001/quic-v1" \
+    --listen "/ip4/0.0.0.0/tcp/4002" \
+    --mesh "e2e-mesh" \
+    --admin-token "e2e-token" \
+    --policy-file "/etc/sam/policies.yaml" \
+    --log-level debug >/dev/null
+    
+  MESH_CONTAINERS+=("${hub_name}")
+  mesh_wait_for_log "${hub_name}" "PeerID:" 20
+
+  local hub_peer_id
+  hub_peer_id=$(docker logs "${hub_name}" 2>&1 | grep -oE '12D3Koo[a-zA-Z0-9]+' | head -n 1)
+  echo "${hub_peer_id}" > "/tmp/${MESH_PREFIX}-hub-peer-id"
+
+  # Start Node 1 (Target) with local policy
+  echo "[$(date +%T)] Starting Node 1"
+  docker run -d \
+    --name "${MESH_PREFIX}-node-1" \
+    --network "${MESH_NETWORK}" \
+    --network-alias "sam-node-1" \
+    -v "${POLICY_VOL}:/etc/sam" \
+    "sam-node:local" \
+    run \
+    --hub "/dns4/sam-hub/tcp/4002/p2p/${hub_peer_id}" \
+    --client-id "sam-e2e" \
+    --client-secret "sam-e2e-secret" \
+    --token-url "http://mock-oidc:18080/token" \
+    --listen "/ip4/0.0.0.0/udp/5001/quic-v1" \
+    --listen "/ip4/0.0.0.0/tcp/5002" \
+    --mcp-addr "0.0.0.0:8080" \
+    --mesh "e2e-mesh" \
+    --local-policy "/etc/sam/local_policy.yaml" \
+    --discovery-interval 100ms \
+    --log-level debug >/dev/null
+
+  MESH_CONTAINERS+=("${MESH_PREFIX}-node-1")
+  mesh_wait_for_log "${MESH_PREFIX}-node-1" "Successfully enrolled" 20
+  local node1_name="${MESH_PREFIX}-node-1"
+  mesh_wait_for_log "${node1_name}" "SAM Node Online" 20
+  mesh_wait_for_mcp_ready 1 20
+  
+  local node1_peer_id
+  node1_peer_id=$(docker logs "${node1_name}" 2>&1 | grep "PeerID:" | head -n 1 | awk '{print $2}' | tr -d '\r')
+
+  # Start Node 2 (Caller) without specific local policy
+  echo "[$(date +%T)] Starting Node 2"
+  run mesh_start_node 2 "--discovery-interval 100ms --log-level debug --mcp-addr 0.0.0.0:8080"
+  [[ "$status" -eq 0 ]]
+  local node2_name="${MESH_PREFIX}-node-2"
+  mesh_wait_for_log "${node2_name}" "SAM Node Online" 20
+  mesh_wait_for_mcp_ready 2 20
+
+  local node2_peer_id
+  node2_peer_id=$(docker logs "${node2_name}" 2>&1 | grep "PeerID:" | head -n 1 | awk '{print $2}' | tr -d '\r')
+
+  # 1. MCP Two-Tier Features
+  # Explicitly connect Node 2 to Node 1
+  echo "[$(date +%T)] Connecting Node 2 to Node 1"
+  local node1_addr="/dns4/sam-node-1/tcp/5002/p2p/${node1_peer_id}"
+  run docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-2:8080/mcp/events" -tool "connect_peer" -args "{\"peer_addr\":\"${node1_addr}\"}"
+  [[ "$status" -eq 0 ]]
+
+  mesh_wait_for_peer_connection 2 "${node1_peer_id}" 20
+  [[ "$status" -eq 0 ]]
+
+  # Explicitly connect Node 1 to Node 2
+  local node2_addr="/dns4/sam-node-2/tcp/5002/p2p/${node2_peer_id}"
+  run docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-1:8080/mcp/events" -tool "connect_peer" -args "{\"peer_addr\":\"${node2_addr}\"}"
+  [[ "$status" -eq 0 ]]
+
+  mesh_wait_for_peer_connection 1 "${node2_peer_id}" 20
+  [[ "$status" -eq 0 ]]
+
+  # Node 2 registers a capability via /sam/register
+  echo "[$(date +%T)] Node 2 registering capability"
+  run docker run --rm --network "${MESH_NETWORK}" curlimages/curl:latest -X POST http://sam-node-2:8080/sam/register -d '{"skills":["math"]}' -H "Content-Type: application/json"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"NodeCard published successfully"* ]]
+
+  sleep 2
+
+  # Node 1 searches for the capability
+  echo "[$(date +%T)] Node 1 searching for capability"
+  run docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-1:8080/mcp/events" -tool "search_nodes" -args "{\"capability\":\"math\"}"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"${node2_peer_id}"* ]]
+
+  # Node 1 inspects Node 2 to get details
+  echo "[$(date +%T)] Node 1 inspecting Node 2"
+  run docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-1:8080/mcp/events" -tool "inspect_node" -args "{\"peer_id\":\"${node2_peer_id}\"}"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"math"* ]]
+
+  # Node 1 calls tool on Node 2 via call_remote_tool
+  echo "[$(date +%T)] Node 1 calling remote tool on Node 2"
+  run docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-1:8080/mcp/events" -tool "call_remote_tool" -timeout 30 -args "{\"peer_id\":\"${node2_peer_id}\",\"tool_name\":\"send_message\",\"arguments\":\"{\\\"peer_id\\\":\\\"someone\\\",\\\"message\\\":\\\"hello\\\"}\"}"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"Simulated sending message"* ]]
+
+  # 2. Policy Path Checks
+  # Positive Path (Allowed by Hub, Not blocked by Node)
+  run mesh_call_remote_tool 2 "${node1_peer_id}" "query_database"
+  echo "Positive Policy Output: $output"
   [ "$status" -eq 0 ]
-}
 
-@test "Policy E2E: Negative Path (Denied by Hub)" {
-  run mesh_call_remote_tool 2 "${TARGET_PEER_ID}" "reboot_server"
-  echo "Output: $output"
+  # Negative Path (Denied by Hub)
+  run mesh_call_remote_tool 2 "${node1_peer_id}" "reboot_server"
+  echo "Negative Policy Output: $output"
   [[ "$output" == *"denied"* ]]
-}
 
-@test "Policy E2E: Attenuation Path (Allowed by Hub, Blocked by Node)" {
-  run mesh_call_remote_tool 2 "${TARGET_PEER_ID}" "delete_tables"
-  echo "Output: $output"
+  # Attenuation Path (Allowed by Hub, Blocked by Node)
+  run mesh_call_remote_tool 2 "${node1_peer_id}" "delete_tables"
+  echo "Attenuation Policy Output: $output"
   [[ "$output" == *"denied"* ]]
+
+  # 3. Revocation Checks
+  # Publish ban event for Node 2
+  echo "[$(date +%T)] Publishing ban event"
+  run docker exec "${hub_name}" /sam-hub admin ban --peer "${node2_peer_id}" --connect "/dns4/sam-hub/tcp/4002/p2p/${hub_peer_id}" --admin-token "e2e-token"
+
+  echo "admin ban output: $output"
+  [[ "$status" -eq 0 ]]
+  if [[ "$output" != *"Published BANNED event"* ]]; then
+    echo "Hub logs:"
+    docker logs "${hub_name}"
+  fi
+  [[ "$output" == *"Published BANNED event"* ]]
+
+  # Verify Node 1 receives the ban event and logs it
+  run mesh_wait_for_log "${node1_name}" "Peer banned: ${node2_peer_id}" 20
+  if [[ "$status" -ne 0 ]]; then
+    echo "Node 1 logs:"
+    docker logs "${node1_name}"
+  fi
+  [[ "$status" -eq 0 ]]
+
+  # Verify Node 1 disconnects from Node 2
+  echo "[$(date +%T)] Waiting for disconnection"
+  run mesh_wait_for_peer_disconnection 1 "${node2_peer_id}" 20
+  [[ "$status" -eq 0 ]]
+
+  # Verify Node 1 cannot reconnect to Node 2
+  echo "[$(date +%T)] Attempting to reconnect (should fail)"
+  run docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-1:8080/mcp/events" -tool "connect_peer" -args "{\"peer_addr\":\"${node2_addr}\"}"
+  echo "Reconnect output: $output"
+  [[ "$output" == *"gater disallows connection"* ]]
 }
