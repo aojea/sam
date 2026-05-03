@@ -15,13 +15,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
-	"bufio"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -91,7 +92,7 @@ type SamNode struct {
 	receivedMsgs      map[string][]string
 	topics            map[string]*pubsub.Topic
 	mu                sync.Mutex
-	LocalPolicy       *CompiledLocalPolicy
+	LocalPolicy       *NodeConfigComplete
 	revokedPeers      *lru.Cache[string, int64]
 	verificationCache *lru.Cache[string, string]
 	trustedKeys       []TrustedKey
@@ -103,20 +104,20 @@ type SamNode struct {
 }
 
 // NewSamNode creates a new Agent instance secured with the 4-layer pipeline.
-func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.PublicKey, hubAddrs []multiaddr.Multiaddr, store *Store, meshID string, discoveryInterval string, listenAddrs []string, enableRelay bool, localPolicy *CompiledLocalPolicy, keyGracePeriod time.Duration) (*SamNode, error) {
+func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.PublicKey, hubAddrs []multiaddr.Multiaddr, store *Store, meshID string, discoveryInterval string, listenAddrs []string, enableRelay bool, nodeConfig *NodeConfigComplete, keyGracePeriod time.Duration) (*SamNode, error) {
 	var trustedKeys []TrustedKey
 	if len(hubPubKey) > 0 {
 		trustedKeys = []TrustedKey{{Key: hubPubKey, ReceivedAt: time.Now()}}
 	}
 
 	node := &SamNode{
-		Store:           store,
-		trustedKeys:     trustedKeys,
-		knownPeers:      make(map[string]bool),
-		receivedMsgs:    make(map[string][]string),
-		topics:          make(map[string]*pubsub.Topic),
-		services:        make(map[string]*ServiceManifest),
-		LocalPolicy:     localPolicy,
+		Store:        store,
+		trustedKeys:  trustedKeys,
+		knownPeers:   make(map[string]bool),
+		receivedMsgs: make(map[string][]string),
+		topics:       make(map[string]*pubsub.Topic),
+		services:     make(map[string]*ServiceManifest),
+		LocalPolicy:  nodeConfig,
 	}
 
 	var err error
@@ -187,7 +188,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	node.DHT = kdht
 
 	if err := kdht.Bootstrap(ctx); err != nil {
-		logger.Warnf("[DHT] Failed to bootstrap DHT: %v", err)
+		return nil, fmt.Errorf("failed to bootstrap DHT: %w", err)
 	}
 
 	// Bootstrap: Connect to the Hub
@@ -247,6 +248,50 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 
 	// Start key pruning
 	node.startKeyPruning(ctx, keyGracePeriod)
+
+	// Register static services from config
+	if nodeConfig != nil {
+		var errs []error
+		for _, sCfg := range nodeConfig.Services {
+			sType, err := parseServiceType(sCfg.Type)
+			if err != nil {
+				logger.Errorf("[ServiceRegistry] Invalid service type %q for static service %s: %v", sCfg.Type, sCfg.Name, err)
+				errs = append(errs, fmt.Errorf("invalid service type %q for static service %s: %w", sCfg.Type, sCfg.Name, err))
+				continue
+			}
+
+			req := &api.RegisterServiceRequest{
+				Service: &api.ServiceInfo{
+					Type:        sType,
+					Name:        sCfg.Name,
+					Description: sCfg.Description,
+				},
+			}
+
+			if sCfg.TargetURL != "" {
+				req.Backend = &api.RegisterServiceRequest_TargetUrl{TargetUrl: sCfg.TargetURL}
+			} else if len(sCfg.Command) > 0 {
+				req.Backend = &api.RegisterServiceRequest_Command{
+					Command: &api.CommandBackend{
+						Command: sCfg.Command,
+						Env:     sCfg.Env,
+					},
+				}
+			} else {
+				logger.Errorf("[ServiceRegistry] Static service %s has no backend specified", sCfg.Name)
+				errs = append(errs, fmt.Errorf("static service %s has no backend specified", sCfg.Name))
+				continue
+			}
+
+			if err := node.RegisterService(ctx, req); err != nil {
+				logger.Errorf("[ServiceRegistry] Failed to register static service %s: %v", sCfg.Name, err)
+				errs = append(errs, fmt.Errorf("failed to register static service %s: %w", sCfg.Name, err))
+			}
+		}
+		if len(errs) > 0 {
+			return nil, fmt.Errorf("failed to register static services: %w", errors.Join(errs...))
+		}
+	}
 
 	// Start Ingress HTTP Server
 	if err := node.StartIngressServer(ctx); err != nil {
@@ -801,7 +846,7 @@ func (n *SamNode) RegisterService(ctx context.Context, req *api.RegisterServiceR
 	}
 
 	if err := n.DHT.Provide(ctx, c, true); err != nil {
-		return err
+		return fmt.Errorf("failed to provide service to DHT: %w", err)
 	}
 
 	var handler http.Handler
