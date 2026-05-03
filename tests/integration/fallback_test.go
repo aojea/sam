@@ -40,8 +40,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// init forces the biscuit-go parser to build its underlying participle 
-// lexer and reflection caches synchronously at startup. This prevents 
+// init forces the biscuit-go parser to build its underlying participle
+// lexer and reflection caches synchronously at startup. This prevents
 // a known data race when multiple goroutines parse facts concurrently.
 func init() {
 	_, _ = parser.FromStringFact(`warmup("cache")`)
@@ -67,24 +67,24 @@ func TestFallbackReEnrollment(t *testing.T) {
 
 	// 3. Create Biscuit token signed by Key B (using pre-computed clientID)
 	builder := biscuit.NewBuilder(privB)
-	
+
 	nodeFact, _ := parser.FromStringFact(fmt.Sprintf(`node("%s")`, clientID))
 	if err := builder.AddAuthorityFact(nodeFact); err != nil {
 		t.Fatal(err)
 	}
-	
+
 	clientPeerFact, _ := parser.FromStringFact(fmt.Sprintf(`client_peer_id("%s")`, clientID))
 	if err := builder.AddAuthorityFact(clientPeerFact); err != nil {
 		t.Fatal(err)
 	}
-	
+
 	toolFact, _ := parser.FromStringFact(`allow_mcp_tool("*")`)
 	if err := builder.AddAuthorityFact(toolFact); err != nil {
 		t.Fatal(err)
 	}
-	
+
 	b, _ := builder.Build()
-	
+
 	// Verify it in test
 	authorizer, err := b.Authorizer(pubB)
 	if err != nil {
@@ -95,7 +95,7 @@ func TestFallbackReEnrollment(t *testing.T) {
 	if err := authorizer.Authorize(); err != nil {
 		t.Fatalf("Token generated in test is invalid: %v", err)
 	}
-	
+
 	tokenBytes, _ := b.Serialize()
 
 	// 4. Start Mock Hub with dynamic key response
@@ -117,12 +117,12 @@ func TestFallbackReEnrollment(t *testing.T) {
 	cmd := exec.Command(nodeBin, "run", "--hub", hubAddr, "--listen", "/ip4/127.0.0.1/tcp/0", "--jwt-path", jwtPath)
 	cmd.Dir = repoRoot(t)
 	cmd.Env = env
-	
+
 	var stdout safeBuffer
 	var stderr safeBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	
+
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func startMockHubDynamic(t *testing.T, pubA, pubB ed25519.PublicKey) (peer.ID, s
 		t.Fatalf("failed to create mock libp2p host: %v", err)
 	}
 
-	kdht, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer))
+	kdht, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
 	if err != nil {
 		t.Fatalf("failed to create DHT on mock hub: %v", err)
 	}

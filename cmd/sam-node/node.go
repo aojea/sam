@@ -16,12 +16,18 @@ package main
 
 import (
 	"context"
-	"os"
-	"strings"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"bufio"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"os/exec"
+	"strings"
 	"sync"
 
 	"time"
@@ -30,7 +36,9 @@ import (
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p"
+	gostream "github.com/libp2p/go-libp2p-gostream"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -45,6 +53,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
+	"github.com/multiformats/go-multihash"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -66,6 +75,12 @@ type TrustedKey struct {
 	ReceivedAt time.Time
 }
 
+type ServiceManifest struct {
+	Info    *api.ServiceInfo
+	Handler http.Handler
+	Cmd     *exec.Cmd
+}
+
 type SamNode struct {
 	Host              host.Host
 	DHT               *dht.IpfsDHT
@@ -82,6 +97,9 @@ type SamNode struct {
 	trustedKeys       []TrustedKey
 	keysMu            sync.RWMutex
 	rateLimiter       *PeerRateLimiter
+	services          map[string]*ServiceManifest
+	servicesMu        sync.RWMutex
+	BoundHTTPAddr     string
 }
 
 // NewSamNode creates a new Agent instance secured with the 4-layer pipeline.
@@ -92,12 +110,13 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	}
 
 	node := &SamNode{
-		Store:        store,
-		trustedKeys:  trustedKeys,
-		knownPeers:   make(map[string]bool),
-		receivedMsgs: make(map[string][]string),
-		topics:       make(map[string]*pubsub.Topic),
-		LocalPolicy:  localPolicy,
+		Store:           store,
+		trustedKeys:     trustedKeys,
+		knownPeers:      make(map[string]bool),
+		receivedMsgs:    make(map[string][]string),
+		topics:          make(map[string]*pubsub.Topic),
+		services:        make(map[string]*ServiceManifest),
+		LocalPolicy:     localPolicy,
 	}
 
 	var err error
@@ -161,7 +180,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	node.Host = h
 
 	// Initialize Rendezvous (DHT Client)
-	kdht, err := dht.New(ctx, h, dht.Mode(dht.ModeAuto))
+	kdht, err := dht.New(ctx, h, dht.Mode(dht.ModeAuto), dht.ProtocolPrefix("/sam"))
 	if err != nil {
 		return nil, err
 	}
@@ -228,6 +247,11 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 
 	// Start key pruning
 	node.startKeyPruning(ctx, keyGracePeriod)
+
+	// Start Ingress HTTP Server
+	if err := node.StartIngressServer(ctx); err != nil {
+		return nil, fmt.Errorf("failed to start ingress server: %w", err)
+	}
 
 	return node, nil
 }
@@ -601,4 +625,372 @@ func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscui
 	}
 
 	return nil, fmt.Errorf("no valid key found")
+}
+
+func serviceTypeToString(t api.ServiceType) (string, error) {
+	switch t {
+	case api.ServiceType_SERVICE_TYPE_MCP:
+		return "mcp", nil
+	case api.ServiceType_SERVICE_TYPE_INFERENCE:
+		return "inference", nil
+	case api.ServiceType_SERVICE_TYPE_A2A:
+		return "a2a", nil
+	default:
+		return "", fmt.Errorf("invalid or unspecified service type")
+	}
+}
+
+func parseServiceType(s string) (api.ServiceType, error) {
+	switch strings.ToLower(s) {
+	case "mcp":
+		return api.ServiceType_SERVICE_TYPE_MCP, nil
+	case "inference":
+		return api.ServiceType_SERVICE_TYPE_INFERENCE, nil
+	case "a2a":
+		return api.ServiceType_SERVICE_TYPE_A2A, nil
+	default:
+		return api.ServiceType_SERVICE_TYPE_UNSPECIFIED, fmt.Errorf("invalid service type: %s", s)
+	}
+}
+
+func serviceNameToCID(serviceType api.ServiceType, serviceName string) (cid.Cid, error) {
+	typeStr, err := serviceTypeToString(serviceType)
+	if err != nil {
+		return cid.Undef, err
+	}
+	serviceKey := fmt.Sprintf("sam:service:%s:%s", typeStr, serviceName)
+	hash, err := multihash.Sum([]byte(serviceKey), multihash.SHA2_256, -1)
+	if err != nil {
+		return cid.Undef, err
+	}
+	return cid.NewCidV1(cid.Raw, hash), nil
+}
+
+type StdioBridge struct {
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	stdout  io.ReadCloser
+	mu      sync.Mutex
+	clients map[chan string]bool
+}
+
+func (b *StdioBridge) Start() {
+	b.clients = make(map[chan string]bool)
+	go func() {
+		scanner := bufio.NewScanner(b.stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			b.mu.Lock()
+			for ch := range b.clients {
+				select {
+				case ch <- line:
+				default:
+				}
+			}
+			b.mu.Unlock()
+		}
+	}()
+}
+
+func (b *StdioBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+			return
+		}
+
+		ch := make(chan string, 10)
+		b.mu.Lock()
+		b.clients[ch] = true
+		b.mu.Unlock()
+
+		// Flush headers immediately to establish the stream
+		w.WriteHeader(http.StatusOK)
+		flusher.Flush()
+
+		defer func() {
+			b.mu.Lock()
+			delete(b.clients, ch)
+			b.mu.Unlock()
+			close(ch)
+		}()
+
+		ctx := r.Context()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case line := <-ch:
+				if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
+					logger.Errorf("Failed to write to SSE client: %v", err)
+					return
+				}
+				flusher.Flush()
+			}
+		}
+	case http.MethodPost:
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body", http.StatusInternalServerError)
+			return
+		}
+		_ = r.Body.Close()
+
+		b.mu.Lock()
+		_, err = b.stdin.Write(append(body, '\n'))
+		b.mu.Unlock()
+
+		if err != nil {
+			http.Error(w, "Failed to write to process stdin", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (n *SamNode) createStdioBridgeHandler(cmdBackend *api.CommandBackend) (http.Handler, *exec.Cmd, error) {
+	cmd := exec.Command(cmdBackend.Command[0], cmdBackend.Command[1:]...)
+	cmd.Env = os.Environ()
+	for k, v := range cmdBackend.Env {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, err
+	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, nil, err
+	}
+
+	bridge := &StdioBridge{
+		cmd:    cmd,
+		stdin:  stdin,
+		stdout: stdout,
+	}
+	bridge.Start()
+
+	return bridge, cmd, nil
+}
+
+func (n *SamNode) RegisterService(ctx context.Context, req *api.RegisterServiceRequest) error {
+	info := req.Service
+	if info.Type == api.ServiceType_SERVICE_TYPE_UNSPECIFIED {
+		return fmt.Errorf("cannot register service with unspecified type")
+	}
+	c, err := serviceNameToCID(info.Type, info.Name)
+	if err != nil {
+		return err
+	}
+
+	if n.DHT == nil {
+		return fmt.Errorf("DHT not initialized")
+	}
+
+	if err := n.DHT.Provide(ctx, c, true); err != nil {
+		return err
+	}
+
+	var handler http.Handler
+	var cmd *exec.Cmd
+
+	switch b := req.Backend.(type) {
+	case *api.RegisterServiceRequest_TargetUrl:
+		targetURL, err := url.Parse(b.TargetUrl)
+		if err != nil {
+			return fmt.Errorf("invalid target URL: %w", err)
+		}
+		handler = httputil.NewSingleHostReverseProxy(targetURL)
+	case *api.RegisterServiceRequest_Command:
+		handler, cmd, err = n.createStdioBridgeHandler(b.Command)
+		if err != nil {
+			return fmt.Errorf("failed to create stdio bridge: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported backend type")
+	}
+
+	n.servicesMu.Lock()
+	n.services[info.Name] = &ServiceManifest{
+		Info:    info,
+		Handler: handler,
+		Cmd:     cmd,
+	}
+	n.servicesMu.Unlock()
+
+	logger.Infof("[ServiceRegistry] Registering service %s/%s (CID: %s)", info.Type, info.Name, c)
+	return nil
+}
+
+func (n *SamNode) UnregisterService(ctx context.Context, serviceName string) error {
+	n.servicesMu.Lock()
+	manifest, ok := n.services[serviceName]
+	if ok && manifest.Cmd != nil {
+		if err := manifest.Cmd.Process.Kill(); err != nil {
+			logger.Errorf("Failed to kill process for service %s: %v", serviceName, err)
+		}
+	}
+	delete(n.services, serviceName)
+	n.servicesMu.Unlock()
+
+	logger.Infof("[ServiceRegistry] Unregistered service %s", serviceName)
+	// We can't easily remove provider records from DHT, but we stop providing it.
+	return nil
+}
+
+func (n *SamNode) IsServiceRegistered(serviceName string) bool {
+	n.servicesMu.RLock()
+	defer n.servicesMu.RUnlock()
+	_, ok := n.services[serviceName]
+	return ok
+}
+
+func (n *SamNode) FindProviders(ctx context.Context, serviceType api.ServiceType, serviceName string) ([]peer.AddrInfo, error) {
+	c, err := serviceNameToCID(serviceType, serviceName)
+	if err != nil {
+		return nil, err
+	}
+
+	if n.DHT == nil {
+		return nil, fmt.Errorf("DHT not initialized")
+	}
+
+	providers := n.DHT.FindProvidersAsync(ctx, c, 20)
+	var providerInfos []peer.AddrInfo
+	for p := range providers {
+		providerInfos = append(providerInfos, p)
+	}
+	return providerInfos, nil
+}
+
+func (n *SamNode) DiscoverRemoteServices(ctx context.Context, serviceType api.ServiceType, serviceName string) ([]*api.DiscoveredProvider, error) {
+	providers, err := n.FindProviders(ctx, serviceType, serviceName)
+	if err != nil {
+		return nil, err
+	}
+
+	typeStr, err := serviceTypeToString(serviceType)
+	if err != nil {
+		return nil, err
+	}
+
+	var discovered []*api.DiscoveredProvider
+	for _, p := range providers {
+		if p.ID == n.Host.ID() {
+			continue
+		}
+
+		// Construct local proxy URL
+		// Format: http://localhost:<sam_port>/sam/{peer_id}/{service_type}/{service_name}
+		localURL := fmt.Sprintf("http://%s/sam/%s/%s/%s",
+			n.BoundHTTPAddr,
+			p.ID.String(),
+			typeStr,
+			serviceName,
+		)
+
+		discovered = append(discovered, &api.DiscoveredProvider{
+			PeerId:        p.ID.String(),
+			LocalProxyUrl: localURL,
+		})
+	}
+
+	return discovered, nil
+}
+
+func (n *SamNode) ListLocalServices() []*api.ServiceInfo {
+	n.servicesMu.RLock()
+	defer n.servicesMu.RUnlock()
+
+	var services []*api.ServiceInfo
+	for _, manifest := range n.services {
+		services = append(services, manifest.Info)
+	}
+	return services
+}
+
+func (n *SamNode) StartIngressServer(ctx context.Context) error {
+	listener, err := gostream.Listen(n.Host, "/libp2p-http")
+	if err != nil {
+		return err
+	}
+
+	server := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			path := r.URL.Path
+			parts := strings.SplitN(strings.TrimPrefix(path, "/"), "/", 3)
+			if len(parts) < 2 {
+				http.Error(w, "Invalid path", http.StatusBadRequest)
+				return
+			}
+			serviceTypeStr := parts[0]
+			serviceName := parts[1]
+			upstreamPath := ""
+			if len(parts) > 2 {
+				upstreamPath = parts[2]
+			}
+
+			serviceType, err := parseServiceType(serviceTypeStr)
+			if err != nil || serviceType == api.ServiceType_SERVICE_TYPE_UNSPECIFIED {
+				http.Error(w, "Invalid service type", http.StatusBadRequest)
+				return
+			}
+
+			n.servicesMu.RLock()
+			manifest, ok := n.services[serviceName]
+			n.servicesMu.RUnlock()
+
+			if !ok || manifest.Handler == nil {
+				http.Error(w, "Service not found", http.StatusNotFound)
+				return
+			}
+
+			r.URL.Path = "/" + upstreamPath
+			manifest.Handler.ServeHTTP(w, r)
+		}),
+	}
+
+	go func() {
+		logger.Infof("[Ingress] Starting P2P HTTP server on protocol /libp2p-http")
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			logger.Errorf("[Ingress] Server error: %v", err)
+		}
+	}()
+
+	go func() {
+		<-ctx.Done()
+		if err := server.Close(); err != nil {
+			logger.Errorf("[Ingress] Failed to close server: %v", err)
+		}
+		if err := listener.Close(); err != nil {
+			logger.Errorf("[Ingress] Failed to close listener: %v", err)
+		}
+	}()
+
+	return nil
+}
+
+func (n *SamNode) RegisterServiceHandler(name string, handler http.Handler) {
+	n.servicesMu.Lock()
+	defer n.servicesMu.Unlock()
+	if manifest, ok := n.services[name]; ok {
+		manifest.Handler = handler
+	} else {
+		n.services[name] = &ServiceManifest{
+			Handler: handler,
+		}
+	}
 }

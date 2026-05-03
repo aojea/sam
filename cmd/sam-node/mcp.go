@@ -60,6 +60,50 @@ func NewMCPHandler(node *SamNode) http.Handler {
 		Description: "Send a message to another agent in the mesh",
 	}, handleSendMessage)
 
+	// Add list_local_services tool
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "list_local_services",
+		Description: "List services registered on the local node",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct{}) (*mcp.CallToolResult, any, error) {
+		services := node.ListLocalServices()
+		respData, err := json.Marshal(services)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: string(respData)},
+			},
+		}, nil, nil
+	})
+
+	// Add discover_remote_services tool
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "discover_remote_services",
+		Description: "Discover remote services in the mesh",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct {
+		Type string `json:"type" jsonschema:"Service type (mcp, inference, a2a)"`
+		Name string `json:"name" jsonschema:"Service name"`
+	}) (*mcp.CallToolResult, any, error) {
+		serviceType, err := parseServiceType(params.Type)
+		if err != nil || serviceType == api.ServiceType_SERVICE_TYPE_UNSPECIFIED {
+			return nil, nil, fmt.Errorf("invalid or unspecified service type: %s", params.Type)
+		}
+		providers, err := node.DiscoverRemoteServices(ctx, serviceType, params.Name)
+		if err != nil {
+			return nil, nil, err
+		}
+		respData, err := json.Marshal(providers)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: string(respData)},
+			},
+		}, nil, nil
+	})
+
 	// Add the mesh_pubsub_broadcast tool.
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "mesh_pubsub_broadcast",

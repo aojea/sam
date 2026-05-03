@@ -241,7 +241,8 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --token-url "http://mock-oidc:18080/token" \
       --listen "/ip4/0.0.0.0/udp/5001/quic-v1" \
       --listen "/ip4/0.0.0.0/tcp/5002" \
-      --mcp-addr "0.0.0.0:8080" \
+      --bind-addr "0.0.0.0:8080" \
+      --api-token "secret-token" \
       --mesh "e2e-mesh" >/dev/null
 
     MESH_CONTAINERS+=("${name}")

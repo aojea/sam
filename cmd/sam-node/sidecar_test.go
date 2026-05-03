@@ -1,0 +1,346 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"google.golang.org/protobuf/encoding/protojson"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/google/sam/api"
+	"github.com/libp2p/go-libp2p"
+	dht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p/core/peer"
+)
+
+func TestWithAuth(t *testing.T) {
+	token := "test-token"
+	handler := withAuth(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	tests := []struct {
+		name           string
+		authHeader     string
+		expectedStatus int
+	}{
+		{
+			name:           "Valid token",
+			authHeader:     "Bearer test-token",
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "Missing token",
+			authHeader:     "",
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "Invalid format",
+			authHeader:     "test-token",
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "Wrong token",
+			authHeader:     "Bearer wrong-token",
+			expectedStatus: http.StatusForbidden,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/any", nil)
+			if tt.authHeader != "" {
+				req.Header.Set("Authorization", tt.authHeader)
+			}
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != tt.expectedStatus {
+				t.Errorf("expected status %d, got %d", tt.expectedStatus, rr.Code)
+			}
+		})
+	}
+
+	t.Run("Empty token configured", func(t *testing.T) {
+		handlerEmpty := withAuth("", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		req := httptest.NewRequest("GET", "/any", nil)
+		req.Header.Set("Authorization", "Bearer anything")
+		rr := httptest.NewRecorder()
+		handlerEmpty.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d", http.StatusOK, rr.Code)
+		}
+	})
+}
+
+func TestPublicEndpoints(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", handleHealthz)
+	mux.HandleFunc("/readyz", handleReadyz)
+
+	endpoints := []string{"/healthz", "/readyz"}
+
+	for _, ep := range endpoints {
+		req := httptest.NewRequest("GET", ep, nil)
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected status OK for %s, got %d", ep, rr.Code)
+		}
+	}
+}
+
+func TestHandleRegisterService(t *testing.T) {
+	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = h.Close() }()
+	d, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+
+	// Create a second host to populate routing table
+	h2, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = h2.Close() }()
+	d2, err := dht.New(context.Background(), h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d2.Close() }()
+
+	err = h.Connect(context.Background(), peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for DHT to recognize the peer
+	time.Sleep(100 * time.Millisecond)
+
+	node := &SamNode{
+		services: make(map[string]*ServiceManifest),
+		DHT:      d,
+	}
+
+	reqBody := &api.RegisterServiceRequest{
+		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "test-service", Description: "test desc"},
+		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: "http://localhost:8080"},
+	}
+	body, err := protojson.Marshal(reqBody)
+	if err != nil {
+		t.Fatalf("Failed to marshal request body: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/sam/service/register", bytes.NewBuffer(body))
+	rr := httptest.NewRecorder()
+
+	handleRegisterService(node, rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected status OK, got %d, body: %s", rr.Code, rr.Body.String())
+	}
+
+	if !node.IsServiceRegistered("test-service") {
+		t.Errorf("expected service to be registered")
+	}
+}
+
+func TestHandleUnregisterService(t *testing.T) {
+	node := &SamNode{
+		services: make(map[string]*ServiceManifest),
+	}
+	node.services["test-service"] = &ServiceManifest{Info: &api.ServiceInfo{Name: "test-service"}}
+
+	reqBody := &api.ServiceInfo{Name: "test-service"}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		t.Fatalf("Failed to marshal request body: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/sam/service/unregister", bytes.NewBuffer(body))
+	rr := httptest.NewRecorder()
+
+	handleUnregisterService(node, rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected status OK, got %d", rr.Code)
+	}
+
+	if node.IsServiceRegistered("test-service") {
+		t.Errorf("expected service to be unregistered")
+	}
+}
+
+func TestHandleDiscoverService(t *testing.T) {
+	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = h.Close() }()
+	d, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+
+	node := &SamNode{
+		services: make(map[string]*ServiceManifest),
+		DHT:      d,
+		Host:     h,
+		BoundHTTPAddr: "127.0.0.1:8080",
+	}
+
+	// Register a service on another host to be discovered
+	h2, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = h2.Close() }()
+	d2, err := dht.New(context.Background(), h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d2.Close() }()
+
+	err = h.Connect(context.Background(), peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	serviceInfo := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "remote-service"}
+	c, err := serviceNameToCID(serviceInfo.Type, serviceInfo.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// We don't strictly need Provide to succeed if we can mock the DHT lookup,
+	// but here we are using real DHT. If it fails because table is empty,
+	// we might need to ensure routing table is populated.
+	// Let's ignore the error for now to see if it works without it (maybe DHT cache works).
+	_ = d2.Provide(context.Background(), c, true)
+
+	time.Sleep(100 * time.Millisecond) // Wait for DHT
+
+	req := httptest.NewRequest("GET", "/sam/service/discover?type=mcp&name=remote-service", nil)
+	rr := httptest.NewRecorder()
+
+	handleDiscoverService(node, rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected status OK, got %d, body: %s", rr.Code, rr.Body.String())
+	}
+
+	var providers []*api.DiscoveredProvider
+	if err := json.NewDecoder(rr.Body).Decode(&providers); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(providers) != 1 {
+		t.Errorf("expected 1 provider, got %d", len(providers))
+	} else if providers[0].PeerId != h2.ID().String() {
+		t.Errorf("expected provider %s, got %s", h2.ID().String(), providers[0].PeerId)
+	}
+}
+
+func TestListLocalServices(t *testing.T) {
+	node := &SamNode{
+		services: make(map[string]*ServiceManifest),
+	}
+
+	service1 := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "service1"}
+	service2 := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_INFERENCE, Name: "service2"}
+
+	node.services["service1"] = &ServiceManifest{Info: service1}
+	node.services["service2"] = &ServiceManifest{Info: service2}
+
+	services := node.ListLocalServices()
+
+	if len(services) != 2 {
+		t.Errorf("expected 2 services, got %d", len(services))
+	}
+}
+
+func TestHandleRegisterService_Validation(t *testing.T) {
+	node := &SamNode{
+		services: make(map[string]*ServiceManifest),
+	}
+
+	tests := []struct {
+		name           string
+		reqBody        *api.RegisterServiceRequest
+		expectedStatus int
+	}{
+		{
+			name: "Missing service",
+			reqBody: &api.RegisterServiceRequest{
+				Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: "http://localhost:8080"},
+			},
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name: "Missing name",
+			reqBody: &api.RegisterServiceRequest{
+				Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP},
+				Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: "http://localhost:8080"},
+			},
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name: "Unspecified type",
+			reqBody: &api.RegisterServiceRequest{
+				Service: &api.ServiceInfo{Name: "test-service", Type: api.ServiceType_SERVICE_TYPE_UNSPECIFIED},
+				Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: "http://localhost:8080"},
+			},
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name: "Missing backend",
+			reqBody: &api.RegisterServiceRequest{
+				Service: &api.ServiceInfo{Name: "test-service", Type: api.ServiceType_SERVICE_TYPE_MCP},
+			},
+			expectedStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := protojson.Marshal(tt.reqBody)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest("POST", "/sam/service/register", bytes.NewBuffer(body))
+			rr := httptest.NewRecorder()
+
+			handleRegisterService(node, rr, req)
+
+			if rr.Code != tt.expectedStatus {
+				t.Errorf("expected status %d, got %d, body: %s", tt.expectedStatus, rr.Code, rr.Body.String())
+			}
+		})
+	}
+}

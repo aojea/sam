@@ -143,7 +143,7 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig) (*Hub, error) {
 		return nil, err
 	}
 
-	kadDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeServer))
+	kadDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
 	if err != nil {
 		return nil, err
 	}

@@ -20,7 +20,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -58,13 +57,18 @@ var (
 	clientSecretFlag      string
 	tokenURLFlag          string
 	hubPublicKeyFlag      string
-	mcpAddrFlag           string
+	bindAddrFlag          string
 	meshFlag              string
 	discoveryIntervalFlag string
 	enableRelayFlag       bool
 	logLevelFlag          string
 	localPolicyFile       string
 	keyGracePeriodFlag    time.Duration
+
+	apiTokenFlag string
+	tlsCertFlag  string
+	tlsKeyFlag   string
+	tlsCAFlag    string
 )
 
 var logger = golog.Logger("sam-node")
@@ -217,8 +221,8 @@ func main() {
 
 			node.Host.SetStreamHandler(api.AuthProtocolID, node.HandleAuthHandshake)
 
-			// Start MCP Server
-			startMCPServer(node, mcpAddrFlag)
+			// Start Sidecar API Server (multiplexed with MCP)
+			startSidecarServer(node, bindAddrFlag, apiTokenFlag, tlsCertFlag, tlsKeyFlag, tlsCAFlag)
 
 			fmt.Printf("SAM Node Online.\nPeerID: %s\nListening on: %v\n", node.Host.ID(), node.Host.Addrs())
 
@@ -305,12 +309,16 @@ func main() {
 	runCmd.Flags().StringVar(&clientIDFlag, "client-id", os.Getenv("SAM_OIDC_ID"), "OIDC Client ID for M2M")
 	runCmd.Flags().StringVar(&clientSecretFlag, "client-secret", os.Getenv("SAM_OIDC_SECRET"), "OIDC Client Secret for M2M")
 	runCmd.Flags().StringVar(&hubPublicKeyFlag, "hub-public-key", "", "Hub Public Key (32-byte Hex)")
-	runCmd.Flags().StringVar(&mcpAddrFlag, "mcp-addr", "127.0.0.1:8080", "Local TCP address for the MCP HTTP/SSE server")
+	runCmd.Flags().StringVar(&bindAddrFlag, "bind-addr", "127.0.0.1:8080", "Local TCP address for the HTTP server (MCP and Sidecar API)")
 	runCmd.Flags().StringVar(&meshFlag, "mesh", DefaultMeshName, "Mesh federation name")
 	runCmd.Flags().StringVar(&discoveryIntervalFlag, "discovery-interval", DefaultDiscoveryInterval, "Polling interval for DHT discovery")
 	runCmd.Flags().BoolVar(&enableRelayFlag, "enable-relay", false, "Allow this node to serve as a relay for others")
 	runCmd.Flags().StringVar(&logLevelFlag, "log-level", "info", "Log level (debug, info, warn, error)")
 	runCmd.Flags().DurationVar(&keyGracePeriodFlag, "key-grace-period", 24*time.Hour, "Key grace period for old keys (e.g. 24h)")
+	runCmd.Flags().StringVar(&apiTokenFlag, "api-token", "", "Static Bearer token for API authorization")
+	runCmd.Flags().StringVar(&tlsCertFlag, "tls-cert", "", "Path to TLS certificate for sidecar API")
+	runCmd.Flags().StringVar(&tlsKeyFlag, "tls-key", "", "Path to TLS key for sidecar API")
+	runCmd.Flags().StringVar(&tlsCAFlag, "tls-ca", "", "Path to TLS CA for sidecar API mTLS")
 	rootCmd.PersistentFlags().StringVar(&hubAddr, "hub", DefaultHubURL, "Hub URL")
 	rootCmd.PersistentFlags().StringVar(&localPolicyFile, "local-policy", DefaultLocalPolicyFile, "Path to local_policy.yaml")
 	rootCmd.PersistentFlags().StringVar(&tokenURLFlag, "token-url", "", "OIDC Token URL")
@@ -355,32 +363,6 @@ func getOrGenerateKey(s *Store) crypto.PrivKey {
 	}
 	return priv
 }
-
-func startMCPServer(node *SamNode, mcpAddr string) {
-	mcpHandler := NewMCPHandler(node)
-	go func() {
-		if mcpAddr == "" {
-			mcpAddr = "127.0.0.1:8080"
-		}
-
-		listener, err := net.Listen("tcp", mcpAddr)
-		if err != nil {
-			logger.Errorf("Failed to listen on TCP address %s: %v", mcpAddr, err)
-			return
-		}
-		defer func() {
-			if err := listener.Close(); err != nil {
-				logger.Errorf("Failed to close listener: %v", err)
-			}
-		}()
-
-		fmt.Printf("Starting MCP server on TCP address %s\n", listener.Addr().String())
-		if err := http.Serve(listener, mcpHandler); err != nil {
-			logger.Errorf("MCP server error: %v", err)
-		}
-	}()
-}
-
 func (n *SamNode) Enroll(ctx context.Context, jwt string) error {
 	if n.HubPeerID == "" {
 		return fmt.Errorf("not connected to any hub")

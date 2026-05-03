@@ -56,3 +56,34 @@ message EnrollResponse {
   int64 expiration = 5;
   repeated string known_peers = 6;
 }
+
+enum ServiceType {
+  SERVICE_TYPE_UNSPECIFIED = 0;
+  SERVICE_TYPE_MCP = 1;
+  SERVICE_TYPE_INFERENCE = 2;
+  SERVICE_TYPE_A2A = 3;
+}
+
+message ServiceInfo {
+  ServiceType type = 1;
+  string name = 2;
+  string description = 3;
+}
+
+message CommandBackend {
+  repeated string command = 1;
+  map<string, string> env = 2;
+}
+
+message RegisterServiceRequest {
+  ServiceInfo service = 1;
+  oneof backend {
+    string target_url = 2;
+    CommandBackend command = 3;
+  }
+}
+
+message DiscoveredProvider {
+  string peer_id = 1;
+  string local_proxy_url = 2;
+}
