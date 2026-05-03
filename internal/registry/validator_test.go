@@ -15,13 +15,12 @@
 package registry
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"google.golang.org/protobuf/proto"
 )
 
 func TestNodeCardValidator_Validate(t *testing.T) {
@@ -35,21 +34,21 @@ func TestNodeCardValidator_Validate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	card := &api.NodeCard{
-		PeerId:    pid.String(),
+	card := &NodeCard{
+		PeerID:    pid.String(),
 		Name:      "test-node",
 		Timestamp: time.Now().Unix(),
 	}
 
 	// Sign the card
-	payload, _ := proto.Marshal(card)
+	payload, _ := json.Marshal(card)
 	sig, err := priv.Sign(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
 	card.Signature = sig
 
-	value, _ := proto.Marshal(card)
+	value, _ := json.Marshal(card)
 
 	v := NodeCardValidator{}
 
@@ -71,7 +70,7 @@ func TestNodeCardValidator_Validate(t *testing.T) {
 
 	// Invalid signature
 	card.Signature = []byte("invalid-signature")
-	invalidValue, _ := proto.Marshal(card)
+	invalidValue, _ := json.Marshal(card)
 	if err := v.Validate(key, invalidValue); err == nil {
 		t.Error("Expected error for invalid signature")
 	}
@@ -81,13 +80,13 @@ func TestNodeCardValidator_Select(t *testing.T) {
 	v := NodeCardValidator{}
 	key := "/sam/some-peer"
 
-	card1 := &api.NodeCard{Timestamp: 100}
-	card2 := &api.NodeCard{Timestamp: 200}
-	card3 := &api.NodeCard{Timestamp: 150}
+	card1 := &NodeCard{Timestamp: 100}
+	card2 := &NodeCard{Timestamp: 200}
+	card3 := &NodeCard{Timestamp: 150}
 
-	val1, _ := proto.Marshal(card1)
-	val2, _ := proto.Marshal(card2)
-	val3, _ := proto.Marshal(card3)
+	val1, _ := json.Marshal(card1)
+	val2, _ := json.Marshal(card2)
+	val3, _ := json.Marshal(card3)
 
 	values := [][]byte{val1, val2, val3}
 

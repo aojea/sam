@@ -302,14 +302,14 @@ func NewMCPHandler(node *SamNode) http.Handler {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		var card api.NodeCard
+		var card registry.NodeCard
 		if err := json.NewDecoder(r.Body).Decode(&card); err != nil {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
 
 		// Ensure PeerID matches our host ID
-		card.PeerId = node.Host.ID().String()
+		card.PeerID = node.Host.ID().String()
 		card.Timestamp = time.Now().Unix()
 
 		// Load private key to sign the card

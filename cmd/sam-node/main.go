@@ -225,8 +225,8 @@ func main() {
 			go func() {
 				// Wait a bit for DHT to warm up
 				time.Sleep(5 * time.Second)
-				card := &api.NodeCard{
-					PeerId:    node.Host.ID().String(),
+				card := &registry.NodeCard{
+					PeerID:    node.Host.ID().String(),
 					Timestamp: time.Now().Unix(),
 				}
 				privKey := node.Host.Peerstore().PrivKey(node.Host.ID())

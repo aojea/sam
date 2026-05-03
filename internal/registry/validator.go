@@ -15,13 +15,12 @@
 package registry
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"google.golang.org/protobuf/proto"
 )
 
 const Namespace = "sam"
@@ -38,17 +37,17 @@ func (v NodeCardValidator) Validate(key string, value []byte) error {
 	}
 	expectedPeerID := parts[2]
 
-	var card api.NodeCard
-	if err := proto.Unmarshal(value, &card); err != nil {
+	var card NodeCard
+	if err := json.Unmarshal(value, &card); err != nil {
 		return errors.New("failed to unmarshal NodeCard")
 	}
 
-	if card.PeerId != expectedPeerID {
+	if card.PeerID != expectedPeerID {
 		return errors.New("record key does not match NodeCard PeerID")
 	}
 
 	// 1. Extract Public Key from the Peer ID
-	pid, err := peer.Decode(card.PeerId)
+	pid, err := peer.Decode(card.PeerID)
 	if err != nil {
 		return err
 	}
@@ -60,7 +59,7 @@ func (v NodeCardValidator) Validate(key string, value []byte) error {
 	// 2. Verify the Signature
 	sig := card.Signature
 	card.Signature = nil
-	payload, err := proto.Marshal(&card)
+	payload, err := json.Marshal(&card)
 	if err != nil {
 		return fmt.Errorf("failed to marshal NodeCard for verification: %w", err)
 	}
@@ -85,8 +84,8 @@ func (v NodeCardValidator) Select(key string, values [][]byte) (int, error) {
 	var maxTime int64 = -1
 
 	for i, val := range values {
-		var card api.NodeCard
-		if err := proto.Unmarshal(val, &card); err != nil {
+		var card NodeCard
+		if err := json.Unmarshal(val, &card); err != nil {
 			continue // Skip corrupted records
 		}
 		if card.Timestamp > maxTime {

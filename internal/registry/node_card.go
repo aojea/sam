@@ -16,23 +16,22 @@ package registry
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
-	"github.com/google/sam/api"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/crypto"
-	"google.golang.org/protobuf/proto"
 )
 
 // PublishMyCard signs and publishes the local NodeCard to the DHT.
-func PublishMyCard(ctx context.Context, kdht *dht.IpfsDHT, privKey crypto.PrivKey, myCard *api.NodeCard) error {
-	// 1. Sign the payload
-	myCard.Signature = nil 
-	payload, err := proto.Marshal(myCard)
+func PublishMyCard(ctx context.Context, kdht *dht.IpfsDHT, privKey crypto.PrivKey, myCard *NodeCard) error {
+	// 1. Sign the payload (without signature field set)
+	myCard.Signature = nil
+	payload, err := json.Marshal(myCard)
 	if err != nil {
 		return fmt.Errorf("failed to marshal NodeCard for signing: %w", err)
 	}
-	
+
 	sig, err := privKey.Sign(payload)
 	if err != nil {
 		return fmt.Errorf("failed to sign NodeCard: %w", err)
@@ -40,29 +39,29 @@ func PublishMyCard(ctx context.Context, kdht *dht.IpfsDHT, privKey crypto.PrivKe
 	myCard.Signature = sig
 
 	// 2. Marshal the final card
-	finalBytes, err := proto.Marshal(myCard)
+	finalBytes, err := json.Marshal(myCard)
 	if err != nil {
 		return fmt.Errorf("failed to marshal final NodeCard: %w", err)
 	}
 
 	// 3. Put to the DHT (The Validator will automatically run here!)
-	key := "/" + Namespace + "/" + myCard.PeerId
+	key := "/" + Namespace + "/" + myCard.PeerID
 	return kdht.PutValue(ctx, key, finalBytes)
 }
 
 // ResolveNodeCard fetches and verifies a remote NodeCard from the DHT.
-func ResolveNodeCard(ctx context.Context, kdht *dht.IpfsDHT, peerID string) (*api.NodeCard, error) {
+func ResolveNodeCard(ctx context.Context, kdht *dht.IpfsDHT, peerID string) (*NodeCard, error) {
 	key := "/" + Namespace + "/" + peerID
-	
-	// GetValue fetches the records. If there are conflicts, 
+
+	// GetValue fetches the records. If there are conflicts,
 	// the Validator.Select() method automatically returns the newest one.
 	val, err := kdht.GetValue(ctx, key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get value from DHT: %w", err)
 	}
 
-	var card api.NodeCard
-	if err := proto.Unmarshal(val, &card); err != nil {
+	var card NodeCard
+	if err := json.Unmarshal(val, &card); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal NodeCard: %w", err)
 	}
 	return &card, nil
