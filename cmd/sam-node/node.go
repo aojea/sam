@@ -17,8 +17,6 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -31,7 +29,6 @@ import (
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
 	"github.com/google/sam/internal/registry"
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -106,8 +103,6 @@ type SamNode struct {
 	topics            map[string]*pubsub.Topic
 	mu                sync.Mutex
 	LocalPolicy       *CompiledLocalPolicy
-	revokedPeers      *lru.Cache[string, int64]
-	verificationCache *lru.Cache[string, string]
 	trustedKeys       []TrustedKey
 	keysMu            sync.RWMutex
 	rateLimiter       *PeerRateLimiter
@@ -133,15 +128,6 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	node.rateLimiter, err = NewPeerRateLimiter(RateLimiterSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create rate limiter: %w", err)
-	}
-	node.revokedPeers, err = lru.New[string, int64](RevocationCacheSize)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create revocation cache: %w", err)
-	}
-
-	node.verificationCache, err = lru.New[string, string](VerificationCacheSize)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create verification cache: %w", err)
 	}
 
 	// Layer 2: Attach the Bouncer (Gater)
@@ -418,11 +404,15 @@ func (n *SamNode) handleBannedEvent(event *api.MeshEvent) {
 
 	logger.Infof("[Mesh Event] Peer banned: %s", event.PeerId)
 
-	n.revokedPeers.Add(event.PeerId, event.Timestamp)
 	if p, err := peer.Decode(event.PeerId); err == nil {
+		if err := n.Store.SaveBanned(p); err != nil {
+			logger.Errorf("[Mesh Event] Failed to save banned peer: %v", err)
+		}
 		if n.Host != nil {
 			_ = n.Host.Network().ClosePeer(p)
 		}
+	} else {
+		logger.Errorf("[Mesh Event] Invalid peer ID in ban event: %s", event.PeerId)
 	}
 }
 
@@ -645,21 +635,6 @@ func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscui
 		return nil, fmt.Errorf("malformed biscuit: %w", err)
 	}
 
-	tokenHash := sha256.Sum256(biscuitData)
-	hashStr := hex.EncodeToString(tokenHash[:]) + ":" + remotePeer.String()
-
-	if pubKeyStr, ok := n.verificationCache.Get(hashStr); ok {
-		n.keysMu.RLock()
-		keys := n.trustedKeys
-		n.keysMu.RUnlock()
-
-		for _, tk := range keys {
-			if hex.EncodeToString(tk.Key) == pubKeyStr {
-				return b, nil
-			}
-		}
-	}
-
 	n.keysMu.RLock()
 	keys := n.trustedKeys
 	n.keysMu.RUnlock()
@@ -680,7 +655,6 @@ func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscui
 		authorizer.AddPolicy(rule)
 
 		if err := authorizer.Authorize(); err == nil {
-			n.verificationCache.Add(hashStr, hex.EncodeToString(tk.Key))
 			return b, nil
 		}
 	}

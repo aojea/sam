@@ -17,8 +17,6 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
@@ -28,7 +26,6 @@ import (
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -351,16 +348,24 @@ func TestRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cache, _ := lru.New[string, int64](10000)
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+	defer store.Close()
+
 	rl, _ := NewPeerRateLimiter(100)
 	node := &SamNode{
-		trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
-		revokedPeers: cache,
-		rateLimiter:  rl,
+		trustedKeys: []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+		Store:       store,
+		rateLimiter: rl,
 	}
 
-	// Mark as revoked
-	node.revokedPeers.Add(dummyPeer.String(), time.Now().Unix())
+	// Mark as banned
+	if err := store.SaveBanned(dummyPeer); err != nil {
+		t.Fatalf("Failed to save banned peer: %v", err)
+	}
 
 	pr1, pw1 := io.Pipe()
 	pr2, pw2 := io.Pipe()
@@ -398,8 +403,8 @@ func TestRevocation(t *testing.T) {
 	if resp.Success {
 		t.Error("expected failure for revoked peer, got success")
 	}
-	if resp.Error != "Peer is revoked" {
-		t.Errorf("expected error 'Peer is revoked', got %q", resp.Error)
+		if resp.Error != "Peer is explicitly BANNED" {
+			t.Errorf("expected error 'Peer is explicitly BANNED', got %q", resp.Error)
 	}
 }
 
@@ -472,8 +477,6 @@ func TestHandleAuthHandshakeCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cache, _ := lru.New[string, string](10)
-
 	dir := t.TempDir()
 	store, err := NewStore(dir)
 	if err != nil {
@@ -481,10 +484,11 @@ func TestHandleAuthHandshakeCache(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 
+	rl, _ := NewPeerRateLimiter(100)
 	node := &SamNode{
 		trustedKeys:       []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
-		verificationCache: cache,
 		Store:             store,
+		rateLimiter:       rl,
 	}
 
 	pr1, pw1 := io.Pipe()
@@ -509,11 +513,12 @@ func TestHandleAuthHandshakeCache(t *testing.T) {
 		t.Fatalf("Expected identity to be saved, got err: %v", err)
 	}
 
-	tokenHash := sha256.Sum256(tokenBytes)
-	hashStr := hex.EncodeToString(tokenHash[:]) + ":" + dummyPeer.String()
+	// Wait a bit to ensure the identity is saved
+	time.Sleep(100 * time.Millisecond)
 
-	if pubKeyStr, ok := cache.Get(hashStr); !ok || pubKeyStr != hex.EncodeToString(pub) {
-		t.Fatal("Expected token to be in verification cache with correct key")
+	_, err = store.GetVerifiedIdentity(dummyPeer)
+	if err != nil {
+		t.Fatalf("Expected identity to be saved, got err: %v", err)
 	}
 
 	// Now corrupt keys and try again.

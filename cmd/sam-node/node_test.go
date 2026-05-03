@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/google/sam/api"
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -61,12 +61,18 @@ func TestHandleExitEvent(t *testing.T) {
 }
 
 func TestHandleBannedEvent(t *testing.T) {
-	revokedCache, _ := lru.New[string, int64](10)
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
 	node := &SamNode{
 		knownPeers: map[string]bool{
 			"12D3KooWAFv4iJst5G6MjwXhZ66K5zS1tP7A9vSg4vK8f1T7X8t9": true,
 		},
-		revokedPeers: revokedCache,
+		Store: store,
 	}
 
 	event := &api.MeshEvent{
@@ -81,8 +87,12 @@ func TestHandleBannedEvent(t *testing.T) {
 		t.Error("Expected peer to be removed from knownPeers")
 	}
 
-	if !node.revokedPeers.Contains(event.PeerId) {
-		t.Error("Expected peer to be added to revokedPeers")
+	// We can't directly check Store via `IsBanned` because `peer.Decode` in `handleBannedEvent`
+	// might fail if the ID string isn't valid, but for a valid ID it should be banned.
+	// Since 12D3... is a valid CID/peer ID format, it should work.
+	p, _ := peer.Decode(event.PeerId)
+	if !node.Store.IsBanned(p) {
+		t.Error("Expected peer to be added to Store as banned")
 	}
 }
 

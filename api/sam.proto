@@ -31,23 +31,6 @@ message AuthResponse {
   string error = 2; // populated only if success is false
 }
 
-message HubConfig {
-  string public_key_hex = 1;
-  string mesh_id = 2;
-  repeated string bootstrap_nodes = 3;
-  int64 key_rotation_interval = 4;
-  int64 key_grace_period = 5;
-}
-
-message PeerProfile {
-  string email = 1;
-  repeated string groups = 2;
-}
-
-message PeerRegistry {
-  map<string, PeerProfile> peers = 1;
-}
-
 message ModelProperty {
   string name = 1;
   int32 context_window = 2;
@@ -63,13 +46,6 @@ message NodeCard {
   map<string, string> metadata = 6;
   bytes signature = 7;
   int64 timestamp = 8; // NEW: Epoch time to resolve version conflicts
-}
-
-message RevocationMsg {
-  string target_peer_id = 1;
-  string reason = 2;
-  int64 timestamp = 3;
-  bytes signature = 4;
 }
 
 message MeshEvent {

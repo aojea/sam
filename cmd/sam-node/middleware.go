@@ -17,8 +17,6 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -41,6 +39,119 @@ type RequestContext struct {
 	Protocol protocol.ID
 }
 
+// verifyStreamAuth encapsulates the logic for verifying a stream's AuthFrame and sending the AuthResponse.
+func (n *SamNode) verifyStreamAuth(s network.Stream) error {
+	remotePeer := s.Conn().RemotePeer()
+
+	if !n.rateLimiter.Allow(remotePeer.String()) {
+		_ = s.Reset()
+		return fmt.Errorf("rate limit exceeded for %s", remotePeer)
+	}
+
+	reader := msgio.NewVarintReaderSize(s, 1024*64)
+	msg, err := reader.ReadMsg()
+	if err != nil {
+		return fmt.Errorf("failed to read auth frame from %s: %w", remotePeer, err)
+	}
+	defer reader.ReleaseMsg(msg)
+
+	var authFrame api.AuthFrame
+	if err := proto.Unmarshal(msg, &authFrame); err != nil {
+		return fmt.Errorf("invalid auth frame from %s", remotePeer)
+	}
+
+	reqCtx := RequestContext{
+		PeerID:   remotePeer,
+		User:     "", // Not used in Authorize
+		Protocol: s.Protocol(),
+	}
+
+	writer := msgio.NewVarintWriter(s)
+
+	if n.Store.IsBanned(remotePeer) {
+		resp := &api.AuthResponse{Success: false, Error: "Peer is explicitly BANNED"}
+		respBytes, _ := proto.Marshal(resp)
+		_ = writer.WriteMsg(respBytes)
+		return fmt.Errorf("peer %s is explicitly BANNED", remotePeer)
+	}
+
+	n.keysMu.RLock()
+	keys := n.trustedKeys
+	n.keysMu.RUnlock()
+
+	var authorized bool
+	var lastErr error
+	for _, pubKey := range keys {
+		logger.Infof("[Auth] Trying key: %x", pubKey.Key)
+		if err := n.Authorize(authFrame.Biscuit, reqCtx, pubKey.Key); err == nil {
+			authorized = true
+			break
+		} else {
+			lastErr = err
+		}
+	}
+
+	if !authorized {
+		logger.Infof("[Auth] All keys failed, triggering re-enrollment fallback for %s", remotePeer)
+		var jwtStr string
+		var fallbackErr error
+
+		if tokenURLFlag != "" {
+			jwtStr, fallbackErr = n.FetchJWT(context.Background(), tokenURLFlag, clientIDFlag, clientSecretFlag)
+			if fallbackErr != nil {
+				logger.Errorf("[Auth] Failed to fetch JWT for fallback: %v", fallbackErr)
+			}
+		} else if jwtPathFlag != "" {
+			data, fileErr := os.ReadFile(jwtPathFlag)
+			if fileErr != nil {
+				logger.Errorf("[Auth] Failed to read JWT file for fallback: %v", fileErr)
+			} else {
+				jwtStr = strings.TrimSpace(string(data))
+			}
+		}
+
+		if jwtStr != "" {
+			enrollErr := n.Enroll(context.Background(), jwtStr)
+			if enrollErr != nil {
+				logger.Errorf("[Auth] Fallback enrollment failed: %v", enrollErr)
+			} else {
+				n.keysMu.RLock()
+				keys = n.trustedKeys
+				n.keysMu.RUnlock()
+
+				for _, pubKey := range keys {
+					logger.Infof("[Auth] Retrying with key: %x", pubKey.Key)
+					if err := n.Authorize(authFrame.Biscuit, reqCtx, pubKey.Key); err == nil {
+						authorized = true
+						break
+					} else {
+						lastErr = err
+					}
+				}
+			}
+		}
+	}
+
+	if !authorized {
+		resp := &api.AuthResponse{Success: false, Error: "Authorization failed"}
+		if lastErr != nil {
+			resp.Error = lastErr.Error()
+		}
+		respBytes, _ := proto.Marshal(resp)
+		_ = writer.WriteMsg(respBytes)
+		return fmt.Errorf("AuthZ Denied %s: %v", remotePeer, lastErr)
+	}
+
+	// Valid
+	resp := &api.AuthResponse{Success: true}
+	respBytes, _ := proto.Marshal(resp)
+	if err := writer.WriteMsg(respBytes); err != nil {
+		return fmt.Errorf("failed to write ACK to %s: %w", remotePeer, err)
+	}
+
+	return nil
+}
+
 // WithBiscuitAuth enforces a Protobuf handshake on a stream before calling the next handler.
 func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHandler {
 	return func(s network.Stream) {
@@ -49,162 +160,9 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 				logger.Errorf("[Auth] Failed to close stream: %v", err)
 			}
 		}()
-		remotePeer := s.Conn().RemotePeer()
 
-		if !n.rateLimiter.Allow(remotePeer.String()) {
-			logger.Warnf("[Auth] Rate limit exceeded for %s, dropping connection", remotePeer)
-			_ = s.Reset()
-			return
-		}
-
-		// Read AuthFrame
-		reader := msgio.NewVarintReaderSize(s, 1024*64)
-		msg, err := reader.ReadMsg()
-		if err != nil {
-			logger.Errorf("[Auth] Failed to read auth frame from %s: %v", remotePeer, err)
-			return
-		}
-		defer reader.ReleaseMsg(msg)
-
-		var authFrame api.AuthFrame
-		if err := proto.Unmarshal(msg, &authFrame); err != nil {
-			logger.Warnf("[Auth] Invalid auth frame from %s", remotePeer)
-			return
-		}
-		reqCtx := RequestContext{
-			PeerID:   remotePeer,
-			User:     "", // Not used in Authorize
-			Protocol: s.Protocol(),
-		}
-
-		writer := msgio.NewVarintWriter(s)
-
-		// Check revocation cache
-		if _, isRevoked := n.revokedPeers.Get(remotePeer.String()); isRevoked {
-			logger.Warnf("[Auth] Peer %s is revoked", remotePeer)
-			resp := &api.AuthResponse{Success: false, Error: "Peer is revoked"}
-			respBytes, err := proto.Marshal(resp)
-			if err != nil {
-				logger.Errorf("[Auth] Failed to marshal revocation response: %v", err)
-				return
-			}
-			_ = writer.WriteMsg(respBytes)
-			return
-		}
-
-		// Check verification cache
-		tokenHash := sha256.Sum256(authFrame.Biscuit)
-		hashStr := hex.EncodeToString(tokenHash[:]) + ":" + remotePeer.String()
-
-		if pubKeyStr, ok := n.verificationCache.Get(hashStr); ok {
-			n.keysMu.RLock()
-			keys := n.trustedKeys
-			n.keysMu.RUnlock()
-
-			trusted := false
-			for _, tk := range keys {
-				if hex.EncodeToString(tk.Key) == pubKeyStr {
-					trusted = true
-					break
-				}
-			}
-			if trusted {
-				logger.Infof("[Auth] Token cache hit for %s", remotePeer)
-				// Valid
-				resp := &api.AuthResponse{Success: true}
-				respBytes, err := proto.Marshal(resp)
-				if err != nil {
-					logger.Errorf("[Auth] Failed to marshal ACK response: %v", err)
-					return
-				}
-				if err := writer.WriteMsg(respBytes); err != nil {
-					logger.Errorf("[Auth] Failed to write ACK to %s: %v", remotePeer, err)
-					return
-				}
-				next(s)
-				return
-			}
-		}
-
-		n.keysMu.RLock()
-		keys := n.trustedKeys
-		n.keysMu.RUnlock()
-
-		var authorized bool
-		var lastErr error
-		var successfulKey ed25519.PublicKey
-		for _, pubKey := range keys {
-			logger.Infof("[Auth] Trying key: %x", pubKey.Key)
-			if err := n.Authorize(authFrame.Biscuit, reqCtx, pubKey.Key); err == nil {
-				authorized = true
-				successfulKey = pubKey.Key
-				break
-			} else {
-				lastErr = err
-			}
-		}
-
-		if !authorized {
-			logger.Infof("[Auth] All keys failed, triggering re-enrollment fallback for %s", remotePeer)
-			var jwtStr string
-			var err error
-
-			if tokenURLFlag != "" {
-				jwtStr, err = n.FetchJWT(context.Background(), tokenURLFlag, clientIDFlag, clientSecretFlag)
-				if err != nil {
-					logger.Errorf("[Auth] Failed to fetch JWT for fallback: %v", err)
-				}
-			} else if jwtPathFlag != "" {
-				data, err := os.ReadFile(jwtPathFlag)
-				if err != nil {
-					logger.Errorf("[Auth] Failed to read JWT file for fallback: %v", err)
-				} else {
-					jwtStr = strings.TrimSpace(string(data))
-				}
-			}
-
-			if jwtStr != "" {
-				err = n.Enroll(context.Background(), jwtStr)
-				if err != nil {
-					logger.Errorf("[Auth] Fallback enrollment failed: %v", err)
-				} else {
-					// Retry authorization with new keys
-					n.keysMu.RLock()
-					keys = n.trustedKeys
-					n.keysMu.RUnlock()
-
-					for _, pubKey := range keys {
-						logger.Infof("[Auth] Retrying with key: %x", pubKey.Key)
-						if err := n.Authorize(authFrame.Biscuit, reqCtx, pubKey.Key); err == nil {
-							authorized = true
-							break
-						} else {
-							lastErr = err
-						}
-					}
-				}
-			}
-		}
-
-		if !authorized {
-			logger.Warnf("[Auth] AuthZ Denied %s: %v", remotePeer, lastErr)
-			resp := &api.AuthResponse{Success: false, Error: "Authorization failed"}
-			if lastErr != nil {
-				resp.Error = lastErr.Error()
-			}
-			respBytes, _ := proto.Marshal(resp)
-			_ = writer.WriteMsg(respBytes)
-			return
-		}
-
-		// Cache successful verification
-		n.verificationCache.Add(hashStr, hex.EncodeToString(successfulKey))
-
-		// Valid
-		resp := &api.AuthResponse{Success: true}
-		respBytes, _ := proto.Marshal(resp)
-		if err := writer.WriteMsg(respBytes); err != nil {
-			logger.Errorf("[Auth] Failed to write ACK to %s: %v", remotePeer, err)
+		if err := n.verifyStreamAuth(s); err != nil {
+			logger.Warnf("[Auth] Stream verification failed: %v", err)
 			return
 		}
 

@@ -194,6 +194,20 @@ func (s *Store) IsBanned(p peer.ID) bool {
 	return banned
 }
 
+func (s *Store) SaveBanned(p peer.ID) error {
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucketBannedPeers))
+		if b == nil {
+			var err error
+			b, err = tx.CreateBucketIfNotExists([]byte(bucketBannedPeers))
+			if err != nil {
+				return err
+			}
+		}
+		return b.Put([]byte(p.String()), []byte("banned"))
+	})
+}
+
 func (s *Store) SaveVerifiedIdentity(p peer.ID, identity VerifiedIdentity) error {
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(bucketVerifiedPeers))

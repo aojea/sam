@@ -16,9 +16,7 @@ package main
 
 import (
 	"testing"
-	"time"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -37,14 +35,8 @@ func TestConnectionGater(t *testing.T) {
 		}
 	}()
 
-	cache, err := lru.New[string, int64](100)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	node := &SamNode{
-		Store:        store,
-		revokedPeers: cache,
+		Store: store,
 	}
 	gater := &nodeConnGate{node: node}
 
@@ -66,14 +58,16 @@ func TestConnectionGater(t *testing.T) {
 		t.Errorf("expected InterceptSecured to allow peer1")
 	}
 
-	// Case 2: Peer is in revoked cache
-	node.revokedPeers.Add(peer2.String(), time.Now().Unix())
+	// Case 2: Peer is explicitly saved as banned via store
+	if err := store.SaveBanned(peer2); err != nil {
+		t.Fatalf("failed to ban peer2: %v", err)
+	}
 	if gater.InterceptPeerDial(peer2) {
-		t.Errorf("expected InterceptPeerDial to deny peer2 (in revoked cache)")
+		t.Errorf("expected InterceptPeerDial to deny peer2 (banned via SaveBanned)")
 	}
 
 	if gater.InterceptSecured(network.DirInbound, peer2, nil) {
-		t.Errorf("expected InterceptSecured to deny peer2 (in revoked cache)")
+		t.Errorf("expected InterceptSecured to deny peer2 (banned via SaveBanned)")
 	}
 
 	// Case 3: Peer is in persistent store (banned)
