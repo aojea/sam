@@ -31,18 +31,18 @@ jobs:
     
     steps:
     - name: Check out code
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
 
     - name: Set up QEMU
-      uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
     - name: Log in to the Container registry
-      uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
@@ -61,7 +61,7 @@ jobs:
           type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
     - name: Build and push Control Plane image
-      uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
       with:
         context: .
         file: Dockerfile.sam-control-plane
@@ -83,7 +83,7 @@ jobs:
           type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
     - name: Build and push Router image
-      uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
       with:
         context: .
         file: Dockerfile.sam-router
@@ -105,7 +105,7 @@ jobs:
           type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
     - name: Build and push Node image
-      uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
       with:
         context: .
         file: Dockerfile.sam-node
@@ -127,7 +127,7 @@ jobs:
           type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
     - name: Build and push nano-init image
-      uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
       with:
         context: .
         file: Dockerfile.nano-init
@@ -149,7 +149,7 @@ jobs:
           type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
     - name: Build and push sam-box image
-      uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
       with:
         context: .
         file: Dockerfile.sam-box
@@ -171,7 +171,7 @@ jobs:
           type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
     - name: Build and push sam-console image
-      uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
       with:
         context: .
         file: Dockerfile.sam-console
@@ -192,7 +192,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
