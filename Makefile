@@ -26,6 +26,7 @@ build:
 	go build -v -o "$(OUT_DIR)/sam-node" ./cmd/sam-node
 	go build -v -o "$(OUT_DIR)/sam-control-plane" ./cmd/sam-control-plane
 	go build -v -o "$(OUT_DIR)/sam-router" ./cmd/sam-router
+	go build -v -o "$(OUT_DIR)/sam-one" ./cmd/sam-one
 	go build -v -o "$(OUT_DIR)/mcp-client" ./cmd/mcp-client
 	go build -v -o "$(OUT_DIR)/sam-box" ./cmd/sam-box
 	go build -v -o "$(OUT_DIR)/sam-bench" ./cmd/sam-bench
