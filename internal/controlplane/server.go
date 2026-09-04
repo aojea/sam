@@ -117,7 +117,48 @@ func (s *Server) getMeshAdapter() MeshAdapter {
 }
 
 // Start boots up HTTP services, sets up OIDC providers, loads initial keys and policies, and schedules rotations.
+// Start boots up HTTP services, sets up OIDC providers, loads initial keys and policies, and schedules rotations.
 func (s *Server) Start() error {
+	if err := s.Init(); err != nil {
+		return err
+	}
+
+	// Setup listener
+	l, err := net.Listen("tcp", s.config.ListenAddr)
+	if err != nil {
+		return err
+	}
+	s.listener = l
+
+	mux := http.NewServeMux()
+	s.RegisterRoutes(mux)
+
+	s.httpServer = &http.Server{
+		Handler: mux,
+		// Mitigate Slowloris-style resource exhaustion from slow/malicious clients.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		logger.Infof("SAM Control Plane listening on http://%s", s.config.ListenAddr)
+		if err := s.httpServer.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Errorf("HTTP Server error: %v", err)
+		}
+	}()
+
+	return nil
+}
+
+// Init prepares the control plane without binding a listener: it bootstraps
+// the signing keyring, discovers OIDC providers and starts the key-rotation
+// loop. Embedders that own their own listener call Init + RegisterRoutes
+// instead of Start.
+func (s *Server) Init() error {
 	// Initialize Keyring
 	ctx := context.Background()
 	_, _, err := s.store.GetCurrentKey(ctx)
@@ -141,14 +182,15 @@ func (s *Server) Start() error {
 		return fmt.Errorf("failed OIDC discovery: %w", err)
 	}
 
-	// Setup listener
-	l, err := net.Listen("tcp", s.config.ListenAddr)
-	if err != nil {
-		return err
-	}
-	s.listener = l
+	// Start key rotation routine
+	s.wg.Add(1)
+	go s.runKeyRotationLoop()
 
-	mux := http.NewServeMux()
+	return nil
+}
+
+// RegisterRoutes registers every control-plane HTTP handler on mux.
+func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", s.HandleHealthz)
 	mux.HandleFunc("/readyz", s.HandleReadyz)
 	mux.Handle("/metrics", promhttp.Handler())
@@ -168,30 +210,6 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/user/status", s.HandleUserStatus)
 	mux.HandleFunc("/user/bootstrap-tokens", s.HandleUserBootstrapTokens)
 	mux.HandleFunc("/user/revoke", s.HandleUserRevoke)
-
-	s.httpServer = &http.Server{
-		Handler: mux,
-		// Mitigate Slowloris-style resource exhaustion from slow/malicious clients.
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       120 * time.Second,
-	}
-
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		logger.Infof("SAM Control Plane listening on http://%s", s.config.ListenAddr)
-		if err := s.httpServer.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Errorf("HTTP Server error: %v", err)
-		}
-	}()
-
-	// Start key rotation routine
-	s.wg.Add(1)
-	go s.runKeyRotationLoop()
-
-	return nil
 }
 
 func (s *Server) discoverProviders() error {

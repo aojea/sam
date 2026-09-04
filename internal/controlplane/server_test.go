@@ -1864,3 +1864,72 @@ func TestBootstrapTokenOwnerPropagatesToNode(t *testing.T) {
 		t.Errorf("enrolled node owner = %q, want %q", enrolled.OwnerID, ownerSub)
 	}
 }
+
+// TestInitRegisterRoutesEmbedded pins the embedder seam used by single-binary
+// distributions: Init + RegisterRoutes on an externally owned mux/listener,
+// with no OIDC issuer configured, and a Close that never saw Start.
+func TestInitRegisterRoutesEmbedded(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "cp-embedded.db")
+	store, err := storage.NewSQLStore("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	srv, err := NewServer(Options{
+		DriverName:       "sqlite",
+		DataSourceName:   dbPath,
+		AllowedAudiences: []string{"sam-mesh-audience"},
+	}, store)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	if err := srv.Init(); err != nil {
+		t.Fatalf("Init() with empty OIDC issuer failed: %v", err)
+	}
+	if _, _, err := store.GetCurrentKey(context.Background()); err != nil {
+		t.Fatalf("Init() did not bootstrap the signing keyring: %v", err)
+	}
+	if got := srv.Addr(); got != "" {
+		t.Errorf("Addr() without an owned listener = %q, want empty", got)
+	}
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	for _, path := range []string{"/healthz", "/readyz", "/keys", "/info"} {
+		resp, err := client.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s failed: %v", path, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET %s status = %s, want 200", path, resp.Status)
+		}
+		if path != "/info" {
+			_ = resp.Body.Close()
+			continue
+		}
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			t.Fatalf("failed to read /info body: %v", err)
+		}
+		var info api.ControlPlaneInfoResponse
+		if err := proto.Unmarshal(body, &info); err != nil {
+			t.Fatalf("failed to unmarshal ControlPlaneInfoResponse: %v", err)
+		}
+		if info.OidcIssuer != "" {
+			t.Errorf("/info issuer = %q, want empty (no OIDC configured)", info.OidcIssuer)
+		}
+	}
+
+	// Close must shut down the rotation loop cleanly even though the server
+	// never owned an http.Server or listener.
+	if err := srv.Close(); err != nil {
+		t.Fatalf("Close() without Start failed: %v", err)
+	}
+}
