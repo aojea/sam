@@ -48,6 +48,11 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
+	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
+	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
+	libp2pwebrtc "github.com/libp2p/go-libp2p/p2p/transport/webrtc"
+	ws "github.com/libp2p/go-libp2p/p2p/transport/websocket"
+	"github.com/libp2p/go-libp2p/p2p/transport/webtransport"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
 	madns "github.com/multiformats/go-multiaddr-dns"
@@ -136,6 +141,24 @@ func NewRouter(ctx context.Context, config Options) (*Router, error) {
 	}, nil
 }
 
+// transportOptions mirrors libp2p.DefaultTransports, attaching the HTTP
+// fallback handler to the WebSocket transport in single-port mode. The
+// explicit list is required because combining DefaultTransports with an
+// extra Transport(websocket.New, ...) registers the WS transport twice and
+// fails host construction.
+func (r *Router) transportOptions() libp2p.Option {
+	if r.config.HTTPFallbackHandler == nil {
+		return libp2p.DefaultTransports
+	}
+	return libp2p.ChainOptions(
+		libp2p.Transport(tcp.NewTCPTransport),
+		libp2p.Transport(libp2pquic.NewTransport),
+		libp2p.Transport(ws.New, ws.WithHTTPHandler(r.config.HTTPFallbackHandler)),
+		libp2p.Transport(libp2pwebtransport.New),
+		libp2p.Transport(libp2pwebrtc.New),
+	)
+}
+
 // Start performs enrollment, syncs keys, launches libp2p host, and starts tasks.
 func (r *Router) Start() error {
 	// 1. Load or Generate persistent identity key
@@ -179,7 +202,7 @@ func (r *Router) Start() error {
 
 	p2pOpts := []libp2p.Option{
 		libp2p.Identity(r.privKey),
-		libp2p.DefaultTransports,
+		r.transportOptions(),
 		libp2p.ListenAddrStrings(r.config.ListenAddrs...),
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
 		libp2p.ConnectionManager(cm),
