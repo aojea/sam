@@ -96,6 +96,49 @@ type Options struct {
 	// OIDCIssuer optionally enables full OIDC enrollment.
 	OIDCIssuer       string
 	AllowedAudiences []string
+	// OIDCClientID is the OAuth client id advertised via /info.
+	OIDCClientID string
+
+	// ControlPlane and Router forward operator tunables to the embedded
+	// components; zero values keep each component's defaults.
+	ControlPlane ControlPlaneTunables
+	Router       RouterTunables
+}
+
+// ControlPlaneTunables are the embedded control plane's operator knobs.
+type ControlPlaneTunables struct {
+	// LeaseDuration bounds how long a router lease stays valid.
+	LeaseDuration time.Duration
+	// KeyRotationInterval is how often the biscuit signing key rotates.
+	KeyRotationInterval time.Duration
+	// KeyGracePeriod keeps rotated-out keys valid for verification.
+	KeyGracePeriod time.Duration
+	// BiscuitTTL is the lifespan minted into issued biscuits.
+	BiscuitTTL time.Duration
+	// ManualEnrollment queues bootstrap enrollments for admin approval
+	// instead of auto-approving them.
+	ManualEnrollment bool
+}
+
+// RouterTunables are the embedded router's operator knobs.
+type RouterTunables struct {
+	// KeysSyncInterval is how often biscuit public keys are refreshed.
+	KeysSyncInterval time.Duration
+	// LeaseRenewInterval is how often the router renews its lease.
+	LeaseRenewInterval time.Duration
+	// LowWaterMark / HighWaterMark bound the connection manager.
+	LowWaterMark  int
+	HighWaterMark int
+	// ConnsPerSourceIP scales libp2p's per-source-IP budgets; defaults to
+	// the connection manager high watermark (proxied deployments share
+	// source IPs, so the global cap should be what binds).
+	ConnsPerSourceIP int
+	// DHTProviderAddrTTL / DHTMaxRecordAge tune DHT record lifetimes.
+	DHTProviderAddrTTL time.Duration
+	DHTMaxRecordAge    time.Duration
+	// DisallowLoopback stops advertising loopback addresses (useful on
+	// public deployments; the default keeps local development working).
+	DisallowLoopback bool
 }
 
 // Default fills unset options with development-friendly values.
@@ -116,6 +159,12 @@ func (o *Options) Default() {
 	}
 	if len(o.AllowedAudiences) == 0 {
 		o.AllowedAudiences = []string{api.DefaultAudience}
+	}
+	if o.Router.HighWaterMark == 0 {
+		o.Router.HighWaterMark = router.DefaultHighWaterMark
+	}
+	if o.Router.ConnsPerSourceIP == 0 {
+		o.Router.ConnsPerSourceIP = o.Router.HighWaterMark
 	}
 }
 
@@ -191,10 +240,15 @@ func (s *Server) Start(ctx context.Context) error {
 		DriverName:            s.opts.DBDriver,
 		DataSourceName:        s.opts.DBDSN,
 		OIDCIssuer:            s.opts.OIDCIssuer,
+		OIDCClientID:          s.opts.OIDCClientID,
 		AllowedAudiences:      s.opts.AllowedAudiences,
+		LeaseDuration:         s.opts.ControlPlane.LeaseDuration,
+		KeyRotationInterval:   s.opts.ControlPlane.KeyRotationInterval,
+		KeyGracePeriod:        s.opts.ControlPlane.KeyGracePeriod,
+		BiscuitTTL:            s.opts.ControlPlane.BiscuitTTL,
 		BiscuitTimeout:        10 * time.Second,
 		AdminToken:            s.adminToken,
-		AutoApproveEnrollment: true,
+		AutoApproveEnrollment: !s.opts.ControlPlane.ManualEnrollment,
 	}, store)
 	if err != nil {
 		return fmt.Errorf("failed to create control plane: %w", err)
@@ -260,18 +314,23 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	rtr, err := router.NewRouter(ctx, router.Options{
-		ControlPlaneURL: "http://" + cp.Addr(),
-		ListenAddrs:     append([]string{wsAddr}, s.opts.P2PListen...),
-		ExternalAddrs:   externalAddrs,
-		AllowLoopback:   true,
-		KeysDBPath:      filepath.Join(s.opts.DataDir, routerKeyFile),
-		BootstrapToken:  routerToken,
+		ControlPlaneURL:    "http://" + cp.Addr(),
+		ListenAddrs:        append([]string{wsAddr}, s.opts.P2PListen...),
+		ExternalAddrs:      externalAddrs,
+		AllowLoopback:      !s.opts.Router.DisallowLoopback,
+		KeysDBPath:         filepath.Join(s.opts.DataDir, routerKeyFile),
+		BootstrapToken:     routerToken,
+		KeysSyncInterval:   s.opts.Router.KeysSyncInterval,
+		LeaseRenewInterval: s.opts.Router.LeaseRenewInterval,
+		LowWaterMark:       s.opts.Router.LowWaterMark,
+		HighWaterMark:      s.opts.Router.HighWaterMark,
+		DHTProviderAddrTTL: s.opts.Router.DHTProviderAddrTTL,
+		DHTMaxRecordAge:    s.opts.Router.DHTMaxRecordAge,
 		// Single-port deployments typically sit behind a TLS-terminating
 		// proxy (Cloud Run, L7 LBs) or NAT where every peer shares a few
 		// source IPs; libp2p's default 8-conns-per-IP cap would throttle
-		// the whole listener. Matches the conn manager's high watermark so
-		// the global cap, not the per-IP one, is what binds.
-		ConnsPerSourceIP:    router.DefaultHighWaterMark,
+		// the whole listener.
+		ConnsPerSourceIP:    s.opts.Router.ConnsPerSourceIP,
 		HTTPFallbackHandler: mux,
 	})
 	if err != nil {

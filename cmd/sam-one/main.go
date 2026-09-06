@@ -47,8 +47,12 @@ func main() {
 		adminToken           string
 		policyFile           string
 		oidcIssuer           string
+		oidcClientID         string
 		allowedAudiencesFlag string
 		logLevel             string
+		cpTunables           standalone.ControlPlaneTunables
+		routerTunables       standalone.RouterTunables
+		routerAllowLoopback  bool
 	)
 
 	rootCmd := &cobra.Command{
@@ -84,6 +88,7 @@ func main() {
 				}
 			}
 
+			routerTunables.DisallowLoopback = !routerAllowLoopback
 			srv, err := standalone.New(standalone.Options{
 				BindAddress:      net.JoinHostPort(bindAddress, strconv.Itoa(port)),
 				ExternalURL:      externalURL,
@@ -95,7 +100,10 @@ func main() {
 				AdminToken:       adminToken,
 				PolicyFile:       policyFile,
 				OIDCIssuer:       oidcIssuer,
+				OIDCClientID:     oidcClientID,
 				AllowedAudiences: auds,
+				ControlPlane:     cpTunables,
+				Router:           routerTunables,
 			})
 			if err != nil {
 				logger.Fatalf("Invalid configuration: %v", err)
@@ -125,8 +133,26 @@ func main() {
 	rootCmd.Flags().StringVar(&adminToken, "admin-token", "", "Admin API bearer token (or env SAM_ADMIN_TOKEN; auto-generated if empty)")
 	rootCmd.Flags().StringVar(&policyFile, "policy-file", "", "Path to a protojson PolicyConfigUpdateRequest seeding the mesh policy on first boot only")
 	rootCmd.Flags().StringVar(&oidcIssuer, "issuer", "", "Optional external OIDC issuer URL (comma-separated)")
+	rootCmd.Flags().StringVar(&oidcClientID, "oidc-client-id", "", "OAuth client id advertised via /info (defaults to the first allowed audience)")
 	rootCmd.Flags().StringVar(&allowedAudiencesFlag, "allowed-audiences", api.DefaultAudience, "Comma-separated list of allowed OIDC audiences")
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "", "Log level: debug, info, warn, error")
+
+	// Embedded control plane tunables.
+	rootCmd.Flags().DurationVar(&cpTunables.LeaseDuration, "control-plane-lease-duration", 0, "Router lease validity (0 keeps the component default)")
+	rootCmd.Flags().DurationVar(&cpTunables.KeyRotationInterval, "control-plane-key-rotation-interval", 0, "Biscuit signing key rotation interval (0 keeps the component default)")
+	rootCmd.Flags().DurationVar(&cpTunables.KeyGracePeriod, "control-plane-key-grace-period", 0, "How long rotated-out keys stay valid for verification (0 keeps the component default)")
+	rootCmd.Flags().DurationVar(&cpTunables.BiscuitTTL, "control-plane-biscuit-ttl", 0, "Lifespan minted into issued biscuits (0 keeps the component default)")
+	rootCmd.Flags().BoolVar(&cpTunables.ManualEnrollment, "control-plane-manual-enrollment", false, "Queue bootstrap enrollments for admin approval instead of auto-approving")
+
+	// Embedded router tunables.
+	rootCmd.Flags().DurationVar(&routerTunables.KeysSyncInterval, "router-keys-sync-interval", 0, "Biscuit public key refresh interval (0 keeps the component default)")
+	rootCmd.Flags().DurationVar(&routerTunables.LeaseRenewInterval, "router-lease-renew-interval", 0, "Lease renewal interval (0 keeps the component default)")
+	rootCmd.Flags().IntVar(&routerTunables.LowWaterMark, "router-low-watermark", 0, "Connection manager low watermark (0 keeps the component default)")
+	rootCmd.Flags().IntVar(&routerTunables.HighWaterMark, "router-high-watermark", 0, "Connection manager high watermark (0 keeps the component default)")
+	rootCmd.Flags().IntVar(&routerTunables.ConnsPerSourceIP, "router-conns-per-source-ip", 0, "Per-source-IP connection budget (0 follows the high watermark; proxied peers share source IPs)")
+	rootCmd.Flags().DurationVar(&routerTunables.DHTProviderAddrTTL, "router-dht-provider-addr-ttl", 0, "DHT provider address TTL (0 keeps the library default)")
+	rootCmd.Flags().DurationVar(&routerTunables.DHTMaxRecordAge, "router-dht-max-record-age", 0, "DHT record max age (0 keeps the library default)")
+	rootCmd.Flags().BoolVar(&routerAllowLoopback, "router-allow-loopback", true, "Advertise loopback addresses (disable on public deployments)")
 
 	rootCmd.AddCommand(newAdminSubcommands()...)
 
