@@ -38,6 +38,7 @@ var (
 	jwtPath            string
 	keysPath           string
 	allowLoopback      bool
+	connsPerSourceIP   int
 	logLevel           string
 	dhtProviderAddrTTL time.Duration
 	dhtMaxRecordAge    time.Duration
@@ -76,6 +77,7 @@ func main() {
 				JWTPath:            jwtPath,
 				KeysDBPath:         keysPath,
 				AllowLoopback:      allowLoopback,
+				ConnsPerSourceIP:   connsPerSourceIP,
 				DHTProviderAddrTTL: dhtProviderAddrTTL,
 				DHTMaxRecordAge:    dhtMaxRecordAge,
 				LowWaterMark:       lowWaterMark,
@@ -111,6 +113,7 @@ func main() {
 	rootCmd.Flags().StringVar(&jwtPath, "jwt-path", "", "Path to file containing OIDC JWT token")
 	rootCmd.Flags().StringVar(&keysPath, "keys-path", "router.key", "Path to save/load persistent private key")
 	rootCmd.Flags().BoolVar(&allowLoopback, "allow-loopback", false, "Allow loopback and link-local addresses for discovery")
+	rootCmd.Flags().IntVar(&connsPerSourceIP, "conns-per-source-ip", 0, "Max inbound connections per source IP (0 keeps libp2p's default of 8); raise behind TLS-terminating proxies or NAT where many peers share source IPs")
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	rootCmd.Flags().DurationVar(&dhtProviderAddrTTL, "dht-provider-addr-ttl", 0, "Time-To-Live for DHT provider addresses (0s uses library default)")
 	rootCmd.Flags().DurationVar(&dhtMaxRecordAge, "dht-max-record-age", 0, "Maximum age for DHT records (0s uses library default)")

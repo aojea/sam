@@ -260,12 +260,18 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	rtr, err := router.NewRouter(ctx, router.Options{
-		ControlPlaneURL:     "http://" + cp.Addr(),
-		ListenAddrs:         append([]string{wsAddr}, s.opts.P2PListen...),
-		ExternalAddrs:       externalAddrs,
-		AllowLoopback:       true,
-		KeysDBPath:          filepath.Join(s.opts.DataDir, routerKeyFile),
-		BootstrapToken:      routerToken,
+		ControlPlaneURL: "http://" + cp.Addr(),
+		ListenAddrs:     append([]string{wsAddr}, s.opts.P2PListen...),
+		ExternalAddrs:   externalAddrs,
+		AllowLoopback:   true,
+		KeysDBPath:      filepath.Join(s.opts.DataDir, routerKeyFile),
+		BootstrapToken:  routerToken,
+		// Single-port deployments typically sit behind a TLS-terminating
+		// proxy (Cloud Run, L7 LBs) or NAT where every peer shares a few
+		// source IPs; libp2p's default 8-conns-per-IP cap would throttle
+		// the whole listener. Matches the conn manager's high watermark so
+		// the global cap, not the per-IP one, is what binds.
+		ConnsPerSourceIP:    router.DefaultHighWaterMark,
 		HTTPFallbackHandler: mux,
 	})
 	if err != nil {
