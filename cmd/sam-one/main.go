@@ -124,6 +124,8 @@ func main() {
 	rootCmd.Flags().StringVar(&allowedAudiencesFlag, "allowed-audiences", api.DefaultAudience, "Comma-separated list of allowed OIDC audiences")
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "", "Log level: debug, info, warn, error")
 
+	rootCmd.AddCommand(newAdminSubcommands()...)
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 

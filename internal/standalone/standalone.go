@@ -407,6 +407,21 @@ func generateToken(prefix string) (string, error) {
 	return prefix + hex.EncodeToString(b), nil
 }
 
+// AdminTokenFromDataDir reads the admin token a previous run persisted in
+// dataDir, so CLI subcommands can authenticate without re-supplying it.
+func AdminTokenFromDataDir(dataDir string) (string, error) {
+	path := filepath.Join(dataDir, adminTokenFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	tok := strings.TrimSpace(string(data))
+	if tok == "" {
+		return "", fmt.Errorf("token file %s is empty", path)
+	}
+	return tok, nil
+}
+
 // loadOrCreateTokenFile reuses the token persisted at path, generating and
 // saving a fresh one (0600) on first boot.
 func loadOrCreateTokenFile(path, prefix string) (string, error) {

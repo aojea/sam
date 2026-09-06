@@ -1440,9 +1440,22 @@ func (s *Server) checkAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// HandleAdminBootstrapTokens HTTP POST `/admin/bootstrap-tokens`
+// HandleAdminBootstrapTokens HTTP POST/GET `/admin/bootstrap-tokens`
 func (s *Server) HandleAdminBootstrapTokens(w http.ResponseWriter, r *http.Request) {
 	if !s.checkAdminAuth(w, r) {
+		return
+	}
+
+	if r.Method == http.MethodGet {
+		list, err := s.store.ListBootstrapTokens(r.Context())
+		if err != nil {
+			logger.Errorf("Failed to list bootstrap tokens: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(list)
 		return
 	}
 
