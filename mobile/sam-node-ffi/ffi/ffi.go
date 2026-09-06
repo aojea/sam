@@ -107,7 +107,9 @@ func StartNode(configJSON string) error {
 			if h, err := store.LoadControlPlaneURL(); err == nil && h != "" {
 				displayControlPlane = h
 			} else {
-				displayControlPlane = "https://bananas.sam-mesh.dev"
+				_ = store.Close()
+				activeStore = nil
+				return fmt.Errorf("no control plane configured: set ControlPlaneURL to the mesh this node should join")
 			}
 		}
 		bindAddr := config.BindAddr

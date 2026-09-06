@@ -137,15 +137,9 @@ func isInteractiveTerminal() bool {
 	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
 }
 
-// Public community meshes a node can join without any private control plane
-// of its own. Neither is the default without explicit user confirmation.
-const (
-	publicTestnetControlPlane    = "https://bananas.sam-mesh.dev" // open to anyone, deployed from the tip of main
-	publicProductionControlPlane = "https://hub.sam-mesh.dev"     // open to anyone, deployed from the latest release tag
-)
-
 // defaultControlPlane resolves which control plane to use when none was
-// explicitly passed: the previously stored one, or the public testnet.
+// explicitly passed: the previously stored one, or "" when this node has
+// never been pointed at a mesh (joining then requires --control-plane).
 func defaultControlPlane(store *node.Store, explicit string) string {
 	if explicit != "" {
 		return explicit
@@ -153,40 +147,7 @@ func defaultControlPlane(store *node.Store, explicit string) string {
 	if h, err := store.LoadControlPlaneURL(); err == nil && h != "" {
 		return h
 	}
-	return publicTestnetControlPlane
-}
-
-// choosePublicMesh explains what bananas.sam-mesh.dev and hub.sam-mesh.dev
-// are and asks which (if either) to join, since a node must never join a
-// public mesh without the user's explicit ack; passing --control-plane <url>
-// is the silent, explicit alternative. Returns the chosen URL, or "" if the
-// user declined (the default).
-func choosePublicMesh() string {
-	fmt.Printf(
-		"No control plane specified. Join a public community mesh?\n"+
-			"  1) %s - open to anyone, deployed from the tip of main (may be unstable)\n"+
-			"  2) %s - open to anyone, deployed from the latest release tag\n"+
-			"Choice [1/2] (default: don't join): ",
-		publicTestnetControlPlane, publicProductionControlPlane)
-	reader := bufio.NewReader(os.Stdin)
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return ""
-	}
-	return parseMeshChoice(response)
-}
-
-// parseMeshChoice maps a raw prompt answer to the chosen public mesh's URL,
-// or "" for anything other than an explicit "1" or "2".
-func parseMeshChoice(response string) string {
-	switch strings.TrimSpace(response) {
-	case "1":
-		return publicTestnetControlPlane
-	case "2":
-		return publicProductionControlPlane
-	default:
-		return ""
-	}
+	return ""
 }
 
 // isYesResponse reports whether a raw prompt answer is an explicit "y"/"yes"
@@ -219,9 +180,9 @@ const (
 	// joinNeedsConfirmSwitch: --control-plane conflicts with the stored
 	// mesh; an interactive terminal must confirm resetting and rejoining.
 	joinNeedsConfirmSwitch
-	// joinNeedsChooseMesh: no explicit or stored control plane; an
-	// interactive terminal must pick a public mesh (or decline).
-	joinNeedsChooseMesh
+	// joinNeedsControlPlane: no explicit or stored control plane; the
+	// user must pass --control-plane for the mesh this node should join.
+	joinNeedsControlPlane
 	// joinProceed: enough is known to go straight to interactiveJoin.
 	joinProceed
 )
@@ -245,7 +206,7 @@ func decideJoinAction(identityExists, hasPubKey, interactive bool, controlPlaneA
 	case mismatched:
 		return joinNeedsConfirmSwitch
 	case controlPlaneAddr == "" && stored == "":
-		return joinNeedsChooseMesh
+		return joinNeedsControlPlane
 	default:
 		return joinProceed
 	}
@@ -457,16 +418,12 @@ func main() {
 						logger.Fatalf("Failed to reset stored identity: %v", err)
 					}
 					fallthrough
-				case joinNeedsChooseMesh, joinProceed:
+				case joinNeedsControlPlane, joinProceed:
 					if !mismatched && identityExists && len(controlPlanePubKey) == 0 {
 						logger.Warn("Stored identity is missing its control plane public key; re-joining")
 					}
 					if controlPlaneAddr == "" && stored == "" {
-						chosen := choosePublicMesh()
-						if chosen == "" {
-							logger.Fatal("Aborted: no control plane specified.")
-						}
-						controlPlaneAddr = chosen
+						logger.Fatal("No control plane specified: pass --control-plane <url> for the mesh this node should join.")
 					}
 					targetControlPlane := normalizeControlPlaneURL(defaultControlPlane(store, controlPlaneAddr))
 					jwtStr, controlPlaneInfo, err = interactiveJoin(ctx, store, targetControlPlane)
@@ -573,7 +530,7 @@ func main() {
 							if len(routerAddrs) > 0 {
 								initRouterAddrs = routerAddrs
 							} else {
-								logger.Fatalf("Invalid control plane address and no stored config: %v. You can use community maintained meshes like hub.sam-mesh.dev (Production) or bananas.sam-mesh.dev (Testnet)", err)
+								logger.Fatalf("Invalid control plane address and no stored config: %v. Pass --control-plane <url> for the mesh this node should join", err)
 							}
 						}
 					}
@@ -724,12 +681,7 @@ func main() {
 			}
 
 			if targetControlPlane == "" {
-				chosen := choosePublicMesh()
-				if chosen == "" {
-					fmt.Println("Aborting join operation.")
-					return
-				}
-				targetControlPlane = chosen
+				logger.Fatal("No control plane specified: sam-node join <control-plane-url>")
 			}
 
 			targetControlPlane = normalizeControlPlaneURL(targetControlPlane)
@@ -899,7 +851,7 @@ func main() {
 	runCmd.Flags().StringSliceVar(&listenAddrs, "listen", []string{"/ip4/0.0.0.0/udp/5001/quic-v1", "/ip4/0.0.0.0/tcp/5002"}, "libp2p Listen Addrs")
 	runCmd.Flags().StringVar(&jwtFlag, "jwt", "", "Pre-fetched JWT token")
 	runCmd.Flags().StringVar(&jwtPathFlag, "jwt-path", "", "Path to file containing JWT token")
-	runCmd.Flags().BoolVar(&joinFlag, "join", false, "Enroll interactively on first run if no identity exists yet (defaults to the public testnet unless --control-plane is set); a no-op on later restarts")
+	runCmd.Flags().BoolVar(&joinFlag, "join", false, "Enroll interactively on first run if no identity exists yet (requires --control-plane or a previously stored mesh); a no-op on later restarts")
 	runCmd.Flags().StringVar(&bootstrapTokenFlag, "bootstrap-token", "", "Pre-shared bootstrap token for enrollment")
 	runCmd.Flags().StringVar(&bootstrapTokenPathFlag, "bootstrap-token-path", "", "Path to file containing the bootstrap token (recommended over --bootstrap-token)")
 	runCmd.Flags().StringVar(&clientIDFlag, "client-id", "", "OIDC Client ID for M2M")

@@ -63,9 +63,13 @@ func daemonizeRun(socketPath string) error {
 		return err
 	}
 	if !enrolled && bootstrapTokenFlag == "" && bootstrapTokenPathFlag == "" && jwtFlag == "" && jwtPathFlag == "" {
+		target := controlPlane
+		if target == "" {
+			target = "<control-plane-url>"
+		}
 		return fmt.Errorf("this node is not enrolled yet, and enrolling needs a one-time login you have to approve:\n"+
 			"  sam-node join --headless %s\n"+
-			"then re-run 'sam-node run --daemonize'", controlPlane)
+			"then re-run 'sam-node run --daemonize'", target)
 	}
 
 	tokenArgs, tokenPath, err := ensureDaemonToken(dataDir)
