@@ -15,9 +15,7 @@
 package integration_test
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"iter"
 	"net/http"
 	"net/http/httptest"
@@ -26,8 +24,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
@@ -71,39 +67,11 @@ func TestA2ACUJ(t *testing.T) {
 	homeB := t.TempDir()
 	apiToken := "test-token"
 
-	t.Log("Starting Node A (provider, region=eu)...")
-	_ = startBackgroundNode(t, nodeBin, hubAddr, homeA,
-		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
-		"--listen", "/ip4/127.0.0.1/tcp/0",
-		"--discovery-interval", "100ms",
-		"--labels", "region=eu",
-	)
-	t.Log("Starting Node B (consumer)...")
-	_ = startBackgroundNode(t, nodeBin, hubAddr, homeB,
-		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
-		"--listen", "/ip4/127.0.0.1/tcp/0",
-		"--discovery-interval", "100ms",
-	)
-
-	apiAddrA := waitForMCPAddr(t, filepath.Join(homeA, "node.log"))
-	apiAddrB := waitForMCPAddr(t, filepath.Join(homeB, "node.log"))
-	waitForAPI(t, apiAddrA)
-	waitForAPI(t, apiAddrB)
-
-	addrA := waitForPeerInfoInLog(t, filepath.Join(homeA, "node.log"))
-	connectPeer(t, apiAddrB, addrA)
-	waitForDHTPeers(t, apiAddrA)
-
-	idx := strings.LastIndex(addrA, "/p2p/")
-	if idx < 0 {
-		t.Fatalf("no /p2p/ component in peer addr %q", addrA)
-	}
-	peerA := addrA[idx+len("/p2p/"):]
-
 	// Stock-SDK A2A agent on node A's side: a2asrv serving its card and
 	// echoing message/send. The card deliberately advertises a gRPC
 	// interface, streaming, and a stale signature: the mesh must drop all
-	// three on regeneration.
+	// three on regeneration. The backend exists before the node: services
+	// are declared in the node's configuration, never registered at runtime.
 	var sendCount atomic.Int32
 	var sawLabelsHeader atomic.Bool
 	echo := a2asrv.AgentExecutorFunc(func(ctx context.Context, ec *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
@@ -134,7 +102,35 @@ func TestA2ACUJ(t *testing.T) {
 	}))
 	defer agent.Close()
 
-	registerA2AService(t, apiAddrA, apiToken, "echo-agent", agent.URL)
+	t.Log("Starting Node A (provider, region=eu)...")
+	_ = startBackgroundNode(t, nodeBin, hubAddr, homeA,
+		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
+		"--listen", "/ip4/127.0.0.1/tcp/0",
+		"--discovery-interval", "100ms",
+		"--labels", "region=eu",
+		"--config", writeServicesConfig(t, homeA, svcDecl{Type: "a2a", Name: "echo-agent", TargetURL: agent.URL}),
+	)
+	t.Log("Starting Node B (consumer)...")
+	_ = startBackgroundNode(t, nodeBin, hubAddr, homeB,
+		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
+		"--listen", "/ip4/127.0.0.1/tcp/0",
+		"--discovery-interval", "100ms",
+	)
+
+	apiAddrA := waitForMCPAddr(t, filepath.Join(homeA, "node.log"))
+	apiAddrB := waitForMCPAddr(t, filepath.Join(homeB, "node.log"))
+	waitForAPI(t, apiAddrA)
+	waitForAPI(t, apiAddrB)
+
+	addrA := waitForPeerInfoInLog(t, filepath.Join(homeA, "node.log"))
+	connectPeer(t, apiAddrB, addrA)
+	waitForDHTPeers(t, apiAddrA)
+
+	idx := strings.LastIndex(addrA, "/p2p/")
+	if idx < 0 {
+		t.Fatalf("no /p2p/ component in peer addr %q", addrA)
+	}
+	peerA := addrA[idx+len("/p2p/"):]
 
 	meshBase := "http://" + apiAddrB + "/sam/" + peerA + "/a2a/echo-agent"
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -218,33 +214,4 @@ func TestA2ACUJ(t *testing.T) {
 	}
 
 	t.Log("A2A CUJ test passed.")
-}
-
-func registerA2AService(t *testing.T, apiAddr, token, serviceName, targetURL string) {
-	t.Helper()
-	reqData := &api.RegisterServiceRequest{
-		Service: &api.ServiceInfo{
-			Type:        api.ServiceType_SERVICE_TYPE_A2A,
-			Name:        serviceName,
-			Description: "test a2a agent",
-		},
-		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: targetURL},
-	}
-	body, err := protojson.Marshal(reqData)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req, _ := http.NewRequest("POST", "http://"+apiAddr+"/sam/service/register", bytes.NewBuffer(body))
-	req.Header.Set(api.HeaderSamAuthentication, "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Failed to register a2a service: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		t.Fatalf("Register a2a service failed with status: %d, body: %s", resp.StatusCode, string(bodyBytes))
-	}
 }

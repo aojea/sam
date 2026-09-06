@@ -721,7 +721,8 @@ blocks in `biscuit-go` to be attributable. It is a clean upgrade, not a rewrite.
 * `internal/node` — **nothing** for authorization: appended blocks are already
   verified and evaluated. Only the namespace-binding policy is new.
 * `internal/sambox` — holds the bundle, attaches it per flow, per socket or per
-  tunnel connection; serves the §10 control socket and the §9 ingress endpoint.
+  tunnel connection; serves the §10 control socket and routes the §9 serving
+  channel.
 * `cmd/nano-init` — owns the guest side of the ingress channel (§9.2).
 * Sidecar — propagates the agent header on egress alongside `X-Sam-Biscuit`.
 * Tests — the CUJ that demonstrates the selling point belongs at integration
@@ -784,43 +785,42 @@ attested label machinery (`api/labels.go`) is for.
 
 ## 9. Ingress: agents that serve
 
-An agent must be able to say "route traffic for this name to me". Two things
-make this smaller than it looks.
+An agent serves exactly one thing: itself, over A2A. `code-reviewer.a2a.sam.alt`
+is already the name (Decision 4); serving it just means being its provider.
+MCP and inference services are operator services, declared in a node's
+configuration — an agent is not a generic backend and never advertises one.
 
-**It is not a new namespace.** `code-reviewer.mcp.sam.alt` is already the name
-(Decision 4); serving it just means being its provider. And **the registration
-API already exists**: `RegisterServiceRequest{service{type,name,description},
-target_url}` on `/sam/service/register`.
+### 9.1 Declaring: a static contract, no runtime registration
 
-### 9.1 Declaring: autoregistration through the gateway
+The agent does **not** declare anything, to anyone, ever. There is no
+registration API on the node — services only exist by declaration in the
+node's configuration at startup — and there is no announce endpoint on the
+gateway. Both facts follow from the same rule: anything an agent can request
+at runtime is an interface it can abuse. A runtime declaration carries a
+*name*, so an agent could advertise itself as `code-reviewer` under the
+node's identity and take over somebody else's traffic; give it a
+`target_url` and it can point the mesh at anything and turn its node into an
+open relay.
 
-The agent does **not** call the node. `/sam/service/register` is part of the
-operator surface an agent never reaches (§5.2), for two independent reasons: the
-request carries a `target_url`, so an agent could point the mesh at anything and
-turn its node into an open relay; and it carries a service *name*, so an agent
-could advertise itself as `code-reviewer` under the node's identity and take
-over somebody else's traffic.
+So the whole route is contracted before the agent runs:
 
-Both are properties of *that* API, not of the capability. So the gateway offers
-the capability without the API:
+* **The bundle names what the agent serves** (§10.1 `serves`): one name, one
+  port. `sam-box` routes that name to that port inside the sandbox from
+  startup, over the reverse channel (§9.2). A name outside the contract is
+  not expressible rather than merely rejected.
+* **The node's configuration declares the service** — `type: a2a`, the
+  contracted name, `target_url` pointing at the gateway's serving listener.
+* **Advertisement is gated on the probe.** The node fetches the agent's card
+  (`/.well-known/agent-card.json`) through the gateway before advertising,
+  and keeps re-probing. An agent that is not up yet, or has died, is simply
+  not discoverable; when it answers, it is. Readiness is observed, never
+  asserted.
 
-```http
-POST http://mesh.sam.alt/ingress
-{"type": "mcp", "name": "code-reviewer", "port": 8080}
-```
-
-`sam-box` serves this itself — it is never forwarded — and then registers with
-the node on the agent's behalf. Two things make that safe:
-
-* **`target_url` is not the agent's to give.** `sam-box` always substitutes its
-  own per-agent ingress endpoint, so the field an agent could abuse is one it
-  never supplies.
-* **The name must be one the agent already had.** The bundle enumerates what it
-  may serve (§10.1 `ingress`), and a name outside that list is not expressible
-  rather than merely rejected.
-
-The bundle declares `{name, type}` only. The port is the agent's to choose at
-runtime, because that is what it actually knows.
+The agent runs a stock A2A server on its contracted port and knows nothing
+else. Its card can claim any address it likes — the mesh regenerates the
+card at the consumer edge (interfaces rewritten to the mesh path, stale
+signatures dropped), so nothing the agent writes in its own card escapes the
+sandbox unverified.
 
 **Implemented, including delivery into an isolated sandbox.** Reaching back in
 cannot be done by dialling the agent: every sandbox has a network namespace of
@@ -831,42 +831,42 @@ rather than from any one runtime.
 The way in is the way out. Egress crosses the boundary over a pathname Unix
 socket, which network namespaces do not apply to because it is a filesystem
 object. Ingress uses a second one: `nano-init --ingress-socket` serves it from
-inside the sandbox, where it can reach the agent at the address the gateway
-meant, and `sam-box --agent-ingress-socket` dials it. The handshake is
-Firecracker's — `CONNECT <port>`, then `OK` — so a microVM can offer the same
-protocol over vsock without the gateway learning the difference.
+inside the sandbox, where it can reach the agent at the contracted port, and
+`sam-box --agent-ingress-socket` dials it. The handshake is Firecracker's —
+`CONNECT <port>`, then `OK` — so a microVM can offer the same protocol over
+vsock without the gateway learning the difference.
 
 `TestSandboxServesThroughTheReverseChannel` drives a real sandbox and asserts
 both halves: that dialling the agent directly from outside fails, and that the
-same agent answers through the channel. The older ingress tests supply their
-own `AgentAddr` and so cover the declaration, the policy check and the
-forwarding logic, but not the hop that depends on where the agent is.
+same agent answers through the channel. `TestAgentIngressCUJ` covers the
+mesh-facing half with a stock A2A SDK on both ends: the card is regenerated at
+the consumer, the message round-trips, and the agent has no serving surface to
+ask anything of.
 
 ### 9.1.1 Why this is also the better UX
 
-This is not only the safe shape, it is the one that matches how agents actually
-start:
+The runtime-announcement design this replaces argued that only the agent
+knows *when* it is ready and *which port* it chose. Both turned out to be
+better served without an API:
 
-* **The platform knows *what* an agent may serve; only the agent knows *when*.**
-  A statically declared route advertises a service that is not listening yet, so
-  the mesh routes to it and fails. Splitting the declaration from the readiness
-  signal removes that window without a health-check protocol.
-* **The port is usually the agent's own business**, chosen at runtime by the
-  framework it happens to use.
-* **Lifetime is tied to the sandbox.** `sam-box` unregisters when the agent's
-  channel drops or the platform detaches it, so a suspended agent stops being
-  advertised without anyone reconciling anything.
-* **Resume is automatic.** On another host, the new `sam-box` re-registers the
-  same name against a different peer, and discovery re-points. That is exactly
-  the property §8 exists to provide, and it would be lost if routes lived in
-  static platform config.
-
-The bundle stays the authority (what may be served), and the agent supplies only
-liveness and a port. An agent that declares nothing serves nothing.
-
-Still to fix before this is built: whether an agent may re-register under a
-changed port (flapping needs a rate limit), and whether `sam-box` should probe
-the port before advertising rather than trusting the agent's claim.
+* **Readiness is the probe's job.** A declared-but-dead service is registered
+  yet withheld from discovery until its card answers. That closes the
+  advertise-before-listening window without a health-check protocol — and
+  without trusting the agent's claim, which the old design listed as an open
+  problem.
+* **The port is part of the contract.** An agent that must be told nothing
+  can still be told one thing by its environment (every serverless platform
+  does exactly this); in exchange, port flapping and re-registration rate
+  limits stop being problems because re-registration does not exist.
+* **Lifetime is tied to the sandbox, structurally.** The gateway's serving
+  listener closes when the sandbox goes; the probe fails; discovery
+  converges. Nothing unregisters because nothing registered.
+* **Resume is still automatic.** The bundle travels with the agent (§8.4), so
+  `Attach` on another host renders the same contract: the new gateway routes
+  the same name, the new node declares the same service, and the probe
+  re-points discovery to the new peer. The property §8 exists to provide
+  survives — it never needed a runtime API, only a declaration that moves
+  with the agent.
 
 ### 9.2 The reverse channel
 
@@ -906,8 +906,9 @@ by portable identities rather than by hosts.
 
 ### 9.4 Migration
 
-The ingress declaration is part of what travels (§8.4). On resume, `sam-box` on
-node B registers the same name and discovery re-points to node B. The name is
+The serving contract is part of what travels (§8.4). On resume, `sam-box` on
+node B routes the same contracted name, node B's configuration declares the
+same service, and the probe re-points discovery to node B. The name is
 stable because it belongs to the agent, not to the node — which is the whole
 point of §8.
 
@@ -933,8 +934,9 @@ egress:
   allow: ["api.github.com", "*.pypi.org"]
   secrets:
     "api.github.com": {kind: bearer, value_from: /etc/sam/secrets/github}
-ingress:
-  - {name: code-reviewer, type: mcp}
+serves:
+  name: code-reviewer   # the agent's A2A name; routed to its contracted port
+  port: 8080
 ```
 
 ### 10.2 Operations
@@ -945,9 +947,9 @@ the sandbox:
 | operation | meaning |
 |---|---|
 | `Attach(bundle)` | admit an agent; returns the egress and ingress endpoints to wire into the sandbox |
-| `Detach(agent_id)` | stop it: unregister ingress, close channels, drop credentials |
+| `Detach(agent_id)` | stop it: close the serving listener and channels, drop credentials |
 | `Refresh(agent_id, credential)` | hand in a rotated workload credential (§8.3) |
-| `Status(agent_id)` | what is registered and connected, for the scheduler's reconcile loop |
+| `Status(agent_id)` | what is routed and connected, for the scheduler's reconcile loop |
 
 ### 10.3 Guarantees the interface owes a connector
 

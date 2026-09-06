@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/google/sam/api"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 func TestIntegrationStdioDatapath(t *testing.T) {
@@ -40,6 +39,11 @@ func TestIntegrationStdioDatapath(t *testing.T) {
 
 	apiToken := "test-token"
 
+	// The stdio service is declared in node A's configuration; there is no
+	// runtime registration.
+	serviceName := "stdio-tool"
+	cfgA := writeServicesConfig(t, homeA, svcDecl{Type: "mcp", Name: serviceName, Command: []string{"cat"}})
+
 	// Start Node A
 	t.Log("Starting Node A...")
 	_ = startBackgroundNode(t, nodeBin, routerAddr, homeA,
@@ -48,6 +52,7 @@ func TestIntegrationStdioDatapath(t *testing.T) {
 		"--discovery-interval", "100ms",
 		"--bind-addr", "127.0.0.1:0",
 		"--api-token-path", tokenPath(t, apiToken),
+		"--config", cfgA,
 	)
 
 	// Start Node B
@@ -74,38 +79,6 @@ func TestIntegrationStdioDatapath(t *testing.T) {
 	// Connect Node B to Node A
 	connectPeer(t, actualApiAddrB, addrA)
 
-	// Register Stdio service on Node A
-	serviceName := "stdio-tool"
-	reqData := &api.RegisterServiceRequest{
-		Service: &api.ServiceInfo{
-			Type:        api.ServiceType_SERVICE_TYPE_MCP,
-			Name:        serviceName,
-			Description: "test stdio service",
-		},
-		Backend: &api.RegisterServiceRequest_Command{
-			Command: &api.CommandBackend{
-				Command: []string{"cat"},
-			},
-		},
-	}
-	body, err := protojson.Marshal(reqData)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	req, _ := http.NewRequest("POST", "http://"+actualApiAddrA+"/sam/service/register", bytes.NewBuffer(body))
-	req.Header.Set(api.HeaderSamAuthentication, "Bearer "+apiToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Failed to register service: %d", resp.StatusCode)
-	}
-
 	// Wait for propagation (optional, but safe)
 	time.Sleep(1 * time.Second)
 
@@ -120,6 +93,7 @@ func TestIntegrationStdioDatapath(t *testing.T) {
 	testMessage := `{"jsonrpc":"2.0","method":"ping","id":1}`
 
 	var postResp *http.Response
+	var err error
 	for i := 0; i < 3; i++ {
 		postReq, _ := http.NewRequest("POST", postURL, bytes.NewBufferString(testMessage))
 		postReq.Header.Set(api.HeaderSamAuthentication, "Bearer "+apiToken)
@@ -165,6 +139,31 @@ func TestIntegrationHTTPDatapath(t *testing.T) {
 
 	apiToken := "test-token"
 
+	// Start a dummy HTTP server on Node A's host (simulating local service).
+	// It captures the headers it receives so we can assert what actually
+	// crosses the mesh: verified caller identity in, biscuit stripped. The
+	// backend exists before the node: services are declared in the node's
+	// configuration, never registered at runtime.
+	expectedBody := `{"status":"success"}`
+	var (
+		hdrMu      sync.Mutex
+		gotPeerID  string
+		gotBiscuit string
+	)
+	dummyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hdrMu.Lock()
+		gotPeerID = r.Header.Get(api.HeaderPeerID)
+		gotBiscuit = r.Header.Get(api.HeaderSamBiscuit)
+		hdrMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(expectedBody))
+	}))
+	defer dummyServer.Close()
+
+	serviceName := "http-tool"
+	cfgA := writeServicesConfig(t, homeA, svcDecl{Type: "mcp", Name: serviceName, TargetURL: dummyServer.URL})
+
 	// Start Node A
 	t.Log("Starting Node A...")
 	_ = startBackgroundNode(t, nodeBin, routerAddr, homeA,
@@ -173,6 +172,7 @@ func TestIntegrationHTTPDatapath(t *testing.T) {
 		"--discovery-interval", "100ms",
 		"--bind-addr", "127.0.0.1:0",
 		"--api-token-path", tokenPath(t, apiToken),
+		"--config", cfgA,
 	)
 
 	// Start Node B
@@ -201,54 +201,6 @@ func TestIntegrationHTTPDatapath(t *testing.T) {
 	// Connect Node B to Node A
 	connectPeer(t, actualApiAddrB, addrA)
 
-	// Start a dummy HTTP server on Node A's host (simulating local service).
-	// It captures the headers it receives so we can assert what actually
-	// crosses the mesh: verified caller identity in, biscuit stripped.
-	expectedBody := `{"status":"success"}`
-	var (
-		hdrMu      sync.Mutex
-		gotPeerID  string
-		gotBiscuit string
-	)
-	dummyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hdrMu.Lock()
-		gotPeerID = r.Header.Get(api.HeaderPeerID)
-		gotBiscuit = r.Header.Get(api.HeaderSamBiscuit)
-		hdrMu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(expectedBody))
-	}))
-	defer dummyServer.Close()
-
-	// Register HTTP service on Node A
-	serviceName := "http-tool"
-	reqData := &api.RegisterServiceRequest{
-		Service: &api.ServiceInfo{
-			Type:        api.ServiceType_SERVICE_TYPE_MCP,
-			Name:        serviceName,
-			Description: "test http service",
-		},
-		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: dummyServer.URL},
-	}
-	body, err := protojson.Marshal(reqData)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	req, _ := http.NewRequest("POST", "http://"+actualApiAddrA+"/sam/service/register", bytes.NewBuffer(body))
-	req.Header.Set(api.HeaderSamAuthentication, "Bearer "+apiToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Failed to register service: %d", resp.StatusCode)
-	}
-
 	// Wait for propagation
 	time.Sleep(1 * time.Second)
 
@@ -257,6 +209,7 @@ func TestIntegrationHTTPDatapath(t *testing.T) {
 
 	client := &http.Client{}
 	var httpResp *http.Response
+	var err error
 	for i := 0; i < 3; i++ {
 		req, _ := http.NewRequest("GET", url, nil)
 		req.Header.Set(api.HeaderSamAuthentication, "Bearer "+apiToken)

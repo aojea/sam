@@ -147,7 +147,7 @@ spec:
             echo "the sandbox's interfaces (expect lo and tun0 only): $(ip -o link show | cut -d: -f2 | tr -d ' ' | paste -sd,)"
             while true; do
               echo "allowlisted destination (expect 200): $(curl -s -o /dev/null -w '%{http_code}' http://example.com/)"
-              echo "the node's own API (expect 403): $(curl -s -o /dev/null -w '%{http_code}' http://mesh.sam.alt/sam/service/register)"
+              echo "the node's own API (expect 403): $(curl -s -o /dev/null -w '%{http_code}' http://mesh.sam.alt/sam/service/discover)"
               curl -s -o /dev/null http://blocked.example/ && echo "unlisted destination was NOT refused" || echo "unlisted destination refused (expected)"
               sleep 30
             done

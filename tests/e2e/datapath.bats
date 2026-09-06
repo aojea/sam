@@ -22,38 +22,8 @@ teardown() {
   local router_peer_id
   router_peer_id=$(cat "/tmp/${MESH_PREFIX}-router-peer-id")
 
-  # Start Node 1
-  echo "[$(date +%T)] Starting Node 1"
-  mesh_start_node 1 "--log-level debug"
-  local node1_name="${MESH_PREFIX}-node-1"
-  mesh_wait_for_log "${node1_name}" "SAM Node Online" 20
-  mesh_wait_for_mcp_ready 1 20
-  
-  local node1_peer_id
-  node1_peer_id=$(docker logs "${node1_name}" 2>&1 | grep "PeerID:" | head -n 1 | awk '{print $2}' | tr -d '\r')
-
-  # Start Node 2
-  echo "[$(date +%T)] Starting Node 2"
-  mesh_start_node 2 "--log-level debug"
-  local node2_name="${MESH_PREFIX}-node-2"
-  mesh_wait_for_log "${node2_name}" "SAM Node Online" 20
-  mesh_wait_for_mcp_ready 2 20
-
-  local node2_peer_id
-  node2_peer_id=$(docker logs "${node2_name}" 2>&1 | grep "PeerID:" | head -n 1 | awk '{print $2}' | tr -d '\r')
-
-  # Explicitly connect Node 1 to Node 2 (DHT auto-discovery is slow/unreliable in this E2E setup)
-  echo "[$(date +%T)] Explicitly connecting Node 1 to Node 2"
-  local node2_addr="/dns4/${node2_name}/tcp/5002/p2p/${node2_peer_id}"
-  run mesh_connect_peer 1 "${node2_addr}"
-  [[ "$status" -eq 0 ]]
-
-  # Verify connection
-  mesh_wait_for_peer_connection 1 "${node2_peer_id}" 20
-  [[ "$status" -eq 0 ]]
-
-  # 1. Setup HTTP Service on Node 1 side
-  # Start a dummy HTTP server in a separate container
+  # Backends exist before the nodes: services are declared in each node's
+  # configuration, there is no runtime registration endpoint.
   echo "[$(date +%T)] Starting dummy HTTP service"
   docker run -d \
     --name http-service \
@@ -79,71 +49,58 @@ HTTPServer(("0.0.0.0", 8000), S).serve_forever()
     sleep 1
   done
 
-  # Register HTTP service on Node 1
-  echo "[$(date +%T)] Registering HTTP service on Node 1"
-  run docker run --rm --network "${MESH_NETWORK}" python:3.12 python3 -c "
-import urllib.request
-import json
+  local node1_cfg="${BATS_TEST_TMPDIR}/node1-services.yaml"
+  cat > "${node1_cfg}" <<'EOF'
+version: "v1alpha1"
+services:
+  - type: "mcp"
+    name: "http-tool"
+    description: "test http service"
+    target_url: "http://http-service:8000"
+EOF
 
-data = {
-    \"service\": {
-        \"type\": \"SERVICE_TYPE_MCP\",
-        \"name\": \"http-tool\",
-        \"description\": \"test http service\"
-    },
-    \"targetUrl\": \"http://http-service:8000\"
-}
+  local node2_cfg="${BATS_TEST_TMPDIR}/node2-services.yaml"
+  cat > "${node2_cfg}" <<'EOF'
+version: "v1alpha1"
+services:
+  - type: "mcp"
+    name: "stdio-tool"
+    description: "test stdio service"
+    command: ["sh", "-c", "sleep 1; cat"]
+EOF
+  # The node container runs as a non-root user; a restrictive umask would
+  # otherwise make the mounted config unreadable inside it.
+  chmod 644 "${node1_cfg}" "${node2_cfg}"
 
-req = urllib.request.Request(
-    \"http://${node1_name}:8080/sam/service/register\",
-    data=json.dumps(data).encode(\"utf-8\"),
-    headers={
-        \"X-Sam-Authentication\": \"Bearer secret-token\",
-        \"Content-Type\": \"application/json\"
-    }
-)
-with urllib.request.urlopen(req) as response:
-    print(response.read().decode(\"utf-8\"))
-"
-  echo "Register HTTP output: $output"
+  # Start Node 1
+  echo "[$(date +%T)] Starting Node 1"
+  mesh_start_node 1 "--log-level debug" "${node1_cfg}"
+  local node1_name="${MESH_PREFIX}-node-1"
+  mesh_wait_for_log "${node1_name}" "SAM Node Online" 20
+  mesh_wait_for_mcp_ready 1 20
+  
+  local node1_peer_id
+  node1_peer_id=$(docker logs "${node1_name}" 2>&1 | grep "PeerID:" | head -n 1 | awk '{print $2}' | tr -d '\r')
+
+  # Start Node 2
+  echo "[$(date +%T)] Starting Node 2"
+  mesh_start_node 2 "--log-level debug" "${node2_cfg}"
+  local node2_name="${MESH_PREFIX}-node-2"
+  mesh_wait_for_log "${node2_name}" "SAM Node Online" 20
+  mesh_wait_for_mcp_ready 2 20
+
+  local node2_peer_id
+  node2_peer_id=$(docker logs "${node2_name}" 2>&1 | grep "PeerID:" | head -n 1 | awk '{print $2}' | tr -d '\r')
+
+  # Explicitly connect Node 1 to Node 2 (DHT auto-discovery is slow/unreliable in this E2E setup)
+  echo "[$(date +%T)] Explicitly connecting Node 1 to Node 2"
+  local node2_addr="/dns4/${node2_name}/tcp/5002/p2p/${node2_peer_id}"
+  run mesh_connect_peer 1 "${node2_addr}"
   [[ "$status" -eq 0 ]]
-  [[ "$output" == *"Service registered"* ]]
 
-  # 2. Setup Stdio Service on Node 2 side
-  # Register Stdio service (cat) on Node 2
-  echo "[$(date +%T)] Registering Stdio service on Node 2"
-  run docker run --rm --network "${MESH_NETWORK}" python:3.12 python3 -c "
-import urllib.request
-import json
-
-data = {
-    'service': {
-        'type': 'SERVICE_TYPE_MCP',
-        'name': 'stdio-tool',
-        'description': 'test stdio service'
-    },
-    'command': {
-        'command': ['sh', '-c', 'sleep 1; cat']
-    }
-}
-
-req = urllib.request.Request(
-    'http://${node2_name}:8080/sam/service/register',
-    data=json.dumps(data).encode('utf-8'),
-    headers={
-        'X-Sam-Authentication': 'Bearer secret-token',
-        'Content-Type': 'application/json'
-    }
-)
-with urllib.request.urlopen(req) as response:
-    print(response.read().decode('utf-8'))
-"
-  if [[ "$status" -ne 0 ]]; then
-    echo "Node 2 logs:"
-    docker logs "${node2_name}"
-  fi
+  # Verify connection
+  mesh_wait_for_peer_connection 1 "${node2_peer_id}" 20
   [[ "$status" -eq 0 ]]
-  [[ "$output" == *"Service registered"* ]]
 
   # 3. Test HTTP Datapath: Node 2 calls Node 1's HTTP service
   echo "[$(date +%T)] Testing HTTP Datapath from Node 2 to Node 1"

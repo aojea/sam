@@ -191,6 +191,23 @@ roles:
 		"roles": []string{api.RoleNode},
 	})
 
+	// A real MCP backend: the node probes it before advertising, so a stub
+	// returning a canned JSON-RPC body is deliberately never discoverable.
+	// Backends exist before node A: its services are declared in
+	// configuration, never registered at runtime.
+	mcpServer := httptest.NewServer(newBoundaryMCPHandler(t))
+	t.Cleanup(func() { mcpServer.Close() })
+
+	// A backend that is not an MCP server. It is never advertised, but stays
+	// reachable when addressed explicitly, which is what the datapath below
+	// exercises: the proxy is a pipe and does not interpret what it carries.
+	rawServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc": "2.0", "id": 1, "result": {"success": true}}`))
+	}))
+	t.Cleanup(func() { rawServer.Close() })
+
 	// Node A connects to Router A (via shared CP)
 	apiPortA := getFreePort(t)
 	nodeACmd := exec.Command(nodeBin, "run", "--control-plane", fmt.Sprintf("http://127.0.0.1:%d", cpPort),
@@ -203,6 +220,9 @@ roles:
 		"--discovery-interval", "100ms",
 		"--enable-relay=true",
 		"--allow-loopback=true",
+		"--config", writeServicesConfig(t, tmpDir,
+			svcDecl{Type: "mcp", Name: "federated-tool", TargetURL: mcpServer.URL},
+			svcDecl{Type: "mcp", Name: "raw-pipe", TargetURL: rawServer.URL}),
 	)
 	nodeACmd.Env = append(os.Environ(), "SAM_TEST_DNS_SERVER="+dnsServer.conn.LocalAddr().String())
 	var nodeStdoutA, nodeStderrA safeBuffer
@@ -238,25 +258,7 @@ roles:
 	waitForDHTReady(t, clientBin, apiPortA, "tokenA")
 	waitForDHTReady(t, clientBin, apiPortB, "tokenB")
 
-	// A real MCP backend: the node probes it before advertising, so a stub
-	// returning a canned JSON-RPC body is deliberately never discoverable.
-	mcpServer := httptest.NewServer(newBoundaryMCPHandler(t))
-	t.Cleanup(func() { mcpServer.Close() })
-
-	// A backend that is not an MCP server. It is never advertised, but stays
-	// reachable when addressed explicitly, which is what the datapath below
-	// exercises: the proxy is a pipe and does not interpret what it carries.
-	rawServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"jsonrpc": "2.0", "id": 1, "result": {"success": true}}`))
-	}))
-	t.Cleanup(func() { rawServer.Close() })
-
-	// Publish a service on Node A
-	t.Log("Publishing tool on Node A...")
-	registerService(t, fmt.Sprintf("127.0.0.1:%d", apiPortA), "tokenA", "federated-tool", mcpServer.URL)
-	registerService(t, fmt.Sprintf("127.0.0.1:%d", apiPortA), "tokenA", "raw-pipe", rawServer.URL)
+	t.Log("Waiting for Node A's declared services to propagate...")
 	time.Sleep(2 * time.Second)
 
 	// Search for the service from Node B

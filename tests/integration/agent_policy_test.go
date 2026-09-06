@@ -45,6 +45,16 @@ func TestAgentPolicyCUJ(t *testing.T) {
 	homeB := t.TempDir()
 	apiToken := "test-token"
 
+	// Backends exist before the node: services are declared in node A's
+	// configuration alongside its attenuation, never registered at runtime.
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"test-model"}]}`))
+	}))
+	defer backend.Close()
+
+	tools := httptest.NewServer(newBoundaryMCPHandler(t))
+	defer tools.Close()
+
 	// Only agents under prod.acme.example may reach this node's services. The
 	// suffix is matched with a leading dot so a lookalike authority such as
 	// "evil-prod.acme.example" cannot satisfy it.
@@ -53,6 +63,15 @@ func TestAgentPolicyCUJ(t *testing.T) {
 attenuation:
   checks:
     - 'check if agent($a), $a.ends_with(".prod.acme.example")'
+services:
+  - type: "inference"
+    name: "test-llm"
+    description: "test inference backend"
+    target_url: "`+backend.URL+`"
+  - type: "mcp"
+    name: "calc"
+    description: "test mcp backend"
+    target_url: "`+tools.URL+`"
 `), 0600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -85,13 +104,6 @@ attenuation:
 	addrA := waitForPeerInfoInLog(t, filepath.Join(homeA, "node.log"))
 	connectPeer(t, apiAddrB, addrA)
 	waitForDHTPeers(t, apiAddrA)
-
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"test-model"}]}`))
-	}))
-	defer backend.Close()
-
-	registerInferenceService(t, apiAddrA, apiToken, "test-llm", backend.URL)
 
 	// Not waitForFacadeModel: node A's own catalog probe carries no agent, so a
 	// provider demanding one refuses it and its models never appear in a peer's
@@ -153,10 +165,6 @@ attenuation:
 	// AuthFrame rather than HTTP headers, so this is a genuinely separate path
 	// and used to be unattributed while inference was not.
 	t.Run("tool calls carry the agent too", func(t *testing.T) {
-		tools := httptest.NewServer(newBoundaryMCPHandler(t))
-		defer tools.Close()
-		registerService(t, apiAddrA, apiToken, "calc", tools.URL)
-
 		peerA := extractPeerID(addrA)
 
 		for i, tc := range []struct {

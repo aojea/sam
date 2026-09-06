@@ -91,14 +91,14 @@ func TestNodeAuthEnforcementIntegration(t *testing.T) {
 	}{
 		{"healthz is public", "GET", "/healthz", http.StatusOK, false},
 		{"readyz is public", "GET", "/readyz", http.StatusOK, false},
-		{"register is protected", "POST", "/sam/service/register", http.StatusUnauthorized, false},
-		{"unregister is protected", "POST", "/sam/service/unregister", http.StatusUnauthorized, false},
+		// Services are declared in configuration only: the former runtime
+		// registration endpoints are gone, so /sam/service/register is just
+		// another egress-proxy path behind auth like any /sam/ path.
 		{"discover is protected", "GET", "/sam/service/discover?type=mcp&name=test", http.StatusUnauthorized, false},
 		{"egress proxy is protected", "GET", "/sam/", http.StatusUnauthorized, false},
+		{"register path is protected like any egress path", "POST", "/sam/service/register", http.StatusUnauthorized, false},
 		{"mcp root is protected", "GET", "/mcp", http.StatusUnauthorized, false},
 
-		{"register with token (bad req)", "POST", "/sam/service/register", http.StatusBadRequest, true},
-		{"unregister with token (bad req)", "POST", "/sam/service/unregister", http.StatusBadRequest, true},
 		// /sam/service/discover expects node to be connected.
 		{"discover with token", "GET", "/sam/service/discover?type=mcp&name=test", http.StatusOK, true},
 		{"mcp root with token", "GET", "/mcp", http.StatusBadRequest, true},

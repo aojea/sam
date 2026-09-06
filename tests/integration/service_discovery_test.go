@@ -16,7 +16,6 @@ package integration_test
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -25,8 +24,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -41,6 +38,14 @@ func TestServiceDiscovery(t *testing.T) {
 
 	apiToken := "test-token"
 
+	// A real MCP backend: the node probes it before advertising, so a stub that
+	// cannot complete an initialize is deliberately never discoverable. It
+	// exists before node A: services are declared in configuration, never
+	// registered at runtime.
+	mockServer := httptest.NewServer(newBoundaryMCPHandler(t))
+	defer mockServer.Close()
+	serviceName := "github-tools"
+
 	// Start Node A
 	t.Log("Starting Node A...")
 	_ = startBackgroundNode(t, nodeBin, routerAddr, homeA,
@@ -49,6 +54,7 @@ func TestServiceDiscovery(t *testing.T) {
 		"--discovery-interval", "100ms",
 		"--bind-addr", "127.0.0.1:0",
 		"--api-token-path", tokenPath(t, apiToken),
+		"--config", writeServicesConfig(t, homeA, svcDecl{Type: "mcp", Name: serviceName, TargetURL: mockServer.URL}),
 	)
 
 	// Start Node B
@@ -95,15 +101,6 @@ func TestServiceDiscovery(t *testing.T) {
 		t.Fatalf("DHT not ready on Node A (size 0)")
 	}
 
-	// A real MCP backend: the node probes it before advertising, so a stub that
-	// cannot complete an initialize is deliberately never discoverable.
-	mockServer := httptest.NewServer(newBoundaryMCPHandler(t))
-	defer mockServer.Close()
-
-	// Agent A registers a service
-	serviceName := "mcp:github-tools"
-	registerService(t, actualApiAddrA, apiToken, serviceName, mockServer.URL)
-
 	// Wait for DHT propagation
 	t.Log("Waiting for DHT propagation...")
 	time.Sleep(2 * time.Second)
@@ -130,9 +127,6 @@ func TestServiceDiscovery(t *testing.T) {
 		t.Fatalf("Agent B did not discover Agent A as provider. Providers: %v", providers)
 	}
 
-	// Agent A unregisters the service
-	unregisterService(t, actualApiAddrA, apiToken, serviceName)
-
 	t.Log("Service discovery test passed.")
 }
 
@@ -145,6 +139,14 @@ func TestServiceDiscoveryStreaming(t *testing.T) {
 
 	apiToken := "test-token"
 
+	// A real MCP backend: the node probes it before advertising, so a stub that
+	// cannot complete an initialize is deliberately never discoverable. It
+	// exists before node A: services are declared in configuration, never
+	// registered at runtime.
+	mockServer := httptest.NewServer(newBoundaryMCPHandler(t))
+	defer mockServer.Close()
+	serviceName := "github-tools"
+
 	// Start Node A
 	t.Log("Starting Node A...")
 	_ = startBackgroundNode(t, nodeBin, routerAddr, homeA,
@@ -153,6 +155,7 @@ func TestServiceDiscoveryStreaming(t *testing.T) {
 		"--discovery-interval", "100ms",
 		"--bind-addr", "127.0.0.1:0",
 		"--api-token-path", tokenPath(t, apiToken),
+		"--config", writeServicesConfig(t, homeA, svcDecl{Type: "mcp", Name: serviceName, TargetURL: mockServer.URL}),
 	)
 
 	// Start Node B
@@ -197,15 +200,6 @@ func TestServiceDiscoveryStreaming(t *testing.T) {
 	if !dhtReady {
 		t.Fatalf("DHT not ready on Node A")
 	}
-
-	// A real MCP backend: the node probes it before advertising, so a stub that
-	// cannot complete an initialize is deliberately never discoverable.
-	mockServer := httptest.NewServer(newBoundaryMCPHandler(t))
-	defer mockServer.Close()
-
-	// Agent A registers a service
-	serviceName := "mcp:github-tools"
-	registerService(t, actualApiAddrA, apiToken, serviceName, mockServer.URL)
 
 	// Wait for DHT propagation
 	t.Log("Waiting for DHT propagation...")
@@ -279,9 +273,6 @@ func TestServiceDiscoveryStreaming(t *testing.T) {
 	if !foundStreamed {
 		t.Fatalf("Failed to stream and find provider Node A in SSE results")
 	}
-
-	// Agent A unregisters the service
-	unregisterService(t, actualApiAddrA, apiToken, serviceName)
 }
 
 func waitForAPI(t *testing.T, addr string) {
@@ -296,53 +287,6 @@ func waitForAPI(t *testing.T, addr string) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("timeout waiting for API at %s", addr)
-}
-
-func registerService(t *testing.T, apiAddr, token, serviceName, targetURL string) {
-	t.Helper()
-	reqData := &api.RegisterServiceRequest{
-		Service: &api.ServiceInfo{
-			Type:        api.ServiceType_SERVICE_TYPE_MCP,
-			Name:        serviceName,
-			Description: "test desc",
-		},
-		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: targetURL},
-	}
-	body, err := protojson.Marshal(reqData)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req, _ := http.NewRequest("POST", "http://"+apiAddr+"/sam/service/register", bytes.NewBuffer(body))
-	req.Header.Set(api.HeaderSamAuthentication, "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Failed to register service: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		t.Fatalf("Register service failed with status: %d, body: %s", resp.StatusCode, string(bodyBytes))
-	}
-}
-
-func unregisterService(t *testing.T, apiAddr, token, serviceName string) {
-	t.Helper()
-	reqBody := map[string]string{"Name": serviceName}
-	body, _ := json.Marshal(reqBody)
-	req, _ := http.NewRequest("POST", "http://"+apiAddr+"/sam/service/unregister", bytes.NewBuffer(body))
-	req.Header.Set(api.HeaderSamAuthentication, "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Failed to unregister service: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Unregister service failed with status: %d", resp.StatusCode)
-	}
 }
 
 func discoverService(t *testing.T, apiAddr, token, serviceName string) []peer.AddrInfo {

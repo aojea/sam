@@ -15,7 +15,6 @@
 package integration_test
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -25,8 +24,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/google/sam/api"
 )
@@ -43,30 +40,9 @@ func TestOpenAIFacadeCUJ(t *testing.T) {
 	homeB := t.TempDir()
 	apiToken := "test-token"
 
-	t.Log("Starting Node A (provider)...")
-	_ = startBackgroundNode(t, nodeBin, hubAddr, homeA,
-		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
-		"--listen", "/ip4/127.0.0.1/tcp/0",
-		"--discovery-interval", "100ms",
-		"--labels", "region=eu", // exercise the operator label claim end to end
-	)
-	t.Log("Starting Node B (consumer)...")
-	_ = startBackgroundNode(t, nodeBin, hubAddr, homeB,
-		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
-		"--listen", "/ip4/127.0.0.1/tcp/0",
-		"--discovery-interval", "100ms",
-	)
-
-	apiAddrA := waitForMCPAddr(t, filepath.Join(homeA, "node.log"))
-	apiAddrB := waitForMCPAddr(t, filepath.Join(homeB, "node.log"))
-	waitForAPI(t, apiAddrA)
-	waitForAPI(t, apiAddrB)
-
-	addrA := waitForPeerInfoInLog(t, filepath.Join(homeA, "node.log"))
-	connectPeer(t, apiAddrB, addrA)
-	waitForDHTPeers(t, apiAddrA)
-
-	// Fake OpenAI-compatible backend on node A's side.
+	// Fake OpenAI-compatible backend on node A's side. The backend exists
+	// before the node: services are declared in the node's configuration,
+	// never registered at runtime.
 	var sawSidecarToken, sawSamAuthHeader atomic.Bool
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.Header.Get("Authorization"), apiToken) {
@@ -98,7 +74,29 @@ func TestOpenAIFacadeCUJ(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	registerInferenceService(t, apiAddrA, apiToken, "test-llm", backend.URL)
+	t.Log("Starting Node A (provider)...")
+	_ = startBackgroundNode(t, nodeBin, hubAddr, homeA,
+		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
+		"--listen", "/ip4/127.0.0.1/tcp/0",
+		"--discovery-interval", "100ms",
+		"--labels", "region=eu", // exercise the operator label claim end to end
+		"--config", writeServicesConfig(t, homeA, svcDecl{Type: "inference", Name: "test-llm", TargetURL: backend.URL}),
+	)
+	t.Log("Starting Node B (consumer)...")
+	_ = startBackgroundNode(t, nodeBin, hubAddr, homeB,
+		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
+		"--listen", "/ip4/127.0.0.1/tcp/0",
+		"--discovery-interval", "100ms",
+	)
+
+	apiAddrA := waitForMCPAddr(t, filepath.Join(homeA, "node.log"))
+	apiAddrB := waitForMCPAddr(t, filepath.Join(homeB, "node.log"))
+	waitForAPI(t, apiAddrA)
+	waitForAPI(t, apiAddrB)
+
+	addrA := waitForPeerInfoInLog(t, filepath.Join(homeA, "node.log"))
+	connectPeer(t, apiAddrB, addrA)
+	waitForDHTPeers(t, apiAddrA)
 
 	// CUJ step 1: the model shows up on the consumer's /v1/models.
 	waitForFacadeModel(t, apiAddrB, apiToken, "test-model")
@@ -195,35 +193,6 @@ func TestOpenAIFacadeCUJ(t *testing.T) {
 	}
 
 	t.Log("OpenAI facade CUJ test passed.")
-}
-
-func registerInferenceService(t *testing.T, apiAddr, token, serviceName, targetURL string) {
-	t.Helper()
-	reqData := &api.RegisterServiceRequest{
-		Service: &api.ServiceInfo{
-			Type:        api.ServiceType_SERVICE_TYPE_INFERENCE,
-			Name:        serviceName,
-			Description: "test inference backend",
-		},
-		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: targetURL},
-	}
-	body, err := protojson.Marshal(reqData)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req, _ := http.NewRequest("POST", "http://"+apiAddr+"/sam/service/register", bytes.NewBuffer(body))
-	req.Header.Set(api.HeaderSamAuthentication, "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Failed to register inference service: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		t.Fatalf("Register inference service failed with status: %d, body: %s", resp.StatusCode, string(bodyBytes))
-	}
 }
 
 // waitForDHTPeers polls get_mesh_info until the node sees DHT peers.

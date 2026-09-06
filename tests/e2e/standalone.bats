@@ -3,7 +3,7 @@
 # Black-box CUJ for the sam-one all-in-one binary: boot on a random port
 # published in the banner, join real sam-nodes through it, drive the admin CLI
 # against the live server, and push a request across the dataplane from node B
-# to a smoke HTTP service registered on node A (egress proxy -> router -> A).
+# to a smoke HTTP service declared in node A's configuration (egress proxy -> router -> A).
 # In-process coverage lives in tests/integration/standalone_test.go; this file
 # only exercises what needs the real binaries.
 
@@ -54,15 +54,17 @@ wait_for_log() {
 # NODE_<NAME>_PID for teardown. The sidecar serves only on the Unix socket so
 # two nodes on one host never fight over the default TCP bind, and loopback
 # addresses must be publishable or peers on one host cannot dial each other.
+# Extra arguments are passed through to the node (e.g. --config).
 start_node() {
   local name="$1"
+  shift
   SAM_API_TOKEN=e2e-secret "$SAM_NODE_BINARY" run \
     --control-plane "$SAM_ONE_URL" \
     --bootstrap-token "$JOIN_TOKEN" \
     --data-dir "$TEST_TMPDIR/node-$name" \
     --bind-addr= \
     --allow-loopback \
-    --listen "/ip4/127.0.0.1/tcp/0" > "$TEST_TMPDIR/node-$name.log" 2>&1 &
+    --listen "/ip4/127.0.0.1/tcp/0" "$@" > "$TEST_TMPDIR/node-$name.log" 2>&1 &
   eval "NODE_${name^^}_PID=$!"
 }
 
@@ -87,14 +89,10 @@ start_node() {
   # Two real nodes join through the single port with the persisted join token.
   JOIN_TOKEN="$(cat "$SAM_ONE_DATA/join-token")"
   [[ "$JOIN_TOKEN" == sam_tok_* ]]
-  start_node a
-  start_node b
-  wait_for_log "$TEST_TMPDIR/node-a.log" "SAM Node Online"
-  wait_for_log "$TEST_TMPDIR/node-b.log" "SAM Node Online"
-  peer_a="$(grep -oE 'PeerID: [A-Za-z0-9]+' "$TEST_TMPDIR/node-a.log" | head -1 | cut -d' ' -f2)"
-  [[ -n "$peer_a" ]]
 
-  # Smoke HTTP backend on node A's host, registered as a URL-backed service.
+  # Smoke HTTP backend on node A's host, declared as a URL-backed service in
+  # node A's configuration: services only exist by declaration at startup,
+  # there is no runtime registration endpoint.
   # -u: unbuffered, or the "Serving HTTP" banner never flushes to the log.
   mkdir -p "$TEST_TMPDIR/www"
   echo "sam-one dataplane ok" > "$TEST_TMPDIR/www/hello.txt"
@@ -104,14 +102,25 @@ start_node() {
   wait_for_log "$TEST_TMPDIR/backend.log" "Serving HTTP"
   backend_port="$(grep -oE 'port [0-9]+' "$TEST_TMPDIR/backend.log" | grep -oE '[0-9]+')"
 
+  cat > "$TEST_TMPDIR/node-a-services.yaml" <<EOF
+version: "v1alpha1"
+services:
+  - type: "mcp"
+    name: "smoke"
+    description: "e2e smoke backend"
+    target_url: "http://127.0.0.1:${backend_port}"
+EOF
+
+  start_node a --config "$TEST_TMPDIR/node-a-services.yaml"
+  start_node b
+  wait_for_log "$TEST_TMPDIR/node-a.log" "SAM Node Online"
+  wait_for_log "$TEST_TMPDIR/node-b.log" "SAM Node Online"
+  peer_a="$(grep -oE 'PeerID: [A-Za-z0-9]+' "$TEST_TMPDIR/node-a.log" | head -1 | cut -d' ' -f2)"
+  [[ -n "$peer_a" ]]
+
   sock_a="$TEST_TMPDIR/node-a/sam.sock"
   sock_b="$TEST_TMPDIR/node-b/sam.sock"
   [[ -S "$sock_a" && -S "$sock_b" ]]
-  register_payload="{\"service\":{\"type\":\"SERVICE_TYPE_MCP\",\"name\":\"smoke\",\"description\":\"e2e smoke backend\"},\"targetUrl\":\"http://127.0.0.1:${backend_port}\"}"
-  run curl -sf --unix-socket "$sock_a" -X POST \
-    -H "Content-Type: application/json" -d "$register_payload" \
-    http://localhost/sam/service/register
-  [[ "$status" -eq 0 ]]
 
   # Node B reaches the service on node A through its egress proxy: the request
   # crosses B -> router -> A over the mesh, exercising the full dataplane.

@@ -2,7 +2,6 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 
 class SamDartMcpServer {
   static const MethodChannel _channel = MethodChannel('com.example.sam_agent/mesh_expose');
@@ -18,8 +17,11 @@ class SamDartMcpServer {
     required this.isLocationEnabled,
   });
 
-  /// Starts the Dart HTTP Server acting as an MCP backend
-  Future<void> start({int port = 9090, required String goSidecarPort, required String apiToken}) async {
+  /// Starts the Dart HTTP Server acting as an MCP backend. The service it
+  /// backs is declared in the node's start configuration; there is no
+  /// runtime registration, so this server must be listening before the node
+  /// starts and probes it.
+  Future<void> start({int port = 9090}) async {
     try {
       _server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
       debugPrint('SAM Dart MCP Server listening on port $port');
@@ -35,16 +37,6 @@ class SamDartMcpServer {
           await request.response.close();
         }
       });
-
-      // Register this service with the local SAM Go Node
-      await registerService(
-        goSidecarPort: goSidecarPort,
-        apiToken: apiToken,
-        serviceName: 'phone-sensors',
-        targetUrl: 'http://127.0.0.1:$port',
-        description: 'Exposes phone sensors like battery and location to the SAM mesh',
-      );
-
     } catch (e) {
       debugPrint('Failed to start Dart MCP Server: $e');
     }
@@ -236,53 +228,5 @@ class SamDartMcpServer {
     request.response.headers.contentType = ContentType.json;
     request.response.write(jsonEncode(response));
     await request.response.close();
-  }
-
-  /// Static helper to register any service (Embedded or External)
-  static Future<bool> registerService({
-    required String goSidecarPort,
-    required String apiToken,
-    required String serviceName,
-    required String targetUrl,
-    required String description,
-  }) async {
-    final url = 'http://127.0.0.1:$goSidecarPort/sam/service/register';
-    
-    int retries = 5;
-    while (retries > 0) {
-      try {
-        final response = await http.post(
-          Uri.parse(url),
-          headers: {
-            'Authorization': 'Bearer $apiToken',
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode({
-            'service': {
-              'type': 'SERVICE_TYPE_MCP',
-              'name': serviceName,
-              'description': description
-            },
-            'targetUrl': targetUrl
-          }),
-        );
-
-        if (response.statusCode == 200) {
-          debugPrint('Service "$serviceName" registered successfully with SAM Go Node!');
-          return true;
-        } else {
-          debugPrint('Failed to register service "$serviceName": ${response.statusCode} - ${response.body}');
-          return false;
-        }
-      } catch (e) {
-        retries--;
-        if (retries == 0) {
-          debugPrint('Error registering service "$serviceName": $e');
-          return false;
-        }
-        await Future.delayed(const Duration(milliseconds: 500));
-      }
-    }
-    return false;
   }
 }

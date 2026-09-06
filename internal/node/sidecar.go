@@ -23,7 +23,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -38,7 +37,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // StartSidecarServer serves the node's local API on a TCP address, on a Unix
@@ -57,12 +55,10 @@ func StartSidecarServer(node *SamNode, addr, socketPath, token, certFile, keyFil
 
 	// Protected endpoints. allowAuthorizationFallback=true is safe here: none of
 	// these ever forward the inbound Authorization header to another service.
-	mux.Handle("/sam/service/register", withAuth(token, true, withMeshConnection(node, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleRegisterService(node, w, r)
-	}))))
-	mux.Handle("/sam/service/unregister", withAuth(token, true, withMeshConnection(node, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleUnregisterService(node, w, r)
-	}))))
+	// Services are declared in the node's configuration and registered at
+	// startup; there is deliberately no runtime registration surface, so no
+	// credential held by an agent can point the mesh at a new backend or
+	// withdraw a sibling service.
 	mux.Handle("/sam/service/discover", withAuth(token, true, withMeshConnection(node, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleDiscoverService(node, w, r)
 	}))))
@@ -448,89 +444,9 @@ func constantTimeEqual(got, want string) bool {
 	return subtle.ConstantTimeCompare(gotHash[:], wantHash[:]) == 1
 }
 
-type ServiceRequest struct {
-	ServiceName string `json:"service_name"`
-}
-
 // maxRequestBodyBytes caps request bodies read into memory to guard
 // against memory-exhaustion from oversized payloads.
 const maxRequestBodyBytes = 1 << 20 // 1 MiB
-
-func handleRegisterService(node *SamNode, w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
-		return
-	}
-	_ = r.Body.Close()
-
-	var req api.RegisterServiceRequest
-	if err := protojson.Unmarshal(body, &req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	if req.Service == nil {
-		http.Error(w, "service field is required", http.StatusBadRequest)
-		return
-	}
-
-	if req.Service.Name == "" || req.Service.Type == api.ServiceType_SERVICE_TYPE_UNSPECIFIED {
-		http.Error(w, "name and type are required", http.StatusBadRequest)
-		return
-	}
-
-	if req.Backend == nil {
-		http.Error(w, "backend is required", http.StatusBadRequest)
-		return
-	}
-
-	if err := node.RegisterService(r.Context(), &req); err != nil {
-		logger.Errorf("Failed to register service: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to register service: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte("Service registered")); err != nil {
-		logger.Errorf("Failed to write response: %v", err)
-	}
-}
-
-func handleUnregisterService(node *SamNode, w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req api.ServiceInfo
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	if req.Name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
-		return
-	}
-
-	if err := node.UnregisterService(r.Context(), req.Name); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to unregister service: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte("Service unregistered")); err != nil {
-		logger.Errorf("Failed to write response: %v", err)
-	}
-}
 
 func handleDiscoverService(node *SamNode, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

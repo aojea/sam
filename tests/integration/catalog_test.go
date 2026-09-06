@@ -17,6 +17,7 @@ package integration_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -36,6 +37,40 @@ func tokenPath(t *testing.T, secret string) string {
 	p := filepath.Join(t.TempDir(), "secret")
 	if err := os.WriteFile(p, []byte(secret), 0o600); err != nil {
 		t.Fatalf("write secret file: %v", err)
+	}
+	return p
+}
+
+// svcDecl is one service entry for writeServicesConfig.
+type svcDecl struct {
+	Type      string
+	Name      string
+	TargetURL string
+	Command   []string
+}
+
+// writeServicesConfig renders a node config file declaring the given
+// services. Services only exist by declaration at startup: there is no
+// runtime registration surface, so backends must be up before the node.
+func writeServicesConfig(t *testing.T, dir string, services ...svcDecl) string {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("version: \"v1alpha1\"\nservices:\n")
+	for _, s := range services {
+		fmt.Fprintf(&b, "  - type: %q\n    name: %q\n    description: \"integration test service\"\n", s.Type, s.Name)
+		if s.TargetURL != "" {
+			fmt.Fprintf(&b, "    target_url: %q\n", s.TargetURL)
+		}
+		if len(s.Command) > 0 {
+			b.WriteString("    command:\n")
+			for _, c := range s.Command {
+				fmt.Fprintf(&b, "      - %q\n", c)
+			}
+		}
+	}
+	p := filepath.Join(dir, "services-config.yaml")
+	if err := os.WriteFile(p, []byte(b.String()), 0o600); err != nil {
+		t.Fatalf("write services config: %v", err)
 	}
 	return p
 }

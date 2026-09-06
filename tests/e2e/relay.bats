@@ -74,7 +74,47 @@ teardown() {
     DISCONNECT_CONTAINERS+=("${oidc_node}:${MESH_NETWORK_2}")
   fi
 
-  mesh_start_node "1" "--enable-relay=true --log-level=debug"
+  # HTTP backend on Node 1's side (default network). It exists before the
+  # node: services are declared in the node's configuration, there is no
+  # runtime registration endpoint.
+  docker run -d \
+    --name "${MESH_PREFIX}-http-service" \
+    --network "${MESH_NETWORK}" \
+    python:3.12 python3 -c '
+from http.server import HTTPServer, BaseHTTPRequestHandler
+class S(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(b"{\"status\":\"success\"}")
+HTTPServer(("0.0.0.0", 8000), S).serve_forever()
+'
+  MESH_CONTAINERS+=("${MESH_PREFIX}-http-service")
+
+  # Wait for http-service to be listening
+  local i
+  for ((i=0; i<30; i++)); do
+    if docker run --rm --network "${MESH_NETWORK}" python:3.12 python3 -c "import urllib.request; urllib.request.urlopen('http://${MESH_PREFIX}-http-service:8000')" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+
+  local node1_cfg="${BATS_TEST_TMPDIR}/node1-services.yaml"
+  cat > "${node1_cfg}" <<EOF
+version: "v1alpha1"
+services:
+  - type: "mcp"
+    name: "http-tool"
+    description: "test http service"
+    target_url: "http://${MESH_PREFIX}-http-service:8000"
+EOF
+  # The node container runs as a non-root user; a restrictive umask would
+  # otherwise make the mounted config unreadable inside it.
+  chmod 644 "${node1_cfg}"
+
+  mesh_start_node "1" "--enable-relay=true --log-level=debug" "${node1_cfg}"
 
   OLD_NET=$MESH_NETWORK
   MESH_NETWORK=$MESH_NETWORK_2
@@ -110,60 +150,6 @@ teardown() {
   run mesh_wait_for_peer_connection "2" "${node1_peer_id}" 60
   [[ "$status" -eq 0 ]]
   MESH_NETWORK=$OLD_NET
-
-  # 1. Setup HTTP Service on Node 1 side (default network)
-  docker run -d \
-    --name "${MESH_PREFIX}-http-service" \
-    --network "${MESH_NETWORK}" \
-    python:3.12 python3 -c '
-from http.server import HTTPServer, BaseHTTPRequestHandler
-class S(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "application/json")
-        self.end_headers()
-        self.wfile.write(b"{\"status\":\"success\"}")
-HTTPServer(("0.0.0.0", 8000), S).serve_forever()
-'
-  MESH_CONTAINERS+=("${MESH_PREFIX}-http-service")
-
-  # Wait for http-service to be listening
-  local i
-  for ((i=0; i<30; i++)); do
-    if docker run --rm --network "${MESH_NETWORK}" python:3.12 python3 -c "import urllib.request; urllib.request.urlopen('http://${MESH_PREFIX}-http-service:8000')" >/dev/null 2>&1; then
-      break
-    fi
-    sleep 1
-  done
-
-  # Register HTTP service on Node 1
-  run docker run --rm --network "${MESH_NETWORK}" python:3.12 python3 -c "
-import urllib.request
-import json
-
-data = {
-    \"service\": {
-        \"type\": \"SERVICE_TYPE_MCP\",
-        \"name\": \"http-tool\",
-        \"description\": \"test http service\"
-    },
-    \"targetUrl\": \"http://${MESH_PREFIX}-http-service:8000\"
-}
-
-req = urllib.request.Request(
-    \"http://${MESH_PREFIX}-node-1:8080/sam/service/register\",
-    data=json.dumps(data).encode('utf-8'),
-    headers={
-        \"Content-Type\": \"application/json\",
-        \"X-Sam-Authentication\": \"Bearer secret-token\"
-    },
-    method=\"POST\"
-)
-with urllib.request.urlopen(req) as response:
-    print(response.read().decode('utf-8'))
-"
-  [[ "$status" -eq 0 ]]
-  [[ "$output" == *"Service registered"* ]]
 
   # 2. Test HTTP Datapath: Node 2 calls Node 1's HTTP service via Node 2's egress proxy (isolated network 2)
   for ((i=0; i<15; i++)); do

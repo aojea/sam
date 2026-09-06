@@ -60,29 +60,8 @@ func TestSandboxBoundaryCUJ(t *testing.T) {
 	nodeSocket := filepath.Join(sockDir, "node.sock")
 	agentSocket := filepath.Join(sockDir, "agent.sock")
 
-	t.Log("Starting node A (provider) and node B (the gateway's node)...")
-	_ = startBackgroundNode(t, nodeBin, hubAddr, homeA,
-		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
-		"--listen", "/ip4/127.0.0.1/tcp/0",
-		"--discovery-interval", "100ms",
-	)
-	_ = startBackgroundNode(t, nodeBin, hubAddr, homeB,
-		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
-		"--listen", "/ip4/127.0.0.1/tcp/0",
-		"--discovery-interval", "100ms",
-		"--socket-path", nodeSocket,
-	)
-
-	apiAddrA := waitForMCPAddr(t, filepath.Join(homeA, "node.log"))
-	apiAddrB := waitForMCPAddr(t, filepath.Join(homeB, "node.log"))
-	waitForAPI(t, apiAddrA)
-	waitForAPI(t, apiAddrB)
-
-	addrA := waitForPeerInfoInLog(t, filepath.Join(homeA, "node.log"))
-	peerA := extractPeerID(addrA)
-	connectPeer(t, apiAddrB, addrA)
-	waitForDHTPeers(t, apiAddrA)
-
+	// Backends exist before node A: its services are declared in
+	// configuration, never registered at runtime.
 	inference := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/models":
@@ -105,11 +84,35 @@ func TestSandboxBoundaryCUJ(t *testing.T) {
 	}))
 	defer external.Close()
 
-	registerInferenceService(t, apiAddrA, apiToken, "test-llm", inference.URL)
-	registerService(t, apiAddrA, apiToken, "calc", tools.URL)
+	t.Log("Starting node A (provider) and node B (the gateway's node)...")
+	_ = startBackgroundNode(t, nodeBin, hubAddr, homeA,
+		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
+		"--listen", "/ip4/127.0.0.1/tcp/0",
+		"--discovery-interval", "100ms",
+		"--config", writeServicesConfig(t, homeA,
+			svcDecl{Type: "inference", Name: "test-llm", TargetURL: inference.URL},
+			svcDecl{Type: "mcp", Name: "calc", TargetURL: tools.URL}),
+	)
+	_ = startBackgroundNode(t, nodeBin, hubAddr, homeB,
+		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
+		"--listen", "/ip4/127.0.0.1/tcp/0",
+		"--discovery-interval", "100ms",
+		"--socket-path", nodeSocket,
+	)
 
-	// The model reaching node B's facade means A's registration has propagated,
-	// so the boundary cases below do not each have to wait for discovery.
+	apiAddrA := waitForMCPAddr(t, filepath.Join(homeA, "node.log"))
+	apiAddrB := waitForMCPAddr(t, filepath.Join(homeB, "node.log"))
+	waitForAPI(t, apiAddrA)
+	waitForAPI(t, apiAddrB)
+
+	addrA := waitForPeerInfoInLog(t, filepath.Join(homeA, "node.log"))
+	peerA := extractPeerID(addrA)
+	connectPeer(t, apiAddrB, addrA)
+	waitForDHTPeers(t, apiAddrA)
+
+	// The model reaching node B's facade means A's declared services have
+	// propagated, so the boundary cases below do not each have to wait for
+	// discovery.
 	waitForFacadeModel(t, apiAddrB, apiToken, "test-model")
 
 	startBoundary(t, agentSocket, nodeSocket, "127.0.0.1")

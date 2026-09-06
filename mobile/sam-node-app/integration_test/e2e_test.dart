@@ -47,28 +47,10 @@ void main() {
     final enrollErr = samLib.enroll(dataDir, controlPlaneURL, jwt, true);
     expect(enrollErr, isNull);
 
-    // 4. Start Node
-    final startErr = samLib.start({
-      'dataDir': dataDir,
-      'controlPlaneURL': controlPlaneURL,
-      'meshID': 'public-mesh',
-      'bindAddr': '0.0.0.0:8080', // sidecar HTTP server inside phone
-      'apiToken': 'test-token',
-      'allowLoopback': true,
-      'enableRelay': true,
-      'logLevel': 'debug',
-    });
-    expect(startErr, isNull);
-
-    // Wait for node to initialize host connection
-    await Future.delayed(const Duration(seconds: 5));
-
-    final nodeID = samLib.getNodeID();
-    expect(nodeID, isNotNull);
-    expect(nodeID, isNotEmpty);
-    expect(nodeID, isNot('unauthenticated'));
-
-    // Start local Mock MCP Server inside the Android emulator
+    // Start local Mock MCP Server inside the Android emulator. It must be
+    // listening before the node starts: the service it backs is declared in
+    // the start configuration below and probed at startup; there is no
+    // runtime registration.
     final mockMcpServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 9090);
     mockMcpServer.listen((HttpRequest request) async {
       if (request.method == 'GET') {
@@ -126,24 +108,35 @@ void main() {
       }
     });
 
-    // Register a dummy MCP service inside the Android emulator
-    const registerUrl = 'http://127.0.0.1:8080/sam/service/register';
-    final regResponse = await http.post(
-      Uri.parse(registerUrl),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer test-token',
-      },
-      body: jsonEncode({
-        'service': {
-          'type': 'SERVICE_TYPE_MCP',
+    // 4. Start Node, declaring the emulator's MCP service in the start
+    // configuration.
+    final startErr = samLib.start({
+      'dataDir': dataDir,
+      'controlPlaneURL': controlPlaneURL,
+      'meshID': 'public-mesh',
+      'bindAddr': '0.0.0.0:8080', // sidecar HTTP server inside phone
+      'apiToken': 'test-token',
+      'allowLoopback': true,
+      'enableRelay': true,
+      'logLevel': 'debug',
+      'services': [
+        {
+          'type': 'mcp',
           'name': 'emulator-tool',
-          'description': 'test tool inside emulator'
-        },
-        'targetUrl': 'http://127.0.0.1:9090' // point to local Dart mock server
-      }),
-    );
-    expect(regResponse.statusCode, equals(200));
+          'description': 'test tool inside emulator',
+          'targetUrl': 'http://127.0.0.1:9090' // point to local Dart mock server
+        }
+      ],
+    });
+    expect(startErr, isNull);
+
+    // Wait for node to initialize host connection
+    await Future.delayed(const Duration(seconds: 5));
+
+    final nodeID = samLib.getNodeID();
+    expect(nodeID, isNotNull);
+    expect(nodeID, isNotEmpty);
+    expect(nodeID, isNot('unauthenticated'));
 
     // Discover host-tool from inside the emulator via its local MCP API using McpClient
     final client = McpClient('http://127.0.0.1:8080/mcp', 'test-token');

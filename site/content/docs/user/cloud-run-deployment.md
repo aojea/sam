@@ -107,28 +107,30 @@ nodes on different networks, neither reachable from the other
 (`--announce-private=false` withholds their private addresses, forcing all
 traffic through the Cloud Run relay).
 
-On the **provider** machine, run a node and any local HTTP backend:
+On the **provider** machine, start any local HTTP backend, declare it in a
+node config file, and run a node with that config. Services only exist by
+declaration at startup — there is no runtime registration endpoint — so
+the backend comes up first and the node probes it before advertising:
 
 ```bash
-sam-node run --control-plane "$URL" --bootstrap-token "$JOIN_TOKEN" \
-  --data-dir ~/provider --announce-private=false &
-
 mkdir -p /tmp/www && echo "hello from provider" > /tmp/www/hello.txt
 python3 -m http.server 9000 --bind 127.0.0.1 --directory /tmp/www &
+
+cat > ~/provider-services.yaml <<'EOF'
+version: "v1alpha1"
+services:
+  - type: "mcp"
+    name: "hello"
+    description: "example"
+    target_url: "http://127.0.0.1:9000"
+EOF
+
+sam-node run --control-plane "$URL" --bootstrap-token "$JOIN_TOKEN" \
+  --data-dir ~/provider --announce-private=false \
+  --config ~/provider-services.yaml &
 ```
 
-Register the backend as a mesh service through the node's local sidecar
-socket (owner-only permissions replace the API token) and note the node's
-PeerID from its startup output:
-
-```bash
-curl --unix-socket ~/provider/sam.sock -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"service":{"type":"SERVICE_TYPE_MCP","name":"hello","description":"example"},
-       "targetUrl":"http://127.0.0.1:9000"}' \
-  http://localhost/sam/service/register
-# -> Service registered
-```
+Note the node's PeerID from its startup output.
 
 On the **consumer** machine, run a node the same way, then call the
 service by peer and name through the local egress proxy:
@@ -144,8 +146,8 @@ curl --unix-socket ~/consumer/sam.sock \
 
 The request crosses consumer → Cloud Run router (relay circuit) →
 provider → backend, with mutual Biscuit authentication between the nodes
-and policy enforced on the service name. Allow a few seconds after
-registration for propagation on first call.
+and policy enforced on the service name. Allow a few seconds after the
+provider starts for propagation on first call.
 
 ## 6. Operate with the CLI
 

@@ -90,11 +90,11 @@ class _NodeControlPageState extends State<NodeControlPage> {
   bool _exposeBattery = false;
   bool _exposeLocation = false;
 
-  // External MCP Bridging State
+  // External MCP Bridging State: read when the node starts, since services
+  // are declared in the start configuration.
   final _externalMcpUrlController = TextEditingController(text: 'http://127.0.0.1:8080');
   final _externalMcpNameController = TextEditingController(text: 'android-remote');
   final _externalMcpDescController = TextEditingController(text: 'External Android Remote Control MCP');
-  bool _externalMcpRegistered = false;
 
   late SamDartMcpServer _embeddedMcpServer;
   int _selectedTab = 0; // 0 = Dashboard, 1 = Services
@@ -625,6 +625,29 @@ class _NodeControlPageState extends State<NodeControlPage> {
     final appDir = await getApplicationDocumentsDirectory();
     final dataDir = '${appDir.path}/sam_data';
 
+    // The embedded MCP backend must be listening before the node starts:
+    // services are declared in the start configuration and probed at startup,
+    // there is no runtime registration.
+    await _embeddedMcpServer.start(port: 9090);
+
+    final services = <Map<String, String>>[
+      {
+        'type': 'mcp',
+        'name': 'phone-sensors',
+        'description':
+            'Exposes phone sensors like battery and location to the SAM mesh',
+        'targetUrl': 'http://127.0.0.1:9090',
+      },
+      if (_externalMcpUrlController.text.isNotEmpty &&
+          _externalMcpNameController.text.isNotEmpty)
+        {
+          'type': 'mcp',
+          'name': _externalMcpNameController.text,
+          'description': _externalMcpDescController.text,
+          'targetUrl': _externalMcpUrlController.text,
+        },
+    ];
+
     final err = _samLib.start({
       'dataDir': dataDir,
       'controlPlaneURL': _controlPlaneController.text,
@@ -633,9 +656,11 @@ class _NodeControlPageState extends State<NodeControlPage> {
       'apiToken': _tokenController.text,
       'allowLoopback': true,
       'enableRelay': false,
+      'services': services,
     });
 
     if (err != null) {
+      await _embeddedMcpServer.stop();
       setState(() {
         _status = 'Start failed: $err';
       });
@@ -655,12 +680,6 @@ class _NodeControlPageState extends State<NodeControlPage> {
       _status = 'Running';
       _nodeID = _samLib.getNodeID() ?? 'unknown';
     });
-    
-    // Start embedded MCP server
-    await _embeddedMcpServer.start(
-      goSidecarPort: '5005',
-      apiToken: _tokenController.text,
-    );
 
     _startPolling();
   }
@@ -843,9 +862,17 @@ class _NodeControlPageState extends State<NodeControlPage> {
                   children: [
                     const Text('Bridge External Local MCP to Mesh',
                         style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Services are declared when the node starts. Fill these '
+                      'fields before pressing Start; there is no runtime '
+                      'registration.',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
                     const SizedBox(height: 10),
                     TextFormField(
                       controller: _externalMcpUrlController,
+                      enabled: !isRunning,
                       decoration: const InputDecoration(
                         labelText: 'External MCP Server URL',
                         hintText: 'http://127.0.0.1:8080',
@@ -853,55 +880,19 @@ class _NodeControlPageState extends State<NodeControlPage> {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: _externalMcpNameController,
-                            decoration: const InputDecoration(
-                              labelText: 'Service Name',
-                              hintText: 'android-remote',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        ElevatedButton(
-                          onPressed: !isRunning ? null : () async {
-                            if (_externalMcpRegistered) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Unregister not fully supported yet in UI')),
-                              );
-                            } else {
-                              final success = await SamDartMcpServer.registerService(
-                                goSidecarPort: '5005',
-                                apiToken: _tokenController.text,
-                                serviceName: _externalMcpNameController.text,
-                                targetUrl: _externalMcpUrlController.text,
-                                description: _externalMcpDescController.text,
-                              );
-                              if (!mounted) return;
-                              if (success) {
-                                setState(() {
-                                  _externalMcpRegistered = true;
-                                });
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('External MCP Registered!')),
-                                );
-                              } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Failed to register external MCP')),
-                                );
-                              }
-                            }
-                          },
-                          child: Text(_externalMcpRegistered ? 'Registered' : 'Register'),
-                        ),
-                      ],
+                    TextFormField(
+                      controller: _externalMcpNameController,
+                      enabled: !isRunning,
+                      decoration: const InputDecoration(
+                        labelText: 'Service Name',
+                        hintText: 'android-remote',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
-                     const SizedBox(height: 10),
-                     TextFormField(
+                    const SizedBox(height: 10),
+                    TextFormField(
                       controller: _externalMcpDescController,
+                      enabled: !isRunning,
                       decoration: const InputDecoration(
                         labelText: 'Description',
                         border: OutlineInputBorder(),

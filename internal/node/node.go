@@ -1580,6 +1580,15 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 }
 
 func (n *SamNode) RegisterService(ctx context.Context, req *api.RegisterServiceRequest) error {
+	if req.Service == nil {
+		return fmt.Errorf("service field is required")
+	}
+	if req.Service.Name == "" || req.Service.Type == api.ServiceType_SERVICE_TYPE_UNSPECIFIED {
+		return fmt.Errorf("service name and type are required")
+	}
+	if req.Backend == nil {
+		return fmt.Errorf("service backend is required")
+	}
 	svc, err := NewServiceFromRequest(req)
 	if err != nil {
 		return err

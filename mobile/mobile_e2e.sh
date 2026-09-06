@@ -141,28 +141,9 @@ mkdir -p /tmp/host-node-data
 
 HOST_JWT=$(curl -s -X POST -d "grant_type=client_credentials&client_id=test-client&client_secret=test-secret" http://127.0.0.1:18080/token | jq -r .access_token)
 
-docker run --name host-node \
-  --network sam-net \
-  -p 8081:8081 \
-  --user "$(id -u):$(id -g)" \
-  -v /tmp/host-node-data:/data \
-  --add-host=host.docker.internal:host-gateway \
-  -e SAM_API_TOKEN=host-token \
-  -d --rm \
-  sam-node:local \
-  run \
-  --data-dir /data \
-  --control-plane http://sam-control-plane:37001 \
-  --jwt "$HOST_JWT" \
-  --bind-addr 0.0.0.0:8081 \
-  --allow-loopback \
-  --enable-relay \
-  --log-level debug
-
-# Wait for external node to be ready
-timeout 15s bash -c 'until curl -s -X POST -H "Authorization: Bearer host-token" -d "{\"jsonrpc\":\"2.0\",\"method\":\"ping\",\"id\":1}" http://127.0.0.1:8081/mcp >/dev/null; do sleep 0.5; done'
-
-# Start a local Mock MCP Server container on port 9091
+# Start a local Mock MCP Server container on port 9091. The backend exists
+# before the node: services are declared in the node's configuration, there
+# is no runtime registration endpoint.
 docker run --name host-mock-mcp \
   --network sam-net \
   -p 9091:9091 \
@@ -237,7 +218,7 @@ HTTPServer(("0.0.0.0", 9091), S).serve_forever()
 '
 
 # The node probes a backend before advertising it, so the mock has to be
-# listening before the service below is registered.
+# listening before the node that declares the service starts.
 for _ in $(seq 1 30); do
   curl -sf -o /dev/null -X POST -H "Content-Type: application/json" \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
@@ -245,12 +226,38 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
-# Register a dummy MCP service on the host node pointing to the local mock server container (using container name)
-curl -s -X POST \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer host-token" \
-  -d '{"service":{"type":"SERVICE_TYPE_MCP","name":"host-tool","description":"test tool on host"},"targetUrl":"http://host-mock-mcp:9091"}' \
-  http://127.0.0.1:8081/sam/service/register
+# The host node declares the dummy MCP service in its config, pointing at the
+# mock server container (using container name).
+cat > /tmp/host-node-data/services.yaml <<'EOF'
+version: "v1alpha1"
+services:
+  - type: "mcp"
+    name: "host-tool"
+    description: "test tool on host"
+    target_url: "http://host-mock-mcp:9091"
+EOF
+
+docker run --name host-node \
+  --network sam-net \
+  -p 8081:8081 \
+  --user "$(id -u):$(id -g)" \
+  -v /tmp/host-node-data:/data \
+  --add-host=host.docker.internal:host-gateway \
+  -e SAM_API_TOKEN=host-token \
+  -d --rm \
+  sam-node:local \
+  run \
+  --data-dir /data \
+  --control-plane http://sam-control-plane:37001 \
+  --jwt "$HOST_JWT" \
+  --bind-addr 0.0.0.0:8081 \
+  --allow-loopback \
+  --enable-relay \
+  --config /data/services.yaml \
+  --log-level debug
+
+# Wait for external node to be ready
+timeout 15s bash -c 'until curl -s -X POST -H "Authorization: Bearer host-token" -d "{\"jsonrpc\":\"2.0\",\"method\":\"ping\",\"id\":1}" http://127.0.0.1:8081/mcp >/dev/null; do sleep 0.5; done'
 }
 
 run_test() {

@@ -15,7 +15,6 @@
 package node
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net"
@@ -34,7 +33,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // socketClient talks HTTP over a Unix socket; the host in the URL is ignored.
@@ -406,15 +404,16 @@ func TestSidecarServerAuthEnforcement(t *testing.T) {
 		{"readyz is public", "GET", "/readyz", http.StatusOK, false},
 		// Liveness says nothing; metrics name peers and count their traffic.
 		{"metrics is protected", "GET", "/metrics", http.StatusUnauthorized, false},
-		{"register is protected", "POST", "/sam/service/register", http.StatusUnauthorized, false},
-		{"unregister is protected", "POST", "/sam/service/unregister", http.StatusUnauthorized, false},
+		// Services are declared in configuration only: the former runtime
+		// mutation endpoints are gone, so these paths are plain egress-proxy
+		// paths (503: not connected) with no special handling.
+		{"register does not exist", "POST", "/sam/service/register", http.StatusServiceUnavailable, true},
+		{"unregister does not exist", "POST", "/sam/service/unregister", http.StatusServiceUnavailable, true},
 		{"discover is protected", "GET", "/sam/service/discover?type=mcp&name=test", http.StatusUnauthorized, false},
 		{"egress proxy is protected", "GET", "/sam/", http.StatusUnauthorized, false},
 		{"mcp root is protected", "GET", "/mcp", http.StatusUnauthorized, false},
 
-		{"register with token (bad req)", "POST", "/sam/service/register", http.StatusServiceUnavailable, true},
 		{"metrics with token", "GET", "/metrics", http.StatusOK, true},
-		{"unregister with token (bad req)", "POST", "/sam/service/unregister", http.StatusServiceUnavailable, true},
 		// /sam/service/discover without mesh connection will return 503 instead of 400 since node is not connected,
 		// but as long as it gets past auth, that's what we want to verify.
 		{"discover with token", "GET", "/sam/service/discover?type=mcp&name=test", http.StatusServiceUnavailable, true},
@@ -514,7 +513,7 @@ func TestSidecarAuthorizationFallbackScope(t *testing.T) {
 	}
 }
 
-func TestHandleRegisterService(t *testing.T) {
+func TestRegisterService(t *testing.T) {
 	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	if err != nil {
 		t.Fatal(err)
@@ -555,22 +554,12 @@ func TestHandleRegisterService(t *testing.T) {
 	upstream := httptest.NewServer(newFakeMCPHandler(t, []*mcp.Tool{}))
 	defer upstream.Close()
 
-	reqBody := &api.RegisterServiceRequest{
+	req := &api.RegisterServiceRequest{
 		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "test-service", Description: "test desc"},
 		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: upstream.URL},
 	}
-	body, err := protojson.Marshal(reqBody)
-	if err != nil {
-		t.Fatalf("Failed to marshal request body: %v", err)
-	}
-
-	req := httptest.NewRequest("POST", "/sam/service/register", bytes.NewBuffer(body))
-	rr := httptest.NewRecorder()
-
-	handleRegisterService(node, rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected status OK, got %d, body: %s", rr.Code, rr.Body.String())
+	if err := node.RegisterService(context.Background(), req); err != nil {
+		t.Fatalf("RegisterService: %v", err)
 	}
 
 	if !node.IsServiceRegistered("test-service") {
@@ -584,25 +573,14 @@ func TestHandleRegisterService(t *testing.T) {
 	}
 }
 
-func TestHandleUnregisterService(t *testing.T) {
+func TestUnregisterService(t *testing.T) {
 	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond,
 		services: NewServiceRegistry(&fakeDHT{}),
 	}
 	node.services.insertService(&testService{info: &api.ServiceInfo{Name: "test-service"}})
 
-	reqBody := &api.ServiceInfo{Name: "test-service"}
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		t.Fatalf("Failed to marshal request body: %v", err)
-	}
-
-	req := httptest.NewRequest("POST", "/sam/service/unregister", bytes.NewBuffer(body))
-	rr := httptest.NewRecorder()
-
-	handleUnregisterService(node, rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected status OK, got %d", rr.Code)
+	if err := node.UnregisterService(context.Background(), "test-service"); err != nil {
+		t.Fatalf("UnregisterService: %v", err)
 	}
 
 	if node.IsServiceRegistered("test-service") {
@@ -797,22 +775,20 @@ func TestServiceKeyToCID_Equivalence(t *testing.T) {
 	}
 }
 
-func TestHandleRegisterService_Validation(t *testing.T) {
+func TestRegisterService_Validation(t *testing.T) {
 	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond,
 		services: NewServiceRegistry(&fakeDHT{}),
 	}
 
 	tests := []struct {
-		name           string
-		reqBody        *api.RegisterServiceRequest
-		expectedStatus int
+		name    string
+		reqBody *api.RegisterServiceRequest
 	}{
 		{
 			name: "Missing service",
 			reqBody: &api.RegisterServiceRequest{
 				Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: "http://localhost:8080"},
 			},
-			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name: "Missing name",
@@ -820,7 +796,6 @@ func TestHandleRegisterService_Validation(t *testing.T) {
 				Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP},
 				Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: "http://localhost:8080"},
 			},
-			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name: "Unspecified type",
@@ -828,30 +803,19 @@ func TestHandleRegisterService_Validation(t *testing.T) {
 				Service: &api.ServiceInfo{Name: "test-service", Type: api.ServiceType_SERVICE_TYPE_UNSPECIFIED},
 				Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: "http://localhost:8080"},
 			},
-			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name: "Missing backend",
 			reqBody: &api.RegisterServiceRequest{
 				Service: &api.ServiceInfo{Name: "test-service", Type: api.ServiceType_SERVICE_TYPE_MCP},
 			},
-			expectedStatus: http.StatusBadRequest,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			body, err := protojson.Marshal(tt.reqBody)
-			if err != nil {
-				t.Fatal(err)
-			}
-			req := httptest.NewRequest("POST", "/sam/service/register", bytes.NewBuffer(body))
-			rr := httptest.NewRecorder()
-
-			handleRegisterService(node, rr, req)
-
-			if rr.Code != tt.expectedStatus {
-				t.Errorf("expected status %d, got %d, body: %s", tt.expectedStatus, rr.Code, rr.Body.String())
+			if err := node.RegisterService(context.Background(), tt.reqBody); err == nil {
+				t.Errorf("expected RegisterService to reject invalid request")
 			}
 		})
 	}
