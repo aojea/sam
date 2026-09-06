@@ -33,7 +33,7 @@ func main() {
 		controlPlaneURL = flag.String("control-plane", "http://localhost:8080", "URL of the SAM control plane")
 		adminTokenPath  = flag.String("admin-token-path", "", "Path to file containing the admin token (or env SAM_ADMIN_TOKEN)")
 		bindAddr        = flag.String("bind-addr", ":8081", "Address to bind the console server")
-		staticDir       = flag.String("static-dir", "public", "Directory containing static frontend files")
+		staticDir       = flag.String("static-dir", "", "Directory containing static frontend files (default: assets embedded in the binary)")
 		basePath        = flag.String("base-path", "", "Base path prefix for the console (e.g. /console)")
 		externalURL     = flag.String("external-url", "", "Origin browsers reach this console on, e.g. https://console.example. Sets the OIDC redirect_uri and cookie Secure flag instead of trusting the Host and X-Forwarded-Proto headers")
 	)
@@ -51,6 +51,7 @@ func main() {
 		ControlPlaneURL: *controlPlaneURL,
 		AdminToken:      adminToken,
 		StaticDir:       *staticDir,
+		StaticFS:        console.EmbeddedAssets(),
 		BasePath:        console.NormalizeBasePath(*basePath),
 		ExternalURL:     *externalURL,
 	})

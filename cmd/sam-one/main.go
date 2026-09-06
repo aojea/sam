@@ -141,6 +141,7 @@ func printBanner(srv *standalone.Server, externalURL string) {
 	fmt.Println("SAM standalone mesh is ready!")
 	fmt.Println()
 	fmt.Printf("API URL:      %s\n", base)
+	fmt.Printf("Web Console:  %s/console\n", base)
 	fmt.Printf("Router Peer:  %s\n", srv.PeerID())
 	fmt.Printf("Admin Token:  %s\n", srv.AdminToken())
 	fmt.Printf("Join Token:   %s\n", srv.JoinToken())

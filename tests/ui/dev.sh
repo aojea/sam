@@ -108,7 +108,7 @@ cat <<EOF
   Control plane ${STACK_CP_URL}
   Logs          ${WORK_DIR}
 
-  Static assets are served from cmd/sam-console/public, so edits to the HTML,
+  Static assets are served from internal/console/public, so edits to the HTML,
   CSS or JS just need a browser refresh. Ctrl-C tears everything down.
 
 EOF

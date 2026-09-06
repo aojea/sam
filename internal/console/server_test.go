@@ -19,9 +19,12 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -31,6 +34,101 @@ import (
 	"github.com/google/sam/api"
 	"google.golang.org/protobuf/proto"
 )
+
+// startNoOIDCControlPlaneStub serves a /info with no issuer, the
+// bootstrap-token-only mode sam-one runs the console in.
+func startNoOIDCControlPlaneStub(t *testing.T) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
+		data, err := proto.Marshal(&api.ControlPlaneInfoResponse{})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		_, _ = w.Write(data)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestNewServerEmbeddedAssets pins the compiled-in frontend path used by
+// sam-one and the cmd default: StaticFS serving, SPA fallback, StaticDir
+// precedence for live-editing, and the fail-fast when no assets are set.
+func TestNewServerEmbeddedAssets(t *testing.T) {
+	cpStub := startNoOIDCControlPlaneStub(t)
+
+	t.Run("no assets configured", func(t *testing.T) {
+		if _, err := NewServer(Config{ControlPlaneURL: cpStub.URL, AdminToken: "x"}); err == nil {
+			t.Fatal("NewServer without StaticDir or StaticFS should fail")
+		}
+	})
+
+	srv, err := NewServer(Config{
+		ControlPlaneURL: cpStub.URL,
+		AdminToken:      "x",
+		StaticFS:        EmbeddedAssets(),
+	})
+	if err != nil {
+		t.Fatalf("failed to create server with embedded assets: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	get := func(path string) (int, string) {
+		t.Helper()
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s failed: %v", path, err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			t.Fatalf("failed to read %s body: %v", path, err)
+		}
+		return resp.StatusCode, string(body)
+	}
+
+	if code, body := get("/"); code != http.StatusOK || !strings.Contains(body, "<html") {
+		t.Errorf("GET / = %d, want 200 with the embedded index.html", code)
+	}
+	if code, _ := get("/app.js"); code != http.StatusOK {
+		t.Errorf("GET /app.js = %d, want 200", code)
+	}
+	// SPA fallback: unknown paths serve index.html.
+	if code, body := get("/some/client/route"); code != http.StatusOK || !strings.Contains(body, "<html") {
+		t.Errorf("GET /some/client/route = %d, want 200 with index.html fallback", code)
+	}
+
+	t.Run("StaticDir wins over StaticFS", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("live-edited marker"), 0o644); err != nil {
+			t.Fatalf("failed to write marker: %v", err)
+		}
+		srv, err := NewServer(Config{
+			ControlPlaneURL: cpStub.URL,
+			AdminToken:      "x",
+			StaticDir:       dir,
+			StaticFS:        EmbeddedAssets(),
+		})
+		if err != nil {
+			t.Fatalf("failed to create server: %v", err)
+		}
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+		resp, err := http.Get(ts.URL + "/")
+		if err != nil {
+			t.Fatalf("GET / failed: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if !strings.Contains(string(body), "live-edited marker") {
+			t.Errorf("StaticDir did not take precedence over StaticFS: %q", body)
+		}
+	})
+}
 
 func TestNewServer_OIDCAutoDiscovery(t *testing.T) {
 	// 1. Generate a mock RSA key for OIDC signing

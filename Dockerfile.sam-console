@@ -11,7 +11,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 
 WORKDIR /app
 COPY --from=builder --chown=nonroot:nonroot /bin/sam-console /usr/local/bin/sam-console
-COPY --chown=nonroot:nonroot cmd/sam-console/public /app/public
+COPY --chown=nonroot:nonroot internal/console/public /app/public
 
 USER nonroot:nonroot
 EXPOSE 8081

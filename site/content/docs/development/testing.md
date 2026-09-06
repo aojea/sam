@@ -96,7 +96,7 @@ leaves the console running with its URL and admin token printed. Only the OIDC
 issuer is a stand-in: it serves a discovery document but cannot sign tokens,
 which is why enrollment uses bootstrap tokens rather than a JWT.
 
-The console serves its static assets from `cmd/sam-console/public`, so edits to
+The console serves its static assets from `internal/console/public`, so edits to
 the HTML, CSS or JS need only a browser refresh; only Go changes need a rebuild.
 
 ## Troubleshooting

@@ -16,10 +16,13 @@ package integration_test
 
 import (
 	"context"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -115,5 +118,23 @@ func TestStandaloneNodeJoin(t *testing.T) {
 	}
 	if got := samNode.Host.Network().Connectedness(routerID); got != network.Connected {
 		t.Fatalf("node connectedness to embedded router = %s, want Connected", got)
+	}
+
+	// The embedded web console is served through the same public port.
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get("http://" + srv.Addr() + "/console/")
+	if err != nil {
+		t.Fatalf("GET /console/ over the single port failed: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		t.Fatalf("failed to read console body: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /console/ status = %s, want 200", resp.Status)
+	}
+	if !strings.Contains(string(body), "<html") {
+		t.Errorf("GET /console/ did not return the embedded frontend")
 	}
 }

@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/google/sam/api"
+	"github.com/google/sam/internal/console"
 	"github.com/google/sam/internal/controlplane"
 	"github.com/google/sam/internal/router"
 	"github.com/google/sam/internal/storage"
@@ -52,6 +53,8 @@ const (
 	joinTokenFile  = "join-token"
 	adminTokenFile = "admin-token"
 	routerKeyFile  = "router.key"
+
+	consoleBasePath = "/console"
 
 	// joinTokenTTL bounds the auto-generated join token; it is a development
 	// credential, not a production secret rotation scheme.
@@ -225,6 +228,21 @@ func (s *Server) Start(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 	cp.RegisterRoutes(mux)
+
+	// The console proxies /console/api/* to the loopback control plane and
+	// serves the embedded frontend; it queries /info at construction, which is
+	// already live on the loopback listener.
+	consoleSrv, err := console.NewServer(console.Config{
+		ControlPlaneURL: "http://" + cp.Addr(),
+		AdminToken:      s.adminToken,
+		StaticFS:        console.EmbeddedAssets(),
+		BasePath:        consoleBasePath,
+		ExternalURL:     s.opts.ExternalURL,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create console: %w", err)
+	}
+	mux.Handle(consoleBasePath+"/", consoleSrv.Handler())
 
 	wsAddr, err := wsListenMultiaddr(s.opts.BindAddress)
 	if err != nil {

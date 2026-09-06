@@ -105,7 +105,7 @@ stack_start_console() {
   "${REPO_ROOT}/bin/sam-console" \
     --control-plane "${STACK_CP_URL}" \
     --bind-addr "${STACK_CONSOLE_ADDR}" \
-    --static-dir "${REPO_ROOT}/cmd/sam-console/public" \
+    --static-dir "${REPO_ROOT}/internal/console/public" \
     >"${WORK_DIR}/console.log" 2>&1 &
   PIDS+=($!)
   wait_for "${STACK_CONSOLE_URL}/" "console"

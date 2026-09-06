@@ -22,12 +22,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -40,8 +40,12 @@ import (
 type Config struct {
 	ControlPlaneURL string
 	AdminToken      string
-	StaticDir       string
-	BasePath        string
+	// StaticDir serves frontend assets from disk (live-editable, used by the
+	// ui-dev workflow). It takes precedence over StaticFS.
+	StaticDir string
+	// StaticFS serves frontend assets from an fs.FS, e.g. EmbeddedAssets().
+	StaticFS fs.FS
+	BasePath string
 
 	// ExternalURL is the origin browsers reach this console on, e.g.
 	// "https://console.example". When set it decides the OIDC redirect_uri and
@@ -105,6 +109,16 @@ type Server struct {
 func NewServer(cfg Config) (*Server, error) {
 	if cfg.ControlPlaneURL == "" {
 		return nil, fmt.Errorf("ControlPlaneURL is required")
+	}
+
+	var assets fs.FS
+	switch {
+	case cfg.StaticDir != "":
+		assets = os.DirFS(cfg.StaticDir)
+	case cfg.StaticFS != nil:
+		assets = cfg.StaticFS
+	default:
+		return nil, fmt.Errorf("static assets are required: set StaticDir or StaticFS")
 	}
 
 	controlPlaneURL, err := url.Parse(cfg.ControlPlaneURL)
@@ -192,16 +206,18 @@ func NewServer(cfg Config) (*Server, error) {
 	routes.Handle("/api/", http.StripPrefix("/api", proxy))
 
 	// Serve static files
-	fs := http.FileServer(http.Dir(s.cfg.StaticDir))
+	fileServer := http.FileServerFS(assets)
 	routes.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Basic check if file exists
-		path := filepath.Join(s.cfg.StaticDir, r.URL.Path)
-		if _, err := os.Stat(path); os.IsNotExist(err) && r.URL.Path != "/" {
+		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if name == "" {
+			name = "."
+		}
+		if _, err := fs.Stat(assets, name); err != nil && r.URL.Path != "/" {
 			// SPA fallback: return index.html for unknown paths (useful for flutter/react router)
-			http.ServeFile(w, r, filepath.Join(s.cfg.StaticDir, "index.html"))
+			http.ServeFileFS(w, r, assets, "index.html")
 			return
 		}
-		fs.ServeHTTP(w, r)
+		fileServer.ServeHTTP(w, r)
 	})
 
 	// OIDC login endpoints
