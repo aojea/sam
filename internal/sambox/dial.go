@@ -46,11 +46,6 @@ type AgentDialer struct {
 	// unidentified, and mesh policy sees only the node it came through.
 	AgentID string
 
-	// Ingress serves what the agent is permitted to advertise. Nil means the
-	// agent may serve nothing, which is the case for a sandbox that only calls
-	// out.
-	Ingress *IngressManager
-
 	// DialContext opens external destinations. Nil uses a plain net.Dialer;
 	// tests and future egress interception replace it.
 	DialContext func(ctx context.Context, network, address string) (net.Conn, error)

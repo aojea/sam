@@ -51,6 +51,7 @@ func main() {
 		logLevel      string
 
 		agentIngressSocket string
+		ingressListen      string
 	)
 
 	rootCmd := &cobra.Command{
@@ -78,12 +79,12 @@ func main() {
 			if err := verifyBundleCredential(cmd.Context(), bundlePath, issuer, audience, insecure); err != nil {
 				return err
 			}
-			ingress, err := resolveIngress(bundlePath, sidecarSocket, agentIngressSocket)
+			ingress, err := resolveIngress(bundlePath, ingressListen, agentIngressSocket)
 			if err != nil {
 				return err
 			}
 			if ingress != nil {
-				defer ingress.Close(context.WithoutCancel(cmd.Context()))
+				defer ingress.Close()
 			}
 
 			listener, err := sambox.ListenSandboxSocket(sandboxSocket)
@@ -107,7 +108,6 @@ func main() {
 					Router:        &sambox.Router{Egress: egress},
 					SidecarSocket: sidecarSocket,
 					AgentID:       agentID,
-					Ingress:       ingress,
 				},
 			}
 
@@ -136,6 +136,7 @@ func main() {
 	runCmd.Flags().BoolVar(&insecure, "insecure-unverified-bundle", false, "Trust the bundle's declared identity without a credential to back it, letting whoever can write the file decide which agent this sandbox is")
 	runCmd.Flags().StringVar(&metricsAddr, "metrics-addr", "", "Serve unauthenticated Prometheus metrics on this address, e.g. 127.0.0.1:9600; off by default")
 	runCmd.Flags().StringVar(&agentIngressSocket, "agent-ingress-socket", "", "Path to the sandbox's reverse channel, served by nano-init --ingress-socket; required to reach an agent that serves the mesh, because an isolated sandbox cannot be dialled")
+	runCmd.Flags().StringVar(&ingressListen, "ingress-listen", "127.0.0.1:7080", "Stable address the gateway's mesh-facing ingress listens on; the node's configuration declares services with this address as their backend")
 	runCmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	for _, required := range []string{"socket", "sidecar-socket"} {
 		if err := runCmd.MarkFlagRequired(required); err != nil {
@@ -222,7 +223,7 @@ func verifyBundleCredential(ctx context.Context, bundlePath, issuer, audience st
 
 // resolveIngress prepares what the agent is permitted to serve. Nil means
 // nothing, which is the case for a sandbox that only calls out.
-func resolveIngress(bundlePath, sidecarSocket, agentIngressSocket string) (*sambox.IngressManager, error) {
+func resolveIngress(bundlePath, ingressListen, agentIngressSocket string) (*sambox.IngressManager, error) {
 	if bundlePath == "" {
 		return nil, nil
 	}
@@ -230,7 +231,7 @@ func resolveIngress(bundlePath, sidecarSocket, agentIngressSocket string) (*samb
 	if err != nil {
 		return nil, err
 	}
-	if len(bundle.Ingress) == 0 {
+	if bundle.Serves == nil {
 		return nil, nil
 	}
 	if agentIngressSocket == "" {
@@ -238,15 +239,23 @@ func resolveIngress(bundlePath, sidecarSocket, agentIngressSocket string) (*samb
 		// only address left is one in this process's network namespace, which
 		// is the pod's: the node's API and every sidecar are on that loopback,
 		// and the port would be the agent's to choose.
-		return nil, fmt.Errorf("agent %s may serve %d mesh service(s), but --agent-ingress-socket is not set. "+
+		return nil, fmt.Errorf("agent %s serves a2a://%s, but --agent-ingress-socket is not set. "+
 			"Point it at the path nano-init --ingress-socket serves; without it there is no way into the "+
 			"sandbox, and delivering to this process's own network namespace would reach the gateway's "+
-			"neighbours instead of the agent", bundle.Agent.ID, len(bundle.Ingress))
+			"neighbours instead of the agent", bundle.Agent.ID, bundle.Serves.Name)
 	}
-	logger.Infof("Agent %s may serve %d mesh service(s) once it announces them", bundle.Agent.ID, len(bundle.Ingress))
-	return &sambox.IngressManager{
-		SidecarSocket: sidecarSocket,
-		Allowed:       bundle.Ingress,
-		AgentSocket:   agentIngressSocket,
-	}, nil
+	manager := &sambox.IngressManager{
+		ListenAddr:  ingressListen,
+		Serves:      *bundle.Serves,
+		AgentSocket: agentIngressSocket,
+	}
+	// The routes are the bundle's contract and exist from startup; the node's
+	// config declares services backed by this address, and its backend probe
+	// fails until the agent actually binds its contracted port.
+	addr, err := manager.Start()
+	if err != nil {
+		return nil, fmt.Errorf("serving ingress on %s: %w", ingressListen, err)
+	}
+	logger.Infof("Agent %s serves a2a://%s; ingress at http://%s", bundle.Agent.ID, bundle.Serves.Name, addr)
+	return manager, nil
 }

@@ -16,9 +16,7 @@ package sambox
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -30,40 +28,35 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"google.golang.org/protobuf/encoding/protojson"
-
-	"github.com/google/sam/api"
 )
 
-// An agent that serves is still not allowed to talk to the node. Registering a
-// service means naming a target_url the mesh will route to and a name it will
-// route under, and an agent holding either would be able to point the mesh at
-// anything and to advertise itself as somebody else's service. So the gateway
-// offers the capability without the API: the agent says it is ready, and the
-// gateway does the registering.
+// An agent that serves never says so to anyone. The node's exposed services
+// are declared in the node's own configuration, where the operator names this
+// gateway's ingress address as the backend; the bundle contracts which names
+// the agent serves and on which sandbox port (like $PORT on a serverless
+// runtime). Nothing at runtime can add a name to the mesh, and there is no
+// agent-facing surface at all: the agent just binds its contracted port.
 //
-// Two things make that safe. The target_url is never the agent's to give: it is
-// always this gateway's own ingress address. And the name must be one the
-// platform already granted in the bundle, so claiming a name nobody granted is
-// not expressible rather than merely refused.
-//
-// Splitting it this way is also what makes the timing work. The platform knows
-// what an agent may serve; only the agent knows when it is listening. A route
-// declared up front advertises a service that is not up yet, and the mesh
-// routes to it and fails.
+// Readiness is implicit. Until the agent listens, forwarding fails at the
+// sandbox's reverse channel, so the node's backend probe fails and the name
+// is withheld from discovery; when the agent binds the port everything
+// converges, and when the sandbox goes away the probe fails again. Dynamic
+// agent behaviour beyond that -- capabilities, negotiation, reconfiguration --
+// belongs to the protocol served over the name (A2A, MCP), not to the mesh.
 
-// maxIngressBody bounds the declaration an agent posts.
-const maxIngressBody = 4 << 10
-
-// IngressManager registers what an agent serves, and forwards what arrives.
+// IngressManager forwards what the mesh delivers to the ports the platform
+// contracted the agent to serve.
 type IngressManager struct {
-	// SidecarSocket is the node's API socket, where registrations are made.
-	SidecarSocket string
+	// ListenAddr is where this gateway's ingress listens, e.g.
+	// "127.0.0.1:7080". It must be stable: the node's configuration names it
+	// as the declared services' backend. Empty picks an ephemeral port,
+	// which only tests can meaningfully consume via Addr.
+	ListenAddr string
 
-	// Allowed is what the bundle permits this agent to serve. Empty means the
-	// agent may serve nothing.
-	Allowed []BundleIngress
+	// Serves is the bundle's contract: the agent's a2a service name and the
+	// sandbox port it binds. An agent serves at most itself; tools and models
+	// are operator workloads, not agent ingress.
+	Serves BundleServes
 
 	// AgentSocket is the sandbox's reverse channel: a Unix socket nano-init
 	// listens on from inside the sandbox. It is how an isolated agent is
@@ -86,95 +79,28 @@ type IngressManager struct {
 	routes   map[string]int // service name -> port inside the sandbox
 }
 
-// ingressDeclaration is what an agent posts to say it is ready.
-type ingressDeclaration struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Port int    `json:"port"`
-}
-
-// Handler serves the gateway's own ingress endpoint. It is never forwarded to
-// the node.
-func (m *IngressManager) Handler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "POST a declaration to announce a service", http.StatusMethodNotAllowed)
-			return
-		}
-
-		var decl ingressDeclaration
-		if err := json.NewDecoder(io.LimitReader(r.Body, maxIngressBody)).Decode(&decl); err != nil {
-			http.Error(w, "expected {\"name\":..., \"type\":..., \"port\":...}", http.StatusBadRequest)
-			return
-		}
-
-		if err := m.Announce(r.Context(), decl); err != nil {
-			// The agent is told what it did wrong, which is always something it
-			// declared, never anything about the node behind the gateway.
-			http.Error(w, err.Error(), http.StatusForbidden)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
-}
-
-// Announce validates a declaration, starts routing to the agent, and registers
-// the service with the node.
-func (m *IngressManager) Announce(ctx context.Context, decl ingressDeclaration) error {
-	if decl.Port < 1 || decl.Port > 65535 {
-		return fmt.Errorf("port %d is not a port", decl.Port)
-	}
-	if !m.permits(decl) {
-		return fmt.Errorf("this agent was not granted %s://%s", decl.Type, decl.Name)
-	}
+// Start validates that the sandbox can be reached, builds the routes the
+// bundle contracts, and serves the ingress. It returns the bound address,
+// which is what the node's configuration must name as the services' backend.
+func (m *IngressManager) Start() (string, error) {
 	if err := m.reachable(); err != nil {
-		return err
+		return "", err
 	}
 
-	addr, err := m.ensureListening()
-	if err != nil {
-		return fmt.Errorf("serving ingress: %w", err)
-	}
-
-	m.mu.Lock()
-	m.routes[decl.Name] = decl.Port
-	m.mu.Unlock()
-
-	// The agent named a service; the gateway names where the mesh reaches it.
-	target := "http://" + addr + "/" + decl.Name
-	if err := m.register(ctx, decl, target); err != nil {
-		m.mu.Lock()
-		delete(m.routes, decl.Name)
-		m.mu.Unlock()
-		return fmt.Errorf("registering %s://%s: %w", decl.Type, decl.Name, err)
-	}
-	log.Printf("sambox: serving %s://%s from the sandbox's port %d", decl.Type, decl.Name, decl.Port)
-	return nil
-}
-
-func (m *IngressManager) permits(decl ingressDeclaration) bool {
-	for _, allowed := range m.Allowed {
-		if allowed.Name == decl.Name && allowed.Type == decl.Type {
-			return true
-		}
-	}
-	return false
-}
-
-// ensureListening starts the ingress listener on first use, so an agent that
-// serves nothing costs nothing.
-func (m *IngressManager) ensureListening() (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.listener != nil {
 		return m.listener.Addr().String(), nil
 	}
-	if m.routes == nil {
-		m.routes = make(map[string]int)
-	}
+	m.routes = map[string]int{m.Serves.Name: m.Serves.Port}
+	log.Printf("sambox: serving a2a://%s from the sandbox's port %d", m.Serves.Name, m.Serves.Port)
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	addr := m.ListenAddr
+	if addr == "" {
+		addr = "127.0.0.1:0"
+	}
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return "", err
 	}
@@ -300,87 +226,18 @@ func dialSandbox(ctx context.Context, socket, port string) (net.Conn, error) {
 	return conn, nil
 }
 
-// register tells the node to advertise the service, with a target only the
-// gateway could have chosen.
-func (m *IngressManager) register(ctx context.Context, decl ingressDeclaration, target string) error {
-	serviceType, err := api.ParseServiceType(decl.Type)
-	if err != nil {
-		return err
-	}
-
-	body, err := protojson.Marshal(&api.RegisterServiceRequest{
-		Service: &api.ServiceInfo{
-			Type:        serviceType,
-			Name:        decl.Name,
-			Description: "served by an agent behind this gateway",
-		},
-		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: target},
-	})
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"http://"+sidecarHost+"/sam/service/register", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := (&http.Client{Transport: sidecarTransport(m.SidecarSocket)}).Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		detail, _ := io.ReadAll(io.LimitReader(resp.Body, maxIngressBody))
-		return fmt.Errorf("the node refused it: %s: %s", resp.Status, bytes.TrimSpace(detail))
-	}
-	return nil
-}
-
-// Close stops serving and withdraws everything this gateway advertised, so a
-// detached sandbox stops being routed to instead of lingering in discovery.
-func (m *IngressManager) Close(ctx context.Context) {
+// Close stops serving, so a detached sandbox stops being routed to: the
+// node's backend probe starts failing and withholds the name from discovery.
+func (m *IngressManager) Close() {
 	m.mu.Lock()
 	listener := m.listener
 	m.listener = nil
-	routes := m.routes
 	m.routes = nil
 	m.mu.Unlock()
 
 	if listener != nil {
 		_ = listener.Close()
 	}
-	for name := range routes {
-		if err := m.unregister(ctx, name); err != nil {
-			log.Printf("sambox: withdrawing %s: %v", name, err)
-		}
-	}
-}
-
-func (m *IngressManager) unregister(ctx context.Context, name string) error {
-	body, err := json.Marshal(map[string]string{"name": name})
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"http://"+sidecarHost+"/sam/service/unregister", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := (&http.Client{Transport: sidecarTransport(m.SidecarSocket)}).Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("the node returned %s", resp.Status)
-	}
-	return nil
 }
 
 // splitServicePath separates the leading service name from the rest of the path.

@@ -56,6 +56,36 @@ func (s *A2AService) Init(ctx context.Context) error {
 	return nil
 }
 
+// Probe asks the backend for its agent card, which is the protocol's own
+// definition of ready: an A2A agent is up exactly when it serves its card.
+// Gating advertisement on it lets a service be declared before its agent is
+// (a sandbox that has not bound its port yet probes as down and stays out of
+// discovery). Deliberately not cached, like the MCP probe.
+func (s *A2AService) Probe(ctx context.Context) error {
+	target, ok := s.backend.(*api.RegisterServiceRequest_TargetUrl)
+	if !ok {
+		return fmt.Errorf("a2a service %q has no URL backend to probe", s.info.GetName())
+	}
+	cardURL := strings.TrimSuffix(target.TargetUrl, "/") + "/.well-known/agent-card.json"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cardURL, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("fetch agent card of %q: %w", s.info.GetName(), err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("agent card of %q: %s", s.info.GetName(), resp.Status)
+	}
+	var card map[string]any
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&card); err != nil {
+		return fmt.Errorf("agent card of %q is not JSON: %w", s.info.GetName(), err)
+	}
+	return nil
+}
+
 // a2aEgressGate runs the caller-side A2A checks on a raw egress request:
 // the fail-closed labels gate. On refusal it writes the HTTP error itself
 // and returns ok=false.

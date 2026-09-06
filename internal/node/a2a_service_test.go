@@ -65,6 +65,57 @@ func TestNewServiceFromRequestA2A(t *testing.T) {
 	}
 }
 
+// TestA2AServiceProbe pins advertisement gating on the agent card: an a2a
+// service may be declared before its agent is up (a sandbox that has not
+// bound its port), and must probe as down until the card is served.
+func TestA2AServiceProbe(t *testing.T) {
+	newSvc := func(target string) *A2AService {
+		return &A2AService{baseService: baseService{
+			info:    &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_A2A, Name: "agent"},
+			backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: target},
+		}}
+	}
+
+	t.Run("card served means ready", func(t *testing.T) {
+		backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/.well-known/agent-card.json" {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = w.Write([]byte(`{"name":"agent","version":"1.0.0"}`))
+		}))
+		defer backend.Close()
+		if err := newSvc(backend.URL).Probe(context.Background()); err != nil {
+			t.Fatalf("Probe with a served card: %v", err)
+		}
+	})
+
+	t.Run("no card means not ready", func(t *testing.T) {
+		backend := httptest.NewServer(http.NotFoundHandler())
+		defer backend.Close()
+		if err := newSvc(backend.URL).Probe(context.Background()); err == nil {
+			t.Fatal("Probe must fail while the card is not served")
+		}
+	})
+
+	t.Run("dead backend means not ready", func(t *testing.T) {
+		// A declared sandbox service whose agent never bound its port.
+		if err := newSvc("http://127.0.0.1:1").Probe(context.Background()); err == nil {
+			t.Fatal("Probe must fail when nothing listens")
+		}
+	})
+
+	t.Run("non-json card means not ready", func(t *testing.T) {
+		backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("<html>login page</html>"))
+		}))
+		defer backend.Close()
+		if err := newSvc(backend.URL).Probe(context.Background()); err == nil {
+			t.Fatal("Probe must fail on a non-JSON card")
+		}
+	})
+}
+
 func TestA2AEgressHookNonA2APassthrough(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/sam/12D3KooWpeer/mcp/svc/foo", nil)

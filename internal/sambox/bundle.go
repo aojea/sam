@@ -39,11 +39,14 @@ type AgentBundle struct {
 	Agent   AgentIdentity `yaml:"agent"`
 	Egress  BundleEgress  `yaml:"egress"`
 
-	// Ingress is what this agent is permitted to serve, not what it is
-	// currently serving. The agent says when it is ready, and on which port,
-	// through the gateway's ingress endpoint; the platform decides only which
-	// names it may claim.
-	Ingress []BundleIngress `yaml:"ingress"`
+	// Serves is the one mesh service this agent provides: itself, as an A2A
+	// agent. The name is the platform's grant and the port is its contract
+	// with the agent (like $PORT on a serverless runtime); the agent binds it
+	// when ready, and everything else about serving -- capabilities, skills,
+	// negotiation -- lives on the agent's own card, inside the A2A protocol.
+	// Tools (mcp://) and models (inference://) are operator workloads declared
+	// in a node's configuration, never agent ingress.
+	Serves *BundleServes `yaml:"serves,omitempty"`
 
 	// egress is the compiled form of Egress.Allow, built during loading so a
 	// malformed allowlist fails at startup rather than on an agent's first
@@ -51,10 +54,11 @@ type AgentBundle struct {
 	egress *EgressPolicy
 }
 
-// BundleIngress is one mesh service the agent may advertise.
-type BundleIngress struct {
+// BundleServes contracts the agent's own a2a service: its mesh name and the
+// sandbox port it must bind.
+type BundleServes struct {
 	Name string `yaml:"name"`
-	Type string `yaml:"type"`
+	Port int    `yaml:"port"`
 }
 
 // AgentIdentity names the principal the gateway asserts for this sandbox.
@@ -106,12 +110,12 @@ func LoadAgentBundle(path string) (*AgentBundle, error) {
 	}
 	bundle.egress = policy
 
-	for i, ingress := range bundle.Ingress {
-		if _, err := api.ParseServiceType(ingress.Type); err != nil {
-			return nil, fmt.Errorf("agent bundle %s: ingress %d: %w", path, i, err)
+	if bundle.Serves != nil {
+		if err := api.ValidateServiceFormat("a2a://" + bundle.Serves.Name); err != nil {
+			return nil, fmt.Errorf("agent bundle %s: serves: %w", path, err)
 		}
-		if err := api.ValidateServiceFormat(ingress.Type + "://" + ingress.Name); err != nil {
-			return nil, fmt.Errorf("agent bundle %s: ingress %d: %w", path, i, err)
+		if bundle.Serves.Port < 1 || bundle.Serves.Port > 65535 {
+			return nil, fmt.Errorf("agent bundle %s: serves: port %d is not a port", path, bundle.Serves.Port)
 		}
 	}
 
