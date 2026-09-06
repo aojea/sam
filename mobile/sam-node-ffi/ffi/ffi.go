@@ -42,6 +42,8 @@ var (
 	sidecarSrv  *http.Server
 	unauthSrv   *http.Server
 	mu          sync.Mutex
+
+	logger = golog.Logger("sam-node-ffi")
 )
 
 // MobileConfig holds simple configuration options for the mobile agent.
@@ -217,6 +219,27 @@ func StartNode(configJSON string) error {
 		return fmt.Errorf("failed to start node: %w", err)
 	}
 	activeNode = samNode
+
+	// Register the declared services, like cmd/sam-node does after Start.
+	// In the background with retries: on mobile the first router connection
+	// can take minutes, and RegisterStaticServices waits only briefly for
+	// mesh connectivity before giving up.
+	if len(services) > 0 {
+		go func() {
+			for {
+				err := samNode.RegisterStaticServices(ctx, services)
+				if err == nil {
+					return
+				}
+				logger.Warnf("Registering static services (will retry): %v", err)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(3 * time.Second):
+				}
+			}
+		}()
+	}
 
 	// Start Sidecar API Server
 	bindAddr := config.BindAddr
