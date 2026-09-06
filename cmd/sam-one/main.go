@@ -19,8 +19,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -35,6 +37,7 @@ var logger = golog.Logger("sam-one")
 func main() {
 	var (
 		bindAddress          string
+		port                 int
 		externalURL          string
 		p2pListen            []string
 		dataDir              string
@@ -82,7 +85,7 @@ func main() {
 			}
 
 			srv, err := standalone.New(standalone.Options{
-				BindAddress:      bindAddress,
+				BindAddress:      net.JoinHostPort(bindAddress, strconv.Itoa(port)),
 				ExternalURL:      externalURL,
 				P2PListen:        p2pListen,
 				DataDir:          dataDir,
@@ -111,7 +114,8 @@ func main() {
 		},
 	}
 
-	rootCmd.Flags().StringVar(&bindAddress, "bind-address", "0.0.0.0:8080", "Address to bind the single HTTP/WebSocket listener")
+	rootCmd.Flags().StringVar(&bindAddress, "bind-address", "0.0.0.0", "Host/IP to bind the single HTTP/WebSocket listener")
+	rootCmd.Flags().IntVar(&port, "port", 0, "TCP port of the single listener; 0 picks a free port, published in the startup banner")
 	rootCmd.Flags().StringVar(&externalURL, "external-url", "", "Public URL reachable by nodes (or env SAM_EXTERNAL_URL)")
 	rootCmd.Flags().StringSliceVar(&p2pListen, "p2p-listen", nil, "Optional extra native libp2p listen multiaddrs")
 	rootCmd.Flags().StringVar(&dataDir, "data-dir", ".", "Directory for the database, router key and generated tokens")

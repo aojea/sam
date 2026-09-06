@@ -88,6 +88,20 @@ builds:
       - arm64
     ldflags:
       - -s -w
+  - id: sam-one
+    main: ./cmd/sam-one
+    binary: sam-one
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
   - id: nano-init
     main: .
     # nano-init is its own module: it carries a userspace TCP stack, and that

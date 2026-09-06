@@ -1,0 +1,23 @@
+# Stage 1: Build
+FROM golang:1.27.0 AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -buildvcs=false -o sam-one ./cmd/sam-one
+# Pre-create the data dir owned by the nonroot UID so that a fresh
+# named/anonymous volume mounted over it inherits writable ownership instead
+# of defaulting to root.
+RUN mkdir -p /data-seed && chown 65532:65532 /data-seed
+
+# Stage 2: Final
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /tmp
+COPY --from=builder --chown=nonroot:nonroot /app/sam-one /
+COPY --from=builder --chown=nonroot:nonroot /data-seed /data
+USER nonroot:nonroot
+ENTRYPOINT ["/sam-one"]
+# Default args only: a container needs a stable published port, and overriding
+# the command line must re-point --data-dir at a writable mount or the sqlite
+# db lands on the container filesystem.
+CMD ["--data-dir", "/data", "--port", "8080"]

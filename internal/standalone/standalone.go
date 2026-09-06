@@ -101,7 +101,9 @@ type Options struct {
 // Default fills unset options with development-friendly values.
 func (o *Options) Default() {
 	if o.BindAddress == "" {
-		o.BindAddress = "0.0.0.0:8080"
+		// Port 0 picks a free port; the caller publishes it (banner/Addr),
+		// like the generated tokens.
+		o.BindAddress = "0.0.0.0:0"
 	}
 	if o.DataDir == "" {
 		o.DataDir = "."
