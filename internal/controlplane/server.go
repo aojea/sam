@@ -1954,10 +1954,13 @@ func (s *Server) refreshExpiredBootstrapBiscuit(ctx context.Context, existingReq
 	// The enrolled node record (not the bootstrap token, which may since have
 	// been consumed or pruned) is the durable source of the role and labels
 	// to re-mint -- both approval paths write it before ever returning this
-	// enrollment request as APPROVED.
-	nodeRecord, err := s.store.GetNode(ctx, existingReq.PeerID)
+	// enrollment request as APPROVED. Look it up by pID.String() (canonical),
+	// not the raw existingReq.PeerID, matching every other GetNode call site
+	// (e.g. HandleRefresh) - the two need not be byte-identical strings for
+	// the same peer.
+	nodeRecord, err := s.store.GetNode(ctx, pID.String())
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to retrieve enrolled node %s: %w", existingReq.PeerID, err)
+		return nil, nil, fmt.Errorf("failed to retrieve enrolled node %s: %w", pID, err)
 	}
 
 	privKey, _, err := s.store.GetCurrentKey(ctx)
