@@ -202,7 +202,9 @@ func TestBootstrapTokenRoundTripsEveryField(t *testing.T) {
 		CreatedAt:   time.Now().Add(-time.Hour),
 		ExpiresAt:   time.Now().Add(time.Hour),
 	}
-	requireAllFieldsSet(t, want)
+	// RevokedAt is never set at creation - only RevokeBootstrapToken sets it,
+	// covered separately below.
+	requireAllFieldsSet(t, want, "RevokedAt")
 
 	if err := store.SaveBootstrapToken(ctx, want); err != nil {
 		t.Fatalf("SaveBootstrapToken: %v", err)
@@ -213,6 +215,9 @@ func TestBootstrapTokenRoundTripsEveryField(t *testing.T) {
 		t.Fatalf("GetBootstrapToken: %v", err)
 	}
 	requireFieldsRoundTrip(t, want, got)
+	if got.IsRevoked() {
+		t.Error("a freshly saved token must not start out revoked")
+	}
 
 	listed, err := store.ListBootstrapTokens(ctx)
 	if err != nil {
@@ -222,6 +227,36 @@ func TestBootstrapTokenRoundTripsEveryField(t *testing.T) {
 		t.Fatalf("ListBootstrapTokens returned %d, want 1", len(listed))
 	}
 	requireFieldsRoundTrip(t, want, &listed[0])
+
+	if err := store.RevokeBootstrapToken(ctx, want.ID); err != nil {
+		t.Fatalf("RevokeBootstrapToken: %v", err)
+	}
+	revoked, err := store.GetBootstrapToken(ctx, want.ID)
+	if err != nil {
+		t.Fatalf("GetBootstrapToken after revoke: %v", err)
+	}
+	if !revoked.IsRevoked() {
+		t.Fatal("RevokedAt was not persisted by RevokeBootstrapToken")
+	}
+
+	// Idempotent: revoking an already-revoked token is not an error and does
+	// not un-set RevokedAt.
+	if err := store.RevokeBootstrapToken(ctx, want.ID); err != nil {
+		t.Fatalf("RevokeBootstrapToken (second call): %v", err)
+	}
+	revokedAgain, err := store.GetBootstrapToken(ctx, want.ID)
+	if err != nil {
+		t.Fatalf("GetBootstrapToken after second revoke: %v", err)
+	}
+	if !revokedAgain.IsRevoked() {
+		t.Error("a second RevokeBootstrapToken call must not un-revoke the token")
+	}
+
+	// Revoking an unknown id is also not an error - the HTTP layer is what
+	// distinguishes "unknown" via a preceding GetBootstrapToken.
+	if err := store.RevokeBootstrapToken(ctx, "no-such-token"); err != nil {
+		t.Errorf("RevokeBootstrapToken(unknown id) = %v, want nil", err)
+	}
 }
 
 func TestEnrollmentRequestRoundTripsEveryField(t *testing.T) {

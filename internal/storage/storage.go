@@ -100,6 +100,17 @@ type BootstrapToken struct {
 	Description string
 	CreatedAt   time.Time
 	ExpiresAt   time.Time
+	// RevokedAt is set by RevokeBootstrapToken - a soft revoke, distinct from
+	// natural expiry, since enrollment_requests.token_id has a foreign key
+	// into this table and a hard delete would break that trail. Nil means
+	// never revoked.
+	RevokedAt *time.Time
+}
+
+// IsRevoked reports whether the token has been explicitly revoked, as
+// opposed to merely expired or usage-exhausted.
+func (t *BootstrapToken) IsRevoked() bool {
+	return t.RevokedAt != nil
 }
 
 // EnrollmentRequest represents a pending or resolved node registration request (CSR).
@@ -203,6 +214,13 @@ type Store interface {
 
 	// IncrementBootstrapTokenUsage increments the usage count of a token.
 	IncrementBootstrapTokenUsage(ctx context.Context, id string) error
+
+	// RevokeBootstrapToken soft-revokes a token by setting its RevokedAt, so
+	// HandleEnroll refuses it even though it may still be within its TTL and
+	// usage count. Idempotent: revoking an already-revoked or unknown token
+	// is not an error - callers that need to distinguish "unknown" first
+	// look the token up with GetBootstrapToken.
+	RevokeBootstrapToken(ctx context.Context, id string) error
 
 	// CreateEnrollmentRequest saves a new pending enrollment request.
 	CreateEnrollmentRequest(ctx context.Context, req *EnrollmentRequest) error

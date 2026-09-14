@@ -369,6 +369,18 @@ var migrations = []migration{
 			)`,
 		},
 	},
+	{
+		// Soft revoke, not delete: enrollment_requests.token_id has an FK to
+		// this table, and a revoked_at column keeps the audit trail distinct
+		// from the token's own natural expiry.
+		version: 9,
+		postgres: []string{
+			`ALTER TABLE bootstrap_tokens ADD COLUMN IF NOT EXISTS revoked_at BIGINT`,
+		},
+		sqlite: []string{
+			`ALTER TABLE bootstrap_tokens ADD COLUMN revoked_at BIGINT`,
+		},
+	},
 }
 
 func (s *SQLStore) initSchema() error {
@@ -1010,10 +1022,11 @@ func (s *SQLStore) SaveBootstrapToken(ctx context.Context, token *BootstrapToken
 
 // GetBootstrapToken retrieves a bootstrap token by its ID (sha256 hash).
 func (s *SQLStore) GetBootstrapToken(ctx context.Context, id string) (*BootstrapToken, error) {
-	query := s.rebind(`SELECT id, token_hash, role, owner_id, max_usages, usages_count, description, created_at, expires_at FROM bootstrap_tokens WHERE id = ?`)
+	query := s.rebind(`SELECT id, token_hash, role, owner_id, max_usages, usages_count, description, created_at, expires_at, revoked_at FROM bootstrap_tokens WHERE id = ?`)
 	var t BootstrapToken
 	var created, expires int64
 	var ownerID sql.NullString
+	var revokedAt sql.NullInt64
 	err := s.db.QueryRowContext(ctx, query, id).Scan(
 		&t.ID,
 		&t.TokenHash,
@@ -1024,6 +1037,7 @@ func (s *SQLStore) GetBootstrapToken(ctx context.Context, id string) (*Bootstrap
 		&t.Description,
 		&created,
 		&expires,
+		&revokedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
@@ -1036,6 +1050,10 @@ func (s *SQLStore) GetBootstrapToken(ctx context.Context, id string) (*Bootstrap
 	}
 	t.CreatedAt = time.Unix(created, 0)
 	t.ExpiresAt = time.Unix(expires, 0)
+	if revokedAt.Valid {
+		rt := time.Unix(revokedAt.Int64, 0)
+		t.RevokedAt = &rt
+	}
 	return &t, nil
 }
 
@@ -1045,6 +1063,18 @@ func (s *SQLStore) IncrementBootstrapTokenUsage(ctx context.Context, id string) 
 	_, err := s.db.ExecContext(ctx, s.rebind(query), id)
 	if err != nil {
 		return fmt.Errorf("failed to increment usage: %w", err)
+	}
+	return nil
+}
+
+// RevokeBootstrapToken soft-revokes a token: see the Store interface comment
+// for why this doesn't delete the row. The WHERE clause makes a repeat call
+// a no-op rather than clobbering the original revocation time.
+func (s *SQLStore) RevokeBootstrapToken(ctx context.Context, id string) error {
+	query := `UPDATE bootstrap_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`
+	_, err := s.db.ExecContext(ctx, s.rebind(query), time.Now().Unix(), id)
+	if err != nil {
+		return fmt.Errorf("failed to revoke bootstrap token: %w", err)
 	}
 	return nil
 }
@@ -1247,7 +1277,7 @@ func (s *SQLStore) ListNodes(ctx context.Context) ([]EnrolledNode, error) {
 
 // ListBootstrapTokens retrieves all bootstrap tokens.
 func (s *SQLStore) ListBootstrapTokens(ctx context.Context) ([]BootstrapToken, error) {
-	query := s.rebind(`SELECT id, token_hash, role, owner_id, max_usages, usages_count, description, created_at, expires_at FROM bootstrap_tokens ORDER BY created_at DESC`)
+	query := s.rebind(`SELECT id, token_hash, role, owner_id, max_usages, usages_count, description, created_at, expires_at, revoked_at FROM bootstrap_tokens ORDER BY created_at DESC`)
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query bootstrap tokens: %w", err)
@@ -1260,6 +1290,7 @@ func (s *SQLStore) ListBootstrapTokens(ctx context.Context) ([]BootstrapToken, e
 		var desc sql.NullString
 		var ownerID sql.NullString
 		var created, expires int64
+		var revokedAt sql.NullInt64
 		err := rows.Scan(
 			&t.ID,
 			&t.TokenHash,
@@ -1270,6 +1301,7 @@ func (s *SQLStore) ListBootstrapTokens(ctx context.Context) ([]BootstrapToken, e
 			&desc,
 			&created,
 			&expires,
+			&revokedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan bootstrap token: %w", err)
@@ -1282,6 +1314,10 @@ func (s *SQLStore) ListBootstrapTokens(ctx context.Context) ([]BootstrapToken, e
 		}
 		t.CreatedAt = time.Unix(created, 0)
 		t.ExpiresAt = time.Unix(expires, 0)
+		if revokedAt.Valid {
+			rt := time.Unix(revokedAt.Int64, 0)
+			t.RevokedAt = &rt
+		}
 		tokens = append(tokens, t)
 	}
 	if err := rows.Err(); err != nil {

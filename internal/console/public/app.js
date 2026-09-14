@@ -699,12 +699,19 @@ function renderRouterTopography(routers) {
 function renderBootstrapTokensTable(tokens) {
     const tbody = document.getElementById('table-bootstrap');
     if (tokens.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="text-center">No active bootstrap tokens found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center">No active bootstrap tokens found</td></tr>`;
         return;
     }
 
     tbody.innerHTML = tokens.map(token => {
         const expiresAt = token.ExpiresAt && !token.ExpiresAt.startsWith('0001') ? new Date(token.ExpiresAt).toLocaleString() : 'Never';
+        const revoked = !!token.RevokedAt;
+        const status = revoked
+            ? `<span class="badge badge-rejected">Revoked</span>`
+            : `<span class="badge badge-approved">Active</span>`;
+        const action = revoked
+            ? '-'
+            : `<button class="btn btn-sm btn-danger" onclick="revokeBootstrapToken('${escapeHTML(token.ID)}')">Revoke</button>`;
         return `
             <tr>
                 <td><code>${escapeHTML(String(token.ID || '').substring(0, 8))}...</code></td>
@@ -712,10 +719,18 @@ function renderBootstrapTokensTable(tokens) {
                 <td><code>${escapeHTML(token.OwnerID || '-')}</code></td>
                 <td>${escapeHTML(String(token.UsagesCount))} / ${escapeHTML(String(token.MaxUsages))}</td>
                 <td>${escapeHTML(expiresAt)}</td>
+                <td>${status}</td>
+                <td>${action}</td>
             </tr>
         `;
     }).join('');
 }
+
+window.revokeBootstrapToken = function(id) {
+    if (confirm('Revoke this bootstrap token? It will no longer be usable to enroll or re-enroll any node.')) {
+        actionRequest(`api/admin/bootstrap-tokens/${id}`, 'DELETE').then(loadData).catch(() => {});
+    }
+};
 
 window.generateBootstrapToken = async function() {
     const role = document.getElementById('token-role').value;
