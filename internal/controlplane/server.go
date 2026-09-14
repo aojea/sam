@@ -1305,7 +1305,13 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 		// Request already exists, return status
 		var resp *api.BootstrapEnrollResponse
 		if existingReq.Status == api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED {
-			resp, err = s.buildApprovedBootstrapEnrollResponse(ctx, existingReq.BiscuitToken, existingReq.ResolvedAt)
+			biscuitToken, resolvedAt, refreshErr := s.refreshExpiredBootstrapBiscuit(ctx, existingReq)
+			if refreshErr != nil {
+				logger.Errorf("Failed to refresh expired enrollment biscuit: %v", refreshErr)
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return
+			}
+			resp, err = s.buildApprovedBootstrapEnrollResponse(ctx, biscuitToken, resolvedAt)
 			if err != nil {
 				logger.Errorf("Failed to build approved response: %v", err)
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -1516,7 +1522,13 @@ func (s *Server) HandleEnrollStatus(w http.ResponseWriter, r *http.Request) {
 
 	var resp *api.BootstrapEnrollResponse
 	if enrollReq.Status == api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED {
-		resp, err = s.buildApprovedBootstrapEnrollResponse(ctx, enrollReq.BiscuitToken, enrollReq.ResolvedAt)
+		biscuitToken, resolvedAt, refreshErr := s.refreshExpiredBootstrapBiscuit(ctx, enrollReq)
+		if refreshErr != nil {
+			logger.Errorf("Failed to refresh expired enrollment biscuit: %v", refreshErr)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		resp, err = s.buildApprovedBootstrapEnrollResponse(ctx, biscuitToken, resolvedAt)
 		if err != nil {
 			logger.Errorf("Failed to build approved response: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -1915,6 +1927,69 @@ func (s *Server) HandleAdminRevoke(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/x-protobuf")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(respData)
+}
+
+// refreshExpiredBootstrapBiscuit returns an already-approved enrollment
+// request's biscuit unchanged if it is still within its TTL, or mints and
+// persists a fresh one otherwise.
+//
+// Bootstrap peers (routers and other non-OIDC nodes) only ever call /refresh
+// proactively while already running; they have no equivalent of a stored
+// refresh token to fall back on across a restart. If a peer's data directory
+// is idle for longer than BiscuitTTL and then restarts, its old biscuit is
+// already expired by the time it re-enrolls, and re-enrolling just hits the
+// "existing enrollment request" branch below, which used to hand back that
+// same expired token every time -- an approve-fails-approve-fails loop with
+// no way out short of an operator manually deleting the enrollment record.
+func (s *Server) refreshExpiredBootstrapBiscuit(ctx context.Context, existingReq *storage.EnrollmentRequest) ([]byte, *time.Time, error) {
+	if existingReq.ResolvedAt != nil && existingReq.ResolvedAt.Add(s.config.BiscuitTTL).After(time.Now()) {
+		return existingReq.BiscuitToken, existingReq.ResolvedAt, nil
+	}
+
+	pID, err := peer.Decode(existingReq.PeerID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid stored peer id %q: %w", existingReq.PeerID, err)
+	}
+
+	// The enrolled node record (not the bootstrap token, which may since have
+	// been consumed or pruned) is the durable source of the role and labels
+	// to re-mint -- both approval paths write it before ever returning this
+	// enrollment request as APPROVED.
+	nodeRecord, err := s.store.GetNode(ctx, existingReq.PeerID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to retrieve enrolled node %s: %w", existingReq.PeerID, err)
+	}
+
+	privKey, _, err := s.store.GetCurrentKey(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to retrieve signing key: %w", err)
+	}
+
+	policyRoles, _, err := s.store.GetMeshPolicy(ctx)
+	if err != nil && err != storage.ErrNotFound {
+		return nil, nil, fmt.Errorf("failed to retrieve mesh policy: %w", err)
+	}
+
+	biscuitExpiry := time.Now().Add(s.config.BiscuitTTL)
+	biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, nodeRecord.Role, biscuitExpiry, policyRoles, nodeRecord.Labels)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to mint refreshed bootstrap biscuit: %w", err)
+	}
+
+	if err := s.store.UpdateEnrollmentRequest(ctx, existingReq.ID, api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED, biscuitBytes, existingReq.ResolvedBy); err != nil {
+		return nil, nil, fmt.Errorf("failed to persist refreshed enrollment request: %w", err)
+	}
+
+	// Keep the node record's biscuit in lockstep: /refresh's reuse-detection
+	// compares a presented biscuit against exactly this field.
+	nodeRecord.Biscuit = biscuitBytes
+	nodeRecord.EnrolledAt = time.Now()
+	if err := s.store.EnrollNode(ctx, nodeRecord); err != nil {
+		return nil, nil, fmt.Errorf("failed to persist refreshed node record: %w", err)
+	}
+
+	resolvedAt := time.Now()
+	return biscuitBytes, &resolvedAt, nil
 }
 
 func (s *Server) buildApprovedBootstrapEnrollResponse(ctx context.Context, biscuitToken []byte, resolvedAt *time.Time) (*api.BootstrapEnrollResponse, error) {
