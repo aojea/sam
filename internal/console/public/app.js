@@ -728,7 +728,7 @@ function renderBootstrapTokensTable(tokens) {
 
 window.revokeBootstrapToken = function(id) {
     if (confirm('Revoke this bootstrap token? It will no longer be usable to enroll or re-enroll any node.')) {
-        actionRequest(`api/admin/bootstrap-tokens/${id}`, 'DELETE').then(loadData).catch(() => {});
+        actionRequest(`api/admin/bootstrap-tokens/${id}`, 'DELETE').catch(() => {});
     }
 };
 
