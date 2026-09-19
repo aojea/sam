@@ -138,14 +138,19 @@ the request to `/<type>/<name>/<path>` on the peer, which proxies it to the
 backend. Headers pass through, including `Authorization`. Paths that contain
 `..` are refused. For an `mcp` service, `<path>` is empty and the request
 body is the JSON-RPC message. For `inference`, `<path>` is `v1/models` or
-`v1/chat/completions`. For `a2a`, `<path>` is whatever the agent serves, and
-`.well-known/agent-card.json` is rewritten for the mesh.
+`v1/chat/completions`. For `a2a`, `<path>` is whatever the agent serves. A
+`GET` of `.well-known/agent-card.json`, or of the bare service path, is
+answered by the calling node with a card fetched from the agent and
+rewritten: interface URLs point at this proxy path, gRPC bindings are
+removed, streaming is set to `false` and signatures are dropped. A card with
+no JSON-RPC or HTTP+JSON binding gives `502`. All other A2A requests are
+forwarded unchanged.
 
 Two headers modify a proxied request:
 
 | Header | Effect |
 |---|---|
-| `X-Sam-Required-Labels: k=v[,k=v]` | Verify that the peer attests at least one of the pairs before forwarding. Otherwise `403`. Removed before forwarding. Also honoured on `/v1/*`. |
+| `X-Sam-Required-Labels: k=v[,k=v]` | Honoured on `/v1/*` and on `a2a` proxy requests. Verify that the peer attests at least one of the pairs before forwarding, otherwise `403`. Removed before forwarding. On `a2a` requests the check runs before the card fetch as well. For MCP tools, use the `required_labels` argument of `call_remote_tool` instead. |
 | `X-Sam-Agent: <agent-id>` | Name the agent for which this request is made. Only meaningful when sent by a `sam-box`. See the [preview](../../preview/sandboxed-agents/). |
 
 ### Talking MCP through the proxy

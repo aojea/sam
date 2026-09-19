@@ -98,7 +98,10 @@ and on a Unix socket. The API includes an MCP server whose tools discover and
 call services across the mesh, an OpenAI-compatible `/v1` endpoint that
 routes model requests to inference providers on the mesh, and a proxy path
 `/sam/<peer-id>/<type>/<name>/` that reaches a specific service directly.
-[Networking](../networking/) describes the API and how traffic moves.
+The proxy path is also how an agent talks to another agent over A2A: a
+standard A2A client points at it, and the node rewrites the agent card so
+that the client stays on the mesh. [Networking](../networking/) describes
+the API and how traffic moves.
 
 ## Names instead of addresses
 

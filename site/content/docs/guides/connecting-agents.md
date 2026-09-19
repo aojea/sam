@@ -53,6 +53,11 @@ ordinary OpenAI request to the node's `/v1` endpoint, with `base_url`
 `http://127.0.0.1:8080/v1` and the token as the API key. `/v1/models` lists
 the available models.
 
+A2A agents are not MCP tools either. `discover_remote_services` with
+`{"type":"a2a"}` lists them, and a standard A2A client, or the
+`sam-a2a-bridge` MCP server, talks to them. See
+[Calling A2A agents](#calling-a2a-agents) below.
+
 Two things an agent should know (the skill below tells it): service names
 are not unique across the mesh, so the peer ID identifies a provider, and
 discovery is best-effort per peer, so on a partly reachable mesh some entries
@@ -212,6 +217,69 @@ The repository's `sam-mcp-python` package wraps this in a `SamClient`.
 node's tools to Gemini function calls with the `google-genai` SDK. For
 inference, point any OpenAI SDK at `http://127.0.0.1:8080/v1` with the token
 as `api_key`, or at the socket with no key.
+
+## Calling A2A agents
+
+An agent published as `type: a2a` on another node is reachable at
+`http://127.0.0.1:8080/sam/<peer-id>/a2a/<name>/` on your node. Get the
+peer ID and the name from `discover_remote_services` with
+`{"type":"a2a"}`. Your node rewrites the agent card so that a standard A2A
+client keeps talking through the node ([Networking](../../concepts/networking/#a2a-agents)
+explains why). There are two ways to call one.
+
+### With an A2A SDK
+
+Point any A2A client at that URL and send the node's token in
+`X-Sam-Authentication`. With the Python `a2a-sdk`:
+
+```python
+import httpx
+from a2a.client import A2ACardResolver, ClientConfig, create_client
+
+url = "http://127.0.0.1:8080/sam/<peer-id>/a2a/<name>"
+async with httpx.AsyncClient(headers={"X-Sam-Authentication": "Bearer <token>"}) as http:
+    card = await A2ACardResolver(http, url).get_agent_card()
+    client = await create_client(card, client_config=ClientConfig(httpx_client=http))
+    # client.send_message(...) as against any A2A server
+```
+
+The card that comes back points at the same mesh URL, so every message goes
+through your node. `contextId` and `taskId` work as they do against a local
+agent. The [A2A chat use case](../../use-cases/chat-a2a/) is a complete
+example.
+
+### With the `sam-a2a-bridge` MCP server
+
+A harness that only speaks MCP cannot use an A2A SDK. `sam-a2a-bridge` is a
+small stdio MCP server that talks to your node and exposes A2A as three
+tools:
+
+| Tool | Purpose |
+|---|---|
+| `get_agent_card(peer, service)` | The agent's skills, accepted input and output MIME types, and whether it streams. Call it before sending structured data or files. |
+| `send_agent_task(peer, service, message?, data?, file_path?, ...)` | Send text, a JSON object, or a file (up to 5 MB) to the agent. Returns at once with `task_id`, `context_id`, `state` and the agent's reply so far. Pass `context_id` back to continue a conversation, and `required_labels` (`key=value,...`) to require attested labels on the provider. |
+| `get_agent_task(peer, service, task_id)` | Poll a task that has not reached a terminal state. Files that the agent returns are saved under the download directory. |
+
+`make build` builds it to `bin/sam-a2a-bridge` (it is its own Go module, so
+the A2A SDK stays out of the root dependency graph). Register it like any
+stdio MCP server, with the node's URL and token:
+
+```bash
+claude mcp add sam-a2a-bridge -- ./bin/sam-a2a-bridge -url http://127.0.0.1:8080 -token <token>
+```
+
+| Flag | Meaning |
+|---|---|
+| `-url` | The node's API URL. Default `http://localhost:8080`. |
+| `-token` | The node's API token. |
+| `-download-dir` | Where files returned by agents are written. Default `~/.sam/a2a-downloads`, created if missing. A directory you pass yourself must already exist. |
+
+The repository ships a skill for it in `agents/skills/sam-a2a-bridge/`, in
+the same format as the mesh skill above. A refusal with
+`403: Required labels not attested by provider` means the label gate in your
+node stopped the call before any data left it. That is the intended result
+when the provider does not match, and the agent should report it instead of
+retrying with weaker labels.
 
 ## A note on trust
 

@@ -132,14 +132,21 @@ by URL only:
     target_url: "http://127.0.0.1:9999"
 ```
 
-Remote callers reach it at `/sam/<peer-id>/a2a/triage/` on their own node.
+Remote callers reach it at `/sam/<peer-id>/a2a/triage/` on their own node,
+with any standard A2A client or with the `sam-a2a-bridge` MCP server (see
+[Connecting agents](../connecting-agents/#calling-a2a-agents)). The node
+advertises the agent only while `/.well-known/agent-card.json` answers on
+the backend, so a declared agent that has not started yet is not listed in
+discovery.
+
 The agent card gets special treatment. The caller's node fetches
 `/.well-known/agent-card.json` from the agent and serves a regenerated card
 whose interface URLs point at the mesh path. Bindings that the mesh cannot
 carry (gRPC) are removed, and the original signatures are dropped because the
 content changed. Standard A2A client SDKs then work without changes. Cards
-must use the A2A 1.0 format. Older formats are refused. The
-[A2A chat use case](../../use-cases/chat-a2a/) runs one end to end.
+must use the A2A 1.0 format. Older formats are refused.
+[Networking](../../concepts/networking/#a2a-agents) explains the rewrite,
+and the [A2A chat use case](../../use-cases/chat-a2a/) runs one end to end.
 
 ## Making it reachable
 

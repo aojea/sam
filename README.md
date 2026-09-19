@@ -3,11 +3,11 @@
 <img alt="SAM" src="site/content/docs/sam_logo.png" width="160" />
 
 SAM is a private network for AI agents. A node runs next to an agent and
-gives it three things: a way to publish tools and models to the network, a
-way to find and call what other nodes publish, and an identity every other
-node can verify. Nodes connect directly when they can and through relays when
-they cannot, so the network works across laptops, containers, clusters and
-phones behind NAT.
+gives it three things: a way to publish tools, models and agents to the
+network, a way to find and call what other nodes publish, and an identity
+every other node can verify. Nodes connect directly when they can and
+through relays when they cannot, so the network works across laptops,
+containers, clusters and phones behind NAT.
 
 Two properties hold everywhere:
 

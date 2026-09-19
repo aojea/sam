@@ -36,10 +36,20 @@ The API has four parts:
 |---|---|
 | `/mcp` | An MCP server (Streamable HTTP). Its tools are the mesh operations: list and discover services, find and describe tools, call a tool on a peer. |
 | `/v1/models`, `/v1/chat/completions`, `/v1/completions` | An OpenAI-compatible endpoint. `/v1/models` lists every model that a reachable `inference://` provider serves. A completion request is routed to a provider that serves the requested model. |
-| `/sam/<peer-id>/<type>/<name>/<path>` | A reverse proxy to one specific service on one specific node, for every service type. `<type>` is `mcp`, `inference` or `a2a`, and `<path>` is passed through to the backend. This is how a caller reaches an A2A agent: `/sam/<peer-id>/a2a/<name>/` serves the agent's card, rewritten for the mesh, and its JSON-RPC endpoint. |
+| `/sam/<peer-id>/<type>/<name>/<path>` | A reverse proxy to one specific service on one specific node, for every service type. `<type>` is `mcp`, `inference` or `a2a`, and `<path>` is passed through to the backend. For an A2A agent this path is the agent's URL as seen from the mesh: it serves the agent card, rewritten for the mesh, and carries the agent's JSON-RPC requests. See [A2A agents](#a2a-agents) below. |
 | `/sam/service/discover` | Service discovery over plain HTTP, with the same results as the `discover_remote_services` tool. |
 
 The [node API reference](../../reference/node-api/) lists every route.
+
+A node publishes three kinds of service, and each one enters the mesh
+through the same discovery, connection and policy steps described on this
+page:
+
+| Type | Backend | How a caller uses it |
+|---|---|---|
+| `mcp` | An MCP server: a subprocess over stdio, or a Streamable HTTP URL. | Through the node's `/mcp` tools, or directly through the proxy path. |
+| `inference` | An OpenAI-compatible HTTP API. | Through the node's `/v1` endpoint, which chooses a provider, or directly through the proxy path. |
+| `a2a` | An agent that speaks the [A2A protocol](https://a2a-protocol.org/) over HTTP. | Through the proxy path, with a standard A2A client. |
 
 ## Discovery
 
@@ -50,9 +60,12 @@ name. A node that looks for a service asks the DHT for providers, and for
 names it asked about before it already has the gossip announcements.
 
 Before a node advertises a backend, it probes the backend
-(`--backend-probe-timeout`, 2 seconds by default). A backend that does not
-answer is not advertised, so `discover_remote_services` does not list
-services that would fail on the first call.
+(`--backend-probe-timeout`, 2 seconds by default). An MCP backend must
+complete an MCP `initialize`, and an A2A agent must serve its agent card. A
+backend that does not answer is not advertised, so `discover_remote_services`
+does not list services that would fail on the first call. Inference backends
+are not probed. They are advertised as declared, and their model list is
+fetched when a caller asks for it.
 
 Discovery results are hints. They tell the caller who claims to provide a
 service and, if the provider declared labels, what those labels are. Nothing
@@ -97,8 +110,9 @@ refreshes, router leases, policy fetches and catalog reports. It never sees a
 request.
 
 Traffic to the control plane is protobuf over HTTPS. Traffic between nodes is
-HTTP over libp2p streams for service requests, and protobuf frames for the
-authentication handshake, the DHT and gossip.
+HTTP over libp2p streams for service requests of every type (MCP, inference
+and A2A), and protobuf frames for the authentication handshake, the DHT and
+gossip.
 
 ## Inference routing
 
@@ -118,6 +132,59 @@ provider's credential and confirms that the labels are attested in it before
 forwarding. The header is removed before the request leaves the node. An
 operator can set a floor that every provider must meet with
 `egress.require_labels` in the node configuration.
+
+## A2A agents
+
+`a2a://` services are agents that speak the
+[A2A protocol](https://a2a-protocol.org/) (Agent2Agent) over HTTP. This is
+how one agent on the mesh calls another agent as a peer, instead of calling
+it as a tool. The agent is declared on its node with `type: a2a` and a
+`target_url`, and remote callers reach it at
+`/sam/<peer-id>/a2a/<name>/` on their own node. The request goes through
+the same authenticated stream and the same policy check as any other
+service request. The policy grant is `a2a://<name>`.
+
+A2A clients start from the agent card at `/.well-known/agent-card.json`.
+The card contains the agent's own interface URLs, which are addresses on
+the provider's machine and are not reachable from anywhere else. Forwarding
+the card unchanged would make a standard client fetch it through the mesh
+and then try to connect to `127.0.0.1` on the wrong host. The caller's node
+therefore handles the card itself:
+
+1. On a `GET` of `/sam/<peer-id>/a2a/<name>/.well-known/agent-card.json`
+   (or of the bare service path, for SDKs that treat the base URL as the
+   card location), the node holds the request and fetches the card from the
+   agent over the mesh.
+2. It rewrites every interface URL to the mesh path that the client used,
+   so the client keeps talking through the node.
+3. It removes bindings that the mesh cannot carry. gRPC needs its own
+   end-to-end connection, so only the JSON-RPC and HTTP+JSON bindings
+   remain. A card with neither, which includes cards in a pre-1.0 format,
+   is refused with `502`.
+4. It advertises streaming as off and removes the card's signatures, because
+   the content has changed.
+
+The client then follows the rewritten card. Every following request, which
+is a JSON-RPC `POST` to the same path, is forwarded to the agent unchanged.
+The A2A `contextId` and `taskId` travel inside the messages and are not
+touched, so multi-turn conversations work as they do against a local agent.
+
+`X-Sam-Required-Labels` works on A2A requests in the same way as on
+inference requests. The calling node verifies the provider's credential,
+refuses with `403` if the labels are not attested, and removes the header
+before forwarding. A caller that needs an agent to run in a given region can
+require it on every message.
+
+On the provider side, the node advertises the agent only while the agent
+serves its card. An agent that is still starting, or that has stopped, is
+not listed in discovery. This is what lets a node declare an agent before
+the agent process exists, which the
+[sandboxed agents preview](../../preview/sandboxed-agents/) relies on.
+
+[Exposing services](../../guides/exposing-services/#a2a-agents) shows the
+declaration, [Connecting agents](../../guides/connecting-agents/#calling-a2a-agents)
+shows the client side, and the [A2A chat use case](../../use-cases/chat-a2a/)
+runs one end to end.
 
 ## Mesh events
 

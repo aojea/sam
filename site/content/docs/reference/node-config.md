@@ -91,13 +91,17 @@ Rules by type:
 - **`inference`**: `target_url` only. It must be the root URL of the backend
   without `/v1`. The node adds the prefix. Callers reach the service through
   the node's `/v1` endpoint or at `/sam/<peer>/inference/<name>/v1/...`.
-- **`a2a`**: `target_url` only. The agent card is fetched from
-  `/.well-known/agent-card.json` on the backend and served again with mesh
-  URLs. The card must use the A2A 1.0 format.
+- **`a2a`**: `target_url` only. The node probes
+  `/.well-known/agent-card.json` on the backend and advertises the service
+  only while the card is served. Callers reach the agent at
+  `/sam/<peer>/a2a/<name>/`. The card must use the A2A 1.0 format and offer
+  a JSON-RPC or HTTP+JSON binding. The caller's node rewrites it for the
+  mesh.
 
-Before a service is advertised, the node probes the backend
+Before an `mcp` or `a2a` service is advertised, the node probes the backend
 (`--backend-probe-timeout`, 2 seconds). A backend that does not answer is
-not advertised, and the log records this.
+not advertised, and the log records this. `inference` backends are not
+probed.
 
 Services exist only through this file. There is no runtime API that adds a
 service. An agent with access to the node's API therefore cannot point the
