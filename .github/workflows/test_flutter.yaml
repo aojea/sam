@@ -99,35 +99,20 @@ jobs:
         fi
     - name: Build images and start the mesh (no emulator needed)
       run: ./mobile/mobile_e2e.sh setup
-    - name: AVD cache
-      id: avd-cache
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: |
-          ~/.android/avd/*
-          ~/.android/adb*
-        key: avd-30-google_apis-x86_64
-    - name: Create AVD snapshot for caching
-      if: steps.avd-cache.outputs.cache-hit != 'true'
-      uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
-      with:
-        api-level: 30
-        target: google_apis
-        arch: x86_64
-        force-avd-creation: false
-        disable-animations: false
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-        emulator-boot-timeout: 300
-        script: echo "Generated AVD snapshot for caching."
+    # Cold boot on purpose (-no-snapshot), so no cached AVD snapshot. Restoring
+    # a snapshot resumes a guest whose sys.boot_completed is already 1, so the
+    # action's boot wait returns as soon as adb reconnects and its
+    # unconditional `input keyevent 82` races the system services coming back
+    # ("No service published for: input"). A cold boot sets the property only
+    # after the services are up. Costs about a minute of boot time with KVM.
     - name: Run E2E Integration Test in Android Emulator
       uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
       with:
         api-level: 30
         target: google_apis
         arch: x86_64
-        force-avd-creation: false
         disable-animations: true
-        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+        emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
         emulator-boot-timeout: 300
         script: ./mobile/mobile_e2e.sh test
 
