@@ -26,6 +26,7 @@ import (
 
 	"github.com/google/sam/api"
 	"github.com/google/sam/internal/node"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // These tests cover how a node comes to hold, keep and lose its mesh
@@ -100,13 +101,13 @@ func join(t *testing.T, nodeBin string, env []string, cpURL string, extra ...str
 	}
 }
 
-// enrolledAs fails unless the control plane holds an enrollment for peerID
-// made by subject, and returns it.
-func enrolledAs(t *testing.T, cpPort int, peerID string, subject string) []byte {
+// enrolledAs fails unless the control plane holds an enrollment for id made
+// by subject, and returns it.
+func enrolledAs(t *testing.T, cpPort int, id peer.ID, subject string) []byte {
 	t.Helper()
-	record := fetchAdminStatus(t, cpPort, testAdminToken).enrolledNode(peerID)
+	record := fetchAdminStatus(t, cpPort, testAdminToken).enrolledNode(id)
 	if record == nil {
-		t.Fatalf("control plane :%d has no enrollment for %s", cpPort, peerID)
+		t.Fatalf("control plane :%d has no enrollment for %s", cpPort, id)
 	}
 	if record.Role != api.RoleNode {
 		t.Fatalf("enrollment role = %q, want %q", record.Role, api.RoleNode)
@@ -131,7 +132,7 @@ func TestSamNodeJoin(t *testing.T) {
 
 	home := filepath.Join(tmpDir, "home")
 	env, dataDir := nodeHome(home)
-	peerID := ensureNodeKey(t, dataDir).String()
+	peerID := ensureNodeKey(t, dataDir)
 
 	join(t, nodeBin, env, cpURL)
 
@@ -165,7 +166,7 @@ func TestSamNodeJoinOfflineAccessSavesRefreshToken(t *testing.T) {
 
 	home := filepath.Join(tmpDir, "home")
 	env, dataDir := nodeHome(home)
-	peerID := ensureNodeKey(t, dataDir).String()
+	peerID := ensureNodeKey(t, dataDir)
 
 	join(t, nodeBin, env, cpURL, "--offline-access")
 	enrolledAs(t, cpPort, peerID, mockOIDCUser)
@@ -237,7 +238,7 @@ func TestSamNodeRunWithStoredIdentity(t *testing.T) {
 		"--api-token-path", token,
 	)
 	first.waitForAPI(t)
-	issued := enrolledAs(t, cpPort, first.peerID.String(), jwtUser)
+	issued := enrolledAs(t, cpPort, first.peerID, jwtUser)
 	first.kill()
 
 	// /healthz answers only once Start succeeded, and Start fails unless a
@@ -273,7 +274,7 @@ func TestSamNodeRunControlPlaneMismatch(t *testing.T) {
 	// Enroll with mesh A.
 	onA := launchNode(t, nodeBin, env, home, "run", "--control-plane", cpURLA, "--jwt", jwt, "--allow-loopback", "--api-token-path", token)
 	onA.waitForAPI(t)
-	peerID := onA.peerID.String()
+	peerID := onA.peerID
 	issuedByA := enrolledAs(t, cpPortA, peerID, jwtUser)
 	onA.kill()
 
@@ -308,7 +309,7 @@ func TestSamNodeRunControlPlaneMismatch(t *testing.T) {
 
 	onB := launchNode(t, nodeBin, env, home, "run", "--control-plane", cpURLB, "--jwt", jwt, "--allow-loopback", "--api-token-path", token)
 	onB.waitForAPI(t)
-	if onB.peerID.String() != peerID {
+	if onB.peerID != peerID {
 		t.Fatalf("reset changed the peer ID: %s then %s", peerID, onB.peerID)
 	}
 	enrolledAs(t, cpPortB, peerID, jwtUser)

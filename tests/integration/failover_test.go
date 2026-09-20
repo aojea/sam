@@ -214,7 +214,7 @@ roles: []
 		"--autorelay-boot-delay", "0s",
 	)
 	samNode.waitForAPI(t)
-	nodePeerID := samNode.peerID.String()
+	nodePeerID := samNode.peerID
 
 	// The node is on the mesh once Router A reports it connected to CP A.
 	waitForPeerOnRouter(t, httpPortCP_A, testAdminToken, nodePeerID, 15*time.Second)

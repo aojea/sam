@@ -74,7 +74,7 @@ func TestSelfHealingHTTPFallback(t *testing.T) {
 	first := launchNode(t, nodeBin, env, home, "run", "--control-plane", cpURL,
 		"--jwt", mintToken(map[string]interface{}{"sub": jwtUser}), "--allow-loopback", "--api-token-path", token)
 	first.waitForAPI(t)
-	waitForPeerOnRouter(t, cpPort, testAdminToken, first.peerID.String(), 10*time.Second)
+	waitForPeerOnRouter(t, cpPort, testAdminToken, first.peerID, 10*time.Second)
 	first.kill()
 	if addrs := storedRouters(t, dataDir); !slices.Contains(addrs, oldRouter) {
 		t.Fatalf("stored routers %v do not include the router the node enrolled through, %s", addrs, oldRouter)
@@ -92,7 +92,7 @@ func TestSelfHealingHTTPFallback(t *testing.T) {
 	// and Start fails unless a router authenticated the node.
 	again := launchNode(t, nodeBin, env, home, "run", "--allow-loopback", "--api-token-path", token)
 	again.waitForAPI(t)
-	lease := waitForPeerOnRouter(t, cpPort, testAdminToken, again.peerID.String(), 10*time.Second)
+	lease := waitForPeerOnRouter(t, cpPort, testAdminToken, again.peerID, 10*time.Second)
 	if !slices.Contains(lease.Addresses, newRouter) {
 		t.Fatalf("the node is connected to %v, not to the new router %s", lease.Addresses, newRouter)
 	}

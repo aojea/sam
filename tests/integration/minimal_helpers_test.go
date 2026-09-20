@@ -548,21 +548,22 @@ func fetchAdminStatus(t *testing.T, cpPort int, adminToken string) adminStatus {
 	return status
 }
 
-// enrolledNode is the control plane's record of peerID, or nil.
-func (s adminStatus) enrolledNode(peerID string) *storage.EnrolledNode {
+// enrolledNode is the control plane's record of id, or nil. The wire carries
+// strings; they are decoded so the comparison is on the peer, not its spelling.
+func (s adminStatus) enrolledNode(id peer.ID) *storage.EnrolledNode {
 	for i := range s.EnrolledNodes {
-		if s.EnrolledNodes[i].PeerID == peerID {
+		if p, err := peer.Decode(s.EnrolledNodes[i].PeerID); err == nil && p == id {
 			return &s.EnrolledNodes[i]
 		}
 	}
 	return nil
 }
 
-// routerWith is the lease of a router that reports peerID connected, or nil.
-func (s adminStatus) routerWith(peerID string) *storage.RouterLease {
+// routerWith is the lease of a router that reports id connected, or nil.
+func (s adminStatus) routerWith(id peer.ID) *storage.RouterLease {
 	for i := range s.ActiveRouters {
-		for _, p := range s.ActiveRouters[i].ConnectedPeers {
-			if p == peerID {
+		for _, raw := range s.ActiveRouters[i].ConnectedPeers {
+			if p, err := peer.Decode(raw); err == nil && p == id {
 				return &s.ActiveRouters[i]
 			}
 		}
@@ -570,17 +571,17 @@ func (s adminStatus) routerWith(peerID string) *storage.RouterLease {
 	return nil
 }
 
-// waitForPeerOnRouter returns the lease of the router peerID is connected
-// to, as the control plane learns it from the router's lease renewals.
-func waitForPeerOnRouter(t *testing.T, cpPort int, adminToken string, peerID string, timeout time.Duration) *storage.RouterLease {
+// waitForPeerOnRouter returns the lease of the router id is connected to,
+// as the control plane learns it from the router's lease renewals.
+func waitForPeerOnRouter(t *testing.T, cpPort int, adminToken string, id peer.ID, timeout time.Duration) *storage.RouterLease {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
-		if lease := fetchAdminStatus(t, cpPort, adminToken).routerWith(peerID); lease != nil {
+		if lease := fetchAdminStatus(t, cpPort, adminToken).routerWith(id); lease != nil {
 			return lease
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("no router on control plane :%d reported %s connected within %v", cpPort, peerID, timeout)
+			t.Fatalf("no router on control plane :%d reported %s connected within %v", cpPort, id, timeout)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
