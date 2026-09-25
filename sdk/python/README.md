@@ -3,8 +3,10 @@
 Native Python SDK for joining a SAM agent mesh from inside the agent
 process. It replaces the `sam-node` sidecar for agents written in Python:
 the agent enrolls with the control plane, joins the mesh through a router,
-finds services and calls them, publishes services of its own, and follows
-the control plane's keys, bans and policy while it runs. Import it as
+finds services and calls them, answers A2A requests for the agent itself,
+and follows the control plane's keys, bans and policy while it runs. It
+publishes no service; a tool or a model others should find by name runs
+behind a `sam-node`. Import it as
 `agent_mesh`.
 
 Guide: [sam-mesh.dev/docs/guides/native-sdks](https://sam-mesh.dev/docs/guides/native-sdks/),
@@ -34,12 +36,13 @@ Find a service and call it:
 
 <!-- embed: sdk/python/examples/call.py -->
 ```python
-"""Finds a service on the mesh and calls it: a tool of an MCP service, or a
-path of an inference or A2A service.
+"""Calls something on the mesh: a tool of an MCP service or a path of an
+inference or A2A service someone published, found by name, or an agent that
+published nothing, reached by its peer ID.
 
-    python call.py mcp://greeter greet '{"name": "Ada"}'
-    python call.py a2a://greeter /card
+    python call.py mcp://everything echo '{"message": "hi"}'
     python call.py inference://ollama /v1/models
+    python call.py 12D3KooW... a2a://agent /card
 
 SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
 SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or SAM_JWT_PATH
@@ -56,9 +59,13 @@ import trio
 from agent_mesh import AgentMesh
 
 argv = sys.argv[1:]
-service = argv[0] if len(argv) > 0 else "mcp://greeter"
-tool_or_path = argv[1] if len(argv) > 1 else "greet"
-args = json.loads(argv[2]) if len(argv) > 2 else {"name": "world"}
+# A first argument that is not a service target is the peer ID of an agent.
+peer_id = None
+if argv and "://" not in argv[0]:
+    peer_id, argv = argv[0], argv[1:]
+service = argv[0] if len(argv) > 0 else ("a2a://agent" if peer_id else "mcp://everything")
+tool_or_path = argv[1] if len(argv) > 1 else ("/card" if peer_id else "echo")
+args = json.loads(argv[2]) if len(argv) > 2 else {"message": "hi"}
 
 mesh = AgentMesh.enroll(
     os.environ.get("SAM_CONTROL_PLANE_URL", "https://mesh.example.com"),
@@ -74,19 +81,25 @@ async def main() -> None:
     async with mesh.join() as session:
         print(f"on the mesh as {session.peer_id}")
 
-        providers = await session.discover(service)
-        if not providers:
-            raise SystemExit(f"no member of the mesh serves {service}")
-        # A provider record can outlive its member; the first that answers is used.
-        for provider in providers:
-            try:
-                await session.connect(provider)
-                break
-            except (ConnectionError, PermissionError) as err:
-                print(f"{provider.peer_id}: {err}", file=sys.stderr)
+        if peer_id:
+            # An agent is not in the discovery table; the SDK finds the path
+            # to its peer ID through the routers.
+            await session.connect(peer_id)
+            provider = peer_id
         else:
-            raise SystemExit(f"no provider of {service} is reachable")
-        print(f"{service} is served by {provider.peer_id}")
+            providers = await session.discover(service)
+            if not providers:
+                raise SystemExit(f"no member of the mesh serves {service}")
+            # A provider record can outlive its member; the first that answers is used.
+            for provider in providers:
+                try:
+                    await session.connect(provider)
+                    break
+                except (ConnectionError, PermissionError) as err:
+                    print(f"{provider.peer_id}: {err}", file=sys.stderr)
+            else:
+                raise SystemExit(f"no provider of {service} is reachable")
+        print(f"{service} is served by {peer_id or provider.peer_id}")
 
         if service.startswith("mcp://"):
             tools = await session.list_tools(provider, service)
@@ -102,24 +115,25 @@ trio.run(main)
 ```
 <!-- /embed -->
 
-Publish services of your own:
+Be an agent others can call. Nothing is published; a caller reaches the
+agent by its peer ID, the one it prints, through a router:
 
-<!-- embed: sdk/python/examples/serve.py -->
+<!-- embed: sdk/python/examples/agent.py -->
 ```python
-"""Publishes services on the mesh and answers callers until stopped: an MCP
-tool, an A2A endpoint and, when OLLAMA_URL is set, the Ollama server running
-beside this program as an inference service. The mesh policy decides which
-members may call; the SDK turns the others away before anything reaches this
-code or Ollama.
+"""An agent on the mesh: joins, then answers A2A requests from other members
+until stopped. It publishes nothing. There is no service name to look up; a
+caller reaches the agent by its peer ID, through a router, as `a2a://agent`.
+The mesh policy decides which members may call; the SDK turns the others away
+before anything reaches this code.
 
-    python serve.py            # publishes mcp://greeter and a2a://greeter
-    python serve.py greeter-2  # the same under another name
+    python agent.py                        # answered by the handler below
+    python agent.py http://127.0.0.1:9999  # forwarded to an A2A server beside it
 
 SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
 SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or SAM_JWT_PATH
 (a workload identity token your platform issues, such as a Kubernetes
 projected service account token), and keeps the identity and credential in
-SAM_STATE_DIR; later runs resume from there without it.
+SAM_STATE_DIR; later runs resume from there, as the same peer, without it.
 """
 
 import json
@@ -127,45 +141,31 @@ import os
 import sys
 
 import trio
-from agent_mesh import AgentMesh, HTTPRequest, HTTPResponse, HTTPService, MCPService, VerifiedBiscuit
-from mcp.server.mcpserver import MCPServer
+from agent_mesh import AgentMesh, HTTPRequest, HTTPResponse, VerifiedBiscuit
 
-service_name = sys.argv[1] if len(sys.argv) > 1 else "greeter"
+backend_url = sys.argv[1] if len(sys.argv) > 1 else None
 
 mesh = AgentMesh.enroll(
     os.environ.get("SAM_CONTROL_PLANE_URL", "https://mesh.example.com"),
     bootstrap_token_path=os.environ.get("SAM_BOOTSTRAP_TOKEN_PATH"),
     jwt_path=os.environ.get("SAM_JWT_PATH"),
-    state_dir=os.environ.get("SAM_STATE_DIR", f"~/.config/sam-mesh/{service_name}"),
+    state_dir=os.environ.get("SAM_STATE_DIR", "~/.config/sam-mesh/agent"),
     # A plaintext http:// control plane is otherwise accepted only on loopback.
     allow_insecure=os.environ.get("SAM_INSECURE_CONTROL_PLANE") == "true",
 )
 
 
-def create_server() -> MCPServer:
-    server = MCPServer(service_name)
-
-    @server.tool(description="Greets someone by name")
-    def greet(name: str) -> str:
-        return f"hello {name}"
-
-    return server
-
-
 async def card(request: HTTPRequest, caller: VerifiedBiscuit) -> HTTPResponse:
-    body = json.dumps({"name": service_name, "path": request.path, "caller": caller.peer_id})
+    """Answers every path with who was asked and who asked; a real agent runs
+    an A2A server here, or beside this process at backend_url."""
+    body = json.dumps({"name": "agent", "path": request.path, "caller": caller.peer_id})
     return HTTPResponse(status=200, headers={"content-type": "application/json"}, body=body.encode())
 
 
 async def main() -> None:
     async with mesh.join() as session:
-        await session.serve(MCPService(name=service_name, create_server=create_server))
-        await session.serve(HTTPService(type="a2a", name=service_name, target=card))
-        if "OLLAMA_URL" in os.environ:
-            await session.serve(HTTPService(type="inference", name="ollama", target=os.environ["OLLAMA_URL"]))
-
-        served = ", ".join(f"{t}://{n}" for t, n, _ in session.services.list())
-        print(f"serving {served} as {session.peer_id}", flush=True)
+        target = await session.accept_a2a(backend_url or card)
+        print(f"accepting {target} as {session.peer_id}", flush=True)
         await trio.sleep_forever()
 
 

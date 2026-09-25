@@ -7,17 +7,25 @@ weight: 6
 An agent written in JavaScript or Python can be a member of the mesh itself,
 with no `sam-node` beside it. The SDK enrolls with the control plane, joins
 through a router, finds services, calls MCP tools and inference or A2A
-endpoints, and publishes services of its own. Every caller of those services
-is checked against the mesh policy before anything reaches your code.
+endpoints, and answers A2A requests for the agent itself. Every caller of
+the agent is checked against the mesh policy before anything reaches your
+code.
 
-This guide takes you from nothing to two programs on a mesh: one that
-publishes a tool and an agent card, and one that finds them and calls them.
-Both programs are in the repository under
+This guide takes you from nothing to two programs on a mesh: an agent that
+other members can call, and a caller that reaches a service by name and the
+agent by its peer ID. Both programs are in the repository under
 [`sdk/js/examples`](https://github.com/google/sam/tree/main/sdk/js/examples)
 and
 [`sdk/python/examples`](https://github.com/google/sam/tree/main/sdk/python/examples),
 and the repository's tests run them against a real mesh, so what you read
 here is what runs.
+
+An SDK member calls what the mesh offers and accepts A2A requests for its
+own agent. It does not publish services. A tool, a model or an agent that
+others should find by name runs behind a `sam-node`, which publishes it and
+enforces the policy; see [Your own mesh](../../getting-started/your-own-mesh/).
+The reasons are in the
+[SDK README](https://github.com/google/sam/blob/main/sdk/README.md#agents-not-services).
 
 ## 1. Get a mesh
 
@@ -92,84 +100,67 @@ programs as canaries beside the `sam-node` ones.
 ## 2. Install the SDK
 
 ```bash
-npm install @sam-mesh/sdk @modelcontextprotocol/sdk zod   # Node.js 22 or later
+npm install @sam-mesh/sdk          # Node.js 22 or later
 ```
 
 ```bash
-pip install sam-mesh                                       # Python 3.11 or later
+pip install sam-mesh               # Python 3.11 or later
 ```
 
-The JavaScript package depends on the MCP SDK and zod; the install line
-names them so your project can import them directly. The Python package is
-imported as `agent_mesh`. It runs on trio, because py-libp2p does; under
-asyncio, use it through `anyio` with the trio backend.
+The Python package is imported as `agent_mesh`. It runs on trio, because
+py-libp2p does; under asyncio, use it through `anyio` with the trio backend.
 
-## 3. Publish a service
+## 3. Be an agent
 
-This program publishes an MCP tool named `greet` under the service
-`mcp://greeter` and an A2A endpoint under `a2a://greeter`, and stays on the
-mesh answering callers until you stop it. With `OLLAMA_URL` set, it also
-publishes the Ollama server running beside it as `inference://ollama`, so a
-model on your laptop becomes a model on the mesh.
+This program joins the mesh and answers A2A requests for `a2a://agent`
+until you stop it. It publishes nothing: there is no name to look up. A
+caller reaches it by the peer ID it prints, through a router. Without an
+argument the handler in the program answers; with the URL of an A2A server
+running beside it, requests are forwarded there, which is how an agent
+written with an A2A SDK joins the mesh.
 
-JavaScript, `serve.js`:
+JavaScript, `agent.js`:
 
-<!-- embed: sdk/js/examples/serve.ts -->
+<!-- embed: sdk/js/examples/agent.ts -->
 ```ts
-// Publishes services on the mesh and answers callers until stopped: an MCP
-// tool, an A2A endpoint and, when OLLAMA_URL is set, the Ollama server running
-// beside this program as an inference service. The mesh policy decides which
-// members may call; the SDK turns the others away before anything reaches
-// this code or Ollama.
+// An agent on the mesh: joins, then answers A2A requests from other members
+// until stopped. It publishes nothing. There is no service name to look up; a
+// caller reaches the agent by its peer ID, through a router, as a2a://agent.
+// The mesh policy decides which members may call; the SDK turns the others
+// away before anything reaches this code.
 //
-//   node serve.js            # publishes mcp://greeter and a2a://greeter
-//   node serve.js greeter-2  # the same under another name
+//   node agent.js                        # answered by the handler below
+//   node agent.js http://127.0.0.1:9999  # forwarded to an A2A server beside it
 //
 // SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
 // SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or
 // SAM_JWT_PATH (a workload identity token your platform issues, such as a
 // Kubernetes projected service account token), and keeps the identity and
-// credential in SAM_STATE_DIR; later runs resume from there without it.
+// credential in SAM_STATE_DIR; later runs resume from there, as the same
+// peer, without it.
 import { homedir } from "node:os";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { AgentMesh } from "@sam-mesh/sdk";
-import { z } from "zod";
 
-const [name = "greeter"] = process.argv.slice(2);
+const [backendURL] = process.argv.slice(2);
 
 const mesh = await AgentMesh.enroll({
   controlPlaneUrl: process.env.SAM_CONTROL_PLANE_URL ?? "https://mesh.example.com",
   bootstrapTokenPath: process.env.SAM_BOOTSTRAP_TOKEN_PATH,
   jwtPath: process.env.SAM_JWT_PATH,
-  stateDir: process.env.SAM_STATE_DIR ?? `${homedir()}/.config/sam-mesh/${name}`,
+  stateDir: process.env.SAM_STATE_DIR ?? `${homedir()}/.config/sam-mesh/agent`,
   // A plaintext http:// control plane is otherwise accepted only on loopback.
   allowInsecure: process.env.SAM_INSECURE_CONTROL_PLANE === "true",
 });
 const session = await mesh.join();
 
-await session.serve({
-  type: "mcp",
-  name,
-  createServer: () => {
-    const server = new McpServer({ name, version: "1.0.0" });
-    server.registerTool("greet", { description: "Greets someone by name", inputSchema: { name: z.string() } }, async ({ name: who }) => ({
-      content: [{ type: "text", text: `hello ${who}` }],
-    }));
-    return server;
-  },
-});
-
-await session.serve({
-  type: "a2a",
-  name,
-  target: (request, caller) => Response.json({ name, path: new URL(request.url).pathname, caller: caller.peerId }),
-});
-
-if (process.env.OLLAMA_URL !== undefined) {
-  await session.serve({ type: "inference", name: "ollama", target: process.env.OLLAMA_URL });
-}
-
-console.log(`serving ${session.servedServices.map((s) => `${s.type}://${s.name}`).join(", ")} as ${session.peerId}`);
+// Answers every path with who was asked and who asked; a real agent runs an
+// A2A server here, or beside this process at backendURL.
+const target = await session.acceptA2A(
+  backendURL !== undefined
+    ? { url: backendURL }
+    : { handler: (request, caller) => Response.json({ name: "agent", path: new URL(request.url).pathname, caller: caller.peerId }) },
+);
+console.log(`accepting ${target} as ${session.peerId}`);
 
 const stop = () => void session.close().then(() => process.exit(0));
 process.on("SIGINT", stop);
@@ -177,24 +168,24 @@ process.on("SIGTERM", stop);
 ```
 <!-- /embed -->
 
-Python, `serve.py`:
+Python, `agent.py`:
 
-<!-- embed: sdk/python/examples/serve.py -->
+<!-- embed: sdk/python/examples/agent.py -->
 ```python
-"""Publishes services on the mesh and answers callers until stopped: an MCP
-tool, an A2A endpoint and, when OLLAMA_URL is set, the Ollama server running
-beside this program as an inference service. The mesh policy decides which
-members may call; the SDK turns the others away before anything reaches this
-code or Ollama.
+"""An agent on the mesh: joins, then answers A2A requests from other members
+until stopped. It publishes nothing. There is no service name to look up; a
+caller reaches the agent by its peer ID, through a router, as `a2a://agent`.
+The mesh policy decides which members may call; the SDK turns the others away
+before anything reaches this code.
 
-    python serve.py            # publishes mcp://greeter and a2a://greeter
-    python serve.py greeter-2  # the same under another name
+    python agent.py                        # answered by the handler below
+    python agent.py http://127.0.0.1:9999  # forwarded to an A2A server beside it
 
 SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
 SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or SAM_JWT_PATH
 (a workload identity token your platform issues, such as a Kubernetes
 projected service account token), and keeps the identity and credential in
-SAM_STATE_DIR; later runs resume from there without it.
+SAM_STATE_DIR; later runs resume from there, as the same peer, without it.
 """
 
 import json
@@ -202,45 +193,31 @@ import os
 import sys
 
 import trio
-from agent_mesh import AgentMesh, HTTPRequest, HTTPResponse, HTTPService, MCPService, VerifiedBiscuit
-from mcp.server.mcpserver import MCPServer
+from agent_mesh import AgentMesh, HTTPRequest, HTTPResponse, VerifiedBiscuit
 
-service_name = sys.argv[1] if len(sys.argv) > 1 else "greeter"
+backend_url = sys.argv[1] if len(sys.argv) > 1 else None
 
 mesh = AgentMesh.enroll(
     os.environ.get("SAM_CONTROL_PLANE_URL", "https://mesh.example.com"),
     bootstrap_token_path=os.environ.get("SAM_BOOTSTRAP_TOKEN_PATH"),
     jwt_path=os.environ.get("SAM_JWT_PATH"),
-    state_dir=os.environ.get("SAM_STATE_DIR", f"~/.config/sam-mesh/{service_name}"),
+    state_dir=os.environ.get("SAM_STATE_DIR", "~/.config/sam-mesh/agent"),
     # A plaintext http:// control plane is otherwise accepted only on loopback.
     allow_insecure=os.environ.get("SAM_INSECURE_CONTROL_PLANE") == "true",
 )
 
 
-def create_server() -> MCPServer:
-    server = MCPServer(service_name)
-
-    @server.tool(description="Greets someone by name")
-    def greet(name: str) -> str:
-        return f"hello {name}"
-
-    return server
-
-
 async def card(request: HTTPRequest, caller: VerifiedBiscuit) -> HTTPResponse:
-    body = json.dumps({"name": service_name, "path": request.path, "caller": caller.peer_id})
+    """Answers every path with who was asked and who asked; a real agent runs
+    an A2A server here, or beside this process at backend_url."""
+    body = json.dumps({"name": "agent", "path": request.path, "caller": caller.peer_id})
     return HTTPResponse(status=200, headers={"content-type": "application/json"}, body=body.encode())
 
 
 async def main() -> None:
     async with mesh.join() as session:
-        await session.serve(MCPService(name=service_name, create_server=create_server))
-        await session.serve(HTTPService(type="a2a", name=service_name, target=card))
-        if "OLLAMA_URL" in os.environ:
-            await session.serve(HTTPService(type="inference", name="ollama", target=os.environ["OLLAMA_URL"]))
-
-        served = ", ".join(f"{t}://{n}" for t, n, _ in session.services.list())
-        print(f"serving {served} as {session.peer_id}", flush=True)
+        target = await session.accept_a2a(backend_url or card)
+        print(f"accepting {target} as {session.peer_id}", flush=True)
         await trio.sleep_forever()
 
 
@@ -251,37 +228,39 @@ trio.run(main)
 Run one of them:
 
 ```bash
-node serve.js
+node agent.js
 # or
-python serve.py
+python agent.py
 ```
 
 ```text
-serving mcp://greeter, a2a://greeter as 12D3KooWQmB5…
+accepting a2a://agent as 12D3KooWQmB5…
 ```
 
 The program spent the token, saved its identity and credential under
-`~/.config/sam-mesh/greeter`, joined through the router and announced its
-services. Run it again and it resumes from that directory; the token is no
-longer needed. The service is reachable from every member of the mesh:
+`~/.config/sam-mesh/agent`, joined through the router and started answering.
+Run it again and it resumes from that directory, as the same peer; the token
+is no longer needed. Keep the peer ID: it is how the agent is reached, from
 another program written with an SDK, a `sam-node` on any machine, or a
 phone.
 
 ## 4. Call it
 
-This program finds a service by name and calls it: a tool of an MCP service,
-or a path of an inference or A2A service.
+This program calls something on the mesh: a tool or a path of a service
+someone published, found by name, or an agent that published nothing,
+reached by its peer ID.
 
 JavaScript, `call.js`:
 
 <!-- embed: sdk/js/examples/call.ts -->
 ```ts
-// Finds a service on the mesh and calls it: a tool of an MCP service, or a
-// path of an inference or A2A service.
+// Calls something on the mesh: a tool of an MCP service or a path of an
+// inference or A2A service someone published, found by name, or an agent that
+// published nothing, reached by its peer ID.
 //
-//   node call.js mcp://greeter greet '{"name": "Ada"}'
-//   node call.js a2a://greeter /card
+//   node call.js mcp://everything echo '{"message": "hi"}'
 //   node call.js inference://ollama /v1/models
+//   node call.js 12D3KooW... a2a://agent /card
 //
 // SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
 // SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or
@@ -291,7 +270,13 @@ JavaScript, `call.js`:
 import { homedir } from "node:os";
 import { AgentMesh, type DiscoveredProvider } from "@sam-mesh/sdk";
 
-const [service = "mcp://greeter", toolOrPath = "greet", args = '{"name": "world"}'] = process.argv.slice(2);
+let argv = process.argv.slice(2);
+// A first argument that is not a service target is the peer ID of an agent.
+let peerId: string | undefined;
+if (argv[0] !== undefined && !argv[0].includes("://")) {
+  [peerId, ...argv] = argv as [string, ...string[]];
+}
+const [service = peerId !== undefined ? "a2a://agent" : "mcp://everything", toolOrPath = peerId !== undefined ? "/card" : "echo", args = '{"message": "hi"}'] = argv;
 
 const mesh = await AgentMesh.enroll({
   controlPlaneUrl: process.env.SAM_CONTROL_PLANE_URL ?? "https://mesh.example.com",
@@ -304,23 +289,32 @@ const mesh = await AgentMesh.enroll({
 const session = await mesh.join();
 console.log(`on the mesh as ${session.peerId}`);
 
-const providers = await session.discover(service);
-if (providers.length === 0) {
-  throw new Error(`no member of the mesh serves ${service}`);
-}
-// A provider record can outlive its member; the first that answers is used.
-let provider: DiscoveredProvider | undefined;
-for (const candidate of providers) {
-  try {
-    await session.connect(candidate);
-    provider = candidate;
-    break;
-  } catch (err) {
-    console.error(`${candidate.peerId}: ${(err as Error).message}`);
+// The peer to call: an agent named by ID, or a provider of a published service.
+let provider: DiscoveredProvider = { peerId: peerId ?? "", addrs: [] };
+if (peerId !== undefined) {
+  // An agent is not in the discovery table; the SDK finds the path to its
+  // peer ID through the routers.
+  await session.connect(peerId);
+} else {
+  const providers = await session.discover(service);
+  if (providers.length === 0) {
+    throw new Error(`no member of the mesh serves ${service}`);
   }
-}
-if (provider === undefined) {
-  throw new Error(`no provider of ${service} is reachable`);
+  // A provider record can outlive its member; the first that answers is used.
+  let reached = false;
+  for (const candidate of providers) {
+    try {
+      await session.connect(candidate);
+      provider = candidate;
+      reached = true;
+      break;
+    } catch (err) {
+      console.error(`${candidate.peerId}: ${(err as Error).message}`);
+    }
+  }
+  if (!reached) {
+    throw new Error(`no provider of ${service} is reachable`);
+  }
 }
 console.log(`${service} is served by ${provider.peerId}`);
 
@@ -342,12 +336,13 @@ Python, `call.py`:
 
 <!-- embed: sdk/python/examples/call.py -->
 ```python
-"""Finds a service on the mesh and calls it: a tool of an MCP service, or a
-path of an inference or A2A service.
+"""Calls something on the mesh: a tool of an MCP service or a path of an
+inference or A2A service someone published, found by name, or an agent that
+published nothing, reached by its peer ID.
 
-    python call.py mcp://greeter greet '{"name": "Ada"}'
-    python call.py a2a://greeter /card
+    python call.py mcp://everything echo '{"message": "hi"}'
     python call.py inference://ollama /v1/models
+    python call.py 12D3KooW... a2a://agent /card
 
 SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
 SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or SAM_JWT_PATH
@@ -364,9 +359,13 @@ import trio
 from agent_mesh import AgentMesh
 
 argv = sys.argv[1:]
-service = argv[0] if len(argv) > 0 else "mcp://greeter"
-tool_or_path = argv[1] if len(argv) > 1 else "greet"
-args = json.loads(argv[2]) if len(argv) > 2 else {"name": "world"}
+# A first argument that is not a service target is the peer ID of an agent.
+peer_id = None
+if argv and "://" not in argv[0]:
+    peer_id, argv = argv[0], argv[1:]
+service = argv[0] if len(argv) > 0 else ("a2a://agent" if peer_id else "mcp://everything")
+tool_or_path = argv[1] if len(argv) > 1 else ("/card" if peer_id else "echo")
+args = json.loads(argv[2]) if len(argv) > 2 else {"message": "hi"}
 
 mesh = AgentMesh.enroll(
     os.environ.get("SAM_CONTROL_PLANE_URL", "https://mesh.example.com"),
@@ -382,19 +381,25 @@ async def main() -> None:
     async with mesh.join() as session:
         print(f"on the mesh as {session.peer_id}")
 
-        providers = await session.discover(service)
-        if not providers:
-            raise SystemExit(f"no member of the mesh serves {service}")
-        # A provider record can outlive its member; the first that answers is used.
-        for provider in providers:
-            try:
-                await session.connect(provider)
-                break
-            except (ConnectionError, PermissionError) as err:
-                print(f"{provider.peer_id}: {err}", file=sys.stderr)
+        if peer_id:
+            # An agent is not in the discovery table; the SDK finds the path
+            # to its peer ID through the routers.
+            await session.connect(peer_id)
+            provider = peer_id
         else:
-            raise SystemExit(f"no provider of {service} is reachable")
-        print(f"{service} is served by {provider.peer_id}")
+            providers = await session.discover(service)
+            if not providers:
+                raise SystemExit(f"no member of the mesh serves {service}")
+            # A provider record can outlive its member; the first that answers is used.
+            for provider in providers:
+                try:
+                    await session.connect(provider)
+                    break
+                except (ConnectionError, PermissionError) as err:
+                    print(f"{provider.peer_id}: {err}", file=sys.stderr)
+            else:
+                raise SystemExit(f"no provider of {service} is reachable")
+        print(f"{service} is served by {peer_id or provider.peer_id}")
 
         if service.startswith("mcp://"):
             tools = await session.list_tools(provider, service)
@@ -411,39 +416,36 @@ trio.run(main)
 <!-- /embed -->
 
 In a second terminal, with the same two environment variables set, call the
-tool and the agent card. Either language finds a service published from the
-other:
+agent by the peer ID it printed. Either language reaches an agent written
+with the other:
 
 ```bash
-node call.js mcp://greeter greet '{"name": "Ada"}'
+python call.py 12D3KooWQmB5… a2a://agent /card
 ```
 
 ```text
 on the mesh as 12D3KooWHZ2M…
-mcp://greeter is served by 12D3KooWQmB5…
-tools: greet
-hello Ada
+a2a://agent is served by 12D3KooWQmB5…
+200 {"name": "agent", "path": "/card", "caller": "12D3KooWHZ2M…"}
 ```
 
+A service a `sam-node` publishes is found by name instead. On a mesh with
+the `everything` canary of the public testnets, or your own `sam-node` with
+an MCP server behind it:
+
 ```bash
-python call.py a2a://greeter /card
+node call.js mcp://everything echo '{"message": "hi"}'
 ```
 
 ```text
 on the mesh as 12D3KooWHZ2M…
-a2a://greeter is served by 12D3KooWQmB5…
-200 {"name": "greeter", "path": "/card", "caller": "12D3KooWHZ2M…"}
+mcp://everything is served by 12D3KooWAb3d…
+tools: echo, add, …
+Echo: hi
 ```
 
-If you started the server with `OLLAMA_URL=http://127.0.0.1:11434`, ask it
-for its models:
-
-```bash
-node call.js inference://ollama /v1/models
-```
-
-The caller and the server are two identities on the mesh with their own
-state directories, `caller` and `greeter`. Each spent a token on its first
+The caller and the agent are two identities on the mesh with their own
+state directories, `caller` and `agent`. Each spent a token on its first
 run; the standing join token of `sam-one` admits any number of members.
 
 ## What happened
@@ -466,29 +468,30 @@ the SDK follows the control plane: keys, bans and router addresses on
 `sam-node`'s schedule, and sooner when the control plane announces a change
 over the mesh.
 
-`discover` looked the service up by name in a table the routers host. Every
-call then dials the addresses the provider advertised and the path through
-the router, and verifies the provider's credential before sending anything.
-`requiredLabels` (`required_labels` in Python) refuses a provider whose
-control-plane-attested labels do not carry the values you ask for.
+`discover` looked a service up by name in a table the routers host. An
+agent is not in that table; given its peer ID, `connect` dials the path
+through every router that admitted the caller, and the router opens a
+circuit because it admitted the agent too. Either way the SDK verifies the
+peer's credential before sending anything, and `requiredLabels`
+(`required_labels` in Python) refuses a peer whose control-plane-attested
+labels do not carry the values you ask for.
 
-`serve` fetched the mesh policy and started answering. Every caller must
-present a credential signed by a trusted control plane key, bound to the
-connection's peer and unexpired, and its role must be granted the service
-by the policy. The check runs on the same Datalog text a `sam-node`
-evaluates. A caller the policy does not admit is turned away before the
-request reaches your handler or your backend. Your handler sees the verified
-caller as `caller.peerId` (`caller.peer_id`) and, for a forwarded backend
-such as Ollama, as the `X-Peer-Id` header; the caller's credential is never
-forwarded.
+`acceptA2A` (`accept_a2a`) fetched the mesh policy and started answering.
+Every caller must present a credential signed by a trusted control plane
+key, bound to the connection's peer and unexpired, and its role must be
+granted `a2a://agent` by the policy. The check runs on the same Datalog
+text a `sam-node` evaluates. A caller the policy does not admit is turned
+away before the request reaches your handler or your A2A server. Your
+handler sees the verified caller as `caller.peerId` (`caller.peer_id`) and
+a forwarded server as the `X-Peer-Id` header; the caller's credential is
+never forwarded. The connection is encrypted end to end between the two
+peers; the router forwards ciphertext.
 
 Under the open development policy of `sam-one`, every member holds the
 `node` role and that role may call any service. On a shared mesh the policy
-grants a role the services it may call (`allowed_services: ["mcp://greeter"]`
+grants a role the services it may call (`allowed_services: ["a2a://agent"]`
 or a pattern) and the members it may reach; see
-[Mesh policy](../../reference/policy/). A refused MCP caller receives
-`AuthResponse{success: false}` on the stream; a refused HTTP caller receives
-`403`.
+[Mesh policy](../../reference/policy/). A refused caller receives `403`.
 
 ## Beyond the examples
 
@@ -496,19 +499,30 @@ or a pattern) and the members it may reach; see
   `connect` accept a provider from `discover`, a peer id, or a multiaddr.
   With a peer id alone the SDK goes through the routers.
 - **Every service of a type.** `discover("mcp")` lists every MCP provider
-  on the mesh; `discover("mcp://greeter")` those of one service.
-- **A member's own catalog.** `listTools(peer, "")` returns the provider's
-  `list_local_services` tool, the same one a `sam-node` offers.
-- **Forwarding to a local server.** `serve({ type: "inference", name,
-  target: "http://127.0.0.1:8000" })` and
-  `HTTPService(type="inference", name=..., target="http://...")` forward
-  authorized requests to a URL; a function instead of a URL handles them in
-  the process.
+  on the mesh; `discover("mcp://everything")` those of one service.
+- **A member's own catalog.** `listTools(peer, "")` returns a `sam-node`'s
+  `list_local_services` tool.
+- **An agent written with an A2A SDK.** Run its server on a local port and
+  pass the URL: `acceptA2A({ url: "http://127.0.0.1:9999" })`,
+  `accept_a2a("http://127.0.0.1:9999")`. In JavaScript an Express app with
+  the A2A SDK's handlers can also run in the process:
+  `acceptA2A({ listener: app })`. The agent's name defaults to `agent`;
+  `name` picks another, and callers use `a2a://<name>`.
+- **Calling an agent with an A2A SDK client.** The mesh is a transport for
+  HTTP clients. A peer's service has the URL
+  `http://mesh/sam/<peer-id>/a2a/agent` (`MeshSession.meshURL`,
+  `MeshSession.mesh_url`); the A2A JavaScript client takes
+  `fetchImpl: session.fetch()`, the Python one an
+  `httpx.AsyncClient(transport=MeshTransport(session))`. Response bodies
+  stream, so `message/stream` works.
 - **Reading the policy.** `session.policyRules` (`session.policy_rules`)
   holds the Datalog the session enforces, for logging or tests.
 
 ## What the SDKs do not do
 
+- They do not publish services. An MCP server, a model or an agent that
+  others should find by name runs behind a `sam-node`, which publishes it
+  to the discovery table and reports it to the console.
 - They do not run a sidecar API or a sandbox. An agent that needs the egress
   policy enforcement of `sam-box` runs beside a `sam-node`.
 - They do not serve the discovery table. A member is a client of it; the

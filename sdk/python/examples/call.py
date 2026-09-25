@@ -2,7 +2,7 @@
 inference or A2A service someone published, found by name, or an agent that
 published nothing, reached by its peer ID.
 
-    python call.py mcp://greeter greet '{"name": "Ada"}'
+    python call.py mcp://everything echo '{"message": "hi"}'
     python call.py inference://ollama /v1/models
     python call.py 12D3KooW... a2a://agent /card
 
@@ -25,9 +25,9 @@ argv = sys.argv[1:]
 peer_id = None
 if argv and "://" not in argv[0]:
     peer_id, argv = argv[0], argv[1:]
-service = argv[0] if len(argv) > 0 else ("a2a://agent" if peer_id else "mcp://greeter")
-tool_or_path = argv[1] if len(argv) > 1 else ("/card" if peer_id else "greet")
-args = json.loads(argv[2]) if len(argv) > 2 else {"name": "world"}
+service = argv[0] if len(argv) > 0 else ("a2a://agent" if peer_id else "mcp://everything")
+tool_or_path = argv[1] if len(argv) > 1 else ("/card" if peer_id else "echo")
+args = json.loads(argv[2]) if len(argv) > 2 else {"message": "hi"}
 
 mesh = AgentMesh.enroll(
     os.environ.get("SAM_CONTROL_PLANE_URL", "https://mesh.example.com"),

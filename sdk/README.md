@@ -16,8 +16,16 @@ Python package (`sam-mcp-python`) only wrapped the sidecar's HTTP API and was
 removed in favour of this work.
 
 Both SDKs speak the mesh protocol directly. There is no SDK-specific
-endpoint anywhere in the mesh; a node built with an SDK is, to every other
-node and to the control plane, a `sam-node`.
+endpoint anywhere in the mesh; a member built with an SDK is, to every other
+member and to the control plane, a peer like a `sam-node`.
+
+An SDK member is an agent, not a service provider. It calls what the mesh
+offers: MCP tools, inference and A2A services that `sam-node`s publish and
+the discovery table names. Inbound, it accepts one thing: A2A requests for
+itself, as `a2a://<name>`, reached by peer ID through a router. It publishes
+no service, writes no provider record and reports no catalog; a tool, a
+model or a named agent that others should find by name runs behind a
+`sam-node`. The reasons are in [Agents, not services](#agents-not-services).
 
 ## What exists today
 
@@ -38,11 +46,10 @@ Milestones 1 to 5 are implemented and tested in both languages:
 | Service discovery in the mesh DHT (`/sam/kad/1.0.0`) | yes | yes |
 | `/sam/mcp/1.0.0` client: list and call a provider's tools, or its catalog | yes | yes |
 | Caller-side label requirements on the provider's credential | yes | yes |
+| `/libp2p-http` client: call inference and A2A services on the mesh; response bodies stream | yes | yes |
+| The mesh as a transport for HTTP clients: `session.fetch()` for fetch-based clients, `MeshTransport` for httpx, so the official A2A SDK's client works unchanged | `fetch` | httpx |
 | Provider authorizer: the baseline Datalog and the mesh policy (`GET /policies`), evaluated as `sam-node` does | yes | yes |
-| `/sam/mcp/1.0.0` server: publish MCP services with an in-process MCP server; the member's own catalog | yes | yes |
-| `/libp2p-http` server: publish inference and A2A services, forwarded to a local URL or an in-process handler | yes | yes |
-| `/libp2p-http` client: call inference and A2A services on the mesh | yes | yes |
-| DHT provide with reprovide, `POST /nodes/catalog` self-report | yes | yes |
+| A2A ingress for the agent: `/libp2p-http` for `a2a://<name>`, forwarded to an A2A server beside the process or answered in it; not announced anywhere | yes | yes |
 | Control plane pull on `sam-node`'s interval: `/keys` verified against the trusted set, credential refresh after a rotation, `/info` bans and router addresses | yes | yes |
 | Gossip events from the control plane (`/sam/mesh/events/v1`, StrictSign): ban enforced at once, key rotation adopted, policy update pulls | yes | yes |
 | Banned peers refused: connections dropped and denied, handshakes and requests refused, dials refused | yes | yes |
@@ -50,12 +57,12 @@ Milestones 1 to 5 are implemented and tested in both languages:
 
 A member built this way is on the mesh and uses it in both directions: it
 finds a service in the DHT and calls it through the router, verifying the
-provider on every call, and it publishes services of its own that a
-`sam-node` or another SDK member discovers and calls, authorizing every
-caller with the same Datalog the Go node evaluates. It follows the control
-plane while it runs: a ban reaches it as a gossip event within a second and
-again with the next pull, and a key rotation makes it refresh its credential
-under the new key.
+provider on every call, and it answers A2A requests for its own agent from
+a `sam-node` or another SDK member that names it by peer ID, authorizing
+every caller with the same Datalog the Go node evaluates. It follows the
+control plane while it runs: a ban reaches it as a gossip event within a
+second and again with the next pull, and a key rotation makes it refresh
+its credential under the new key.
 
 Facts about the libp2p implementations that the SDKs work around, each
 pinned by a test:
@@ -94,7 +101,8 @@ pinned by a test:
   every outbound stream and returns it only when sending the SYN fails, so
   the 257th `open_stream` on a connection blocks forever with no error. A
   member that keeps one connection to its router reaches that in hours (a
-  DHT provide every ten minutes, a reservation renewal every hour). `main`
+  reservation renewal every hour, a control plane pull every fifteen
+  minutes). `main`
   releases the slot on close (libp2p/py-libp2p#1426); until that is
   released, `host.py` replaces `Yamux.open_stream` with one that does the
   same, since py-libp2p constructs `Yamux` by name whatever `muxer_opt`
@@ -109,15 +117,21 @@ pinned by a test:
 - go-libp2p-kad-dht keys provider records by the multihash, not the CID.
   `sdk/testdata/service_keys.json` pins the keys both SDKs derive against
   `internal/node/service.go`.
-- go-libp2p-kad-dht stores an ADD_PROVIDER record only when the sender is
-  the provider it names and lists at least one address, and it answers
-  nothing. The Python SDK sends the record itself to the routers and to the
-  closer peers they name (`agent_mesh/discovery.py`); js-libp2p's
-  `contentRouting.provide` does the same in client mode.
 - go-libp2p-http is plain HTTP/1.1 on a stream, one request per stream,
   with `Host` set to the peer ID. The JS SDK bridges the stream to a Node
   duplex and runs Node's HTTP server and client on it; the Python SDK
-  drives `h11` over the stream.
+  drives `h11` over the stream. Both read the response body as it arrives,
+  which an A2A `message/stream` (server-sent events) needs.
+- URL parsers lowercase the host (WHATWG `URL`, httpx), and a base58 peer
+  ID is case-sensitive. The URL an HTTP client uses for a peer's service
+  therefore carries the peer ID in the path,
+  `http://mesh/sam/<peer-id>/<type>/<name>/<path>`, the shape of `sam-node`'s
+  egress proxy and of an agent card it rewrote; the host is ignored.
+- A member that publishes nothing has announced no address, so nothing in
+  the DHT or a router's peerstore names one. `sam-node` dials
+  `/p2p/<router>/p2p-circuit` for every router it authenticated with when
+  it knows nothing else about a peer, as both SDKs do for a peer named by
+  ID (`internal/node/mcp.go`, `preparePeerAddrs`).
 - Every Go component runs GossipSub with `StrictSign`. `@libp2p/gossipsub`
   (the libp2p-maintained package; `@chainsafe/libp2p-gossipsub` stops at
   libp2p 2) and py-libp2p's `GossipSub` with `strict_signing=True` both
@@ -180,7 +194,7 @@ messages in `api/sam.proto`. Bodies are capped at 1 MiB on both sides.
 | `POST /refresh` | `TokenRefreshRequest`, header `Authorization: Bearer <base64 biscuit>` | `TokenRefreshResponse` | sign `sam:refresh:<peer_id>:<ts>` |
 | `GET /keys` | — | `KeysResponse` | none; see below |
 | `GET /policies` | header `Authorization: Bearer <base64 biscuit>` | `PolicyConfigGetResponse{datalog_rules}` | none; the biscuit must belong to an admitted node |
-| `POST /nodes/catalog` | `NodeCatalogReport`, header `Authorization: Bearer <base64 biscuit>` | `204` | none; the reporting peer is read from the biscuit |
+| `POST /nodes/catalog` | `NodeCatalogReport`, header `Authorization: Bearer <base64 biscuit>` | `204` | none; the reporting peer is read from the biscuit. `sam-node` reports what it publishes; an SDK member publishes nothing and does not call it |
 
 - `<ts>` is the request's `challenge_unix_ms`, unix milliseconds, and must
   be within 5 minutes of the control plane's clock (`challengeMaxAge`).
@@ -226,9 +240,9 @@ messages in `api/sam.proto`. Bodies are capped at 1 MiB on both sides.
 
 ### Streams
 
-Two protocols, both starting with a length-prefixed protobuf frame. Framing
-is the go-msgio varint style (unsigned varint byte length, then the bytes),
-with a 64 KiB cap on the first frame.
+Three protocols. The first two start with a length-prefixed protobuf frame;
+framing is the go-msgio varint style (unsigned varint byte length, then the
+bytes), with a 64 KiB cap on the first frame.
 
 - `/sam/auth/1.0.0` (`HandleAuthHandshake`, and the router's equivalent).
   Client sends `AuthFrame{biscuit}`; server verifies the biscuit against the
@@ -237,13 +251,24 @@ with a 64 KiB cap on the first frame.
   credential. The client verifies that credential the same way and, for a
   router, requires the router role. This is how a member joins: connect to a
   router, run this handshake, and the router admits it to the relay and
-  gossip.
+  gossip. Both SDKs answer it too, so a `sam-node` can verify them before
+  calling.
 - `/sam/mcp/1.0.0` (`WithBiscuitAuth` then `HandleMCPStream`). Client sends
   `AuthFrame{biscuit, target_service: "mcp://<service>", agent}`; server
   authorizes the request with the Biscuit authorizer described below and
   answers `AuthResponse`. The stream then carries MCP JSON-RPC messages, each
   one varint-length-prefixed (`StreamTransport` in `internal/node/gate.go`).
-  An empty `target_service` selects the node's own catalog tools.
+  An empty `target_service` selects the node's own catalog tools. The SDKs
+  are clients of this protocol only; they serve no MCP.
+- `/libp2p-http` (go-libp2p-http; `StartIngressServer` and the egress proxy
+  in `internal/node`). Plain HTTP/1.1 on a stream, one request per stream,
+  `Host` set to the peer ID, the caller's biscuit in `X-Sam-Biscuit` and the
+  agent it speaks for in `X-Sam-Agent`. The path is
+  `/<type>/<name>/<upstream>`; the server authorizes `<type>://<name>` with
+  the same authorizer, then forwards `<upstream>` to the service with those
+  two headers stripped and `X-Peer-Id` set to the verified caller. The SDKs
+  are clients of this for `inference://` and `a2a://` services, and servers
+  of it for their own agent, `a2a://<name>`, only.
 
 ### Discovery (`internal/node/service.go`)
 
@@ -252,7 +277,15 @@ A provider announces a service as a DHT provider record for
 once for the name (`<type>` is `mcp`, `inference` or `a2a`). A consumer
 looks up providers for the same CID, dials one and opens `/sam/mcp/1.0.0`.
 Gossip topics under `/sam/discovery/v1/...` carry `ServiceAnnounce` for
-interest-scoped updates; the DHT is the source of truth.
+interest-scoped updates; the DHT is the source of truth. The SDKs look
+records up and announce none.
+
+A peer that announced nothing is still reachable by peer ID: every router
+relays for the peers it admitted, so a caller dials
+`<router>/p2p-circuit/p2p/<peer>` through each router that admitted it.
+Both SDKs do this for a bare peer ID, and `sam-node` does it when it knows
+no other address for a peer (`preparePeerAddrs` in `internal/node/mcp.go`).
+This is how an SDK agent is reached.
 
 ### Authorization on the provider side (`internal/node/middleware.go`)
 
@@ -283,6 +316,47 @@ of it is derived in the SDK:
 - An unconditional rule is written `head <- true`, which every parser
   accepts as a rule (`role("dev") <- true` for a
   `sam:system:authenticated` binding).
+
+## Agents, not services
+
+An SDK member calls services and accepts A2A requests for its own agent.
+It does not publish services: no MCP server, no named inference or A2A
+service, no DHT record, no catalog entry. The reasons:
+
+- **The agent is the principal; a service is infrastructure.** A harness
+  (LangChain, Claude Code, a browser agent) is an MCP client. The tools it
+  should see through the mesh are the ones `sam-node`s publish. Something
+  that must be reachable by name, a tool, a model, a named agent, is a
+  deployment concern, and the sidecar model exists for it: the `sam-node`
+  beside it publishes the service and enforces the policy once, in Go.
+- **Publishing is the expensive part.** Being a provider needs a DHT
+  provide loop, a catalog report and provider records that go stale on
+  every rollout. Accepting requests for the agent itself needs the relay
+  reservation, the auth handshake and the authorizer, all of which a member
+  needs anyway to be verified by a `sam-node` before it is called.
+- **One inbound protocol.** A2A is the protocol for talking to an agent,
+  and the A2A SDKs serve one agent card each. One ingress means one
+  authorizer path to audit in three languages instead of two ingress
+  protocols times a registry of services.
+- **The browser.** A browser cannot listen. An agent in a browser is
+  reachable through a router's relay and nothing else, which is what
+  `accept_a2a` is.
+
+What an SDK agent is on the wire: a peer with a relay reservation on a
+router, answering `/sam/auth/1.0.0` and `/libp2p-http` for `a2a://<name>`,
+with no DHT record and no catalog entry. To a `sam-node` it is a peer whose
+address nobody announced, reached through the router that admitted both,
+and whose credential it verifies before forwarding
+`/sam/<peer>/a2a/<name>/...`. Routers, the control plane and the Datalog
+need no special case.
+
+Two agents that both wrote nothing down still meet: A learns B's peer ID
+(an invite, an agent card, a coordinator), dials it through a router, both
+present their credentials, and A opens the A2A conversation on that
+connection; libp2p's TLS is end to end, so the router carries ciphertext.
+An agent that must be *found* by name runs behind a `sam-node`. Two agents
+that both can only call out (two browsers) meet at a third agent behind a
+`sam-node` that both call.
 
 ## Plan
 
@@ -365,7 +439,7 @@ holds against the control plane's records.
   service the node does not have. The runners took `discover`, `tools` and
   `call` commands for it.
 
-### Milestone 4 — serve tools (done)
+### Milestone 4 — be an agent (done)
 
 - Datalog as the contract, Go side: the baseline moved into a generated
   artifact both SDKs embed, the control plane renders the mesh policy as
@@ -373,39 +447,41 @@ holds against the control plane's records.
   See the authorization section above.
 - Provider authorizer in each SDK (`authorizer.ts`, `authorizer.py`), built
   from the artifact and `datalog_rules`, evaluated on every inbound
-  `AuthFrame` and every `/libp2p-http` request in the order
-  `internal/node/middleware.go` uses.
-- `/sam/mcp/1.0.0` server: read the `AuthFrame`, authorize, answer with the
-  member's credential, then hand the stream to the service's MCP server
-  (`@modelcontextprotocol/sdk` `McpServer`; `mcp.server.mcpserver.MCPServer`
-  run over pumped streams). A denied caller gets `AuthResponse{success:
-  false}` with the reason; a granted service the member does not publish
-  closes the stream after the answer, as `sam-node` does. The empty target is
-  the member's catalog (`list_local_services`).
-- `/libp2p-http` server for inference and A2A: the path is
+  `/libp2p-http` request in the order `internal/node/middleware.go` uses.
+- `/libp2p-http` server for the agent: the path is
   `/<type>/<name>/<upstream>`, the biscuit is `X-Sam-Biscuit`; after
-  authorization the request goes to a local URL or an in-process handler
-  with the biscuit and agent headers stripped and `X-Peer-Id` set to the
-  verified caller. `session.request(addr, "inference://<name>", path)` is
-  the client side.
-- `session.serve(spec)` registers the service, fetches the mesh policy on
-  the first call and re-reads it on `sam-node`'s sync interval, announces
-  the service in the DHT (type and name, reprovided periodically) and
-  reports it to `POST /nodes/catalog`.
-- Tests. Unit: each SDK's handlers behind an in-process host, called with
-  its own clients: an MCP tool, the catalog, a proxied backend that sees
-  `X-Peer-Id` and never the biscuit, an in-process handler, and refusals for
-  a role that grants nothing, an ungranted service, a missing service, a
+  authorization for `<type>://<name>`, a request for the agent's own
+  `a2a://<name>` goes to an A2A server beside the process or a handler in
+  it, with the biscuit and agent headers stripped and `X-Peer-Id` set to the
+  verified caller; anything else is 404, after authorization, so an
+  unauthorized caller learns nothing. JS also takes a Node request
+  listener, which is what an Express app with the A2A SDK's handlers is,
+  and runs it on the ingress's own `http.Server`.
+- `session.accept_a2a(target, name=)` / `session.acceptA2A(spec)` fetches
+  the mesh policy, re-reads it on `sam-node`'s sync interval and starts
+  answering. It announces nothing. One agent per session.
+- `/libp2p-http` client for callers built on HTTP libraries:
+  `open_http_request` / `fetchOverStream` return once the headers are in
+  and stream the body; `MeshTransport` (httpx) and `session.fetch()`
+  (fetch) carry a client's requests to the peer a mesh URL names. The A2A
+  SDK's client takes either without changes.
+- `sam-node`: a peer it knows no address for is dialed through every
+  router it authenticated with, so its egress proxy reaches an agent by
+  peer ID (`preparePeerAddrs`).
+- Tests. Unit: each SDK's ingress behind an in-process host, called with
+  its own clients: a forwarded A2A server that sees `X-Peer-Id` and never
+  the biscuit, an SSE body read event by event, an in-process handler (and
+  a Node listener), an httpx client on `MeshTransport`, and refusals for a
+  role that grants nothing, an ungranted type, another agent name (404), a
   missing biscuit and a dotted path; plus the authorizer alone against the
-  decisions `internal/node/middleware_test.go` pins. Integration: in the
-  mesh of `sdk_mesh_test.go` each SDK member publishes `mcp://echo-<sdk>`
-  and `inference://llm-<sdk>`; the `sam-node` calls the tool with
-  `call_remote_tool` and the inference endpoint through its egress proxy,
-  the other SDK member discovers both in the DHT and calls them through the
-  router, and a Go peer the control plane vouches for but whose role the
-  policy grants nothing is refused at the `AuthResponse` and with 403 on
-  the HTTP path, then served once it presents a node-role token. About 9
-  seconds for the whole mesh.
+  decisions `internal/node/middleware_test.go` pins, and `sam-node`'s
+  router fallback. Integration: in the mesh of `sdk_mesh_test.go` each SDK
+  member accepts `a2a://agent`; the `sam-node` reaches it by peer ID
+  through its egress proxy, the other SDK member does the same with no
+  lookup, a lookup for `a2a://agent` finds nothing, the member refuses a
+  `/sam/mcp/1.0.0` stream, and a Go peer whose role the policy grants
+  nothing gets 403 and is answered once it presents a node-role token.
+  About 9 seconds for the whole mesh.
 
 ### Milestone 5 — parity and release (done)
 
@@ -416,7 +492,8 @@ holds against the control plane's records.
   was unknown when the credential was issued (`issuedUnderKeys` in the
   credential file); `/info` for router addresses and the ban set,
   reconciled with the rule that a ban recorded after the request went out
-  survives an answer that omits it; the mesh policy when serving. Runs
+  survives an answer that omits it; the mesh policy while accepting
+  callers. Runs
   once shortly after join, then on `sam-node`'s interval with the same
   jitter, and whenever an event triggers it.
 - Gossip events on `/sam/mesh/events/v1`: the topic validator rejects
@@ -424,9 +501,9 @@ holds against the control plane's records.
   events; `BANNED` evicts the peer at once, `KEY_ROTATION` adopts the key
   and triggers a pull, `POLICY_UPDATE` triggers a pull. Bans are not
   persisted; a restarted member reads them from `/info`.
-- Ban enforcement: the auth handshake, the MCP handshake and HTTP ingress
-  refuse a banned peer before looking at its token; `connect()` refuses to
-  dial one; its connections are dropped when the ban lands.
+- Ban enforcement: the auth handshake and the A2A ingress refuse a banned
+  peer before looking at its token; `connect()` refuses to dial one; its
+  connections are dropped when the ban lands.
 - Publishing: `.github/workflows/release.yml` stamps the release tag's
   version on both packages (`hack/sdk-version.sh`) and publishes
   `@sam-mesh/sdk` to npm and `sam-mesh` to PyPI through trusted
@@ -462,18 +539,23 @@ holds against the control plane's records.
 ### On the testnets
 
 Both testnets run the example programs, unchanged, as canaries beside the
-`sam-node` ones (`.github/k8s/sam-sdk-canary-template.yaml`): the JavaScript
-and the Python `serve` publish `mcp://greeter-js` / `a2a://greeter-js` and
-`…-py`, enrolled with the pod's projected service account token through
-`SAM_JWT_PATH`. Two CronJobs cross every implementation boundary every 15
-minutes and once per rollout: the `sam-node` cold-path probe now also calls
-both greeters (node → SDK, MCP through `call_remote_tool` and A2A through
-the egress proxy), and the SDK cold-path probe
-(`sam-sdk-probe-cronjob-template.yaml`) runs each SDK's `call` against the
-everything canary (SDK → node) and the other SDK's greeter (SDK → SDK). The
-images (`Dockerfile.sam-sdk-js`, `Dockerfile.sam-sdk-python`) are built per
-commit by `deploy.yaml`, so `bananas` runs the SDKs at the same commit as
-the Go components they talk to.
+`sam-node` ones (`.github/k8s/sam-sdk-canary-template.yaml`): two pairs, an
+agent written with one SDK and a caller written with the other in one pod,
+enrolled with the pod's projected service account token through
+`SAM_JWT_PATH`. The agent accepts `a2a://agent`; the caller reads its peer
+ID from the line it prints, through a volume the pod shares, calls it every
+five minutes and is Ready while the last call succeeded, so the
+Deployment's availability says whether an agent is still reachable after
+hours on the mesh. Two CronJobs cross every implementation boundary every
+15 minutes and once per rollout: the `sam-node` cold-path probe
+(`sam-probe-cronjob-template.yaml`) runs an agent per SDK as sidecars and
+reaches each by peer ID through the egress proxy (node → SDK), and the SDK
+cold-path probe (`sam-sdk-probe-cronjob-template.yaml`) runs each SDK's
+`call` against the everything canary by name (SDK → node) and the other
+SDK's agent by peer ID (SDK → SDK). The images (`Dockerfile.sam-sdk-js`,
+`Dockerfile.sam-sdk-python`) are built per commit by `deploy.yaml`, so
+`bananas` runs the SDKs at the same commit as the Go components they talk
+to.
 
 ### Later
 
@@ -486,6 +568,9 @@ the Go components they talk to.
 ### Non-goals
 
 - Rewriting the control plane, router or sandbox components; they stay Go.
+- Publishing services from an SDK: an MCP server, a named inference or A2A
+  service, a DHT record or a catalog entry. That is `sam-node`'s job; see
+  [Agents, not services](#agents-not-services).
 - A browser build. Node.js only until the transport story for browsers
   (WebTransport or WebRTC to routers) is designed.
 - Any SDK-only wire protocol. If an SDK needs something the Go node does not
@@ -517,7 +602,7 @@ both so nothing skips there. The SDK members in the mesh test are the
 runners `sdk/js/src/conformance-join.ts` and
 `sdk/python/src/agent_mesh/conformance_join.py`: each joins, prints what it
 holds, then takes JSON commands on stdin (`auth`, `discover`, `tools`,
-`call`, `serve`, `http`, `peers`, `sync`, `banned`, `quit`) so the Go test
+`call`, `accept`, `http`, `peers`, `sync`, `banned`, `quit`) so the Go test
 can drive both languages through the same script.
 
 The programs the package READMEs and the Native SDKs guide show are
@@ -550,18 +635,19 @@ one follows is named so a change on one side can be carried to the others.
 | JavaScript (`sdk/js/src/`) | Python (`sdk/python/src/agent_mesh/`) | Mirrors |
 | --- | --- | --- |
 | `identity.ts` | `identity.py` | ed25519 key pair, libp2p key encodings, peer ID |
-| `controlplane.ts` | `controlplane.py` | `/info`, `/keys`, `/enroll`, `/enroll/status`, `/register`, `/refresh`, `/policies`, `/nodes/catalog`, with the challenges of `api/network.go` |
+| `controlplane.ts` | `controlplane.py` | `/info`, `/keys`, `/enroll`, `/enroll/status`, `/register`, `/refresh`, `/policies`, with the challenges of `api/network.go` |
 | `credential.ts` | `credential.py` | what a member holds, `AuthFrame` encoding, `issuedUnderKeys` |
 | `mesh.ts` | `mesh.py` | `AgentMesh`: enroll (resumes an unexpired credential in the state directory before spending a token), load, refresh, `syncControlPlane` as `SyncControlPlane` in `internal/node/controlplane_sync.go`; state directory (`identity.key`, `credential.json`, the same layout in both languages) |
 | `biscuit.ts` | `biscuit.py` | verification of a peer's credential, as `internal/identity.verifyBiscuit` |
 | `host.ts` | `host.py` | the libp2p host as `internal/node/node.go` configures it, plus gossipsub and the connection gater |
 | `auth.ts` | `auth.py` | `/sam/auth/1.0.0` on both sides, as `HandleAuthHandshake` |
 | — | `relay.py` | circuit relay v2 client (py-libp2p's cannot talk to go-libp2p) |
-| `session.ts` | `session.py` | `MeshSession`: join, relay reservation, refresh loop, control plane sync loop, gossip events, `serve()` |
-| `discovery.ts` | `discovery.py` | service keys and DHT lookups as `internal/node/service.go`; Python also provides, py-libp2p's client cannot |
+| `session.ts` | `session.py` | `MeshSession`: join, relay reservation, refresh loop, control plane sync loop, gossip events, `acceptA2A()` / `accept_a2a()`, `fetch()` |
+| `discovery.ts` | `discovery.py` | service keys and DHT lookups as `internal/node/service.go`; lookups only, no records |
 | `mcp.ts` | `mcp_client.py` | MCP over `/sam/mcp/1.0.0`, the client side of `internal/node/gate.go` |
 | `authorizer.ts` | `authorizer.py` | the provider authorizer, as `internal/node.(*SamNode).Authorize`, over the generated baseline and `datalog_rules` |
-| `serve.ts` | `serve.py` | `/sam/mcp/1.0.0` server, `/libp2p-http` server and client, service registry, as `WithBiscuitAuth` and `StartIngressServer` |
+| `libp2p-http.ts` | `libp2p_http.py` | `/libp2p-http` client (streaming) and the A2A ingress for the agent, as go-libp2p-http and `StartIngressServer`; mesh URLs |
+| — | `httpx_transport.py` | `MeshTransport`, the mesh as an `httpx.AsyncBaseTransport` (JS has `session.fetch()` instead) |
 | `sync.ts` | `sync.py` | ban set and mesh event verification, as `reconcileBannedPeers` and `verifyEvent` |
 | `conformance.ts`, `conformance-join.ts` | `conformance.py`, `conformance_join.py` | the runners the integration tests drive |
 | `../examples/` | `../../examples/` | the programs the docs embed and `TestNativeSDKExamples` runs |
