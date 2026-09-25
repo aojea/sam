@@ -30,7 +30,7 @@ from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
 from libp2p.stream_muxer.yamux.yamux import FLAG_SYN, YAMUX_HEADER_FORMAT
 from multiaddr.resolvers import DNSResolver
 
-from agent_mesh.host import LIBP2P_LEAKS_STREAM_SLOTS, create_mesh_host, dial_addrs, open_stream, peer_info
+from agent_mesh.host import LIBP2P_LEAKS_CONNECTION_SCOPES, LIBP2P_LEAKS_STREAM_SLOTS, create_mesh_host, dial_addrs, open_stream, peer_info
 from agent_mesh.identity import Identity
 from agent_mesh.session import DIAL_TIMEOUT, dial
 
@@ -213,3 +213,51 @@ def test_the_stream_slot_workaround_retires_with_libp2p_0_8():
 
     major, minor = (int(p) for p in importlib.metadata.version("libp2p").split(".")[:2])
     assert LIBP2P_LEAKS_STREAM_SLOTS == ((major, minor) < (0, 8))
+
+
+def test_the_host_runs_without_a_resource_manager_and_a_background_dialer():
+    """py-libp2p 0.7 leaks a ResourceManager connection slot per connection
+    and per failed security upgrade; at 1000 the manager degrades to one
+    connection for good, and the host refuses every peer. And its
+    AutoConnector dials every peer in the peerstore every 30s while under
+    100 connections, which for a member is always. Neither runs here."""
+    host, _ = create_mesh_host(Identity.generate())
+    swarm = host.get_network()
+    assert swarm._resource_manager is None  # noqa: SLF001 - py-libp2p offers no getter
+    assert swarm.connection_config.low_watermark == 0
+    assert swarm.connection_config.min_connections == 0
+    # The Swarm's own limits do not depend on the manager.
+    assert swarm.connection_config.max_connections > 0
+    assert swarm.connection_config.max_connections_per_peer > 0
+
+
+def test_a_connection_ends_with_no_slot_held():
+    """Connections come and go for a member's whole life; each must leave
+    the host as it found it. With the manager gone there is no slot to
+    hold; this pins that a connect and a disconnect round-trip cleanly, so
+    a future manager cannot come back with the leak unnoticed."""
+
+    async def main():
+        server, server_listen = create_mesh_host(Identity.generate(), ["/ip4/127.0.0.1/tcp/0"])
+        client, _ = create_mesh_host(Identity.generate())
+        async with server.run(listen_addrs=server_listen), client.run(listen_addrs=[]):
+            info = info_from_p2p_addr(multiaddr.Multiaddr(f"{server.get_addrs()[0]}"))
+            for _ in range(5):
+                with trio.fail_after(10):
+                    await client.connect(info)
+                    assert server.get_id() in client.get_connected_peers()
+                    await client.disconnect(server.get_id())
+                    await trio.sleep(0.05)
+            assert client.get_network().get_total_connections() == 0
+            assert client.get_network()._resource_manager is None  # noqa: SLF001
+
+    trio.run(main)
+
+
+def test_the_connection_scope_workaround_retires_with_libp2p_0_8():
+    """When the pin moves past 0.7, delete the set_resource_manager(None)
+    call and this flag in host.py, and check the leak is gone upstream."""
+    import importlib.metadata
+
+    major, minor = (int(p) for p in importlib.metadata.version("libp2p").split(".")[:2])
+    assert LIBP2P_LEAKS_CONNECTION_SCOPES == ((major, minor) < (0, 8))
