@@ -66,7 +66,8 @@ var sdkExampleLaunchers = []sdkExampleLauncher{
 			if err := exec.Command(python, "-c", "import agent_mesh.session").Run(); err != nil {
 				return nil, "agent_mesh is not importable with libp2p (pip install -e sdk/python)"
 			}
-			entry := filepath.Join(root, "sdk", "python", "examples", example+".py")
+			// Python names its files with underscores: a2a-agent is a2a_agent.py.
+			entry := filepath.Join(root, "sdk", "python", "examples", strings.ReplaceAll(example, "-", "_")+".py")
 			return exec.CommandContext(ctx, python, append([]string{entry}, args...)...), ""
 		},
 	},
@@ -164,7 +165,7 @@ func TestNativeSDKExamples(t *testing.T) {
 
 			// The first run spends the token: the sam-node's calc over MCP,
 			// found by name.
-			out := runExample(t, mesh, l, withToken, "mcp://calc", "add", `{"a": 1, "b": 2}`)
+			out := runExample(t, mesh, l, withToken, "call", "mcp://calc", "add", `{"a": 1, "b": 2}`)
 			caller := expectLine(t, out, "on the mesh as ")
 			expectLine(t, out, "mcp://calc is served by "+mesh.samNode.peerID.String())
 			expectLine(t, out, "tools: add")
@@ -177,7 +178,7 @@ func TestNativeSDKExamples(t *testing.T) {
 			if err := os.Remove(tokenPath); err != nil {
 				t.Fatal(err)
 			}
-			out = runExample(t, mesh, l, withoutToken, target.peerID, "a2a://agent", "/card")
+			out = runExample(t, mesh, l, withoutToken, "call", target.peerID, "a2a://agent", "/card")
 			if got := expectLine(t, out, "on the mesh as "); got != caller {
 				t.Fatalf("second run joined as %s, want the identity of the first run %s", got, caller)
 			}
@@ -200,7 +201,7 @@ func TestNativeSDKExamples(t *testing.T) {
 				if other.name == l.name {
 					continue
 				}
-				out := runExample(t, mesh, other, withoutToken, target.peerID, "a2a://agent", "/card")
+				out := runExample(t, mesh, other, withoutToken, "call", target.peerID, "a2a://agent", "/card")
 				if got := expectLine(t, out, "on the mesh as "); got != caller {
 					t.Fatalf("%s resumed %s's state directory as %s, want %s", other.name, l.name, got, caller)
 				}
@@ -303,12 +304,12 @@ func startExampleAgent(t *testing.T, name string, cmd *exec.Cmd) (*sdkExampleAge
 	}
 }
 
-// runExample runs a call example to completion and returns its stdout.
-func runExample(t *testing.T, mesh *sdkMesh, l sdkExampleLauncher, env []string, args ...string) string {
+// runExample runs an example that exits on its own to completion and returns its stdout.
+func runExample(t *testing.T, mesh *sdkMesh, l sdkExampleLauncher, env []string, example string, args ...string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd, skip := l.cmd(ctx, mesh.root, "call", args...)
+	cmd, skip := l.cmd(ctx, mesh.root, example, args...)
 	if skip != "" {
 		t.Fatalf("%s: %s", l.name, skip)
 	}
@@ -318,7 +319,7 @@ func runExample(t *testing.T, mesh *sdkMesh, l sdkExampleLauncher, env []string,
 	cmd.Stderr = stderr
 	stdout, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("%s call %v failed: %v\nstdout:\n%s\nstderr:\n%s", l.name, args, err, stdout, stderr.String())
+		t.Fatalf("%s %s %v failed: %v\nstdout:\n%s\nstderr:\n%s", l.name, example, args, err, stdout, stderr.String())
 	}
 	return string(stdout)
 }

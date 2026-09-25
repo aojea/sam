@@ -170,7 +170,7 @@ sdk-js:
 
 sdk-python:
 	python3 -m venv sdk/python/.venv
-	./sdk/python/.venv/bin/pip install -q -e './sdk/python[test]'
+	./sdk/python/.venv/bin/pip install -q -e './sdk/python[test,examples]'
 	./sdk/python/.venv/bin/python -m pytest -q sdk/python/tests
 
 sdk-proto:
