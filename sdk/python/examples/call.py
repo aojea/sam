@@ -1,9 +1,10 @@
-"""Finds a service on the mesh and calls it: a tool of an MCP service, or a
-path of an inference or A2A service.
+"""Calls something on the mesh: a tool of an MCP service or a path of an
+inference or A2A service someone published, found by name, or an agent that
+published nothing, reached by its peer ID.
 
     python call.py mcp://greeter greet '{"name": "Ada"}'
-    python call.py a2a://greeter /card
     python call.py inference://ollama /v1/models
+    python call.py 12D3KooW... a2a://agent /card
 
 SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
 SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or SAM_JWT_PATH
@@ -20,8 +21,12 @@ import trio
 from agent_mesh import AgentMesh
 
 argv = sys.argv[1:]
-service = argv[0] if len(argv) > 0 else "mcp://greeter"
-tool_or_path = argv[1] if len(argv) > 1 else "greet"
+# A first argument that is not a service target is the peer ID of an agent.
+peer_id = None
+if argv and "://" not in argv[0]:
+    peer_id, argv = argv[0], argv[1:]
+service = argv[0] if len(argv) > 0 else ("a2a://agent" if peer_id else "mcp://greeter")
+tool_or_path = argv[1] if len(argv) > 1 else ("/card" if peer_id else "greet")
 args = json.loads(argv[2]) if len(argv) > 2 else {"name": "world"}
 
 mesh = AgentMesh.enroll(
@@ -38,19 +43,25 @@ async def main() -> None:
     async with mesh.join() as session:
         print(f"on the mesh as {session.peer_id}")
 
-        providers = await session.discover(service)
-        if not providers:
-            raise SystemExit(f"no member of the mesh serves {service}")
-        # A provider record can outlive its member; the first that answers is used.
-        for provider in providers:
-            try:
-                await session.connect(provider)
-                break
-            except (ConnectionError, PermissionError) as err:
-                print(f"{provider.peer_id}: {err}", file=sys.stderr)
+        if peer_id:
+            # An agent is not in the discovery table; the SDK finds the path
+            # to its peer ID through the routers.
+            await session.connect(peer_id)
+            provider = peer_id
         else:
-            raise SystemExit(f"no provider of {service} is reachable")
-        print(f"{service} is served by {provider.peer_id}")
+            providers = await session.discover(service)
+            if not providers:
+                raise SystemExit(f"no member of the mesh serves {service}")
+            # A provider record can outlive its member; the first that answers is used.
+            for provider in providers:
+                try:
+                    await session.connect(provider)
+                    break
+                except (ConnectionError, PermissionError) as err:
+                    print(f"{provider.peer_id}: {err}", file=sys.stderr)
+            else:
+                raise SystemExit(f"no provider of {service} is reachable")
+        print(f"{service} is served by {peer_id or provider.peer_id}")
 
         if service.startswith("mcp://"):
             tools = await session.list_tools(provider, service)

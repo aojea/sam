@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Mapping, Optional, Sequenc
 import multiaddr
 import trio
 from libp2p.abc import IHost
-from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
 from libp2p.pubsub.gossipsub import PROTOCOL_ID as GOSSIPSUB_V10
@@ -38,24 +37,26 @@ from mcp import ClientSession
 
 from ._proto import circuit_pb2 as circuit
 from ._proto import sam_pb2 as pb
-from .auth import AUTH_PROTOCOL, MCP_PROTOCOL, auth_stream_handler, authenticate_with_peer
+from .auth import AUTH_PROTOCOL, auth_stream_handler, authenticate_with_peer
 from .authorizer import ProviderAuthorizerOptions
 from .biscuit import ROLE_ROUTER, VerifiedBiscuit, require_role
-from .discovery import DiscoveredProvider, ServiceType, find_providers, parse_service_target, provide, service_key
+from .discovery import DiscoveredProvider, find_providers, parse_service_target, service_key
 from .host import create_mesh_host, dial_addrs, peer_info
+from .httpx_transport import MESH_PATH_PREFIX
 from .identity import canonical_peer_id
-from .mcp_client import ToolCallResult, ToolInfo, open_mcp_session, tool_call_result
-from .relay import STOP_PROTOCOL, dial_through_relay, reserve_relay, split_circuit_address, stop_stream_handler
-from .serve import (
+from .libp2p_http import (
+    DEFAULT_A2A_NAME,
     HTTP_PROTOCOL,
+    A2AEndpoint,
+    HTTPHandler,
     HTTPResponse,
     ProviderOptions,
-    ServiceRegistry,
-    ServiceSpec,
     http_ingress_handler,
     http_request_over_stream,
-    mcp_stream_handler,
+    mesh_http_target,
 )
+from .mcp_client import ToolCallResult, ToolInfo, open_mcp_session, tool_call_result
+from .relay import STOP_PROTOCOL, dial_through_relay, reserve_relay, split_circuit_address, stop_stream_handler
 from .sync import GOSSIP_EVENTS_TOPIC, BanSet, verify_mesh_event
 
 if TYPE_CHECKING:
@@ -71,8 +72,6 @@ MIN_REFRESH_DELAY = 2.0
 RESERVATION_RENEW_LEAD = 2 * 60.0
 # sam-node's --control-plane-sync-interval default.
 DEFAULT_POLICY_SYNC = 15 * 60.0
-# How often provider records are refreshed; go-libp2p-kad-dht expires them after 48h.
-DEFAULT_PROVIDE_INTERVAL = 10 * 60.0
 # sam-node's --control-plane-sync-interval default, and its 2s first pull.
 DEFAULT_CONTROL_PLANE_SYNC = 15 * 60.0
 FIRST_CONTROL_PLANE_SYNC = 2.0
@@ -151,23 +150,33 @@ class MeshSession:
     authenticated_peers: dict[str, datetime] = field(default_factory=dict)
     # Peers the control plane has banned; connections to and from them are refused.
     banned: BanSet = field(default_factory=BanSet)
-    # The services this member publishes.
-    services: ServiceRegistry = field(default_factory=ServiceRegistry)
+    # This member's agent, once accept_a2a was called.
+    endpoint: Optional[A2AEndpoint] = None
     policy_sync_interval: float = DEFAULT_POLICY_SYNC
-    provide_interval: float = DEFAULT_PROVIDE_INTERVAL
     control_plane_sync_interval: float = DEFAULT_CONTROL_PLANE_SYNC
     control_plane_sync_jitter: float = DEFAULT_CONTROL_PLANE_SYNC_JITTER
     reservation_lead: float = RESERVATION_RENEW_LEAD
     reservation_retry: float = DEFAULT_REFRESH_RETRY
     _nursery: Optional[trio.Nursery] = field(default=None, repr=False)
     _policy_rules: Optional[list[str]] = field(default=None, repr=False)
-    _serving: bool = field(default=False, repr=False)
     _sync_lock: trio.Lock = field(default_factory=trio.Lock, repr=False)
     _sync_trigger: trio.Event = field(default_factory=trio.Event, repr=False)
 
     @property
     def peer_id(self) -> str:
         return str(self.host.get_id())
+
+    @staticmethod
+    def mesh_url(peer_id: str, target_service: str, path: str = "") -> str:
+        """The URL an httpx client on `MeshTransport` uses for a service on a
+        peer: http://mesh/sam/<peer-id>/<type>/<name>/<path>, the shape of
+        sam-node's egress proxy and of an agent card it rewrote."""
+        return "http://mesh" + MESH_PATH_PREFIX + canonical_peer_id(peer_id) + mesh_http_target(target_service, path)
+
+    @property
+    def agent_url(self) -> Optional[str]:
+        """The mesh URL of this member's own agent, once accept_a2a was called."""
+        return self.mesh_url(self.peer_id, self.endpoint.service) if self.endpoint is not None else None
 
     @property
     def relay_addresses(self) -> list[str]:
@@ -302,7 +311,7 @@ class MeshSession:
     def policy_rules(self) -> list[str]:
         """The mesh policy rules this member evaluates for callers, as the
         control plane rendered them (PolicyConfigGetResponse.datalog_rules).
-        Empty until the first serve() or sync_policy()."""
+        Empty until accept_a2a() or sync_policy()."""
         return list(self._policy_rules or [])
 
     async def sync_policy(self) -> None:
@@ -311,16 +320,17 @@ class MeshSession:
 
     async def sync(self) -> "ControlPlaneSync":
         """Pulls keys, bans and router addresses from the control plane now, and
-        the mesh policy when serving, then applies them: a newly banned peer is
-        disconnected and dropped from the admitted set. Concurrent calls run
-        one after the other. Errors of individual parts are in the result."""
+        the mesh policy when accepting callers, then applies them: a newly
+        banned peer is disconnected and dropped from the admitted set.
+        Concurrent calls run one after the other. Errors of individual parts
+        are in the result."""
         async with self._sync_lock:
             result = await trio.to_thread.run_sync(self.mesh.sync_control_plane)
             if result.banned_peer_ids is not None:
                 newly_banned, _ = self.banned.reconcile(canonical_peer_ids(result.banned_peer_ids), result.fetched_at)
                 for peer in newly_banned:
                     await self._evict(peer)
-            if self._serving:
+            if self.endpoint is not None:
                 try:
                     await self.sync_policy()
                 except Exception as err:  # noqa: BLE001 - the last good policy stays in force
@@ -432,53 +442,35 @@ class MeshSession:
             self.host, peer_id, self.mesh.credential.biscuit, target_service, path, method=method, headers=headers, body=body, agent=agent
         )
 
-    async def serve(self, spec: ServiceSpec) -> None:
-        """Publishes a service on the mesh: registers it, announces it in the
-        DHT and reports it to the control plane's catalog. The first call
-        fetches the mesh policy and starts answering /sam/mcp/1.0.0 and
-        /libp2p-http; a policy that cannot be read fails the call, since a
-        provider without it could only authorize what callers carry in their
-        own tokens."""
-        if not self._serving:
-            await self.sync_policy()
-            options = ProviderOptions(
-                authorizer=ProviderAuthorizerOptions(
-                    trusted_keys=lambda: self.mesh.credential.control_plane_keys,
-                    own_biscuit=lambda: self.mesh.credential.biscuit,
-                    policy_rules=lambda: self._policy_rules or [],
-                ),
+    async def accept_a2a(self, target: Union[str, HTTPHandler], *, name: str = DEFAULT_A2A_NAME) -> str:
+        """Makes this member's agent reachable: other members call it as
+        `a2a://<name>` by peer ID, through a router, and the SDK answers
+        /libp2p-http with target, the base URL of an A2A server beside this
+        process or a handler in it. Nothing is announced: no DHT record, no
+        catalog entry. A tool, a model or a service others should find by
+        name is published by a sam-node. Fetches the mesh policy first and
+        keeps it current; a policy that cannot be read fails the call, since
+        an agent without it could only authorize what callers carry in their
+        own tokens. Returns the service target callers use. One agent per
+        session."""
+        if self.endpoint is not None:
+            raise RuntimeError(f"this session already accepts {self.endpoint.service}")
+        endpoint = A2AEndpoint(target=target, name=name)
+        await self.sync_policy()
+        options = ProviderOptions(
+            authorizer=ProviderAuthorizerOptions(
+                trusted_keys=lambda: self.mesh.credential.control_plane_keys,
                 own_biscuit=lambda: self.mesh.credential.biscuit,
-                on_authorized=lambda peer, verified, _target: self.authenticated_peers.__setitem__(peer, verified.expiration),
-                is_banned=lambda peer: peer in self.banned,
-            )
-            self.host.set_stream_handler(MCP_PROTOCOL, mcp_stream_handler(self.services, options, str(MCP_PROTOCOL)))
-            self.host.set_stream_handler(HTTP_PROTOCOL, http_ingress_handler(self.services, options))
-            if self._nursery is not None:
-                self._nursery.start_soon(self._policy_loop)
-                self._nursery.start_soon(self._provide_loop)
-            self._serving = True
-        self.services.add(spec)
-        await self._provide(spec.type, spec.name)
-        try:
-            await self.report_catalog()
-        except Exception as err:  # noqa: BLE001 - the catalog is display only
-            logger.warning("catalog report failed: %s", err)
-
-    async def provide_all(self) -> None:
-        """Announces every registered service in the DHT again."""
-        for service_type, name, _ in self.services.list():
-            await self._provide(service_type, name)  # type: ignore[arg-type]
-
-    async def _provide(self, service_type: ServiceType, name: str) -> None:
-        # Once for the type and once for the name, as sam-node announces.
-        seeds = [ID.from_base58(r.peer_id) for r in self.routers]
-        addrs = [multiaddr.Multiaddr(a) for a in self.relay_addresses] + list(self.host.get_addrs())
-        for key in (service_key(service_type), service_key(service_type, name)):
-            await provide(self.host, key, seeds, addrs)
-
-    async def report_catalog(self) -> None:
-        """Reports the published services to the control plane's catalog (display only)."""
-        await trio.to_thread.run_sync(self.mesh.control_plane.report_catalog, self.mesh.credential.biscuit, self.services.list())
+                policy_rules=lambda: self._policy_rules or [],
+            ),
+            on_authorized=lambda peer, verified, _target: self.authenticated_peers.__setitem__(peer, verified.expiration),
+            is_banned=lambda peer: peer in self.banned,
+        )
+        self.host.set_stream_handler(HTTP_PROTOCOL, http_ingress_handler(endpoint, options))
+        if self._nursery is not None:
+            self._nursery.start_soon(self._policy_loop)
+        self.endpoint = endpoint
+        return endpoint.service
 
     async def _policy_loop(self) -> None:
         while True:
@@ -487,14 +479,6 @@ class MeshSession:
                 await self.sync_policy()
             except Exception as err:  # noqa: BLE001 - the last good policy stays in force
                 logger.warning("mesh policy sync failed: %s", err)
-
-    async def _provide_loop(self) -> None:
-        while True:
-            await trio.sleep(self.provide_interval)
-            try:
-                await self.provide_all()
-            except Exception as err:  # noqa: BLE001
-                logger.warning("dht reprovide failed: %s", err)
 
 
 async def _refresh_loop(mesh: "AgentMesh", lead: float, retry: float) -> None:
@@ -527,7 +511,6 @@ async def join_mesh(
     refresh_retry: float = DEFAULT_REFRESH_RETRY,
     reservation_lead: float = RESERVATION_RENEW_LEAD,
     policy_sync_interval: float = DEFAULT_POLICY_SYNC,
-    provide_interval: float = DEFAULT_PROVIDE_INTERVAL,
     control_plane_sync_interval: float = DEFAULT_CONTROL_PLANE_SYNC,
     control_plane_sync_jitter: float = DEFAULT_CONTROL_PLANE_SYNC_JITTER,
 ) -> AsyncIterator[MeshSession]:
@@ -568,7 +551,6 @@ async def join_mesh(
                     authenticated_peers=authenticated,
                     banned=banned,
                     policy_sync_interval=policy_sync_interval,
-                    provide_interval=provide_interval,
                     control_plane_sync_interval=control_plane_sync_interval,
                     control_plane_sync_jitter=control_plane_sync_jitter,
                     reservation_lead=reservation_lead,
