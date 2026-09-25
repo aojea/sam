@@ -19,9 +19,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,45 +72,31 @@ var sdkExampleLaunchers = []sdkExampleLauncher{
 	},
 }
 
-// sdkExampleServer is a running serve example.
-type sdkExampleServer struct {
-	name string
-	// service is what it publishes, greeter-<lang>, as the testnet canaries do.
-	service string
-	peerID  string
+// sdkExampleAgent is a running agent example.
+type sdkExampleAgent struct {
+	name   string
+	peerID string
 }
 
-var servingLine = regexp.MustCompile(`^serving (.*) as (\S+)$`)
+var acceptingLine = regexp.MustCompile(`^accepting (\S+) as (\S+)$`)
 
 // TestNativeSDKExamples runs the programs the SDK READMEs and the Native
 // SDKs guide embed, unchanged, against a real mesh, configured as the
 // testnet canaries are (.github/k8s/sam-sdk-canary-template.yaml). Each
-// SDK's serve example enrolls with an OIDC token through SAM_JWT_PATH, the
-// way a Kubernetes workload does, and publishes mcp://greeter-<lang>,
-// a2a://greeter-<lang> and inference://ollama, the last forwarding to a
-// stand-in for Ollama this test runs. Each SDK's call example enrolls with
-// a bootstrap token, reaches the sam-node's mcp://calc and the other
-// language's greeter (its own when the other toolchain is missing), naming
-// providers only by what discover returned; the SDK finds the path through
-// the router by itself. The first run spends the token, the later runs
-// resume from the state directory without one.
+// SDK's agent example enrolls with an OIDC token through SAM_JWT_PATH, the
+// way a Kubernetes workload does, and accepts A2A requests for a2a://agent,
+// publishing nothing. Each SDK's call example enrolls with a bootstrap
+// token, reaches the sam-node's mcp://calc by name, and the other language's
+// agent (its own when the other toolchain is missing) by peer ID; the SDK
+// finds the path through the router by itself. The first run spends the
+// token, the later runs resume from the state directory without one.
 func TestNativeSDKExamples(t *testing.T) {
 	mesh := startSDKMesh(t)
-
-	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"gemma3","object":"model","owned_by":"`+r.Header.Get("X-Peer-Id")+`"}]}`)
-	}))
-	t.Cleanup(ollama.Close)
 
 	var launchers []sdkExampleLauncher
 	var cmds []*exec.Cmd
 	for _, l := range sdkExampleLaunchers {
-		cmd, skip := l.cmd(context.Background(), mesh.root, "serve", "greeter-"+l.name)
+		cmd, skip := l.cmd(context.Background(), mesh.root, "agent")
 		if skip != "" {
 			t.Logf("%s SDK skipped: %s", l.name, skip)
 			continue
@@ -124,7 +107,7 @@ func TestNativeSDKExamples(t *testing.T) {
 	if len(launchers) == 0 {
 		t.Skip("no SDK toolchain available; see sdk/README.md")
 	}
-	servers := make([]*sdkExampleServer, len(launchers))
+	agents := make([]*sdkExampleAgent, len(launchers))
 	errs := make([]error, len(launchers))
 	var wg sync.WaitGroup
 	for i := range launchers {
@@ -137,13 +120,12 @@ func TestNativeSDKExamples(t *testing.T) {
 			"SAM_CONTROL_PLANE_URL="+mesh.baseURL,
 			"SAM_JWT_PATH="+jwtPath,
 			"SAM_STATE_DIR="+filepath.Join(t.TempDir(), "state"),
-			"OLLAMA_URL="+ollama.URL,
 		)
 		cmds[i].Dir = mesh.root
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			servers[i], errs[i] = startExampleServer(t, launchers[i].name, "greeter-"+launchers[i].name, cmds[i])
+			agents[i], errs[i] = startExampleAgent(t, launchers[i].name, cmds[i])
 		}(i)
 	}
 	wg.Wait()
@@ -152,30 +134,24 @@ func TestNativeSDKExamples(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, s := range servers {
-		waitForPeerOnRouter(t, mesh.cpPort, mesh.adminToken, s.peerID, 5*time.Second)
+	for _, a := range agents {
+		waitForPeerOnRouter(t, mesh.cpPort, mesh.adminToken, a.peerID, 5*time.Second)
 	}
 
-	// The greeter a caller of one language targets: the other language's,
-	// as the testnet probes do, or its own when it is the only one present.
-	peerServer := func(name string) *sdkExampleServer {
-		for _, s := range servers {
-			if s.name != name {
-				return s
+	// The agent a caller of one language targets: the other language's, as
+	// the testnet probes do, or its own when it is the only one present.
+	peerAgent := func(name string) *sdkExampleAgent {
+		for _, a := range agents {
+			if a.name != name {
+				return a
 			}
 		}
-		return servers[0]
-	}
-	servedBy := func(t *testing.T, out string, want *sdkExampleServer, serviceType string) {
-		t.Helper()
-		if got := expectLine(t, out, serviceType+"://"+want.service+" is served by "); got != want.peerID {
-			t.Fatalf("%s://%s is served by %s, want the %s serve example %s", serviceType, want.service, got, want.name, want.peerID)
-		}
+		return agents[0]
 	}
 
 	for _, l := range launchers {
 		l := l
-		target := peerServer(l.name)
+		target := peerAgent(l.name)
 		t.Run(l.name+"-calls", func(t *testing.T) {
 			t.Parallel()
 			stateDir := filepath.Join(t.TempDir(), "state")
@@ -186,7 +162,8 @@ func TestNativeSDKExamples(t *testing.T) {
 			withToken := []string{"SAM_CONTROL_PLANE_URL=" + mesh.baseURL, "SAM_STATE_DIR=" + stateDir, "SAM_BOOTSTRAP_TOKEN_PATH=" + tokenPath}
 			withoutToken := withToken[:2]
 
-			// The first run spends the token: the sam-node's calc over MCP.
+			// The first run spends the token: the sam-node's calc over MCP,
+			// found by name.
 			out := runExample(t, mesh, l, withToken, "mcp://calc", "add", `{"a": 1, "b": 2}`)
 			caller := expectLine(t, out, "on the mesh as ")
 			expectLine(t, out, "mcp://calc is served by "+mesh.samNode.peerID.String())
@@ -194,18 +171,19 @@ func TestNativeSDKExamples(t *testing.T) {
 			expectLine(t, out, "fake-result:add")
 
 			// The state directory now holds the identity and credential; the
-			// token file is gone and not needed. The HTTP path: an in-process
-			// A2A handler on one side, a forward to the Ollama stand-in on the
-			// other. The provider sees the verified caller as X-Peer-Id, never
-			// the biscuit.
+			// token file is gone and not needed. The agent, by peer ID: no
+			// lookup, the path goes through the router. The agent sees the
+			// verified caller, never the biscuit.
 			if err := os.Remove(tokenPath); err != nil {
 				t.Fatal(err)
 			}
-			out = runExample(t, mesh, l, withoutToken, "a2a://"+target.service, "/card")
+			out = runExample(t, mesh, l, withoutToken, target.peerID, "a2a://agent", "/card")
 			if got := expectLine(t, out, "on the mesh as "); got != caller {
 				t.Fatalf("second run joined as %s, want the identity of the first run %s", got, caller)
 			}
-			servedBy(t, out, target, "a2a")
+			if got := expectLine(t, out, "a2a://agent is served by "); got != target.peerID {
+				t.Fatalf("a2a://agent is served by %s, want the %s agent example %s", got, target.name, target.peerID)
+			}
 			card := expectLine(t, out, "200 ")
 			if !strings.Contains(card, `"path": "/card"`) && !strings.Contains(card, `"path":"/card"`) {
 				t.Fatalf("a2a card %q does not echo the path", card)
@@ -213,28 +191,22 @@ func TestNativeSDKExamples(t *testing.T) {
 			if !strings.Contains(card, caller) {
 				t.Fatalf("a2a card %q does not name the verified caller %s", card, caller)
 			}
-			out = runExample(t, mesh, l, withoutToken, "inference://ollama", "/v1/models")
-			if got := expectLine(t, out, "inference://ollama is served by "); got != servers[0].peerID && (len(servers) < 2 || got != servers[1].peerID) {
-				t.Fatalf("inference://ollama is served by %s, which is none of the serve examples", got)
-			}
-			models := expectLine(t, out, "200 ")
-			if !strings.Contains(models, `"gemma3"`) || !strings.Contains(models, caller) {
-				t.Fatalf("models %q: want gemma3 owned by the caller %s", models, caller)
-			}
 
 			// The state directory is the same layout in every implementation:
 			// the other SDK's call example resumes this identity from it, and
 			// so does a sam-node after `state import`. Each proves it by
-			// reaching a greeter as the same peer.
+			// reaching the agent as the same peer.
 			for _, other := range launchers {
 				if other.name == l.name {
 					continue
 				}
-				out := runExample(t, mesh, other, withoutToken, "mcp://"+target.service, "greet", `{"name": "sam"}`)
+				out := runExample(t, mesh, other, withoutToken, target.peerID, "a2a://agent", "/card")
 				if got := expectLine(t, out, "on the mesh as "); got != caller {
 					t.Fatalf("%s resumed %s's state directory as %s, want %s", other.name, l.name, got, caller)
 				}
-				expectLine(t, out, "hello sam")
+				if card := expectLine(t, out, "200 "); !strings.Contains(card, caller) {
+					t.Fatalf("a2a card %q through %s does not name the verified caller %s", card, other.name, caller)
+				}
 			}
 			importedNode := importStateIntoNode(t, mesh, stateDir)
 			if importedNode.peerID.String() != caller {
@@ -242,15 +214,9 @@ func TestNativeSDKExamples(t *testing.T) {
 			}
 			importedAPI := importedNode.waitForAPI(t)
 			waitForPeerOnRouter(t, mesh.cpPort, mesh.adminToken, caller, 10*time.Second)
-			answer, err := callMCPAllowError(t, importedAPI, "imported-token", "call_remote_tool", map[string]any{
-				"peer_id": target.peerID, "tool_name": "mcp://" + target.service + "/greet", "arguments": map[string]any{"name": "node"},
-			})
-			if err != nil || !strings.Contains(answer, "hello node") {
-				t.Fatalf("sam-node running %s's identity could not call %s: %v\n%s", l.name, target.service, err, answer)
-			}
-			// The node's A2A egress path reaches the SDK's handler too, as the
-			// testnet's node probe expects.
-			status, body := egressGet(t, importedAPI, "imported-token", "/sam/"+target.peerID+"/a2a/"+target.service+"/card")
+			// The node's A2A egress path reaches the agent by peer ID, as the
+			// testnet's node probe does.
+			status, body := egressGet(t, importedAPI, "imported-token", "/sam/"+target.peerID+"/a2a/agent/card")
 			if status != 200 || !strings.Contains(body, `"caller"`) || !strings.Contains(body, caller) {
 				t.Fatalf("a2a card through the node: %d %s", status, body)
 			}
@@ -283,10 +249,10 @@ func importStateIntoNode(t *testing.T, mesh *sdkMesh, stateDir string) *backgrou
 	)
 }
 
-// startExampleServer starts a configured serve example and waits for its
-// "serving ... as <peer>" line. Safe to call from several goroutines at
+// startExampleAgent starts a configured agent example and waits for its
+// "accepting ... as <peer>" line. Safe to call from several goroutines at
 // once, so it reports failures instead of ending the test.
-func startExampleServer(t *testing.T, name, service string, cmd *exec.Cmd) (*sdkExampleServer, error) {
+func startExampleAgent(t *testing.T, name string, cmd *exec.Cmd) (*sdkExampleAgent, error) {
 	stderr := &bytes.Buffer{}
 	cmd.Stderr = stderr
 	stdout, err := cmd.StdoutPipe()
@@ -294,7 +260,7 @@ func startExampleServer(t *testing.T, name, service string, cmd *exec.Cmd) (*sdk
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start %s serve example: %w", name, err)
+		return nil, fmt.Errorf("failed to start %s agent example: %w", name, err)
 	}
 	t.Cleanup(func() {
 		_ = cmd.Process.Signal(os.Interrupt)
@@ -307,7 +273,7 @@ func startExampleServer(t *testing.T, name, service string, cmd *exec.Cmd) (*sdk
 			<-done
 		}
 		if t.Failed() {
-			t.Logf("%s serve example stderr:\n%s", name, stderr.String())
+			t.Logf("%s agent example stderr:\n%s", name, stderr.String())
 		}
 	})
 
@@ -315,7 +281,7 @@ func startExampleServer(t *testing.T, name, service string, cmd *exec.Cmd) (*sdk
 	go func() {
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
-			if m := servingLine.FindStringSubmatch(scanner.Text()); m != nil {
+			if m := acceptingLine.FindStringSubmatch(scanner.Text()); m != nil {
 				lines <- scanner.Text()
 				return
 			}
@@ -325,17 +291,15 @@ func startExampleServer(t *testing.T, name, service string, cmd *exec.Cmd) (*sdk
 	select {
 	case line, ok := <-lines:
 		if !ok {
-			return nil, fmt.Errorf("%s serve example exited before serving\nstderr:\n%s", name, stderr.String())
+			return nil, fmt.Errorf("%s agent example exited before accepting\nstderr:\n%s", name, stderr.String())
 		}
-		m := servingLine.FindStringSubmatch(line)
-		for _, want := range []string{"mcp://" + service, "a2a://" + service, "inference://ollama"} {
-			if !strings.Contains(m[1], want) {
-				return nil, fmt.Errorf("%s serve example serves %q, want %s among them", name, m[1], want)
-			}
+		m := acceptingLine.FindStringSubmatch(line)
+		if m[1] != "a2a://agent" {
+			return nil, fmt.Errorf("%s agent example accepts %q, want a2a://agent", name, m[1])
 		}
-		return &sdkExampleServer{name: name, service: service, peerID: m[2]}, nil
+		return &sdkExampleAgent{name: name, peerID: m[2]}, nil
 	case <-time.After(30 * time.Second):
-		return nil, fmt.Errorf("%s serve example did not report serving within 30s\nstderr:\n%s", name, stderr.String())
+		return nil, fmt.Errorf("%s agent example did not report accepting within 30s\nstderr:\n%s", name, stderr.String())
 	}
 }
 
