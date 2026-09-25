@@ -46,21 +46,26 @@ export { DHT_PROTOCOL, isServiceType, parseServiceTarget, serviceCID, type Servi
 export { LabelsNotSatisfiedError, StreamTransport, openMCPSession, requireLabels, type MCPSession, type MCPSessionOptions } from "./mcp.ts";
 export { AuthorizationError, authorizeCaller, type AuthorizeRequest, type ProviderAuthorizerOptions } from "./authorizer.ts";
 export {
+  DEFAULT_A2A_NAME,
+  HTTP_HANDLER_OPTIONS,
   HTTP_PROTOCOL,
-  ServiceRegistry,
+  MESH_PATH_PREFIX,
+  a2aEndpoint,
+  fetchOverStream,
   httpIngressHandler,
   httpRequestOverStream,
-  mcpStreamHandler,
+  meshHTTPTarget,
+  meshURL,
+  splitMeshURL,
   streamToNodeDuplex,
+  type A2AEndpoint,
+  type A2AEndpointSpec,
   type HTTPHandler,
   type HTTPRequestOptions,
   type HTTPResponse,
-  type HTTPServiceSpec,
-  type MCPServerLike,
-  type MCPServiceSpec,
+  type HTTPStreamOptions,
+  type NodeRequestListener,
   type ProviderOptions,
-  type ServedService,
-  type ServiceSpec,
-} from "./serve.ts";
+} from "./libp2p-http.ts";
 export { BASELINE_DATALOG } from "./gen/datalog.ts";
 export { BanSet, EVENT_FRESHNESS_MS, GOSSIP_EVENTS_TOPIC, verifyMeshEvent, type VerifiedMeshEvent } from "./sync.ts";
