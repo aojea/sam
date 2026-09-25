@@ -223,7 +223,8 @@ def test_the_host_runs_without_a_resource_manager_and_a_background_dialer():
     100 connections, which for a member is always. Neither runs here."""
     host, _ = create_mesh_host(Identity.generate())
     swarm = host.get_network()
-    assert swarm._resource_manager is None  # noqa: SLF001 - py-libp2p offers no getter
+    if LIBP2P_LEAKS_CONNECTION_SCOPES:
+        assert swarm._resource_manager is None  # noqa: SLF001 - py-libp2p offers no getter
     assert swarm.connection_config.low_watermark == 0
     assert swarm.connection_config.min_connections == 0
     # The Swarm's own limits do not depend on the manager.
@@ -233,9 +234,9 @@ def test_the_host_runs_without_a_resource_manager_and_a_background_dialer():
 
 def test_a_connection_ends_with_no_slot_held():
     """Connections come and go for a member's whole life; each must leave
-    the host as it found it. With the manager gone there is no slot to
-    hold; this pins that a connect and a disconnect round-trip cleanly, so
-    a future manager cannot come back with the leak unnoticed."""
+    the host as it found it. While the manager is off there is no slot to
+    hold; once a libp2p without the leak brings it back, the slots it
+    counts must return to zero when the connections do."""
 
     async def main():
         server, server_listen = create_mesh_host(Identity.generate(), ["/ip4/127.0.0.1/tcp/0"])
@@ -249,7 +250,11 @@ def test_a_connection_ends_with_no_slot_held():
                     await client.disconnect(server.get_id())
                     await trio.sleep(0.05)
             assert client.get_network().get_total_connections() == 0
-            assert client.get_network()._resource_manager is None  # noqa: SLF001
+            manager = client.get_network()._resource_manager  # noqa: SLF001 - py-libp2p offers no getter
+            if LIBP2P_LEAKS_CONNECTION_SCOPES:
+                assert manager is None
+            elif manager is not None:
+                assert manager._current_connections == 0  # noqa: SLF001
 
     trio.run(main)
 
