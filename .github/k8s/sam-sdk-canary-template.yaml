@@ -1,31 +1,37 @@
-# Two members with no sam-node beside them: the JavaScript and Python SDK
-# example servers (sdk/js/examples/serve.ts, sdk/python/examples/serve.py),
-# unchanged, each publishing mcp://greeter-<lang> and a2a://greeter-<lang>.
-# They enroll with the pod's projected service account token, the way every
-# other canary does, and keep their identity in an emptyDir, so a restart
-# resumes and a new pod enrolls afresh. What the mesh sees from them is what a
-# user of the packages gets.
+# Two long-lived pairs of SDK members with no sam-node beside them: an agent
+# written with one SDK and a caller written with the other, in one pod, both
+# example programs (sdk/js/examples, sdk/python/examples) unchanged. The agent
+# joins through a router and accepts A2A requests for a2a://agent; it publishes
+# nothing, so the caller learns its peer ID from the line it prints, through a
+# volume the pod shares, and calls it every few minutes. The caller is Ready
+# while its last call succeeded, so the Deployment's availability is the
+# answer to "can an agent written with one SDK still be reached by the other
+# after hours on the mesh": relay reservations renewed, credentials refreshed,
+# the control plane followed. Both enroll with the pod's projected service
+# account token, the way every other canary does, and keep their identity in
+# an emptyDir, so a container restart resumes and a new pod enrolls afresh.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: js-canary-${ENV_NAME}
+  name: js-agent-canary-${ENV_NAME}
   namespace: sam-canary-${ENV_NAME}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: js-canary-${ENV_NAME}
+      app: js-agent-canary-${ENV_NAME}
   template:
     metadata:
       labels:
-        app: js-canary-${ENV_NAME}
+        app: js-agent-canary-${ENV_NAME}
         sam-canary: "true"
     spec:
       serviceAccountName: sam-node-sa
+      terminationGracePeriodSeconds: 10
       containers:
-      - name: sdk
+      - name: agent
         image: ghcr.io/google/sam-sdk-js:${IMAGE_TAG}
-        args: ["build/examples/serve.js", "greeter-js"]
+        command: ["/bin/sh", "-c", "node build/examples/agent.js 2>&1 | tee /var/run/sam/agent.log"]
         env:
         - name: SAM_CONTROL_PLANE_URL
           value: "http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
@@ -34,7 +40,7 @@ spec:
         - name: SAM_JWT_PATH
           value: /var/run/secrets/tokens/sam-token
         - name: SAM_STATE_DIR
-          value: /var/run/sam/state
+          value: /var/run/sam/agent
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -52,9 +58,56 @@ spec:
           readOnly: true
         - name: sam-state
           mountPath: /var/run/sam
+      - name: caller
+        image: ghcr.io/google/sam-sdk-python:${IMAGE_TAG}
+        command: ["/bin/sh", "/etc/sam-canary/canary.sh"]
+        env:
+        - name: SAM_CONTROL_PLANE_URL
+          value: "http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
+        - name: SAM_INSECURE_CONTROL_PLANE
+          value: "true"
+        - name: SAM_JWT_PATH
+          value: /var/run/secrets/tokens/sam-token
+        - name: SAM_STATE_DIR
+          value: /var/run/sam/caller
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: CANARY
+          value: python-calls-js-agent
+        - name: CALL
+          value: "python examples/call.py"
+        readinessProbe:
+          exec:
+            command: ["test", "-f", "/var/run/sam/reachable"]
+          initialDelaySeconds: 20
+          periodSeconds: 30
+          failureThreshold: 1
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        volumeMounts:
+        - name: sam-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+        - name: sam-state
+          mountPath: /var/run/sam
+        - name: canary-script
+          mountPath: /etc/sam-canary
+          readOnly: true
       volumes:
       - name: sam-state
         emptyDir: {}
+      - name: canary-script
+        configMap:
+          name: sam-sdk-canary-script-${ENV_NAME}
       - name: sam-token
         projected:
           sources:
@@ -66,24 +119,25 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: python-canary-${ENV_NAME}
+  name: python-agent-canary-${ENV_NAME}
   namespace: sam-canary-${ENV_NAME}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: python-canary-${ENV_NAME}
+      app: python-agent-canary-${ENV_NAME}
   template:
     metadata:
       labels:
-        app: python-canary-${ENV_NAME}
+        app: python-agent-canary-${ENV_NAME}
         sam-canary: "true"
     spec:
       serviceAccountName: sam-node-sa
+      terminationGracePeriodSeconds: 10
       containers:
-      - name: sdk
+      - name: agent
         image: ghcr.io/google/sam-sdk-python:${IMAGE_TAG}
-        args: ["examples/serve.py", "greeter-py"]
+        command: ["/bin/sh", "-c", "python examples/agent.py 2>&1 | tee /var/run/sam/agent.log"]
         env:
         - name: SAM_CONTROL_PLANE_URL
           value: "http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
@@ -92,7 +146,7 @@ spec:
         - name: SAM_JWT_PATH
           value: /var/run/secrets/tokens/sam-token
         - name: SAM_STATE_DIR
-          value: /var/run/sam/state
+          value: /var/run/sam/agent
         - name: PYTHONUNBUFFERED
           value: "1"
         securityContext:
@@ -112,9 +166,54 @@ spec:
           readOnly: true
         - name: sam-state
           mountPath: /var/run/sam
+      - name: caller
+        image: ghcr.io/google/sam-sdk-js:${IMAGE_TAG}
+        command: ["/bin/sh", "/etc/sam-canary/canary.sh"]
+        env:
+        - name: SAM_CONTROL_PLANE_URL
+          value: "http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
+        - name: SAM_INSECURE_CONTROL_PLANE
+          value: "true"
+        - name: SAM_JWT_PATH
+          value: /var/run/secrets/tokens/sam-token
+        - name: SAM_STATE_DIR
+          value: /var/run/sam/caller
+        - name: CANARY
+          value: js-calls-python-agent
+        - name: CALL
+          value: "node build/examples/call.js"
+        readinessProbe:
+          exec:
+            command: ["test", "-f", "/var/run/sam/reachable"]
+          initialDelaySeconds: 20
+          periodSeconds: 30
+          failureThreshold: 1
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        volumeMounts:
+        - name: sam-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+        - name: sam-state
+          mountPath: /var/run/sam
+        - name: canary-script
+          mountPath: /etc/sam-canary
+          readOnly: true
       volumes:
       - name: sam-state
         emptyDir: {}
+      - name: canary-script
+        configMap:
+          name: sam-sdk-canary-script-${ENV_NAME}
       - name: sam-token
         projected:
           sources:
@@ -122,3 +221,47 @@ spec:
               path: sam-token
               expirationSeconds: 3600
               audience: "sam-control-plane-audience"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sam-sdk-canary-script-${ENV_NAME}
+  namespace: sam-canary-${ENV_NAME}
+data:
+  canary.sh: |
+    #!/bin/sh
+    # Calls the agent beside this container every INTERVAL seconds by the
+    # peer ID it printed to /var/run/sam/agent.log, and keeps
+    # /var/run/sam/reachable present while the last call succeeded; the
+    # readiness probe reads it. One JSON line per call, for a log-based
+    # metric. The first call enrolls with the projected token; the later ones
+    # resume from SAM_STATE_DIR.
+    set -u
+    INTERVAL=${INTERVAL:-300}
+    LOG=/var/run/sam/agent.log
+    REACHABLE=/var/run/sam/reachable
+
+    verdict() {
+      printf '{"canary":"%s","ok":%s,"agent_peer":"%s","call_s":%d,"error":"%s"}\n' \
+        "$CANARY" "$1" "${AGENT_PEER:-}" "$2" "$(printf '%s' "$3" | tr -d '"\n' | cut -c1-300)"
+    }
+
+    while :; do
+      AGENT_PEER=$(grep -o 'accepting a2a://agent as [^ ]*' "$LOG" 2>/dev/null | tail -1 | cut -d' ' -f4)
+      if [ -z "$AGENT_PEER" ]; then
+        sleep 2
+        continue
+      fi
+      start=$(date +%s)
+      out=$($CALL "$AGENT_PEER" a2a://agent /card 2>&1); rc=$?
+      if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q '"caller"'; then
+        touch "$REACHABLE"
+        verdict true $(( $(date +%s) - start )) ""
+        sleep "$INTERVAL"
+      else
+        rm -f "$REACHABLE"
+        verdict false $(( $(date +%s) - start )) "$(printf '%s' "$out" | tail -c 200)"
+        # A failed call is retried soon; the readiness probe already shows it.
+        sleep 30
+      fi
+    done

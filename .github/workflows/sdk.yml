@@ -98,5 +98,9 @@ jobs:
         run: |
           docker build -f Dockerfile.sam-sdk-js -t sam-sdk-js:ci .
           docker build -f Dockerfile.sam-sdk-python -t sam-sdk-python:ci .
+          # Without a token every example stops at enrollment with this
+          # message: the default command (the agent) and the caller both.
+          docker run --rm sam-sdk-js:ci 2>&1 | grep -q 'exactly one of'
+          docker run --rm sam-sdk-python:ci 2>&1 | grep -q 'exactly one of'
           docker run --rm sam-sdk-js:ci build/examples/call.js 2>&1 | grep -q 'exactly one of'
           docker run --rm sam-sdk-python:ci examples/call.py 2>&1 | grep -q 'exactly one of'
