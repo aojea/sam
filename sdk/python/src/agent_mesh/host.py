@@ -33,6 +33,7 @@ from libp2p import new_host
 from libp2p.abc import IHost, INetStream
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.custom_types import TProtocol
+from libp2p.network.config import ConnectionConfig
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
 from libp2p.security.tls.transport import PROTOCOL_ID as TLS_PROTOCOL_ID
@@ -64,6 +65,15 @@ def _libp2p_version() -> tuple[int, int]:
 # MuxerMultistream.new_conn constructs Yamux by name, whatever muxer_opt says.
 # Delete this block and its tests with the libp2p>=0.8 bump.
 LIBP2P_LEAKS_STREAM_SLOTS = _libp2p_version() < (0, 8)
+
+# py-libp2p 0.7's Swarm.upgrade_*_raw_conn opens a ResourceManager connection
+# scope and stores it on the muxed connection, then add_conn opens a second
+# one and stores it on the SwarmConn; only the second is closed when the
+# connection ends. A SecurityUpgradeFailure closes the raw connection and
+# raises without closing the pre-upgrade scope either. Each leaked scope is
+# one of the manager's 1000 connection slots for the life of the process.
+# Retire with the same bump.
+LIBP2P_LEAKS_CONNECTION_SCOPES = _libp2p_version() < (0, 8)
 
 
 async def _open_stream_returning_slot(self: Yamux) -> YamuxStream:
@@ -153,7 +163,21 @@ def create_mesh_host(identity: Identity, listen_addrs: Sequence[str] = ()) -> tu
         key_pair=key_pair,
         sec_opt={TLS_PROTOCOL_ID: tls},
         muxer_opt={TProtocol(YAMUX_PROTOCOL_ID): Yamux},
+        # A member connects to its routers and to the peers it calls or that
+        # call it. py-libp2p's AutoConnector would otherwise dial every peer
+        # in the peerstore every 30s while under 100 connections, including
+        # addresses this host has no transport for and relay addresses it
+        # dials as if direct, and each failed TLS handshake leaks below.
+        connection_config=ConnectionConfig(min_connections=0, low_watermark=0),
     )
+    if LIBP2P_LEAKS_CONNECTION_SCOPES:
+        # py-libp2p 0.7's Swarm opens two ResourceManager connection scopes
+        # per connection and closes one, and none after a failed security
+        # upgrade. After 1000 leaked slots the manager degrades its limit to
+        # one connection and never recovers, and the host refuses every peer.
+        # The Swarm's own limits (max_connections, max_connections_per_peer)
+        # do not depend on the manager and stay in force.
+        host.get_network().set_resource_manager(None)  # type: ignore[attr-defined]
     if str(host.get_id()) != identity.peer_id:
         raise RuntimeError(f"libp2p derived peer {host.get_id()} for identity {identity.peer_id}")
     return host, [multiaddr.Multiaddr(a) for a in listen_addrs]
