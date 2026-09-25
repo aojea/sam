@@ -448,6 +448,413 @@ The caller and the agent are two identities on the mesh with their own
 state directories, `caller` and `agent`. Each spent a token on its first
 run; the standing join token of `sam-one` admits any number of members.
 
+## 5. Agents that speak A2A
+
+The two programs above answer and call HTTP paths by hand. An agent you
+write with an [A2A SDK](https://a2a-protocol.org/) speaks the protocol:
+an agent card, `message/send`, tasks, streaming. It joins the mesh the same
+way, and needs to know two things: the URL it has on the mesh, and how to
+plug the mesh in as its transport.
+
+- An agent on the mesh has the URL `http://mesh/sam/<peer-id>/a2a/agent`
+  (`MeshSession.meshURL(peerId, "a2a://agent")`,
+  `MeshSession.mesh_url(peer_id, "a2a://agent")`). That is what goes in its
+  agent card, and what an A2A client on the mesh is given. The peer ID is in
+  the path because URL parsers lowercase the host and a peer ID is
+  case-sensitive.
+- The A2A JavaScript SDK takes a `fetch` for its client and mounts its server
+  as Express handlers. `session.fetch()` is the fetch;
+  `acceptA2A({ listener: app })` runs the Express app on the mesh, with
+  nothing listening on a port.
+- The A2A Python SDK takes an `httpx.AsyncClient` for its client and runs its
+  server as a Starlette app. `httpx.AsyncClient(transport=MeshTransport(session))`
+  is the client; the server runs under uvicorn on a loopback port, in a
+  thread since the A2A SDK is asyncio and the mesh SDK trio, and
+  `accept_a2a("http://127.0.0.1:<port>")` forwards to it.
+
+Install the A2A SDK next to the mesh SDK:
+
+```bash
+npm install @a2a-js/sdk express
+```
+
+```bash
+pip install 'a2a-sdk[http-server]' uvicorn
+```
+
+The agent, an echo: it answers every message with what was said and who
+said it. Who said it is the peer the mesh verified, which the SDK sets as
+`X-Peer-Id` after authorizing the request and before it reaches the A2A
+server, so the agent reads the header rather than a name in the message.
+
+JavaScript, `a2a-agent.js`:
+
+<!-- embed: sdk/js/examples/a2a-agent.ts -->
+```ts
+// An agent written with the A2A SDK, on the mesh. The A2A SDK builds the agent
+// card and the JSON-RPC handler as an Express app; instead of listening on a
+// port, the app answers requests the mesh SDK accepts for a2a://agent. Other
+// members reach it by peer ID through a router; the mesh policy decides which
+// ones, and the SDK turns the rest away before a request reaches the app.
+//
+//   node a2a-agent.js
+//
+// SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
+// SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or
+// SAM_JWT_PATH (a workload identity token your platform issues, such as a
+// Kubernetes projected service account token), and keeps the identity and
+// credential in SAM_STATE_DIR; later runs resume from there, as the same
+// peer, without it.
+import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
+import express from "express";
+import { A2A_PROTOCOL_VERSION, AGENT_CARD_PATH, Role, type AgentCard, type Message } from "@a2a-js/sdk";
+import { AgentEvent, DefaultRequestHandler, InMemoryTaskStore, type AgentExecutor, type ExecutionEventBus, type RequestContext } from "@a2a-js/sdk/server";
+import { UserBuilder, agentCardHandler, jsonRpcHandler } from "@a2a-js/sdk/server/express";
+import { AgentMesh, MeshSession } from "@sam-mesh/sdk";
+
+const mesh = await AgentMesh.enroll({
+  controlPlaneUrl: process.env.SAM_CONTROL_PLANE_URL ?? "https://mesh.example.com",
+  bootstrapTokenPath: process.env.SAM_BOOTSTRAP_TOKEN_PATH,
+  jwtPath: process.env.SAM_JWT_PATH,
+  stateDir: process.env.SAM_STATE_DIR ?? `${homedir()}/.config/sam-mesh/a2a-agent`,
+  // A plaintext http:// control plane is otherwise accepted only on loopback.
+  allowInsecure: process.env.SAM_INSECURE_CONTROL_PLANE === "true",
+});
+const session = await mesh.join();
+
+// The card names the agent as the mesh reaches it: the URL an A2A client on
+// the mesh gives its fetch, http://mesh/sam/<peer-id>/a2a/agent.
+const url = MeshSession.meshURL(session.peerId, "a2a://agent");
+const card: AgentCard = {
+  name: "Echo agent",
+  description: "Answers every message with what it said and who sent it.",
+  version: "1.0.0",
+  supportedInterfaces: [{ url, protocolBinding: "JSONRPC", tenant: "", protocolVersion: A2A_PROTOCOL_VERSION }],
+  provider: undefined,
+  documentationUrl: "",
+  capabilities: { streaming: true, pushNotifications: false, extendedAgentCard: false, extensions: [] },
+  securitySchemes: {},
+  securityRequirements: [],
+  defaultInputModes: ["text/plain"],
+  defaultOutputModes: ["text/plain"],
+  skills: [{ id: "echo", name: "Echo", description: "Repeats the message.", tags: ["echo"], examples: ["hello"], inputModes: [], outputModes: [], securityRequirements: [] }],
+  signatures: [],
+  iconUrl: "",
+};
+
+// The agent's logic: one message in, one message out. The user on the call
+// context is the caller the mesh verified, built from X-Peer-Id below.
+class EchoExecutor implements AgentExecutor {
+  async execute(context: RequestContext, eventBus: ExecutionEventBus): Promise<void> {
+    const said = context.userMessage.parts.map((p) => (p.content?.$case === "text" ? p.content.value : "")).join("");
+    const caller = context.context.user?.userName ?? "someone";
+    const reply: Message = {
+      messageId: randomUUID(),
+      contextId: context.contextId,
+      taskId: "",
+      role: Role.ROLE_AGENT,
+      parts: [{ content: { $case: "text", value: `${caller} said: ${said}` }, filename: "", mediaType: "text/plain", metadata: undefined }],
+      metadata: undefined,
+      extensions: [],
+      referenceTaskIds: [],
+    };
+    eventBus.publish(AgentEvent.message(reply));
+    eventBus.finished();
+  }
+
+  async cancelTask(): Promise<void> {}
+}
+
+const requestHandler = new DefaultRequestHandler(card, new InMemoryTaskStore(), new EchoExecutor());
+const app = express();
+app.use(`/${AGENT_CARD_PATH}`, agentCardHandler({ agentCardProvider: requestHandler }));
+// The SDK sets X-Peer-Id to the peer it verified and authorized, after
+// stripping anything the caller sent under that name.
+const verifiedPeer: UserBuilder = async (req) => ({ isAuthenticated: true, userName: String(req.headers["x-peer-id"] ?? "") });
+app.use(jsonRpcHandler({ requestHandler, userBuilder: verifiedPeer }));
+
+const target = await session.acceptA2A({ listener: app });
+console.log(`accepting ${target} as ${session.peerId}`);
+console.log(`agent card at ${session.agentURL}/${AGENT_CARD_PATH}`);
+
+const stop = () => void session.close().then(() => process.exit(0));
+process.on("SIGINT", stop);
+process.on("SIGTERM", stop);
+```
+<!-- /embed -->
+
+Python, `a2a_agent.py`:
+
+<!-- embed: sdk/python/examples/a2a_agent.py -->
+```python
+"""An agent written with the A2A SDK, on the mesh. The A2A SDK's server runs
+as it always does, a Starlette app under uvicorn on a loopback port; the mesh
+SDK accepts requests for a2a://agent and forwards them to it. Other members
+reach the agent by peer ID through a router; the mesh policy decides which
+ones, and the SDK turns the rest away before a request reaches the app.
+
+    python a2a_agent.py
+
+SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
+SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or SAM_JWT_PATH
+(a workload identity token your platform issues, such as a Kubernetes
+projected service account token), and keeps the identity and credential in
+SAM_STATE_DIR; later runs resume from there, as the same peer, without it.
+"""
+
+import os
+import socket
+import threading
+
+import trio
+import uvicorn
+from a2a.helpers import get_message_text, new_text_message
+from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.events import EventQueue
+from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
+from a2a.server.tasks import InMemoryTaskStore
+from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill, Role
+from agent_mesh import AgentMesh, MeshSession
+from starlette.applications import Starlette
+
+mesh = AgentMesh.enroll(
+    os.environ.get("SAM_CONTROL_PLANE_URL", "https://mesh.example.com"),
+    bootstrap_token_path=os.environ.get("SAM_BOOTSTRAP_TOKEN_PATH"),
+    jwt_path=os.environ.get("SAM_JWT_PATH"),
+    state_dir=os.environ.get("SAM_STATE_DIR", "~/.config/sam-mesh/a2a-agent"),
+    # A plaintext http:// control plane is otherwise accepted only on loopback.
+    allow_insecure=os.environ.get("SAM_INSECURE_CONTROL_PLANE") == "true",
+)
+
+
+class EchoExecutor(AgentExecutor):
+    """One message in, one message out. X-Peer-Id is the caller the mesh
+    verified; the SDK sets it after authorizing the request."""
+
+    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        caller = context.call_context.state["headers"].get("x-peer-id", "someone") if context.call_context else "someone"
+        said = get_message_text(context.message) if context.message else ""
+        await event_queue.enqueue_event(new_text_message(f"{caller} said: {said}", role=Role.ROLE_AGENT, context_id=context.context_id))
+
+    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
+        pass
+
+
+def a2a_app(agent_url: str) -> Starlette:
+    """The A2A SDK's server, as its samples build it. The card names the agent
+    as the mesh reaches it: http://mesh/sam/<peer-id>/a2a/agent."""
+    card = AgentCard(
+        name="Echo agent",
+        description="Answers every message with what it said and who sent it.",
+        version="1.0.0",
+        default_input_modes=["text/plain"],
+        default_output_modes=["text/plain"],
+        capabilities=AgentCapabilities(streaming=True),
+        supported_interfaces=[AgentInterface(protocol_binding="JSONRPC", url=agent_url, protocol_version="1.0")],
+        skills=[AgentSkill(id="echo", name="Echo", description="Repeats the message.", tags=["echo"], examples=["hello"])],
+    )
+    handler = DefaultRequestHandler(agent_executor=EchoExecutor(), task_store=InMemoryTaskStore(), agent_card=card)
+    return Starlette(routes=[*create_agent_card_routes(card), *create_jsonrpc_routes(handler, "/")])
+
+
+def serve_locally(app: Starlette) -> str:
+    """Runs uvicorn on a free loopback port in a thread and returns its URL.
+    The A2A SDK runs on asyncio, the mesh SDK on trio; a thread keeps them apart."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    threading.Thread(target=server.run, daemon=True).start()
+    return f"http://127.0.0.1:{port}"
+
+
+async def main() -> None:
+    backend_url = serve_locally(a2a_app(MeshSession.mesh_url(mesh.identity.peer_id, "a2a://agent")))
+    async with mesh.join() as session:
+        target = await session.accept_a2a(backend_url)
+        print(f"accepting {target} as {session.peer_id}", flush=True)
+        print(f"agent card at {session.agent_url}/.well-known/agent-card.json", flush=True)
+        await trio.sleep_forever()
+
+
+trio.run(main)
+```
+<!-- /embed -->
+
+```bash
+node a2a-agent.js
+# or
+python a2a_agent.py
+```
+
+```text
+accepting a2a://agent as 12D3KooWQmB5…
+agent card at http://mesh/sam/12D3KooWQmB5…/a2a/agent/.well-known/agent-card.json
+```
+
+The caller, with the A2A SDK's client: it fetches the card, sends one
+message and prints the answer.
+
+JavaScript, `a2a-call.js`:
+
+<!-- embed: sdk/js/examples/a2a-call.ts -->
+```ts
+// Talks to an agent on the mesh with the A2A SDK's client. The mesh SDK hands
+// the A2A client a `fetch` bound to the mesh; the client fetches the agent
+// card and sends messages as it would to any A2A server, and every request
+// travels to the peer through a router with this member's credential.
+//
+//   node a2a-call.js 12D3KooW... "hello"
+//
+// SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
+// SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or
+// SAM_JWT_PATH (a workload identity token your platform issues, such as a
+// Kubernetes projected service account token), and keeps the identity and
+// credential in SAM_STATE_DIR; later runs resume from there without it.
+import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { Message, Role, type SendMessageRequest } from "@a2a-js/sdk";
+import { ClientFactory, DefaultAgentCardResolver, JsonRpcTransportFactory } from "@a2a-js/sdk/client";
+import { AgentMesh, MeshSession } from "@sam-mesh/sdk";
+
+const [peerId, text = "hello"] = process.argv.slice(2);
+if (peerId === undefined) {
+  throw new Error("usage: a2a-call.js <peer-id> [text]");
+}
+
+const mesh = await AgentMesh.enroll({
+  controlPlaneUrl: process.env.SAM_CONTROL_PLANE_URL ?? "https://mesh.example.com",
+  bootstrapTokenPath: process.env.SAM_BOOTSTRAP_TOKEN_PATH,
+  jwtPath: process.env.SAM_JWT_PATH,
+  stateDir: process.env.SAM_STATE_DIR ?? `${homedir()}/.config/sam-mesh/a2a-caller`,
+  // A plaintext http:// control plane is otherwise accepted only on loopback.
+  allowInsecure: process.env.SAM_INSECURE_CONTROL_PLANE === "true",
+});
+const session = await mesh.join();
+console.log(`on the mesh as ${session.peerId}`);
+
+// The agent's URL on the mesh, and a fetch that carries requests to it.
+const agentURL = MeshSession.meshURL(peerId, "a2a://agent");
+const fetchImpl = session.fetch();
+const factory = new ClientFactory({
+  transports: [new JsonRpcTransportFactory({ fetchImpl })],
+  cardResolver: new DefaultAgentCardResolver({ fetchImpl }),
+});
+// The card lives under the agent's URL; the trailing slash keeps the last segment when the resolver appends the well-known path.
+const client = await factory.createFromUrl(agentURL + "/");
+const card = await client.getAgentCard();
+console.log(`agent: ${card.name}, ${card.description}`);
+
+const request: SendMessageRequest = {
+  tenant: "",
+  message: Message.fromJSON({ messageId: randomUUID(), role: Role[Role.ROLE_USER], parts: [{ text }] }),
+  configuration: undefined,
+  metadata: undefined,
+};
+const answer = await client.sendMessage(request);
+const parts = "parts" in answer ? answer.parts : (answer.status?.message?.parts ?? []);
+console.log(parts.map((p) => (p.content?.$case === "text" ? p.content.value : "")).join(""));
+
+await session.close();
+```
+<!-- /embed -->
+
+Python, `a2a_call.py`:
+
+<!-- embed: sdk/python/examples/a2a_call.py -->
+```python
+"""Talks to an agent on the mesh with the A2A SDK's client. The mesh SDK is an
+httpx transport; the A2A client fetches the agent card and sends messages as
+it would to any A2A server, and every request travels to the peer through a
+router with this member's credential.
+
+    python a2a_call.py 12D3KooW... "hello"
+
+SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
+SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or SAM_JWT_PATH
+(a workload identity token your platform issues, such as a Kubernetes
+projected service account token), and keeps the identity and credential in
+SAM_STATE_DIR; later runs resume from there without it.
+"""
+
+import os
+import sys
+
+import httpx
+import trio
+from a2a.client import A2ACardResolver, ClientConfig, create_client
+from a2a.helpers import get_message_text, new_text_message
+from a2a.types import Role, SendMessageRequest
+from agent_mesh import AgentMesh, MeshSession, MeshTransport
+
+if len(sys.argv) < 2:
+    raise SystemExit("usage: a2a_call.py <peer-id> [text]")
+peer_id = sys.argv[1]
+text = sys.argv[2] if len(sys.argv) > 2 else "hello"
+
+mesh = AgentMesh.enroll(
+    os.environ.get("SAM_CONTROL_PLANE_URL", "https://mesh.example.com"),
+    bootstrap_token_path=os.environ.get("SAM_BOOTSTRAP_TOKEN_PATH"),
+    jwt_path=os.environ.get("SAM_JWT_PATH"),
+    state_dir=os.environ.get("SAM_STATE_DIR", "~/.config/sam-mesh/a2a-caller"),
+    # A plaintext http:// control plane is otherwise accepted only on loopback.
+    allow_insecure=os.environ.get("SAM_INSECURE_CONTROL_PLANE") == "true",
+)
+
+
+async def main() -> None:
+    async with mesh.join() as session:
+        print(f"on the mesh as {session.peer_id}")
+
+        # The agent's URL on the mesh, and an httpx client that carries requests to it.
+        agent_url = MeshSession.mesh_url(peer_id, "a2a://agent")
+        async with httpx.AsyncClient(transport=MeshTransport(session), timeout=60) as http:
+            card = await A2ACardResolver(http, agent_url).get_agent_card()
+            print(f"agent: {card.name}, {card.description}")
+
+            client = await create_client(card, ClientConfig(httpx_client=http, streaming=False))
+            request = SendMessageRequest(message=new_text_message(text, role=Role.ROLE_USER))
+            async for response in client.send_message(request):
+                if response.HasField("message"):
+                    print(get_message_text(response.message))
+                elif response.HasField("task") and response.task.status.HasField("message"):
+                    print(get_message_text(response.task.status.message))
+            await client.close()
+
+
+trio.run(main)
+```
+<!-- /embed -->
+
+In a second terminal, call the agent from the other language:
+
+```bash
+python a2a_call.py 12D3KooWQmB5… "hello from python"
+```
+
+```text
+on the mesh as 12D3KooWHZ2M…
+agent: Echo agent, Answers every message with what it said and who sent it.
+12D3KooWHZ2M… said: hello from python
+```
+
+The A2A client did what it does against any A2A server; the mesh carried
+each request to the peer through a router, with the caller's credential,
+and the agent's server received it with the caller already verified.
+`message/stream` works the same way: response bodies stream through both
+SDKs.
+
+Treat what another agent sends as input from outside your control. The
+mesh verifies the peer's identity and credential; it does not inspect the
+content the peer sends. An agent card's `description` or a skill's text
+pasted into a prompt is a prompt injection path like any other.
+
+The public testnets run these programs: an agent written with each SDK
+and, every fifteen minutes, a caller written with the other that sends it a
+message and checks the answer names the caller.
+
 ## What happened
 
 `enroll` sent the token and the program's public key to the control plane
@@ -502,19 +909,9 @@ or a pattern) and the members it may reach; see
   on the mesh; `discover("mcp://everything")` those of one service.
 - **A member's own catalog.** `listTools(peer, "")` returns a `sam-node`'s
   `list_local_services` tool.
-- **An agent written with an A2A SDK.** Run its server on a local port and
-  pass the URL: `acceptA2A({ url: "http://127.0.0.1:9999" })`,
-  `accept_a2a("http://127.0.0.1:9999")`. In JavaScript an Express app with
-  the A2A SDK's handlers can also run in the process:
-  `acceptA2A({ listener: app })`. The agent's name defaults to `agent`;
-  `name` picks another, and callers use `a2a://<name>`.
-- **Calling an agent with an A2A SDK client.** The mesh is a transport for
-  HTTP clients. A peer's service has the URL
-  `http://mesh/sam/<peer-id>/a2a/agent` (`MeshSession.meshURL`,
-  `MeshSession.mesh_url`); the A2A JavaScript client takes
-  `fetchImpl: session.fetch()`, the Python one an
-  `httpx.AsyncClient(transport=MeshTransport(session))`. Response bodies
-  stream, so `message/stream` works.
+- **Another agent name.** `acceptA2A({ name: "reviewer", ... })` and
+  `accept_a2a(target, name="reviewer")` answer as `a2a://reviewer`; callers
+  use that target and the matching mesh URL.
 - **Reading the policy.** `session.policyRules` (`session.policy_rules`)
   holds the Datalog the session enforces, for logging or tests.
 

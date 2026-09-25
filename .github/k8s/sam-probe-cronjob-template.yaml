@@ -67,15 +67,15 @@ spec:
               readOnly: true
             - name: sam-uds
               mountPath: /var/run/sam
-          # An agent written with each SDK (sdk/js/examples/agent.ts,
-          # sdk/python/examples/agent.py), the programs the docs embed. Each
-          # accepts A2A requests for a2a://agent and publishes nothing; its
-          # stdout goes to the container log and to the shared volume, where
-          # the probe reads its peer ID.
+          # An agent written with each SDK and the official A2A SDK
+          # (sdk/js/examples/a2a-agent.ts, sdk/python/examples/a2a_agent.py),
+          # the programs the docs embed. Each accepts A2A requests for
+          # a2a://agent and publishes nothing; its stdout goes to the container
+          # log and to the shared volume, where the probe reads its peer ID.
           - name: js-agent
             restartPolicy: Always
             image: ghcr.io/google/sam-sdk-js:${IMAGE_TAG}
-            command: ["/bin/sh", "-c", "node build/examples/agent.js 2>&1 | tee /var/run/sam-agents/js-agent.log"]
+            command: ["/bin/sh", "-c", "node build/examples/a2a-agent.js 2>&1 | tee /var/run/sam-agents/js-agent.log"]
             env:
             - name: SAM_CONTROL_PLANE_URL
               value: "http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
@@ -105,7 +105,7 @@ spec:
           - name: python-agent
             restartPolicy: Always
             image: ghcr.io/google/sam-sdk-python:${IMAGE_TAG}
-            command: ["/bin/sh", "-c", "python examples/agent.py 2>&1 | tee /var/run/sam-agents/python-agent.log"]
+            command: ["/bin/sh", "-c", "python examples/a2a_agent.py 2>&1 | tee /var/run/sam-agents/python-agent.log"]
             env:
             - name: SAM_CONTROL_PLANE_URL
               value: "http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
@@ -238,10 +238,10 @@ spec:
               # 4. An agent written with each SDK, reachable by peer ID alone:
               # it published nothing, so there is nothing to discover, and the
               # node finds the path through the router by itself. The probe
-              # reads the peer ID from the line the agent printed, then calls
-              # its A2A endpoint through the egress proxy, the way an agent
-              # behind this node reaches another agent. The answer names the
-              # verified caller.
+              # reads the peer ID from the line the agent printed, then fetches
+              # its agent card through the egress proxy, the way an A2A client
+              # behind this node would; the node rewrites the card's URL to the
+              # mesh path it serves.
               SDK_START=$(date +%s)
               SDK_PEERS=""
               for lang in ${SDK_AGENTS}; do
@@ -256,8 +256,8 @@ spec:
                 LAST_ERR=""
                 CALL_START=$(date +%s)
                 while :; do
-                  CODE=$(curl -s --unix-socket "$SOCK" -o /tmp/sdk-card.out -w '%{http_code}' "http://localhost/sam/${AGENT_PEER}/a2a/agent/card")
-                  if [ "$CODE" = "200" ] && grep -q '"caller"' /tmp/sdk-card.out; then
+                  CODE=$(curl -s --unix-socket "$SOCK" -o /tmp/sdk-card.out -w '%{http_code}' "http://localhost/sam/${AGENT_PEER}/a2a/agent/.well-known/agent-card.json")
+                  if [ "$CODE" = "200" ] && grep -q 'Echo agent' /tmp/sdk-card.out && grep -q "/sam/${AGENT_PEER}/a2a/agent" /tmp/sdk-card.out; then
                     break
                   fi
                   LAST_ERR="HTTP ${CODE} $(head -c 160 /tmp/sdk-card.out | tr -d '"\n')"

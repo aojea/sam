@@ -468,6 +468,13 @@ holds against the control plane's records.
 - `sam-node`: a peer it knows no address for is dialed through every
   router it authenticated with, so its egress proxy reaches an agent by
   peer ID (`preparePeerAddrs`).
+- Examples with the official A2A SDKs (`a2a-agent.ts`, `a2a-call.ts`;
+  `a2a_agent.py`, `a2a_call.py`): the A2A SDK's server is the listener
+  `acceptA2A` runs (JS) or a uvicorn process `accept_a2a` forwards to
+  (Python), its card names the agent by its mesh URL, and the A2A SDK's
+  client runs on `session.fetch()` or `MeshTransport`. The A2A SDKs are
+  dependencies of the examples only: dev dependencies in `sdk/js`, the
+  `examples` extra in `sdk/python`.
 - Tests. Unit: each SDK's ingress behind an in-process host, called with
   its own clients: a forwarded A2A server that sees `X-Peer-Id` and never
   the biscuit, an SSE body read event by event, an in-process handler (and
@@ -481,7 +488,10 @@ holds against the control plane's records.
   lookup, a lookup for `a2a://agent` finds nothing, the member refuses a
   `/sam/mcp/1.0.0` stream, and a Go peer whose role the policy grants
   nothing gets 403 and is answered once it presents a node-role token.
-  About 9 seconds for the whole mesh.
+  About 9 seconds for the whole mesh. `TestNativeSDKA2A` runs the A2A SDK
+  agents and calls each from the other language with the A2A SDK's client;
+  the answer names the caller's peer, and a `sam-node` fetches the card
+  through its egress proxy.
 
 ### Milestone 5 — parity and release (done)
 
@@ -540,22 +550,24 @@ holds against the control plane's records.
 
 Both testnets run the example programs, unchanged, as canaries beside the
 `sam-node` ones (`.github/k8s/sam-sdk-canary-template.yaml`): two pairs, an
-agent written with one SDK and a caller written with the other in one pod,
-enrolled with the pod's projected service account token through
-`SAM_JWT_PATH`. The agent accepts `a2a://agent`; the caller reads its peer
-ID from the line it prints, through a volume the pod shares, calls it every
-five minutes and is Ready while the last call succeeded, so the
-Deployment's availability says whether an agent is still reachable after
-hours on the mesh. Two CronJobs cross every implementation boundary every
-15 minutes and once per rollout: the `sam-node` cold-path probe
-(`sam-probe-cronjob-template.yaml`) runs an agent per SDK as sidecars and
-reaches each by peer ID through the egress proxy (node → SDK), and the SDK
-cold-path probe (`sam-sdk-probe-cronjob-template.yaml`) runs each SDK's
-`call` against the everything canary by name (SDK → node) and the other
-SDK's agent by peer ID (SDK → SDK). The images (`Dockerfile.sam-sdk-js`,
-`Dockerfile.sam-sdk-python`) are built per commit by `deploy.yaml`, so
-`bananas` runs the SDKs at the same commit as the Go components they talk
-to.
+agent written with one SDK and the official A2A SDK (`a2a-agent.ts`,
+`a2a_agent.py`) and a caller written with the other in one pod, enrolled
+with the pod's projected service account token through `SAM_JWT_PATH`. The
+agent accepts `a2a://agent`; the caller reads its peer ID from the line it
+prints, through a volume the pod shares, sends it a message with the A2A
+SDK's client every five minutes and is Ready while the last answer named
+the caller, so the Deployment's availability says whether an agent is still
+reachable after hours on the mesh. Two CronJobs cross every implementation
+boundary every 15 minutes and once per rollout: the `sam-node` cold-path
+probe (`sam-probe-cronjob-template.yaml`) runs an agent per SDK as sidecars
+and fetches each one's agent card by peer ID through the egress proxy
+(node → SDK), and the SDK cold-path probe
+(`sam-sdk-probe-cronjob-template.yaml`) runs each SDK's callers against the
+everything canary by name (SDK → node) and the other SDK's agent by peer ID,
+the card with the mesh SDK's client and a message with the A2A SDK's
+(SDK → SDK). The images (`Dockerfile.sam-sdk-js`, `Dockerfile.sam-sdk-python`)
+are built per commit by `deploy.yaml`, so `bananas` runs the SDKs at the
+same commit as the Go components they talk to.
 
 ### Later
 

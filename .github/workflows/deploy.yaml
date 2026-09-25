@@ -807,8 +807,9 @@ jobs:
           }
 
       # Two long-lived pairs with no sam-node: an agent written with one SDK
-      # and a caller written with the other, reaching it by peer ID every few
-      # minutes. The caller's readiness is the last call's outcome.
+      # and the official A2A SDK, and a caller written with the other that
+      # sends it a message with the A2A SDK's client every few minutes, by
+      # peer ID. The caller's readiness is the last call's outcome.
       - name: Deploy SDK Canaries
         env:
           VAR_ENV_NAME: ${{ vars.ENV_NAME }}
@@ -941,12 +942,13 @@ jobs:
               ;;
           esac
 
-      # The same cold path through each SDK: an agent and a caller enroll
-      # with the JavaScript and the Python SDK; each caller reaches the
-      # everything canary's MCP server (a sam-node) by name and the other
-      # SDK's agent by peer ID. With the node probe above, every pair of
-      # implementations is crossed in both directions on every rollout and
-      # every 15 minutes after.
+      # The same cold path through each SDK: an agent written with the A2A
+      # SDK and a caller enroll with the JavaScript and the Python SDK; each
+      # caller reaches the everything canary's MCP server (a sam-node) by
+      # name and the other SDK's agent by peer ID, its card with the mesh
+      # SDK's client and a message with the A2A SDK's. With the node probe
+      # above, every pair of implementations is crossed in both directions
+      # on every rollout and every 15 minutes after.
       - name: Deploy and run the SDK cold-path probe
         env:
           VAR_ENV_NAME: ${{ vars.ENV_NAME }}

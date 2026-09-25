@@ -1,9 +1,10 @@
 # Two long-lived pairs of SDK members with no sam-node beside them: an agent
-# written with one SDK and a caller written with the other, in one pod, both
-# example programs (sdk/js/examples, sdk/python/examples) unchanged. The agent
-# joins through a router and accepts A2A requests for a2a://agent; it publishes
-# nothing, so the caller learns its peer ID from the line it prints, through a
-# volume the pod shares, and calls it every few minutes. The caller is Ready
+# written with one SDK and the official A2A SDK, and a caller written with the
+# other, in one pod, both example programs (sdk/js/examples,
+# sdk/python/examples) unchanged. The agent joins through a router and accepts
+# A2A requests for a2a://agent; it publishes nothing, so the caller learns its
+# peer ID from the line it prints, through a volume the pod shares, and sends
+# it a message with the A2A SDK's client every few minutes. The caller is Ready
 # while its last call succeeded, so the Deployment's availability is the
 # answer to "can an agent written with one SDK still be reached by the other
 # after hours on the mesh": relay reservations renewed, credentials refreshed,
@@ -31,7 +32,7 @@ spec:
       containers:
       - name: agent
         image: ghcr.io/google/sam-sdk-js:${IMAGE_TAG}
-        command: ["/bin/sh", "-c", "node build/examples/agent.js 2>&1 | tee /var/run/sam/agent.log"]
+        command: ["/bin/sh", "-c", "node build/examples/a2a-agent.js 2>&1 | tee /var/run/sam/agent.log"]
         env:
         - name: SAM_CONTROL_PLANE_URL
           value: "http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
@@ -75,7 +76,7 @@ spec:
         - name: CANARY
           value: python-calls-js-agent
         - name: CALL
-          value: "python examples/call.py"
+          value: "python examples/a2a_call.py"
         readinessProbe:
           exec:
             command: ["test", "-f", "/var/run/sam/reachable"]
@@ -137,7 +138,7 @@ spec:
       containers:
       - name: agent
         image: ghcr.io/google/sam-sdk-python:${IMAGE_TAG}
-        command: ["/bin/sh", "-c", "python examples/agent.py 2>&1 | tee /var/run/sam/agent.log"]
+        command: ["/bin/sh", "-c", "python examples/a2a_agent.py 2>&1 | tee /var/run/sam/agent.log"]
         env:
         - name: SAM_CONTROL_PLANE_URL
           value: "http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
@@ -181,7 +182,7 @@ spec:
         - name: CANARY
           value: js-calls-python-agent
         - name: CALL
-          value: "node build/examples/call.js"
+          value: "node build/examples/a2a-call.js"
         readinessProbe:
           exec:
             command: ["test", "-f", "/var/run/sam/reachable"]
@@ -230,8 +231,9 @@ metadata:
 data:
   canary.sh: |
     #!/bin/sh
-    # Calls the agent beside this container every INTERVAL seconds by the
-    # peer ID it printed to /var/run/sam/agent.log, and keeps
+    # Sends the agent beside this container a message with the A2A SDK's
+    # client every INTERVAL seconds, by the peer ID it printed to
+    # /var/run/sam/agent.log, and keeps
     # /var/run/sam/reachable present while the last call succeeded; the
     # readiness probe reads it. One JSON line per call, for a log-based
     # metric. The first call enrolls with the projected token; the later ones
@@ -253,8 +255,8 @@ data:
         continue
       fi
       start=$(date +%s)
-      out=$($CALL "$AGENT_PEER" a2a://agent /card 2>&1); rc=$?
-      if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q '"caller"'; then
+      out=$($CALL "$AGENT_PEER" "hello from ${CANARY}" 2>&1); rc=$?
+      if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "said: hello from ${CANARY}"; then
         touch "$REACHABLE"
         verdict true $(( $(date +%s) - start )) ""
         sleep "$INTERVAL"
