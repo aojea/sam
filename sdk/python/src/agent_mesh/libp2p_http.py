@@ -30,6 +30,7 @@ import httpx
 import trio
 from libp2p.abc import IHost, INetStream
 from libp2p.custom_types import TProtocol
+from libp2p.network.stream.exceptions import StreamEOF
 from libp2p.peer.id import ID
 
 from .auth import AUTH_HANDSHAKE_TIMEOUT
@@ -267,6 +268,19 @@ async def _handle_ingress(
     return upstream.status_code, out_headers, upstream.content
 
 
+async def _read_or_eof(stream: INetStream, peer_id: ID) -> bytes:
+    """One read for the HTTP parser. The peer closing its side is the end of
+    input, which is how a body without a length (server-sent events) ends. A
+    reset or any other failure is not: without a length only the stream can
+    tell a body that ended from one that was cut."""
+    try:
+        return await stream.read(_READ_CHUNK)
+    except StreamEOF:
+        return b""
+    except Exception as err:
+        raise ConnectionError(f"peer {peer_id} broke the stream mid-response: {err}") from err
+
+
 def mesh_http_target(target_service: str, path: str = "") -> str:
     """The request target for a service on a peer: /<type>/<name>/<path>."""
     scheme, sep, name = target_service.partition("://")
@@ -293,11 +307,7 @@ class StreamedResponse:
         while True:
             event = self._conn.next_event()
             if event is h11.NEED_DATA:
-                try:
-                    chunk = await self._stream.read(_READ_CHUNK)
-                except Exception:  # noqa: BLE001 - EOF ends the response
-                    chunk = b""
-                self._conn.receive_data(chunk)
+                self._conn.receive_data(await _read_or_eof(self._stream, self._peer_id))
                 continue
             if isinstance(event, h11.Data):
                 yield bytes(event.data)
@@ -350,11 +360,7 @@ async def open_http_request(
             while True:
                 event = conn.next_event()
                 if event is h11.NEED_DATA:
-                    try:
-                        chunk = await stream.read(_READ_CHUNK)
-                    except Exception:  # noqa: BLE001 - EOF ends the response
-                        chunk = b""
-                    conn.receive_data(chunk)
+                    conn.receive_data(await _read_or_eof(stream, peer_id))
                     continue
                 if isinstance(event, h11.Response):
                     resp_headers = {k.decode("latin-1"): v.decode("latin-1") for k, v in event.headers}

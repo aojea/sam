@@ -253,3 +253,63 @@ def test_mesh_urls_name_a_peer_and_a_service():
     assert mesh_http_target("a2a://agent", "card") == "/a2a/agent/card"
     with pytest.raises(ValueError):
         mesh_http_target("ftp://agent", "/")
+
+
+def test_a_reset_mid_body_is_an_error_and_a_close_is_the_end():
+    """A body that arrives without a length (server-sent events) ends when
+    the peer closes its side. The same body cut by a reset must not pass for
+    one that ended: without a length there is nothing in HTTP to tell them
+    apart, only the stream knows."""
+
+    async def truncating(stream) -> None:
+        # Same framing as `closing`, reset instead of closed.
+        await stream.write(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\ndata: 1\n\n")
+        await stream.reset()
+
+    async def closing(stream) -> None:
+        # No length and no chunking: the close is the end of the body.
+        await stream.write(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\ndata: 1\n\ndata: 2\n\n")
+        await stream.close()
+
+    async def main():
+        async with trio.open_nursery() as nursery:
+            server = libp2p_host(Identity.generate())
+            handlers = {"/a2a/cut": truncating, "/a2a/end": closing}
+
+            async def route(stream) -> None:
+                request = b""
+                while b"\r\n\r\n" not in request:
+                    request += await stream.read(1024)
+                path = request.split(b" ", 2)[1].decode()
+                await handlers[path](stream)
+
+            server.set_stream_handler(HTTP_PROTOCOL, route)
+            started = trio.Event()
+            addr_box = []
+
+            async def run():
+                async with server.run(listen_addrs=[multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")]):
+                    addr_box.append(multiaddr.Multiaddr(f"{server.get_addrs()[0]}"))
+                    started.set()
+                    await trio.sleep_forever()
+
+            nursery.start_soon(run)
+            await started.wait()
+            caller = libp2p_host(Identity.generate())
+            async with caller.run(listen_addrs=[]):
+                await caller.connect(info_from_p2p_addr(addr_box[0]))
+                pid = server.get_id()
+                with trio.fail_after(10):
+                    ended = await open_http_request(caller, pid, b"x", "GET", "/a2a/end")
+                    assert ended.status == 200
+                    assert (await ended.read()).decode().count("data:") == 2
+                    await ended.aclose()
+
+                    cut = await open_http_request(caller, pid, b"x", "GET", "/a2a/cut")
+                    assert cut.status == 200
+                    with pytest.raises(ConnectionError, match="mid-response"):
+                        await cut.read()
+                    await cut.aclose()
+            nursery.cancel_scope.cancel()
+
+    trio.run(main)
