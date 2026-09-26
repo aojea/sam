@@ -690,16 +690,16 @@ func createEgressProxy(node *SamNode) http.Handler {
 	transport := libp2phttp.NewTransport(node.Host)
 
 	proxy := &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			ctx := allowLimitedEgressConn(req.Context())
-			*req = *req.WithContext(ctx)
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			req := pr.Out.WithContext(allowLimitedEgressConn(pr.Out.Context()))
+			pr.Out = req
 
 			parts := strings.SplitN(req.URL.Path, "/", 6)
 			if len(parts) < 5 {
 				return
 			}
 			peerID := parts[2]
-			node.prepareEgressPeer(ctx, peerID)
+			node.prepareEgressPeer(req.Context(), peerID)
 			serviceType := parts[3]
 			serviceName := parts[4]
 			upstreamPath := ""
@@ -763,8 +763,8 @@ func createEgressProxy(node *SamNode) http.Handler {
 			return
 		}
 		// The verdict is for the canonical peer, so the dial must name the
-		// same form: rewrite the segment the Director will re-parse rather
-		// than let a non-canonical spelling travel past the gate.
+		// same form: rewrite the segment the proxy's Rewrite will re-parse
+		// rather than let a non-canonical spelling travel past the gate.
 		if canonical := pid.String(); route.peerID != canonical {
 			parts := strings.SplitN(r.URL.Path, "/", 6)
 			if len(parts) >= 3 {

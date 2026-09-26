@@ -110,11 +110,10 @@ func (s *InferenceService) trackActive(next http.Handler) http.Handler {
 
 func (s *InferenceService) newInferenceProxy() http.Handler {
 	return &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			if _, ok := req.Header["User-Agent"]; !ok {
-				req.Header.Set("User-Agent", "")
-			}
-		},
+		// The transport addresses the backend; the proxy itself strips the
+		// inbound Forwarded and X-Forwarded-* headers and blanks a missing
+		// User-Agent.
+		Rewrite: func(*httputil.ProxyRequest) {},
 		Transport: &inferenceTransport{
 			backend: s.backendURL,
 			auth:    s.backendAuth,
@@ -132,11 +131,6 @@ type inferenceTransport struct {
 func (t *inferenceTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	attemptReq := req.Clone(req.Context())
 	attemptReq.Header.Del("Accept-Encoding") // Prevent gzipped response from breaking token tracking
-	// A Director proxy does not manage X-Forwarded-For, and RemoteAddr here is
-	// a peer id, so an inbound value would reach the backend as-is.
-	attemptReq.Header.Del("X-Forwarded-For")
-	attemptReq.Header.Del("X-Forwarded-Host")
-	attemptReq.Header.Del("X-Forwarded-Proto")
 	t.auth.apply(attemptReq.Header)
 
 	attemptReq.URL.Scheme = t.backend.Scheme
