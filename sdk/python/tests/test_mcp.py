@@ -33,11 +33,11 @@ from mcp.shared.message import SessionMessage
 
 from agent_mesh._proto import sam_pb2 as pb
 from agent_mesh.auth import MCP_PROTOCOL, AuthRejectedError
-from agent_mesh.biscuit import verify_peer_biscuit
+from agent_mesh.biscuit import VerifiedBiscuit, verify_peer_biscuit
 from agent_mesh.controlplane import ROLE_NODE
 from agent_mesh.discovery import parse_service_target, service_key
 from agent_mesh.identity import Identity
-from agent_mesh.mcp_client import LabelsNotSatisfiedError, open_mcp_session, tool_call_result
+from agent_mesh.mcp_client import LabelsNotSatisfiedError, open_mcp_session, require_labels, tool_call_result
 
 from .test_session import CP, CP_KEY, libp2p_host
 
@@ -192,6 +192,9 @@ def test_tools_over_the_mesh_stream():
                 with pytest.raises(LabelsNotSatisfiedError):
                     async with open_mcp_session(caller, pid, frame(caller_biscuit, "mcp://calc"), [CP_KEY], required_labels={"region": "us"}):
                         pass
+                # Several pairs are met by any one of them; the provider attests region=eu only.
+                async with open_mcp_session(caller, pid, frame(caller_biscuit, "mcp://calc"), [CP_KEY], required_labels={"region": "eu", "team": "platform"}):
+                    pass
 
                 # A provider whose credential the caller does not trust is rejected.
                 with pytest.raises(AuthRejectedError):
@@ -216,3 +219,30 @@ def test_tools_over_the_mesh_stream():
             await main()
 
     trio.run(with_timeout)
+
+
+def test_a_requirement_of_several_labels_is_met_by_any_one_of_them():
+    """The cases of internal/node/labels_gate_test.go, run through the SDK's
+    predicate: a caller naming several pairs means any of these will do, as
+    sam-node's checkPeerLabels and api.LabelCheck read it."""
+    from datetime import datetime, timezone
+
+    def attesting(labels: dict) -> VerifiedBiscuit:
+        return VerifiedBiscuit(peer_id="p", expiration=datetime.now(timezone.utc), verifying_key=CP_KEY, roles=[], labels=labels)
+
+    # exact match
+    require_labels(attesting({"region": "us-east-1"}), {"region": "us-east-1"})
+    # any-of requirement matches one key
+    require_labels(attesting({"region": "na-us", "team": "platform"}), {"region": "eu", "team": "platform"})
+    # no built-in hierarchy: coarser requirement fails a finer claim
+    with pytest.raises(LabelsNotSatisfiedError):
+        require_labels(attesting({"region": "us-east-1"}), {"region": "us"})
+    # disjoint labels fail
+    with pytest.raises(LabelsNotSatisfiedError):
+        require_labels(attesting({"region": "na-us"}), {"region": "eu"})
+    # unattested token fails closed, naming every pair the caller asked for
+    with pytest.raises(LabelsNotSatisfiedError, match="region=eu, team=platform"):
+        require_labels(attesting({}), {"region": "eu", "team": "platform"})
+    # an empty requirement is no requirement
+    require_labels(attesting({}), {})
+    require_labels(attesting({}), None)

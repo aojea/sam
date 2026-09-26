@@ -881,7 +881,8 @@ through every router that admitted the caller, and the router opens a
 circuit because it admitted the agent too. Either way the SDK verifies the
 peer's credential before sending anything, and `requiredLabels`
 (`required_labels` in Python) refuses a peer whose control-plane-attested
-labels do not carry the values you ask for.
+labels carry none of the pairs you ask for; one matching pair is enough,
+as with `X-Sam-Required-Labels` on a `sam-node`.
 
 `acceptA2A` (`accept_a2a`) fetched the mesh policy and started answering.
 Every caller must present a credential signed by a trusted control plane

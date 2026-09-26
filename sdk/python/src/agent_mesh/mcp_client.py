@@ -46,18 +46,22 @@ MCP_CLIENT_INFO = mcp_types.Implementation(name="agent-mesh-sdk", version="0.1.0
 
 
 class LabelsNotSatisfiedError(Exception):
-    """The provider's credential lacks a label the caller requires (checkPeerLabels)."""
+    """The provider's credential carries none of the labels the caller requires (checkPeerLabels)."""
 
-    def __init__(self, peer_id: str, missing: Sequence[str]):
-        super().__init__(f"peer {peer_id} does not carry the required labels: {', '.join(missing)}")
+    def __init__(self, peer_id: str, required: Sequence[str]):
+        super().__init__(f"peer {peer_id} carries none of the required labels: {', '.join(required)}")
 
 
 def require_labels(provider: VerifiedBiscuit, required: Optional[Mapping[str, str]]) -> None:
+    """A caller's requirement is satisfied by any one pair, as sam-node's
+    api.LabelCheck (`check if label(k1, v1) or label(k2, v2)`): several pairs
+    mean "any of these will do". The operator's egress floor is the
+    conjunction, and sam-node's alone."""
     if not required:
         return
-    missing = [f"{k}={v}" for k, v in required.items() if provider.labels.get(k) != v]
-    if missing:
-        raise LabelsNotSatisfiedError(provider.peer_id, missing)
+    if any(provider.labels.get(k) == v for k, v in required.items()):
+        return
+    raise LabelsNotSatisfiedError(provider.peer_id, [f"{k}={v}" for k, v in required.items()])
 
 
 @dataclass

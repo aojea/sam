@@ -30,6 +30,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -70,6 +71,28 @@ type sdkMesh struct {
 	// mintToken mints an OIDC token the control plane accepts, as a platform's
 	// workload identity token would be.
 	mintToken func(map[string]interface{}) string
+}
+
+// sdkMeshLabels is what every provider in the mesh attests, the node and the
+// SDK members alike: the inputs of the "any-of requirement matches one key"
+// case of internal/node/labels_gate_test.go, so the caller-side check can be
+// run against a real credential from every implementation.
+var sdkMeshLabels = map[string]string{"region": "na-us", "team": "platform"}
+
+// sdkMeshLabelRequirements are the caller requirements the matrix runs against
+// sdkMeshLabels: one pair of two matches, so a requirement is met by any of its
+// pairs (api.LabelCheck joins them with `or`); none of the pairs matches, so
+// it is refused; one pair that matches; the coarser value of a finer claim, so
+// there is no hierarchy.
+var sdkMeshLabelRequirements = []struct {
+	name     string
+	required map[string]string
+	allowed  bool
+}{
+	{"any-of requirement matches one key", map[string]string{"region": "eu", "team": "platform"}, true},
+	{"disjoint labels fail", map[string]string{"region": "eu", "team": "sre"}, false},
+	{"exact match", map[string]string{"team": "platform"}, true},
+	{"no built-in hierarchy", map[string]string{"region": "na"}, false},
 }
 
 const sdkMeshAdminToken = "test-admin-token"
@@ -114,8 +137,9 @@ func startSDKMesh(t *testing.T) *sdkMesh {
 
 	// The router enrolls through OIDC with group "routers" and the node with
 	// user mock-user. Every member holds the node role, which may reach any
-	// service on any target; the SDK members get it from their bootstrap
-	// token and the node from its binding.
+	// service on any target and declare the two labels the matrix uses; the
+	// SDK members get it from their bootstrap token and the node from its
+	// binding.
 	policyFile := filepath.Join(t.TempDir(), "policy.yaml")
 	policy := fmt.Sprintf(`roles:
   - name: %s
@@ -124,6 +148,7 @@ func startSDKMesh(t *testing.T) *sdkMesh {
   - name: %s
     allowed_services: ["*"]
     allowed_targets: ["*"]
+    allowed_labels: ["region=*", "team=*"]
 bindings:
   - role: %s
     members: ["group:routers"]
@@ -159,7 +184,7 @@ bindings:
 		"--allow-loopback",
 		"--api-token-path", tokenPath(t, "node-token"),
 		"--discovery-interval", "100ms",
-		"--config", writeNodeConfig(t, nodeHome, nil, svcDecl{Type: "mcp", Name: "calc", TargetURL: backend.URL}),
+		"--config", writeNodeConfig(t, nodeHome, sdkMeshLabels, svcDecl{Type: "mcp", Name: "calc", TargetURL: backend.URL}),
 		"--log-level", "debug",
 	)
 	return &sdkMesh{
@@ -260,7 +285,11 @@ var sdkMemberLaunchers = []sdkRunner{
 // credential gets no answer. Then each SDK member discovers the sam-node's
 // service in the DHT, lists and calls its tools over /sam/mcp/1.0.0 through
 // the router, reads the node's own catalog, and is refused a service the
-// node does not have. Then each SDK member accepts A2A requests for its
+// node does not have. Every member and the sam-node attest the same labels,
+// and the caller-side label requirement is run as one matrix from each SDK
+// against the node and from the node against each SDK agent, so the three
+// implementations agree on what a requirement of several pairs means. Then
+// each SDK member accepts A2A requests for its
 // agent: the sam-node reaches it by peer ID through its egress proxy
 // (/sam/<peer>/a2a/agent/...), the other SDK member does the same over the
 // mesh, the agent is in no discovery table, the member speaks no
@@ -384,6 +413,35 @@ func TestNativeSDKsMesh(t *testing.T) {
 		})
 	}
 
+	// The caller-side label requirement means the same thing in every
+	// implementation: a requirement of several pairs is met by any one of
+	// them, none of them is a refusal, and a value is matched whole. The node
+	// and every SDK member attest the same labels, so the matrix below runs
+	// each requirement from each caller against a credential each provider
+	// minted: SDK -> node over /sam/mcp/1.0.0, and node -> SDK through the
+	// egress proxy's X-Sam-Required-Labels, which runs checkPeerLabels.
+	t.Run("required-labels", func(t *testing.T) {
+		for _, m := range members {
+			if got := m.auth(t, samNode.p2pAddr).Labels; got["region"] != sdkMeshLabels["region"] || got["team"] != sdkMeshLabels["team"] {
+				t.Fatalf("%s sees the node's labels as %v, want %v", m.name, got, sdkMeshLabels)
+			}
+		}
+		for _, tc := range sdkMeshLabelRequirements {
+			t.Run(tc.name, func(t *testing.T) {
+				nodeRelayAddr := routerAddr + "/p2p-circuit/p2p/" + samNode.peerID.String()
+				for _, m := range members {
+					res := m.toolsRequiring(t, nodeRelayAddr, "mcp://"+serviceName, tc.required)
+					if res.OK != tc.allowed {
+						t.Errorf("%s requiring %v of the node: ok=%v (%s), want %v", m.name, tc.required, res.OK, res.Error, tc.allowed)
+					}
+					if !tc.allowed && res.OK == false && !strings.Contains(res.Error, "LabelsNotSatisfied") {
+						t.Errorf("%s requiring %v of the node was refused for another reason: %s", m.name, tc.required, res.Error)
+					}
+				}
+			})
+		}
+	})
+
 	// Every SDK member is an agent: it accepts A2A requests for a2a://agent,
 	// answered in the runner's process, reachable by peer ID through the
 	// router. It publishes nothing; the policy rules it evaluates are the
@@ -411,6 +469,19 @@ func TestNativeSDKsMesh(t *testing.T) {
 			}
 			if json.Unmarshal([]byte(body), &seen) != nil || seen.SDK != m.name || seen.Peer != samNode.peerID.String() || seen.Path != "/card" {
 				t.Fatalf("sam-node egress to %s agent answered %s", m.name, body)
+			}
+
+			// The node's caller-side requirement against the member's
+			// credential, the same matrix the members ran against the node's.
+			for _, tc := range sdkMeshLabelRequirements {
+				want := http.StatusForbidden
+				if tc.allowed {
+					want = http.StatusOK
+				}
+				status, body := egressGetRequiring(t, nodeAPI, "node-token", "/sam/"+m.report.PeerID+"/a2a/agent/card", tc.required)
+				if status != want {
+					t.Errorf("sam-node requiring %v of %s (%s): status %d %s, want %d", tc.required, m.name, tc.name, status, strings.TrimSpace(body), want)
+				}
 			}
 
 			// The agent is not in the discovery table: nothing was announced.
@@ -604,6 +675,7 @@ func startSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, adm
 		"SAM_BOOTSTRAP_TOKEN_PATH="+tokenPath,
 		"SAM_SDK_STATE_DIR="+filepath.Join(t.TempDir(), "state"),
 		"SAM_SDK_LISTEN_ADDRS=/ip4/127.0.0.1/tcp/0",
+		"SAM_SDK_LABELS="+labelsEnv(sdkMeshLabels),
 	)
 	cmd.Dir = root
 	m := &sdkMember{name: name, cmd: cmd, stderr: &bytes.Buffer{}}
@@ -807,18 +879,37 @@ func (m *sdkMember) discoverOnce(t *testing.T, serviceType, name string) []sdkPr
 
 func (m *sdkMember) tools(t *testing.T, addr, service string) []string {
 	t.Helper()
-	var res struct {
-		OK    bool     `json:"ok"`
-		Error string   `json:"error"`
-		Tools []string `json:"tools"`
-	}
-	if line := m.send(t, map[string]string{"cmd": "tools", "addr": addr, "service": service}); json.Unmarshal(line, &res) != nil {
-		t.Fatalf("%s member: tools answered %q", m.name, line)
-	}
+	res := m.toolsRequiring(t, addr, service, nil)
 	if !res.OK {
 		t.Fatalf("%s member could not list tools of %q at %s: %s", m.name, service, addr, res.Error)
 	}
 	return res.Tools
+}
+
+// sdkToolsResult answers a {"cmd":"tools"} command.
+type sdkToolsResult struct {
+	OK    bool     `json:"ok"`
+	Error string   `json:"error"`
+	Tools []string `json:"tools"`
+}
+
+// toolsRequiring lists a provider's tools with a caller-side label requirement
+// on the provider's credential, and reports a refusal instead of failing.
+func (m *sdkMember) toolsRequiring(t *testing.T, addr, service string, required map[string]string) sdkToolsResult {
+	t.Helper()
+	command := map[string]any{"cmd": "tools", "addr": addr, "service": service}
+	if required != nil {
+		command["required_labels"] = required
+	}
+	line, _ := json.Marshal(command)
+	if _, err := m.stdin.Write(append(line, '\n')); err != nil {
+		t.Fatalf("%s member: write command: %v", m.name, err)
+	}
+	var res sdkToolsResult
+	if answer := m.readLine(t, 20*time.Second); json.Unmarshal(answer, &res) != nil {
+		t.Fatalf("%s member: tools answered %q", m.name, answer)
+	}
+	return res
 }
 
 // sdkCallResult answers a {"cmd":"call"} command.
@@ -1040,11 +1131,21 @@ func libp2pHTTPGet(t *testing.T, ctx context.Context, h host.Host, target peer.I
 // egressGet is a GET through sam-node's egress proxy with the node API token.
 func egressGet(t *testing.T, apiAddr, token, path string) (int, string) {
 	t.Helper()
+	return egressGetRequiring(t, apiAddr, token, path, nil)
+}
+
+// egressGetRequiring is egressGet with a caller-side label requirement on the
+// destination, as X-Sam-Required-Labels carries it.
+func egressGetRequiring(t *testing.T, apiAddr, token, path string, required map[string]string) (int, string) {
+	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, "http://"+apiAddr+path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set(api.HeaderSamAuthentication, "Bearer "+token)
+	if required != nil {
+		req.Header.Set(api.HeaderSamRequiredLabels, labelsEnv(required))
+	}
 	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {
 		t.Fatalf("GET %s through the sidecar: %v", path, err)
@@ -1052,6 +1153,21 @@ func egressGet(t *testing.T, apiAddr, token, path string) (int, string) {
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(body)
+}
+
+// labelsEnv renders labels as "k=v,k2=v2", the form the runners' SAM_SDK_LABELS
+// and sam-node's X-Sam-Required-Labels both take, keys sorted.
+func labelsEnv(labels map[string]string) string {
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	pairs := make([]string, 0, len(keys))
+	for _, k := range keys {
+		pairs = append(pairs, k+"="+labels[k])
+	}
+	return strings.Join(pairs, ",")
 }
 
 // authHandshake runs the client side of /sam/auth/1.0.0 against target and

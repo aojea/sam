@@ -22,10 +22,12 @@
 //                                            run the auth handshake
 //   {"cmd": "discover", "type": "mcp", "name": "calc"}
 //                                            DHT lookup for a service's providers
-//   {"cmd": "tools", "addr": "<multiaddr>", "service": "mcp://calc"}
-//                                            list a provider's tools
+//   {"cmd": "tools", "addr": "<multiaddr>", "service": "mcp://calc",
+//    "required_labels": {"region": "eu"}}   list a provider's tools; the labels,
+//                                            if given, must be on its credential
 //   {"cmd": "call", "addr": "<multiaddr>", "service": "mcp://calc",
-//    "tool": "add", "args": {...}}          call one tool
+//    "tool": "add", "args": {...}, "required_labels": {...}}
+//                                            call one tool
 //   {"cmd": "accept", "name": "agent", "target": "<url>"}
 //                                            accept A2A requests for this
 //                                            member's agent; without target,
@@ -61,6 +63,7 @@ interface Command {
   method?: string;
   body?: string;
   headers?: Record<string, string>;
+  required_labels?: Record<string, string>;
 }
 
 function requireEnv(name: string): string {
@@ -77,6 +80,10 @@ function emit(obj: unknown): void {
 
 function failure(cmd: string | undefined, err: unknown): unknown {
   return { cmd, ok: false, error: err instanceof Error ? `${err.name}: ${err.message}` : String(err) };
+}
+
+function requiredLabelsOf(command: Command): { requiredLabels?: Record<string, string> } {
+  return command.required_labels !== undefined ? { requiredLabels: command.required_labels } : {};
 }
 
 async function handle(session: MeshSession, command: Command): Promise<unknown> {
@@ -98,11 +105,14 @@ async function handle(session: MeshSession, command: Command): Promise<unknown> 
         return { cmd: "discover", ok: true, providers: providers.map((p) => ({ peer_id: p.peerId, addrs: p.addrs })) };
       }
       case "tools": {
-        const tools = await session.listTools(command.addr ?? "", command.service ?? "", { signal: AbortSignal.timeout(15_000) });
+        const tools = await session.listTools(command.addr ?? "", command.service ?? "", { signal: AbortSignal.timeout(15_000), ...requiredLabelsOf(command) });
         return { cmd: "tools", ok: true, tools: tools.map((t) => t.name) };
       }
       case "call": {
-        const result = await session.callTool(command.addr ?? "", command.service ?? "", command.tool ?? "", command.args ?? {}, { signal: AbortSignal.timeout(15_000) });
+        const result = await session.callTool(command.addr ?? "", command.service ?? "", command.tool ?? "", command.args ?? {}, {
+          signal: AbortSignal.timeout(15_000),
+          ...requiredLabelsOf(command),
+        });
         return { cmd: "call", ok: true, is_error: result.isError, text: result.text };
       }
       case "peers":
@@ -160,8 +170,23 @@ async function main(): Promise<void> {
   const stateDir = requireEnv("SAM_SDK_STATE_DIR");
   const allowInsecure = process.env.SAM_INSECURE_CONTROL_PLANE === "1";
   const listenAddrs = (process.env.SAM_SDK_LISTEN_ADDRS ?? "").split(",").filter((a) => a !== "");
+  // Labels this member declares at enrollment, "k=v,k2=v2"; the policy's
+  // allowed_labels decide whether the control plane attests them.
+  const labels = Object.fromEntries(
+    (process.env.SAM_SDK_LABELS ?? "")
+      .split(",")
+      .filter((pair) => pair.includes("="))
+      .map((pair) => pair.split("=", 2) as [string, string]),
+  );
 
-  const mesh = await AgentMesh.enroll({ controlPlaneUrl, allowInsecure, stateDir, bootstrapTokenPath, pollIntervalMs: 200 });
+  const mesh = await AgentMesh.enroll({
+    controlPlaneUrl,
+    allowInsecure,
+    stateDir,
+    bootstrapTokenPath,
+    pollIntervalMs: 200,
+    ...(Object.keys(labels).length > 0 ? { labels } : {}),
+  });
   // The test drives every pull itself; only gossip events bring one forward.
   const session = await mesh.join({ listenAddrs, signal: AbortSignal.timeout(20_000), controlPlaneSyncIntervalMs: 0, controlPlaneSyncJitterMs: 0 });
 
