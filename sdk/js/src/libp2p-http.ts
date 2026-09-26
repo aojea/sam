@@ -15,16 +15,33 @@
 // The /libp2p-http protocol (go-libp2p-http): the client that calls inference
 // and A2A services on the mesh, and the ingress that accepts A2A requests for
 // this member's own agent, gated by the authorizer the way sam-node gates its
-// ingress (StartIngressServer in internal/node). Node's own HTTP server and
-// client run over the libp2p stream, so bodies stream in both directions and
-// an A2A message/stream (SSE) works.
+// ingress (StartIngressServer in internal/node). Requests and responses are
+// framed by the codec in http1.ts on the libp2p stream itself, so bodies
+// stream in both directions, an A2A message/stream (SSE) works, and none of
+// it needs Node: a member in a browser calls and answers the same way. A
+// Node request listener (an Express app) is served by libp2p-http-node.ts.
 
 import type { Connection, Stream, StreamHandler } from "@libp2p/interface";
-import http from "node:http";
-import { Duplex, Readable } from "node:stream";
 import { AUTH_HANDSHAKE_TIMEOUT_MS } from "./auth.ts";
 import { AuthorizationError, authorizeCaller, type ProviderAuthorizerOptions } from "./authorizer.ts";
 import type { VerifiedBiscuit } from "./biscuit.ts";
+import { fromBase64, toBase64 } from "./bytes.ts";
+import {
+  ByteReader,
+  HTTPParseError,
+  LAST_CHUNK,
+  bodyStream,
+  encodeChunk,
+  encodeRequestHead,
+  encodeResponseHead,
+  readBody,
+  readRequestHead,
+  readResponseHead,
+  requestBodyFraming,
+  responseBodyFraming,
+  sendAll,
+  streamSource,
+} from "./http1.ts";
 import { canonicalPeerId } from "./identity.ts";
 
 /** go-libp2p-http's protocol: plain HTTP/1.1 on a stream, one request per stream. */
@@ -50,14 +67,21 @@ export const DEFAULT_A2A_NAME = "agent";
  */
 export const MESH_PATH_PREFIX = "/sam/";
 
-const MAX_INGRESS_BODY_BYTES = 8 * 1024 * 1024;
+/** Largest request body the ingress reads whole for a handler or url target. */
+export const MAX_INGRESS_BODY_BYTES = 8 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 60_000;
 
 /** A fetch-style handler in this process. */
 export type HTTPHandler = (request: Request, caller: VerifiedBiscuit) => Promise<Response> | Response;
 
-/** A Node request listener in this process, such as an Express app with the A2A SDK's handlers mounted. */
-export type NodeRequestListener = (req: http.IncomingMessage, res: http.ServerResponse) => void;
+/**
+ * A request listener of the runtime's own HTTP server, such as an Express
+ * app with the A2A SDK's handlers mounted. On Node it is
+ * (req: http.IncomingMessage, res: http.ServerResponse) => void, served by
+ * libp2p-http-node.ts; a browser has no such server and answers 501.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type NodeRequestListener = (req: any, res: any) => void;
 
 /**
  * This member's agent as other members reach it: `a2a://<name>`, answered by
@@ -97,239 +121,210 @@ export interface ProviderOptions extends ProviderAuthorizerOptions {
   onAuthorized?(peerId: string, verified: VerifiedBiscuit, targetService: string): void;
 }
 
-interface StreamSocket extends Duplex {
-  remotePeer: string;
-}
-
-/**
- * Bridges a libp2p stream to a Node Duplex so Node's own HTTP parser and
- * client can run over it.
- */
-export function streamToNodeDuplex(stream: Stream, remotePeer: string): StreamSocket {
-  const duplex = new Duplex({
-    read() {
-      stream.resume();
-    },
-    write(chunk: Uint8Array, _encoding, callback) {
-      if (stream.send(chunk)) {
-        callback();
-      } else {
-        stream.addEventListener("drain", () => callback(), { once: true });
-      }
-    },
-    final(callback) {
-      stream.close().then(
-        () => callback(),
-        (err: Error) => callback(err),
-      );
-    },
-    destroy(err, callback) {
-      if (err !== null) {
-        stream.abort(err);
-      } else {
-        void stream.close().catch(() => {});
-      }
-      callback(err);
-    },
-  }) as StreamSocket;
-  duplex.remotePeer = remotePeer;
-  stream.addEventListener("message", (evt) => {
-    if (!duplex.push(Buffer.from(evt.data.subarray()))) {
-      stream.pause();
-    }
-  });
-  const end = () => {
-    if (!duplex.readableEnded) {
-      duplex.push(null);
-    }
-  };
-  stream.addEventListener("remoteCloseWrite", end);
-  stream.addEventListener("close", end);
-  return duplex;
-}
-
-/** Reads a whole body, bounded. */
-async function readBody(readable: Readable, limit: number): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of readable) {
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
-    size += buf.length;
-    if (size > limit) {
-      throw new Error(`body exceeds ${limit} bytes`);
-    }
-    chunks.push(buf);
-  }
-  return Buffer.concat(chunks);
-}
-
 function hasDotSegment(path: string): boolean {
   return path.split("/").some((seg) => seg === "." || seg === "..");
 }
 
-/**
- * Server side of /libp2p-http, as sam-node's StartIngressServer: the path is
- * /<type>/<name>[/<upstream>], the caller's biscuit is X-Sam-Biscuit, and the
- * request is authorized for <type>://<name> before anything is forwarded. Only
- * the agent's own endpoint is answered; anything else is 404 after
- * authorization, so an unauthorized caller learns nothing about it.
- */
-export function httpIngressHandler(endpoint: A2AEndpoint, options: ProviderOptions): StreamHandler {
-  const server = http.createServer({ keepAlive: false }, (req, res) => {
-    void handleIngress(req, res, endpoint, options).catch((err: unknown) => {
-      if (!res.headersSent) {
-        res.writeHead(500, { "content-type": "text/plain" });
-      }
-      res.end(`ingress error: ${err instanceof Error ? err.message : String(err)}\n`);
-    });
-  });
-  server.headersTimeout = AUTH_HANDSHAKE_TIMEOUT_MS;
-  return (stream: Stream, connection: Connection) => {
-    server.emit("connection", streamToNodeDuplex(stream, connection.remotePeer.toString()));
-  };
+/** What the ingress looks at before anything reaches the agent. */
+export interface IngressRequest {
+  /** The request target as it came off the wire, path and query. */
+  target: string;
+  headers: Headers;
+  remotePeer: string;
 }
 
-async function handleIngress(req: http.IncomingMessage, res: http.ServerResponse, endpoint: A2AEndpoint, options: ProviderOptions): Promise<void> {
-  const remotePeer = (req.socket as unknown as StreamSocket).remotePeer;
-  const reply = (status: number, text: string) => {
-    res.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
-    res.end(text + "\n");
-  };
+/** A refusal, with the text the caller gets. */
+export interface IngressRefusal {
+  status: number;
+  text: string;
+}
 
-  const rawURL = req.url ?? "/";
+/** An authorized request for the endpoint, with what the agent may see. */
+export interface IngressAdmission {
+  verified: VerifiedBiscuit;
+  /** The path relative to the service, query included. */
+  path: string;
+  noTrailingSlash: boolean;
+}
+
+/**
+ * Server-side admission of /libp2p-http, as sam-node's StartIngressServer:
+ * the path is /<type>/<name>[/<upstream>], the caller's biscuit is
+ * X-Sam-Biscuit, and the request is authorized for <type>://<name> before
+ * anything is forwarded. Only the agent's own endpoint is answered; anything
+ * else is 404 after authorization, so an unauthorized caller learns nothing
+ * about it.
+ */
+export async function admitIngress(req: IngressRequest, endpoint: A2AEndpoint, options: ProviderOptions): Promise<IngressRefusal | IngressAdmission> {
   // Policy is decided on the /<type>/<name> prefix; a dot segment in what
   // follows could resolve to a sibling path on the backend. Checked on the
   // raw path, before URL parsing normalizes it away.
-  if (hasDotSegment(rawURL.split("?")[0] as string)) {
-    reply(400, "Invalid path");
-    return;
+  if (hasDotSegment(req.target.split("?")[0] as string)) {
+    return { status: 400, text: "Invalid path" };
   }
-  const url = new URL(rawURL, "http://mesh.invalid");
+  const url = new URL(req.target, "http://mesh.invalid");
   const parts = url.pathname.replace(/^\//, "").split("/");
   if (parts.length < 2 || parts[0] === "" || parts[1] === "") {
-    reply(400, "Invalid path");
-    return;
+    return { status: 400, text: "Invalid path" };
   }
   const [serviceType, serviceName, ...rest] = parts as [string, string, ...string[]];
   if (serviceType !== "inference" && serviceType !== "a2a" && serviceType !== "mcp") {
-    reply(400, "Invalid service type");
-    return;
+    return { status: 400, text: "Invalid service type" };
   }
   const upstreamPath = rest.join("/");
 
-  const biscuitB64 = req.headers[HEADER_SAM_BISCUIT];
-  if (typeof biscuitB64 !== "string" || biscuitB64 === "") {
-    reply(401, "Missing X-Sam-Biscuit header");
-    return;
+  const biscuitB64 = req.headers.get(HEADER_SAM_BISCUIT);
+  if (biscuitB64 === null || biscuitB64 === "") {
+    return { status: 401, text: "Missing X-Sam-Biscuit header" };
   }
   let biscuit: Uint8Array;
   try {
-    biscuit = new Uint8Array(Buffer.from(biscuitB64, "base64"));
+    biscuit = fromBase64(biscuitB64);
     if (biscuit.length === 0) {
       throw new Error("empty");
     }
   } catch {
-    reply(400, "Invalid X-Sam-Biscuit encoding");
-    return;
+    return { status: 400, text: "Invalid X-Sam-Biscuit encoding" };
   }
 
   const targetService = `${serviceType}://${serviceName}`;
-  if (options.isBanned?.(remotePeer) === true) {
-    reply(403, "Authorization failed");
-    return;
+  if (options.isBanned?.(req.remotePeer) === true) {
+    return { status: 403, text: "Authorization failed" };
   }
-  const agentHeader = req.headers[HEADER_SAM_AGENT];
   let verified: VerifiedBiscuit;
   try {
     verified = await authorizeCaller(
-      { biscuit, peerId: remotePeer, targetService, protocol: HTTP_PROTOCOL, agent: typeof agentHeader === "string" ? agentHeader : "" },
+      { biscuit, peerId: req.remotePeer, targetService, protocol: HTTP_PROTOCOL, agent: req.headers.get(HEADER_SAM_AGENT) ?? "" },
       options,
     );
   } catch (err) {
     if (err instanceof AuthorizationError) {
-      reply(403, "Authorization failed");
-      return;
+      return { status: 403, text: "Authorization failed" };
     }
     throw err;
   }
-  options.onAuthorized?.(remotePeer, verified, targetService);
+  options.onAuthorized?.(req.remotePeer, verified, targetService);
 
   // Under the type the policy was evaluated on.
   if (targetService !== endpoint.service) {
-    reply(404, "Service not found");
-    return;
+    return { status: 404, text: "Service not found" };
   }
+  return { verified, path: "/" + upstreamPath + url.search, noTrailingSlash: upstreamPath === "" && rest.length === 0 };
+}
 
-  const path = "/" + upstreamPath + url.search;
-  const noTrailingSlash = upstreamPath === "" && rest.length === 0;
+/** Headers of the mesh datapath and of the hop itself, not passed on to the agent. */
+const HOP_HEADERS = new Set([HEADER_SAM_BISCUIT, HEADER_SAM_AGENT, HEADER_SAM_NO_TRAILING_SLASH, HEADER_PEER_ID, "host", "connection", "transfer-encoding", "content-length", "keep-alive"]);
 
-  if ("listener" in endpoint.target) {
-    // The listener sees the request as a backend behind sam-node would: the
-    // path relative to the service, the verified caller, never the biscuit.
-    // X-Peer-Id is set, not added, so an inbound value cannot pose as the
-    // verified peer.
-    req.url = path;
-    delete req.headers[HEADER_SAM_BISCUIT];
-    delete req.headers[HEADER_SAM_AGENT];
-    req.headers[HEADER_PEER_ID] = remotePeer;
-    if (noTrailingSlash) {
-      req.headers[HEADER_SAM_NO_TRAILING_SLASH] = "true";
-    } else {
-      delete req.headers[HEADER_SAM_NO_TRAILING_SLASH];
-    }
-    endpoint.target.listener(req, res);
-    return;
-  }
-
+/**
+ * The headers the agent sees: the request's own, less the datapath's, with
+ * X-Peer-Id set (not added) to the verified caller so an inbound value
+ * cannot pose as the peer.
+ */
+export function agentHeaders(inbound: Headers, remotePeer: string, noTrailingSlash: boolean): Headers {
   const headers = new Headers();
-  for (const [k, v] of Object.entries(req.headers)) {
-    if (v === undefined || k === HEADER_SAM_BISCUIT || k === HEADER_SAM_AGENT || k === HEADER_SAM_NO_TRAILING_SLASH || k === HEADER_PEER_ID || k === "host" || k === "connection" || k === "transfer-encoding" || k === "content-length") {
-      continue;
+  inbound.forEach((value, name) => {
+    if (!HOP_HEADERS.has(name)) {
+      headers.append(name, value);
     }
-    for (const value of Array.isArray(v) ? v : [v]) {
-      headers.append(k, value);
-    }
-  }
+  });
   headers.set(HEADER_PEER_ID, remotePeer);
   if (noTrailingSlash) {
     headers.set(HEADER_SAM_NO_TRAILING_SLASH, "true");
   }
+  return headers;
+}
 
-  const method = req.method ?? "GET";
-  const body: Uint8Array<ArrayBuffer> | undefined =
-    method === "GET" || method === "HEAD" ? undefined : new Uint8Array(await readBody(req, MAX_INGRESS_BODY_BYTES));
-  const init: RequestInit = { method, headers };
-  if (body !== undefined) {
-    init.body = body;
-  }
+/** A plain-text refusal, as sam-node's ingress writes one. */
+export function refusalResponse(refusal: IngressRefusal): Response {
+  return new Response(refusal.text + "\n", { status: refusal.status, headers: { "content-type": "text/plain; charset=utf-8" } });
+}
 
-  let response: Response;
-  if ("url" in endpoint.target) {
-    const base = endpoint.target.url.replace(/\/$/, "");
-    response = await fetch(base + path, { ...init, redirect: "manual" });
-  } else {
-    response = await endpoint.target.handler(new Request("http://" + endpoint.name + path, init), verified);
-  }
-
-  const outHeaders: Record<string, string | string[]> = {};
-  response.headers.forEach((value, key) => {
-    if (key === "content-length" || key === "transfer-encoding" || key === "connection") {
-      return;
+async function writeResponse(stream: Stream, response: Response, headOnly: boolean): Promise<void> {
+  const headers = new Headers();
+  response.headers.forEach((value, name) => {
+    if (name !== "content-length" && name !== "transfer-encoding" && name !== "connection") {
+      headers.set(name, value);
     }
-    outHeaders[key] = value;
   });
-  res.writeHead(response.status, outHeaders);
-  if (response.body === null) {
-    res.end();
+  headers.set("connection", "close");
+  const body = headOnly ? null : response.body;
+  if (body === null) {
+    headers.set("content-length", "0");
+    await sendAll(stream, encodeResponseHead(response.status, response.statusText, headers));
     return;
   }
-  await new Promise<void>((resolve, reject) => {
-    Readable.fromWeb(response.body as import("node:stream/web").ReadableStream)
-      .on("error", reject)
-      .pipe(res)
-      .on("finish", resolve)
-      .on("error", reject);
-  });
+  // The length is not known up front, so each piece goes as a chunk as soon
+  // as the agent writes it; an SSE event reaches the caller before the next.
+  headers.set("transfer-encoding", "chunked");
+  await sendAll(stream, encodeResponseHead(response.status, response.statusText, headers));
+  const reader = body.getReader();
+  try {
+    for (let next = await reader.read(); !next.done; next = await reader.read()) {
+      if (next.value.length > 0) {
+        await sendAll(stream, encodeChunk(next.value));
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  await sendAll(stream, LAST_CHUNK);
+}
+
+async function serveIngress(stream: Stream, remotePeer: string, endpoint: A2AEndpoint, options: ProviderOptions): Promise<void> {
+  const reader = new ByteReader(streamSource(stream));
+  const headTimer = setTimeout(() => stream.abort(new Error(`no request head from ${remotePeer} within ${AUTH_HANDSHAKE_TIMEOUT_MS}ms`)), AUTH_HANDSHAKE_TIMEOUT_MS);
+  let response: Response;
+  let headOnly = false;
+  try {
+    let head;
+    try {
+      head = await readRequestHead(reader);
+    } finally {
+      clearTimeout(headTimer);
+    }
+    if (head === null) {
+      return;
+    }
+    headOnly = head.method === "HEAD";
+    const admission = await admitIngress({ target: head.target, headers: head.headers, remotePeer }, endpoint, options);
+    if ("status" in admission) {
+      response = refusalResponse(admission);
+    } else if ("listener" in endpoint.target) {
+      response = refusalResponse({ status: 501, text: "A request listener is not served in this runtime" });
+    } else {
+      const headers = agentHeaders(head.headers, remotePeer, admission.noTrailingSlash);
+      const init: RequestInit = { method: head.method, headers };
+      if (head.method !== "GET" && head.method !== "HEAD") {
+        init.body = await readBody(reader, requestBodyFraming(head), MAX_INGRESS_BODY_BYTES);
+      }
+      if ("url" in endpoint.target) {
+        const base = endpoint.target.url.replace(/\/$/, "");
+        response = await fetch(base + admission.path, { ...init, redirect: "manual" });
+      } else {
+        response = await endpoint.target.handler(new Request("http://" + endpoint.name + admission.path, init), admission.verified);
+      }
+    }
+  } catch (err) {
+    if (err instanceof HTTPParseError) {
+      response = refusalResponse({ status: 400, text: `Bad request: ${err.message}` });
+    } else {
+      response = refusalResponse({ status: 500, text: `ingress error: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+  await writeResponse(stream, response, headOnly);
+}
+
+/**
+ * Server side of /libp2p-http for an endpoint answered by a handler in this
+ * process or an A2A server at a URL. One request per stream; the stream is
+ * closed once the response has been written.
+ */
+export function httpIngressHandler(endpoint: A2AEndpoint, options: ProviderOptions): StreamHandler {
+  return (stream: Stream, connection: Connection) => {
+    void serveIngress(stream, connection.remotePeer.toString(), endpoint, options)
+      .then(() => stream.close())
+      .catch((err: unknown) => stream.abort(err instanceof Error ? err : new Error(String(err))));
+  };
 }
 
 /** The request target for a service on a peer: /<type>/<name>/<path>. */
@@ -393,50 +388,55 @@ export async function fetchOverStream(conn: Connection, biscuit: Uint8Array, req
         ctl.abort(new DOMException(`no response headers from ${peerId} within ${REQUEST_TIMEOUT_MS}ms`, "TimeoutError"));
       }
     }, REQUEST_TIMEOUT_MS);
-    timer.unref?.();
+    (timer as { unref?: () => void }).unref?.();
   }
   const signal = ctl.signal;
   const stream = await conn.newStream(HTTP_PROTOCOL, { signal, runOnLimitedConnection: true });
-  const socket = streamToNodeDuplex(stream, peerId);
-  const headers: Record<string, string> = {};
-  request.headers.forEach((value, key) => {
-    if (key !== "host" && key !== "content-length" && key !== HEADER_SAM_BISCUIT && key !== HEADER_PEER_ID) {
-      headers[key] = value;
-    }
-  });
-  headers.host = peerId;
-  headers[HEADER_SAM_BISCUIT] = Buffer.from(biscuit).toString("base64");
-  if (options.agent) {
-    headers[HEADER_SAM_AGENT] = options.agent;
-  }
-  const body = request.body === null ? undefined : Buffer.from(await request.arrayBuffer());
-  headers["content-length"] = String(body?.length ?? 0);
+  const asError = (reason: unknown) => (reason instanceof Error ? reason : new Error(String(reason)));
+  const abortStream = () => stream.abort(asError(signal.reason));
+  signal.addEventListener("abort", abortStream, { once: true });
 
-  return new Promise<Response>((resolve, reject) => {
-    const req = http.request({ method: request.method, path: target, headers, createConnection: () => socket, signal }, (res) => {
-      headersIn = true;
-      const responseHeaders = new Headers();
-      for (const [k, v] of Object.entries(res.headers)) {
-        if (typeof v === "string") {
-          responseHeaders.set(k, v);
-        } else if (Array.isArray(v)) {
-          responseHeaders.set(k, v.join(", "));
-        }
-      }
-      res.on("close", () => socket.destroy());
-      const status = res.statusCode ?? 0;
-      const bodyStream = Readable.toWeb(res) as ReadableStream<Uint8Array>;
-      resolve(new Response(status === 204 || status === 304 || request.method === "HEAD" ? null : bodyStream, { status, statusText: res.statusMessage ?? "", headers: responseHeaders }));
-    });
-    req.on("error", (err) => {
-      socket.destroy();
-      reject(err);
-    });
-    if (body !== undefined) {
-      req.write(body);
+  const headers = new Headers();
+  request.headers.forEach((value, name) => {
+    if (name !== "host" && name !== "content-length" && name !== "transfer-encoding" && name !== HEADER_SAM_BISCUIT && name !== HEADER_PEER_ID) {
+      headers.set(name, value);
     }
-    req.end();
   });
+  headers.set("host", peerId);
+  headers.set(HEADER_SAM_BISCUIT, toBase64(biscuit));
+  if (options.agent) {
+    headers.set(HEADER_SAM_AGENT, options.agent);
+  }
+  const body = request.body === null ? new Uint8Array(0) : new Uint8Array(await request.arrayBuffer());
+  headers.set("content-length", String(body.length));
+
+  try {
+    await sendAll(stream, encodeRequestHead(request.method, target, headers));
+    await sendAll(stream, body);
+    const reader = new ByteReader(streamSource(stream));
+    const head = await readResponseHead(reader);
+    headersIn = true;
+    signal.throwIfAborted();
+    const framing = responseBodyFraming(request.method, head);
+    const done = (err?: Error) => {
+      signal.removeEventListener("abort", abortStream);
+      if (err !== undefined) {
+        stream.abort(err);
+      } else {
+        void stream.close().catch(() => {});
+      }
+    };
+    let responseBody: ReadableStream<Uint8Array> | null = null;
+    if (framing.kind === "none") {
+      done();
+    } else {
+      responseBody = bodyStream(reader, framing, done);
+    }
+    return new Response(responseBody, { status: head.status, statusText: head.statusText, headers: head.headers });
+  } catch (err) {
+    stream.abort(asError(err));
+    throw signal.aborted ? signal.reason : err;
+  }
 }
 
 export interface HTTPRequestOptions {
