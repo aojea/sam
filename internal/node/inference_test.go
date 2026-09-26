@@ -41,6 +41,49 @@ func getCounterValue(peerID, model, tokenType string) float64 {
 	return m.GetCounter().GetValue()
 }
 
+// The backend sees no forwarding header a caller sent and no Go default
+// User-Agent: ReverseProxy strips Forwarded and X-Forwarded-* before its
+// Rewrite runs and blanks a missing User-Agent, the same in Rewrite mode
+// as the Director used to do by hand.
+func TestInferenceService_ForwardingHeadersDoNotReachTheBackend(t *testing.T) {
+	var seen http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Clone()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	svc := &InferenceService{
+		baseService: baseService{
+			info:    &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_INFERENCE, Name: "test-inference-headers"},
+			backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: server.URL},
+		},
+	}
+	if err := svc.Init(context.Background()); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "http://localhost/v1/chat/completions", strings.NewReader(`{}`))
+	req.RemoteAddr = "12D3KooWpeer"
+	req.Header.Set("Forwarded", "for=spoofed;host=spoofed;proto=spoofed")
+	req.Header.Set("X-Forwarded-For", "spoofed")
+	req.Header.Set("X-Forwarded-Host", "spoofed")
+	req.Header.Set("X-Forwarded-Proto", "spoofed")
+	w := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusNoContent)
+	}
+	for _, name := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto"} {
+		if got, ok := seen[name]; ok {
+			t.Errorf("backend saw %s: %q", name, got)
+		}
+	}
+	if got := seen.Get("User-Agent"); got != "" {
+		t.Errorf("backend saw User-Agent %q, want none", got)
+	}
+}
+
 func TestInferenceService_TokenAccountability_JSON(t *testing.T) {
 	peerID := "test-peer-json"
 	modelName := "test-model-json"

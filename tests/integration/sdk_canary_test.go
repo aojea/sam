@@ -219,8 +219,8 @@ func runCanaryScript(t *testing.T, script, dir, canary, call string, env []strin
 					return
 				}
 				out <- v
-			case <-time.After(60 * time.Second):
-				t.Errorf("%s: no verdict within 60s", canary)
+			case <-time.After(30 * time.Second):
+				t.Errorf("%s: no verdict within 30s", canary)
 				return
 			}
 		}
