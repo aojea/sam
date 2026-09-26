@@ -72,9 +72,13 @@ func (s *Server) HandleAdminStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logger.Errorf("Failed to list policy: %v", err)
 	}
+	egress, err := s.store.GetEgressDestinations(r.Context())
+	if err != nil {
+		logger.Errorf("Failed to list egress destinations: %v", err)
+	}
 
 	var policyJSON string
-	if rendered, err := marshalPolicyJSON(roles, bindings); err == nil {
+	if rendered, err := marshalPolicyJSON(roles, bindings, egress); err == nil {
 		policyJSON = rendered
 	} else {
 		logger.Errorf("Failed to render policy: %v", err)

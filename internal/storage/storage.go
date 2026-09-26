@@ -244,6 +244,17 @@ type Store interface {
 	// GetMeshPolicy loads the mesh configurations.
 	GetMeshPolicy(ctx context.Context) ([]*api.PolicyRole, []*api.PolicyBinding, error)
 
+	// SaveEgressDestinations replaces the egress section of the mesh policy
+	// (PolicyConfig.egress).
+	SaveEgressDestinations(ctx context.Context, egress []*api.EgressDestination) error
+
+	// GetEgressDestinations loads the egress section of the mesh policy.
+	GetEgressDestinations(ctx context.Context) ([]*api.EgressDestination, error)
+
+	// SavePolicyDocument replaces roles, bindings and egress destinations in
+	// one transaction: a policy post is applied whole or not at all.
+	SavePolicyDocument(ctx context.Context, roles []*api.PolicyRole, bindings []*api.PolicyBinding, egress []*api.EgressDestination) error
+
 	// SaveBootstrapToken persists a new bootstrap token.
 	SaveBootstrapToken(ctx context.Context, token *BootstrapToken) error
 

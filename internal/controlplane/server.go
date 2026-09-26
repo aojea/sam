@@ -235,6 +235,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	handle("/keys", meshSurface(s.HandleKeys))
 	handle("/routers/lease", s.HandleRouterLease)
 	handle("/policies", meshSurface(s.HandlePolicies))
+	handle("/egress", meshSurface(s.HandleEgress))
 	handle("/enroll", meshSurface(noStore(s.HandleEnroll)))
 	handle("/enroll/status", meshSurface(noStore(s.HandleEnrollStatus)))
 	handle("/refresh", meshSurface(noStore(s.HandleRefresh)))
@@ -1190,11 +1191,20 @@ func (s *Server) HandlePolicies(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
+		egress, err := s.store.GetEgressDestinations(r.Context())
+		if err != nil && err != storage.ErrNotFound {
+			logger.Errorf("Failed to load egress destinations: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
 
 		policyRules, warnings := api.BuildPolicyRules(roles, bindings)
 		for _, warning := range warnings {
 			logger.Warnf("mesh policy: %s", warning)
 		}
+		// The nodes that serve a destination are granted it, so the serving
+		// node authorizes local requests with its own credential.
+		policyRules = append(policyRules, api.BuildEgressServingRules(egress)...)
 		respData, _ := proto.Marshal(&api.PolicyConfigGetResponse{DatalogRules: api.PolicyRuleTexts(policyRules)})
 		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.WriteHeader(http.StatusOK)
@@ -1233,11 +1243,12 @@ func (s *Server) HandlePolicies(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := s.store.SaveMeshPolicy(r.Context(), req.Roles, req.Bindings); err != nil {
+		if err := s.store.SavePolicyDocument(r.Context(), req.Roles, req.Bindings, req.Egress); err != nil {
 			logger.Errorf("Failed to save policy: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
+		s.warnUnservedEgress(r.Context(), req)
 
 		if err := s.getMeshAdapter().PublishEvent(r.Context(), api.MeshEvent_POLICY_UPDATE, "", nil); err != nil {
 			logger.Warnf("Failed to publish POLICY_UPDATE event to mesh: %v", err)
@@ -1258,29 +1269,155 @@ func (s *Server) HandlePolicies(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// warnUnservedEgress logs each destination of a just-posted policy that no
+// enrolled, admitted node is selected to serve. A selector with a typo is
+// valid in form and would otherwise fail silently, as a 404 to every caller.
+// A warning and not an error: the node it selects may enroll later.
+func (s *Server) warnUnservedEgress(ctx context.Context, policy *api.PolicyConfig) {
+	unserved, err := s.unservedEgress(ctx, policy)
+	if err != nil {
+		logger.Warnf("mesh policy: cannot check egress selectors against enrolled nodes: %v", err)
+		return
+	}
+	for _, d := range unserved {
+		logger.Warnf("mesh policy: egress destination %s is served by no enrolled node (served_by %v); callers get 404 until one matches", d.GetName(), d.GetServedBy())
+	}
+}
+
+// unservedEgress returns the destinations of policy whose served_by selects
+// no enrolled, admitted node, with roles resolved as a refresh would.
+func (s *Server) unservedEgress(ctx context.Context, policy *api.PolicyConfig) ([]*api.EgressDestination, error) {
+	if len(policy.GetEgress()) == 0 {
+		return nil, nil
+	}
+	nodes, err := s.store.ListNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	var unserved []*api.EgressDestination
+	for _, d := range policy.GetEgress() {
+		served := false
+		for i := range nodes {
+			node := &nodes[i]
+			if node.CheckAdmission(now) != nil {
+				continue
+			}
+			roles, err := nodeRoles(node, policy.GetBindings())
+			if err != nil {
+				continue
+			}
+			if api.EgressServedBy(d, roles, node.Labels) {
+				served = true
+				break
+			}
+		}
+		if !served {
+			unserved = append(unserved, d)
+		}
+	}
+	return unserved, nil
+}
+
 // isAdmittedNodeRequest reports whether the bearer credential is a biscuit of
 // an enrolled, admitted node. It never falls through to OIDC: running ID token
 // verification on a biscuit logs a failure and would auto-register whoever's
 // ID token lands here.
 func (s *Server) isAdmittedNodeRequest(r *http.Request) bool {
+	return s.admittedNode(r) != nil
+}
+
+// admittedNode returns the enrolled, admitted node whose biscuit the request
+// bears, or nil.
+func (s *Server) admittedNode(r *http.Request) *storage.EnrolledNode {
 	authHeader := r.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "Bearer ") {
-		return false
+		return nil
 	}
 	biscuitBytes, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(authHeader, "Bearer "))
 	if err != nil {
-		return false
+		return nil
 	}
 	trustedKeys, err := s.store.GetAllValidPublicKeys(r.Context())
 	if err != nil {
-		return false
+		return nil
 	}
 	peerID, err := identity.VerifyAndExtractPeerID(trustedKeys, biscuitBytes, s.config.BiscuitTimeout)
 	if err != nil {
-		return false
+		return nil
 	}
 	nodeRecord, err := s.store.GetNode(r.Context(), peerID.String())
-	return err == nil && nodeRecord != nil && nodeRecord.CheckAdmission(time.Now()) == nil
+	if err != nil || nodeRecord == nil || nodeRecord.CheckAdmission(time.Now()) != nil {
+		return nil
+	}
+	return nodeRecord
+}
+
+// HandleEgress HTTP GET `/egress`: the egress destinations the requesting
+// node serves, selected by its roles and labels (see EgressDestination).
+// Mesh protocol, biscuit-authenticated, binary protobuf. A separate endpoint
+// from /policies so a node predating it keeps syncing rules unchanged.
+func (s *Server) HandleEgress(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	nodeRecord := s.admittedNode(r)
+	if nodeRecord == nil {
+		http.Error(w, "Unauthorized: node credential required", http.StatusUnauthorized)
+		return
+	}
+	_, bindings, err := s.store.GetMeshPolicy(r.Context())
+	if err != nil && err != storage.ErrNotFound {
+		logger.Errorf("Failed to load policy: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	egress, err := s.store.GetEgressDestinations(r.Context())
+	if err != nil && err != storage.ErrNotFound {
+		logger.Errorf("Failed to load egress destinations: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	roles, err := nodeRoles(nodeRecord, bindings)
+	if err != nil {
+		logger.Errorf("Failed to resolve roles for node %s: %v", nodeRecord.PeerID, err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	resp := &api.EgressAssignmentsResponse{}
+	for _, d := range egress {
+		if api.EgressServedBy(d, roles, nodeRecord.Labels) {
+			resp.Egress = append(resp.Egress, d)
+		}
+	}
+	respData, err := proto.Marshal(resp)
+	if err != nil {
+		http.Error(w, "Failed to serialize response", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-protobuf")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(respData)
+}
+
+// nodeRoles is the role set a refresh would mint for the node: the enrolled
+// role plus the custom roles its identity resolves to, from the bindings.
+func nodeRoles(nodeRecord *storage.EnrolledNode, bindings []*api.PolicyBinding) ([]string, error) {
+	roles := []string{nodeRecord.Role}
+	if nodeRecord.EnrollmentType != "OIDC" {
+		return roles, nil
+	}
+	var claims jwt.MapClaims
+	if err := json.Unmarshal([]byte(nodeRecord.ClaimsJSON), &claims); err != nil {
+		return nil, err
+	}
+	for _, r := range resolveRoles(nodeRecord.PeerID, claims, bindings) {
+		if !strings.HasPrefix(r, "sam:role:") && r != nodeRecord.Role {
+			roles = append(roles, r)
+		}
+	}
+	return roles, nil
 }
 
 // HandleAdminPolicy HTTP GET `/admin/policy`: the mesh policy as the operator
@@ -1299,7 +1436,13 @@ func (s *Server) HandleAdminPolicy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	writeProtoJSON(w, &api.PolicyConfig{Roles: roles, Bindings: bindings})
+	egress, err := s.store.GetEgressDestinations(r.Context())
+	if err != nil && err != storage.ErrNotFound {
+		logger.Errorf("Failed to load egress destinations: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	writeProtoJSON(w, &api.PolicyConfig{Roles: roles, Bindings: bindings, Egress: egress})
 }
 
 // writeProtoJSON answers an operator-plane request with protojson of msg,
@@ -2545,7 +2688,11 @@ func (s *Server) HandleUserStatus(w http.ResponseWriter, r *http.Request) {
 		if err != nil && err != storage.ErrNotFound {
 			logger.Errorf("Failed to list policy: %v", err)
 		}
-		if rendered, err := marshalPolicyJSON(roles, bindings); err == nil {
+		egress, err := s.store.GetEgressDestinations(ctx)
+		if err != nil && err != storage.ErrNotFound {
+			logger.Errorf("Failed to list egress destinations: %v", err)
+		}
+		if rendered, err := marshalPolicyJSON(roles, bindings, egress); err == nil {
 			resp["policy_json"] = rendered
 		} else {
 			logger.Errorf("Failed to render policy: %v", err)
@@ -2906,8 +3053,8 @@ func toStringSlice(val any) []string {
 // field names. Generated marshalling is the point: a hand-maintained mirror of
 // PolicyRole silently drops any field it forgets, which is how custom_datalog
 // went missing from the console for so long.
-func marshalPolicyJSON(roles []*api.PolicyRole, bindings []*api.PolicyBinding) (string, error) {
-	resp := &api.PolicyConfig{Roles: roles, Bindings: bindings}
+func marshalPolicyJSON(roles []*api.PolicyRole, bindings []*api.PolicyBinding, egress []*api.EgressDestination) (string, error) {
+	resp := &api.PolicyConfig{Roles: roles, Bindings: bindings, Egress: egress}
 	marshaler := protojson.MarshalOptions{UseProtoNames: true, Multiline: true, Indent: "  "}
 	out, err := marshaler.Marshal(resp)
 	if err != nil {
@@ -2949,6 +3096,9 @@ func validatePolicyConfig(req *api.PolicyConfig) error {
 			if err := api.ValidateServiceFormat(svc); err != nil {
 				return fmt.Errorf("invalid allowed_service %q in role %s: %w", svc, r.Name, err)
 			}
+			if err := api.ValidateEgressServicePattern(svc); err != nil {
+				return fmt.Errorf("in role %s: %w", r.Name, err)
+			}
 		}
 		for _, target := range r.AllowedTargets {
 			if err := api.ValidateTargetFormat(target); err != nil {
@@ -2962,6 +3112,11 @@ func validatePolicyConfig(req *api.PolicyConfig) error {
 		}
 		for _, label := range r.AllowedLabels {
 			if err := api.ValidateLabelPattern(label); err != nil {
+				return fmt.Errorf("in role %s: %w", r.Name, err)
+			}
+		}
+		for _, g := range r.Http {
+			if err := api.ValidateHTTPGrant(g, r.AllowedServices); err != nil {
 				return fmt.Errorf("in role %s: %w", r.Name, err)
 			}
 		}
@@ -2985,6 +3140,9 @@ func validatePolicyConfig(req *api.PolicyConfig) error {
 		factBudget += len(api.BuildTargetDatalogFacts(r.AllowedTargets))
 		factBudget += len(api.BuildAgentDatalogFacts(r.AllowedAgents))
 		factBudget += len(r.CustomDatalog)
+		for _, g := range r.Http {
+			factBudget += len(api.BuildHTTPGrantFacts(g))
+		}
 	}
 
 	if factBudget > maxIdentityFactBudget {
@@ -3022,6 +3180,20 @@ func validatePolicyConfig(req *api.PolicyConfig) error {
 				return fmt.Errorf("member prefix %q in member %q is invalid", prefix, member)
 			}
 		}
+	}
+
+	egressNames := make(map[string]bool, len(req.Egress))
+	for _, d := range req.Egress {
+		if d == nil {
+			continue
+		}
+		if err := api.ValidateEgressDestination(d, roleNames); err != nil {
+			return err
+		}
+		if egressNames[d.Name] {
+			return fmt.Errorf("duplicate egress destination: %s", d.Name)
+		}
+		egressNames[d.Name] = true
 	}
 	return nil
 }

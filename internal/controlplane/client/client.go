@@ -48,6 +48,11 @@ const MaxBodyBytes = 8 << 20
 // truncated ban set or router list would be read as a smaller, valid one.
 var ErrBodyTooLarge = errors.New("control plane answer exceeds the body cap")
 
+// ErrNotFound marks a 404: the control plane does not serve the endpoint, as
+// one predating it does not. Callers of an endpoint added after the first
+// release check for it, so a newer node works against an older control plane.
+var ErrNotFound = errors.New("control plane does not serve this endpoint")
+
 // ReadBody reads a control plane response body of at most MaxBodyBytes and
 // reports ErrBodyTooLarge for anything larger.
 func ReadBody(r io.Reader) ([]byte, error) {
@@ -140,6 +145,16 @@ func (c *Client) FetchPolicy(ctx context.Context, biscuit []byte) (*api.PolicyCo
 	return &policy, nil
 }
 
+// FetchEgress is GET /egress, authenticated with the caller's biscuit: the
+// egress destinations the control plane assigned to this node.
+func (c *Client) FetchEgress(ctx context.Context, biscuit []byte) (*api.EgressAssignmentsResponse, error) {
+	var egress api.EgressAssignmentsResponse
+	if err := c.get(ctx, "/egress", biscuit, &egress); err != nil {
+		return nil, err
+	}
+	return &egress, nil
+}
+
 func (c *Client) get(ctx context.Context, path string, biscuit []byte, msg proto.Message) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
@@ -157,6 +172,9 @@ func (c *Client) get(ctx context.Context, path string, biscuit []byte, msg proto
 	body, err := ReadBody(resp.Body)
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("%w: %s", ErrNotFound, path)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("control plane returned status %s: %s", resp.Status, string(body))

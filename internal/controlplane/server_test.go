@@ -582,7 +582,7 @@ func TestMarshalPolicyJSONRoundTrip(t *testing.T) {
 		{Role: "ops", Members: []string{"user:root"}},
 	}
 
-	rendered, err := marshalPolicyJSON(roles, bindings)
+	rendered, err := marshalPolicyJSON(roles, bindings, nil)
 	if err != nil {
 		t.Fatalf("rendering the policy: %v", err)
 	}
@@ -675,7 +675,7 @@ func TestPoliciesAcceptConsoleJSON(t *testing.T) {
 	}
 
 	// What /status hands the console must be postable back unchanged.
-	rendered, err := marshalPolicyJSON(roles, bindings)
+	rendered, err := marshalPolicyJSON(roles, bindings, nil)
 	if err != nil {
 		t.Fatalf("rendering the stored policy: %v", err)
 	}

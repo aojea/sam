@@ -27,6 +27,7 @@ import (
 
 	"github.com/google/sam/api"
 	log "github.com/ipfs/go-log/v2"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	// Register PG and SQLite drivers
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -449,6 +450,28 @@ var migrations = []migration{
 		},
 		sqlite: []string{
 			`ALTER TABLE users ADD COLUMN issuer TEXT DEFAULT '' NOT NULL`,
+		},
+	},
+	{
+		// Egress destinations are part of the policy document (PolicyConfig.egress)
+		// but are not role-scoped, so they get their own table. served_by is a
+		// JSON array of role names and key=value labels.
+		version: 12,
+		postgres: []string{
+			`CREATE TABLE IF NOT EXISTS egress_destinations (
+				name VARCHAR(253) PRIMARY KEY,
+				target_url TEXT NOT NULL,
+				credential VARCHAR(64) NOT NULL,
+				served_by TEXT NOT NULL
+			)`,
+		},
+		sqlite: []string{
+			`CREATE TABLE IF NOT EXISTS egress_destinations (
+				name TEXT PRIMARY KEY,
+				target_url TEXT NOT NULL,
+				credential TEXT NOT NULL,
+				served_by TEXT NOT NULL
+			)`,
 		},
 	},
 }
@@ -992,12 +1015,36 @@ func (s *SQLStore) GetActiveRouters(ctx context.Context) ([]RouterLease, error) 
 
 // SaveMeshPolicy replaces the entire mesh policy with the provided roles and bindings.
 func (s *SQLStore) SaveMeshPolicy(ctx context.Context, roles []*api.PolicyRole, bindings []*api.PolicyBinding) error {
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		return s.saveMeshPolicyTx(ctx, tx, roles, bindings)
+	})
+}
+
+// SavePolicyDocument replaces roles, bindings and egress destinations in one
+// transaction, so a POST /policies is applied whole or not at all.
+func (s *SQLStore) SavePolicyDocument(ctx context.Context, roles []*api.PolicyRole, bindings []*api.PolicyBinding, egress []*api.EgressDestination) error {
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		if err := s.saveMeshPolicyTx(ctx, tx, roles, bindings); err != nil {
+			return err
+		}
+		return s.saveEgressDestinationsTx(ctx, tx, egress)
+	})
+}
+
+// inTx runs fn in a transaction and commits when it returns nil.
+func (s *SQLStore) inTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
+func (s *SQLStore) saveMeshPolicyTx(ctx context.Context, tx *sql.Tx, roles []*api.PolicyRole, bindings []*api.PolicyBinding) error {
 	// For simplicity in replacing policy, we clear all and insert new.
 	if _, err := tx.ExecContext(ctx, "DELETE FROM role_permissions"); err != nil {
 		return err
@@ -1041,6 +1088,20 @@ func (s *SQLStore) SaveMeshPolicy(ctx context.Context, roles []*api.PolicyRole, 
 				return err
 			}
 		}
+		// One row per narrowed entry, as protojson: the shape is the proto's
+		// and a new HTTPGrant field needs no schema change here.
+		for _, g := range r.Http {
+			if g == nil {
+				continue
+			}
+			encoded, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(g)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, s.rebind("INSERT INTO role_permissions (role_name, resource_type, resource_value) VALUES (?, 'http', ?)"), r.Name, string(encoded)); err != nil {
+				return err
+			}
+		}
 	}
 
 	for _, b := range bindings {
@@ -1054,7 +1115,7 @@ func (s *SQLStore) SaveMeshPolicy(ctx context.Context, roles []*api.PolicyRole, 
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // GetMeshPolicy retrieves the entire mesh policy as structured data.
@@ -1104,6 +1165,12 @@ func (s *SQLStore) GetMeshPolicy(ctx context.Context) ([]*api.PolicyRole, []*api
 				r.AllowedAgents = append(r.AllowedAgents, resValue)
 			case "label":
 				r.AllowedLabels = append(r.AllowedLabels, resValue)
+			case "http":
+				g := &api.HTTPGrant{}
+				if err := protojson.Unmarshal([]byte(resValue), g); err != nil {
+					return nil, nil, fmt.Errorf("role %s: stored http grant does not parse: %w", roleName, err)
+				}
+				r.Http = append(r.Http, g)
 			}
 		}
 	}
@@ -1140,6 +1207,57 @@ func (s *SQLStore) GetMeshPolicy(ctx context.Context) ([]*api.PolicyRole, []*api
 	}
 
 	return roles, bindings, nil
+}
+
+// SaveEgressDestinations replaces the egress section of the mesh policy.
+func (s *SQLStore) SaveEgressDestinations(ctx context.Context, egress []*api.EgressDestination) error {
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		return s.saveEgressDestinationsTx(ctx, tx, egress)
+	})
+}
+
+func (s *SQLStore) saveEgressDestinationsTx(ctx context.Context, tx *sql.Tx, egress []*api.EgressDestination) error {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM egress_destinations"); err != nil {
+		return err
+	}
+	for _, d := range egress {
+		if d == nil {
+			continue
+		}
+		servedBy, err := json.Marshal(d.GetServedBy())
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, s.rebind("INSERT INTO egress_destinations (name, target_url, credential, served_by) VALUES (?, ?, ?, ?)"),
+			d.GetName(), d.GetTargetUrl(), d.GetCredential(), string(servedBy)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GetEgressDestinations loads the egress section of the mesh policy, in name
+// order so the rendered document and rules are stable.
+func (s *SQLStore) GetEgressDestinations(ctx context.Context) ([]*api.EgressDestination, error) {
+	rows, err := s.db.QueryContext(ctx, s.rebind("SELECT name, target_url, credential, served_by FROM egress_destinations ORDER BY name"))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var egress []*api.EgressDestination
+	for rows.Next() {
+		var name, targetURL, credential, servedByJSON string
+		if err := rows.Scan(&name, &targetURL, &credential, &servedByJSON); err != nil {
+			return nil, err
+		}
+		var servedBy []string
+		if err := json.Unmarshal([]byte(servedByJSON), &servedBy); err != nil {
+			return nil, fmt.Errorf("egress %s: stored served_by does not parse: %w", name, err)
+		}
+		egress = append(egress, &api.EgressDestination{Name: name, TargetUrl: targetURL, Credential: credential, ServedBy: servedBy})
+	}
+	return egress, rows.Err()
 }
 
 // SaveBootstrapToken persists a new bootstrap token.
