@@ -107,7 +107,7 @@ func TestNativeSDKA2A(t *testing.T) {
 			}
 			env := []string{"SAM_CONTROL_PLANE_URL=" + mesh.baseURL, "SAM_STATE_DIR=" + filepath.Join(t.TempDir(), "state"), "SAM_BOOTSTRAP_TOKEN_PATH=" + tokenPath}
 
-			out := runExample(t, mesh, l, env, "a2a-call", target.peerID, "hello from "+l.name)
+			out := runExample(t, mesh.root, l, env, "a2a-call", target.peerID, "hello from "+l.name)
 			caller := expectLine(t, out, "on the mesh as ")
 			expectLine(t, out, "agent: Echo agent, ")
 			// The agent's server saw the verified caller, never a name the

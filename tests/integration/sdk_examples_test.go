@@ -165,7 +165,7 @@ func TestNativeSDKExamples(t *testing.T) {
 
 			// The first run spends the token: the sam-node's calc over MCP,
 			// found by name.
-			out := runExample(t, mesh, l, withToken, "call", "mcp://calc", "add", `{"a": 1, "b": 2}`)
+			out := runExample(t, mesh.root, l, withToken, "call", "mcp://calc", "add", `{"a": 1, "b": 2}`)
 			caller := expectLine(t, out, "on the mesh as ")
 			expectLine(t, out, "mcp://calc is served by "+mesh.samNode.peerID.String())
 			expectLine(t, out, "tools: add")
@@ -178,7 +178,7 @@ func TestNativeSDKExamples(t *testing.T) {
 			if err := os.Remove(tokenPath); err != nil {
 				t.Fatal(err)
 			}
-			out = runExample(t, mesh, l, withoutToken, "call", target.peerID, "a2a://agent", "/card")
+			out = runExample(t, mesh.root, l, withoutToken, "call", target.peerID, "a2a://agent", "/card")
 			if got := expectLine(t, out, "on the mesh as "); got != caller {
 				t.Fatalf("second run joined as %s, want the identity of the first run %s", got, caller)
 			}
@@ -201,7 +201,7 @@ func TestNativeSDKExamples(t *testing.T) {
 				if other.name == l.name {
 					continue
 				}
-				out := runExample(t, mesh, other, withoutToken, "call", target.peerID, "a2a://agent", "/card")
+				out := runExample(t, mesh.root, other, withoutToken, "call", target.peerID, "a2a://agent", "/card")
 				if got := expectLine(t, out, "on the mesh as "); got != caller {
 					t.Fatalf("%s resumed %s's state directory as %s, want %s", other.name, l.name, got, caller)
 				}
@@ -305,16 +305,16 @@ func startExampleAgent(t *testing.T, name string, cmd *exec.Cmd) (*sdkExampleAge
 }
 
 // runExample runs an example that exits on its own to completion and returns its stdout.
-func runExample(t *testing.T, mesh *sdkMesh, l sdkExampleLauncher, env []string, example string, args ...string) string {
+func runExample(t *testing.T, root string, l sdkExampleLauncher, env []string, example string, args ...string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd, skip := l.cmd(ctx, mesh.root, example, args...)
+	cmd, skip := l.cmd(ctx, root, example, args...)
 	if skip != "" {
 		t.Fatalf("%s: %s", l.name, skip)
 	}
 	cmd.Env = append(os.Environ(), env...)
-	cmd.Dir = mesh.root
+	cmd.Dir = root
 	stderr := &bytes.Buffer{}
 	cmd.Stderr = stderr
 	stdout, err := cmd.Output()

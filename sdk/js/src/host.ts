@@ -15,7 +15,8 @@
 // The libp2p host a member joins the mesh with, configured the way
 // sam-node's is (internal/node/node.go): TLS is the only security
 // protocol, yamux the muxer, circuit relay v2 for reachability through
-// the routers.
+// the routers. TCP and WebSocket are the transports: the testnets' routers
+// listen on TCP, sam-one's single port is a WebSocket listener.
 
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { circuitRelayTransport } from "@libp2p/circuit-relay-v2";
@@ -27,6 +28,7 @@ import { kadDHT, passthroughMapper } from "@libp2p/kad-dht";
 import { ping } from "@libp2p/ping";
 import { tcp } from "@libp2p/tcp";
 import { tls } from "@libp2p/tls";
+import { webSockets } from "@libp2p/websockets";
 import type { Multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p, type Libp2pOptions } from "libp2p";
 import { DHT_PROTOCOL } from "./discovery.ts";
@@ -34,8 +36,9 @@ import type { Identity } from "./identity.ts";
 
 export interface MeshHostOptions {
   /**
-   * Addresses to accept direct connections on, e.g. "/ip4/0.0.0.0/tcp/0".
-   * Empty by default: an agent is reached through a router's relay.
+   * Addresses to accept direct connections on, e.g. "/ip4/0.0.0.0/tcp/0"
+   * or "/ip4/0.0.0.0/tcp/0/ws". Empty by default: an agent is reached
+   * through a router's relay.
    */
   listenAddrs?: string[];
   /**
@@ -58,7 +61,7 @@ export async function createMeshHost(identity: Identity, options: MeshHostOption
     privateKey: privateKeyFromProtobuf(identity.toLibp2pPrivateKey()),
     addresses: { listen: options.listenAddrs ?? [] },
     ...(options.dns !== undefined ? { dns: options.dns } : {}),
-    transports: [tcp(), circuitRelayTransport()],
+    transports: [tcp(), webSockets(), circuitRelayTransport()],
     connectionEncrypters: [tls()],
     streamMuxers: [yamux()],
     connectionGater: {

@@ -21,6 +21,7 @@ from __future__ import annotations
 import importlib.metadata
 import os
 import re
+import ssl
 import struct
 from datetime import datetime, timedelta, timezone
 from typing import Sequence
@@ -42,6 +43,7 @@ from libp2p.stream_muxer.exceptions import MuxedStreamError
 from libp2p.stream_muxer.yamux.yamux import FLAG_SYN, TYPE_WINDOW_UPDATE, YAMUX_HEADER_FORMAT
 from libp2p.stream_muxer.yamux.yamux import PROTOCOL_ID as YAMUX_PROTOCOL_ID
 from libp2p.stream_muxer.yamux.yamux import Yamux, YamuxStream
+from libp2p.transport.websocket.transport import WebsocketTransport
 from multiaddr.resolvers import DNSResolver
 
 from .identity import Identity
@@ -152,8 +154,10 @@ def _certificate_template() -> x509.CertificateBuilder:
 
 def create_mesh_host(identity: Identity, listen_addrs: Sequence[str] = ()) -> tuple[IHost, list[multiaddr.Multiaddr]]:
     """Builds the host for `identity`. Run it with `async with host.run(addrs)`.
-    listen_addrs are for direct connections, e.g. "/ip4/0.0.0.0/tcp/0"; an
-    agent is normally reached through a router's relay instead."""
+    listen_addrs are for direct connections, e.g. "/ip4/0.0.0.0/tcp/0" or
+    "/ip4/0.0.0.0/tcp/0/ws"; an agent is normally reached through a router's
+    relay instead. The host dials TCP and WebSocket: the testnets' routers
+    listen on TCP, sam-one's single port is a WebSocket listener."""
     key_pair = create_new_key_pair(identity.seed)
     # No ALPN muxer list: py-libp2p 0.7 advertises early muxer negotiation
     # but does not complete it, and go-libp2p then refuses the mux upgrade.
@@ -163,6 +167,10 @@ def create_mesh_host(identity: Identity, listen_addrs: Sequence[str] = ()) -> tu
         key_pair=key_pair,
         sec_opt={TLS_PROTOCOL_ID: tls},
         muxer_opt={TProtocol(YAMUX_PROTOCOL_ID): Yamux},
+        enable_websocket=True,
+        # py-libp2p 0.7 dials wss with certificate verification off unless
+        # given a context; the system roots, as go-libp2p and js-libp2p use.
+        tls_client_config=ssl.create_default_context(),
         # A member connects to its routers and to the peers it calls or that
         # call it. py-libp2p's AutoConnector would otherwise dial every peer
         # in the peerstore every 30s while under 100 connections, including
@@ -178,9 +186,28 @@ def create_mesh_host(identity: Identity, listen_addrs: Sequence[str] = ()) -> tu
         # The Swarm's own limits (max_connections, max_connections_per_peer)
         # do not depend on the manager and stay in force.
         host.get_network().set_resource_manager(None)  # type: ignore[attr-defined]
+    for transport in host.get_network().transport_manager.get_transports():  # type: ignore[attr-defined]
+        if isinstance(transport, WebsocketTransport):
+            _dial_websockets_by_name(transport)
     if str(host.get_id()) != identity.peer_id:
         raise RuntimeError(f"libp2p derived peer {host.get_id()} for identity {identity.peer_id}")
     return host, [multiaddr.Multiaddr(a) for a in listen_addrs]
+
+
+def _dial_websockets_by_name(transport: WebsocketTransport) -> None:
+    """py-libp2p 0.7 resolves a `/dns4/<host>/tcp/443/wss` address to its IP
+    before dialing and then names the IP in the TLS SNI and the Host header,
+    which a TLS-terminating edge (sam-one behind a tunnel) answers with 403.
+    The transport's own dial of an unresolved address keeps the name; the
+    dial here goes straight to it, as go-libp2p and js-libp2p do. Fixed
+    upstream by libp2p/py-libp2p#1549; drop this with the release that has it."""
+    # Bound here so a py-libp2p that renamed it fails at host construction.
+    dial_resolved = transport._dial_resolved  # noqa: SLF001
+
+    async def dial(maddr: multiaddr.Multiaddr):  # noqa: ANN202 - py-libp2p's RawConnection
+        return await dial_resolved(maddr)
+
+    transport.dial = dial  # type: ignore[method-assign]
 
 
 async def open_stream(host: IHost, peer_id: ID, protocol: TProtocol, timeout: float) -> INetStream:
@@ -195,8 +222,9 @@ async def open_stream(host: IHost, peer_id: ID, protocol: TProtocol, timeout: fl
 
 
 _DNS_PROTOCOLS = frozenset({"dnsaddr", "dns", "dns4", "dns6"})
-# py-libp2p dials TCP only; a resolved address on another transport is noise.
-_UNDIALABLE_PROTOCOLS = frozenset({"quic", "quic-v1", "ws", "wss", "webtransport", "webrtc", "webrtc-direct"})
+# The host dials TCP and WebSocket; a resolved address on another transport is noise.
+_UNDIALABLE_PROTOCOLS = frozenset({"quic", "quic-v1", "webtransport", "webrtc", "webrtc-direct"})
+_WEBSOCKET_PROTOCOLS = frozenset({"ws", "wss"})
 _DNS_TIMEOUT = 10.0
 
 
@@ -205,10 +233,14 @@ async def dial_addrs(addr: multiaddr.Multiaddr) -> list[multiaddr.Multiaddr]:
     hands out router addresses as `/dnsaddr/<host>/p2p/<id>`, resolved here
     through the host's `_dnsaddr` TXT records (and `/dns4`, `/dns6`, `/dns`
     through A and AAAA records) the way go-libp2p and js-libp2p do before
-    dialing; py-libp2p does not, and would report no transport for them.
+    dialing; py-libp2p's TCP transport does not, and would report no
+    transport for them. A WebSocket address keeps its DNS name: the name is
+    the TLS server name and the Host header, which a TLS-terminating edge in
+    front of the router (sam-one behind a tunnel) selects the origin by.
     Addresses on transports this host lacks are left out."""
     protocols = [p.name for p in addr.protocols()]
-    if protocols and protocols[0] in _DNS_PROTOCOLS:
+    first = protocols[0] if protocols else ""
+    if first == "dnsaddr" or (first in _DNS_PROTOCOLS and not set(protocols) & _WEBSOCKET_PROTOCOLS):
         resolved: list[multiaddr.Multiaddr] = []
         with trio.move_on_after(_DNS_TIMEOUT):
             resolved = list(await DNSResolver().resolve(addr))
@@ -222,7 +254,7 @@ async def dial_addrs(addr: multiaddr.Multiaddr) -> list[multiaddr.Multiaddr]:
         if "tcp" in names and not names & _UNDIALABLE_PROTOCOLS:
             dialable.append(m)
     if not dialable:
-        raise RuntimeError(f"{addr} offers no TCP address; this host dials TCP only")
+        raise RuntimeError(f"{addr} offers no TCP or WebSocket address; this host dials those only")
     return dialable
 
 

@@ -18,6 +18,7 @@ address through its TXT records and keep the transports this host has
 stream must do: come back after the 256th one on a connection (py-libp2p
 0.7 leaks its yamux backlog slots), or fail at a deadline."""
 
+import ssl
 import struct
 
 import multiaddr
@@ -28,6 +29,7 @@ from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
 from libp2p.stream_muxer.yamux.yamux import FLAG_SYN, YAMUX_HEADER_FORMAT
+from libp2p.transport.websocket.transport import WebsocketTransport
 from multiaddr.resolvers import DNSResolver
 
 from agent_mesh.host import LIBP2P_LEAKS_CONNECTION_SCOPES, LIBP2P_LEAKS_STREAM_SLOTS, create_mesh_host, dial_addrs, open_stream, peer_info
@@ -100,8 +102,67 @@ def test_addresses_without_a_transport_this_host_has_are_an_error(testnet_dns):
 
 def test_a_concrete_address_passes_through():
     async def main():
-        ma = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/4001/p2p/{ROUTER}")
-        assert await dial_addrs(ma) == [ma]
+        for text in (f"/ip4/127.0.0.1/tcp/4001/p2p/{ROUTER}", f"/ip4/127.0.0.1/tcp/8080/ws/p2p/{ROUTER}", f"/dns4/mesh.example/tcp/443/tls/ws/p2p/{ROUTER}"):
+            ma = multiaddr.Multiaddr(text)
+            assert await dial_addrs(ma) == [ma]
+
+    trio.run(main)
+
+
+def test_a_websocket_address_is_dialed_by_its_name():
+    """A TLS-terminating edge in front of the router (sam-one behind a tunnel)
+    selects the origin by the name in the TLS SNI and the Host header.
+    py-libp2p 0.7 resolves the name first and sends the IP; the host sends
+    the name. Pinned on the Host header of the upgrade request, the SNI is
+    the same string."""
+    seen: dict[str, str] = {}
+
+    async def record(stream):
+        seen["request"] = (await stream.receive_some(4096)).decode(errors="replace")
+        await stream.aclose()
+
+    async def main():
+        listeners = await trio.open_tcp_listeners(0, host="127.0.0.1")
+        port = listeners[0].socket.getsockname()[1]
+        client, _ = create_mesh_host(Identity.generate())
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(trio.serve_listeners, record, listeners)
+            async with client.run(listen_addrs=[]):
+                addr = multiaddr.Multiaddr(f"/dns4/localhost/tcp/{port}/ws/p2p/{ROUTER}")
+                assert await dial_addrs(addr) == [addr]
+                with pytest.raises(Exception), trio.fail_after(10):
+                    await client.connect(await peer_info(addr))
+            nursery.cancel_scope.cancel()
+        assert f"\r\nhost: localhost:{port}\r\n" in seen["request"].lower(), seen["request"]
+
+    trio.run(main)
+
+
+def test_a_websocket_listener_is_reached_with_tls_and_yamux():
+    """sam-one's router listens on /ws alone, on the port that also serves
+    its HTTP API; a member reaches it as it reaches a TCP router."""
+
+    async def echo(stream):
+        try:
+            await stream.write(await stream.read(64))
+        finally:
+            await stream.close()
+
+    async def main():
+        server, server_listen = create_mesh_host(Identity.generate(), ["/ip4/127.0.0.1/tcp/0/ws"])
+        client, _ = create_mesh_host(Identity.generate())
+        server.set_stream_handler(ECHO, echo)
+        async with server.run(listen_addrs=server_listen), client.run(listen_addrs=[]):
+            addr = server.get_addrs()[0]
+            assert "/ws/p2p/" in str(addr), f"listening on {addr}"
+            with trio.fail_after(10):
+                await client.connect(await peer_info(addr))
+                stream = await open_stream(client, server.get_id(), ECHO, 5)
+                try:
+                    await stream.write(b"ping")
+                    assert await stream.read(4) == b"ping"
+                finally:
+                    await stream.close()
 
     trio.run(main)
 
@@ -213,6 +274,19 @@ def test_the_stream_slot_workaround_retires_with_libp2p_0_8():
 
     major, minor = (int(p) for p in importlib.metadata.version("libp2p").split(".")[:2])
     assert LIBP2P_LEAKS_STREAM_SLOTS == ((major, minor) < (0, 8))
+
+
+def test_wss_is_dialed_with_certificate_verification():
+    """py-libp2p 0.7 dials wss with verification off unless given a TLS
+    client context; the host gives it the system roots, so an edge's
+    certificate is checked as go-libp2p and js-libp2p check it."""
+    host, _ = create_mesh_host(Identity.generate())
+    transports = host.get_network().transport_manager.get_transports()  # type: ignore[attr-defined]
+    ws = next(t for t in transports if isinstance(t, WebsocketTransport))
+    context = ws._config.tls_client_config  # noqa: SLF001 - py-libp2p offers no getter
+    assert context is not None
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname
 
 
 def test_the_host_runs_without_a_resource_manager_and_a_background_dialer():
