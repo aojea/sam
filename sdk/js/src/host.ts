@@ -66,6 +66,13 @@ export async function createMeshHost(identity: Identity, options: MeshHostOption
       denyDialPeer: denyBanned,
       denyInboundEncryptedConnection: denyBanned,
       denyInboundRelayedConnection: (_relay, remotePeer) => denyBanned(remotePeer),
+      // The addresses dialled are the routers' as the control plane
+      // published them, and every connection is authenticated by peer ID
+      // whatever the address, so no address is refused for its shape. In a
+      // browser js-libp2p would otherwise skip loopback and plain ws://
+      // addresses, which is what sam-one on the same machine advertises; a
+      // page on https cannot open ws:// anyway, the browser sees to that.
+      denyDialMultiaddr: () => false,
     },
     services: {
       identify: identify(),

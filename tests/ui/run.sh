@@ -32,6 +32,14 @@ export SAM_CONSOLE_URL="${STACK_CONSOLE_URL}"
 
 stack_start
 
+# The browser SDK test (browser-sdk.spec.js) runs sdk/js in a page against
+# bin/sam-one; the page and the Node examples it talks to are built here.
+cd "${REPO_ROOT}/sdk/js"
+npm ci --no-audit --no-fund
+npm run build
+npm run examples
+node scripts/bundle-browser.mjs examples/browser/app.js build/browser-example
+
 cd "${REPO_ROOT}/tests/ui"
 npm ci --no-audit --no-fund
 # --with-deps needs root to install OS libraries; only CI runners allow that.

@@ -257,3 +257,15 @@ test("keys() fetches and verifies against the enrollment key", async () => {
   assert.deepEqual(await client.keys([cpKey.publicKeyRaw]), [cpKey.publicKeyRaw]);
   await assert.rejects(client.keys([Identity.generate().publicKeyRaw]), /not signed by any trusted/);
 });
+
+test("an injected fetch is called unbound, as a browser's window.fetch requires", async () => {
+  const inner = fakeFetch({ "GET /keys": () => proto(toBinary(KeysResponseSchema, signedKeys([cpKey]))) });
+  let receiver: unknown = "unset";
+  const strict = function (this: unknown, input: Parameters<typeof fetch>[0], init?: RequestInit) {
+    receiver = this;
+    return inner(input, init);
+  } as typeof fetch;
+  const client = new ControlPlaneClient({ url: "http://127.0.0.1:1", fetch: strict });
+  await client.keys([cpKey.publicKeyRaw]);
+  assert.equal(receiver, undefined);
+});
