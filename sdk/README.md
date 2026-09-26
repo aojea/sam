@@ -422,7 +422,10 @@ holds against the control plane's records.
   multiaddr is dialed as given.
 - `/sam/mcp/1.0.0` client: `session.openMCP(peer, "mcp://<name>")` sends
   the `AuthFrame` naming the service, verifies the provider's credential
-  and the caller's required labels (`checkPeerLabels`), then runs the
+  and the caller's required labels (`checkPeerLabels`: several pairs are
+  met by any one of them, as `api.LabelCheck` joins them with `or`; the
+  conjunction is the operator's egress floor, which only `sam-node` has),
+  then runs the
   official MCP client over the varint-framed stream. JS: a `Transport` for
   `@modelcontextprotocol/sdk`; Python: a pair of memory streams pumped to
   and from the libp2p stream for `mcp.ClientSession`. `""` as the target is

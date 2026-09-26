@@ -168,6 +168,23 @@ test("required labels are checked on the provider's credential", async () => {
   assert.throws(() => requireLabels({ peerId: "p", expiration: new Date(), verifyingKey: cpKey, roles: [], labels: {} }, { team: "x" }), /team=x/);
 });
 
+test("a requirement of several labels is met by any one of them, as sam-node's checkPeerLabels", () => {
+  // The cases of internal/node/labels_gate_test.go, run through the SDK's predicate.
+  const attesting = (labels: Record<string, string>) => ({ peerId: "p", expiration: new Date(), verifyingKey: cpKey, roles: [], labels });
+  // exact match
+  requireLabels(attesting({ region: "us-east-1" }), { region: "us-east-1" });
+  // any-of requirement matches one key
+  requireLabels(attesting({ region: "na-us", team: "platform" }), { region: "eu", team: "platform" });
+  // no built-in hierarchy: coarser requirement fails a finer claim
+  assert.throws(() => requireLabels(attesting({ region: "us-east-1" }), { region: "us" }), LabelsNotSatisfiedError);
+  // disjoint labels fail
+  assert.throws(() => requireLabels(attesting({ region: "na-us" }), { region: "eu" }), LabelsNotSatisfiedError);
+  // unattested token fails closed, naming every pair the caller asked for
+  assert.throws(() => requireLabels(attesting({}), { region: "eu", team: "platform" }), /region=eu, team=platform/);
+  // an empty requirement is no requirement
+  requireLabels(attesting({}), {});
+});
+
 test("a caller the provider cannot verify gets no session", async () => {
   const conn = await caller.dial(provider.getMultiaddrs()[0] as Parameters<typeof caller.dial>[0]);
   const forged = new wasm.KeyPair(wasm.SignatureAlgorithm.Ed25519);

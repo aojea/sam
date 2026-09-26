@@ -21,10 +21,12 @@ then takes JSON commands on stdin, one per line, until stdin closes:
                                            the auth handshake
   {"cmd": "discover", "type": "mcp", "name": "calc"}
                                            DHT lookup for a service's providers
-  {"cmd": "tools", "addr": "<multiaddr>", "service": "mcp://calc"}
-                                           list a provider's tools
+  {"cmd": "tools", "addr": "<multiaddr>", "service": "mcp://calc",
+   "required_labels": {"region": "eu"}}   list a provider's tools; the labels,
+                                           if given, must be on its credential
   {"cmd": "call", "addr": "<multiaddr>", "service": "mcp://calc",
-   "tool": "add", "args": {...}}          call one tool
+   "tool": "add", "args": {...}, "required_labels": {...}}
+                                           call one tool
   {"cmd": "accept", "name": "agent", "target": "<url>"}
                                            accept A2A requests for this
                                            member's agent; without target, a
@@ -92,11 +94,13 @@ async def _handle(session: MeshSession, command: dict) -> dict:
             return {"cmd": cmd, "ok": True, "providers": [{"peer_id": p.peer_id, "addrs": p.addrs} for p in providers]}
         if cmd == "tools":
             with trio.fail_after(15):
-                tools = await session.list_tools(command["addr"], command.get("service", ""))
+                tools = await session.list_tools(command["addr"], command.get("service", ""), required_labels=command.get("required_labels"))
             return {"cmd": cmd, "ok": True, "tools": [t.name for t in tools]}
         if cmd == "call":
             with trio.fail_after(15):
-                result = await session.call_tool(command["addr"], command.get("service", ""), command["tool"], command.get("args") or {})
+                result = await session.call_tool(
+                    command["addr"], command.get("service", ""), command["tool"], command.get("args") or {}, required_labels=command.get("required_labels")
+                )
             return {"cmd": cmd, "ok": True, "is_error": result.is_error, "text": result.text}
         if cmd == "peers":
             return {"cmd": cmd, "authenticated_peers": sorted(session.authenticated_peers)}
@@ -154,12 +158,16 @@ async def main() -> None:
     state_dir = _require_env("SAM_SDK_STATE_DIR")
     allow_insecure = os.environ.get("SAM_INSECURE_CONTROL_PLANE") == "1"
     listen = [a for a in os.environ.get("SAM_SDK_LISTEN_ADDRS", "").split(",") if a]
+    # Labels this member declares at enrollment, "k=v,k2=v2"; the policy's
+    # allowed_labels decide whether the control plane attests them.
+    labels = dict(pair.split("=", 1) for pair in os.environ.get("SAM_SDK_LABELS", "").split(",") if "=" in pair)
 
     mesh = AgentMesh.enroll(
         control_plane_url,
         bootstrap_token_path=bootstrap_token_path,
         state_dir=state_dir,
         allow_insecure=allow_insecure,
+        labels=labels or None,
         poll_interval=0.2,
     )
     # The test drives every pull itself; only gossip events bring one forward.

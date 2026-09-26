@@ -102,24 +102,32 @@ export interface MCPSession {
   close(): Promise<void>;
 }
 
-/** The provider's credential lacks a label the caller requires (checkPeerLabels). */
+/** The provider's credential carries none of the labels the caller requires (checkPeerLabels). */
 export class LabelsNotSatisfiedError extends Error {
-  constructor(peerId: string, missing: string[]) {
-    super(`peer ${peerId} does not carry the required labels: ${missing.join(", ")}`);
+  constructor(peerId: string, required: string[]) {
+    super(`peer ${peerId} carries none of the required labels: ${required.join(", ")}`);
     this.name = "LabelsNotSatisfiedError";
   }
 }
 
+/**
+ * A caller's requirement is satisfied by any one pair, as sam-node's
+ * api.LabelCheck (`check if label(k1, v1) or label(k2, v2)`): several pairs
+ * mean "any of these will do". The operator's egress floor is the
+ * conjunction, and sam-node's alone.
+ */
 export function requireLabels(provider: VerifiedBiscuit, required: Record<string, string> | undefined): void {
   if (!required) {
     return;
   }
-  const missing = Object.entries(required)
-    .filter(([k, v]) => provider.labels[k] !== v)
-    .map(([k, v]) => `${k}=${v}`);
-  if (missing.length > 0) {
-    throw new LabelsNotSatisfiedError(provider.peerId, missing);
+  const pairs = Object.entries(required);
+  if (pairs.length === 0 || pairs.some(([k, v]) => provider.labels[k] === v)) {
+    return;
   }
+  throw new LabelsNotSatisfiedError(
+    provider.peerId,
+    pairs.map(([k, v]) => `${k}=${v}`),
+  );
 }
 
 /**
