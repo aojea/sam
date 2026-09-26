@@ -103,6 +103,18 @@ test("a chunked body is reassembled, extensions and trailers skipped, and stream
   }
   assert.deepEqual(pieces, ["hello", " world"]);
   assert.ok(finished);
+  // Cancelling the stream reports the reason once and closes the generator,
+  // so nothing is read after the caller has gone.
+  const slow = new ByteReader(source("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n", 3));
+  await readResponseHead(slow);
+  const reasons: (Error | undefined)[] = [];
+  const cancelled = bodyStream(slow, { kind: "chunked" }, (err) => reasons.push(err));
+  const r = cancelled.getReader();
+  assert.ok("hello".startsWith(dec.decode((await r.read()).value)));
+  await r.cancel(new Error("gone"));
+  assert.equal(reasons.length, 1);
+  assert.equal(reasons[0]?.message, "gone");
+  assert.deepEqual(await r.read(), { done: true, value: undefined });
   // Each malformed size line is followed by a body that would otherwise
   // parse, so only the size check can be what refuses it.
   for (const bad of ["zz\r\nhello\r\n0\r\n\r\n", "5g\r\nhello\r\n0\r\n\r\n", "5 g\r\nhello\r\n0\r\n\r\n", "-5\r\nhello\r\n0\r\n\r\n", "\r\nhello\r\n0\r\n\r\n", "123456789\r\n0\r\n\r\n"]) {

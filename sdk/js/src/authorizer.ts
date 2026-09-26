@@ -52,8 +52,16 @@ export class AuthorizationError extends Error {
   }
 }
 
+// biscuit-wasm throws plain objects ({ FailedLogic: ... }, { RunLimit: ... }).
 function describe(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  if (err instanceof Error) {
+    return err.message;
+  }
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
 }
 
 function timeFact(now: Date): string {

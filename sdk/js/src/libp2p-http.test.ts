@@ -174,6 +174,10 @@ before(async () => {
       });
       return new Response(body, { headers: { "content-type": "text/event-stream" } });
     }
+    if (url.pathname === "/sized") {
+      // An agent that declares its length, as a static file server would.
+      return new Response(request.method === "HEAD" ? null : "x".repeat(42), { headers: { "content-type": "text/plain", "content-length": "42" } });
+    }
     return Response.json({ path: url.pathname + url.search, method: request.method, peer: request.headers.get("x-peer-id"), biscuit: request.headers.get("x-sam-biscuit"), echo: await request.text() });
   };
   await handlerAgent.handle(HTTP_PROTOCOL, httpIngressHandler(a2aEndpoint({ handler }), providerOptions(mint(handlerAgent.peerId.toString(), ROLE_NODE))), {
@@ -243,6 +247,20 @@ test("a fetch handler sees the caller and the path, and its streaming body goes 
   const res = await httpRequestOverStream(conn, callerBiscuit, "a2a://agent", "/tasks?x=1", { method: "POST", headers: { "x-sam-biscuit": "spoof", "content-type": "text/plain" }, body: "hello" });
   assert.equal(res.status, 200);
   assert.deepEqual(JSON.parse(res.text()), { path: "/tasks?x=1", method: "POST", peer: caller.peerId.toString(), biscuit: null, echo: "hello" });
+
+  // HEAD: the head a GET would get, the declared length kept, no body sent.
+  const sized = await httpRequestOverStream(conn, callerBiscuit, "a2a://agent", "/sized");
+  assert.equal(sized.text(), "x".repeat(42));
+  const head = await httpRequestOverStream(conn, callerBiscuit, "a2a://agent", "/sized", { method: "HEAD" });
+  assert.equal(head.status, 200);
+  assert.equal(head.headers["content-length"], "42");
+  assert.equal(head.headers["content-type"], "text/plain");
+  assert.equal(head.body.length, 0);
+  // A handler that built a body for HEAD anyway: no length is invented.
+  const headJson = await httpRequestOverStream(conn, callerBiscuit, "a2a://agent", "/card", { method: "HEAD" });
+  assert.equal(headJson.status, 200);
+  assert.equal(headJson.headers["content-length"], undefined);
+  assert.equal(headJson.body.length, 0);
 
   const response = await fetchOverStream(conn, callerBiscuit, new Request(meshURL(handlerAgent.peerId.toString(), "a2a://agent", "/stream")));
   assert.equal(response.status, 200);

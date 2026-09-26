@@ -252,7 +252,18 @@ async function writeResponse(stream: Stream, response: Response, headOnly: boole
     }
   });
   headers.set("connection", "close");
-  const body = headOnly ? null : response.body;
+  if (headOnly) {
+    // The same head a GET would get (RFC 9110 section 9.3.2): the length the
+    // agent declared, if any; the body it may have built is not sent.
+    const declared = response.headers.get("content-length");
+    if (declared !== null) {
+      headers.set("content-length", declared);
+    }
+    void response.body?.cancel().catch(() => {});
+    await sendAll(stream, encodeResponseHead(response.status, response.statusText, headers));
+    return;
+  }
+  const body = response.body;
   if (body === null) {
     headers.set("content-length", "0");
     await sendAll(stream, encodeResponseHead(response.status, response.statusText, headers));
@@ -440,7 +451,7 @@ export async function fetchOverStream(conn: Connection, biscuit: Uint8Array, req
     return new Response(responseBody, { status: head.status, statusText: head.statusText, headers: head.headers });
   } catch (err) {
     stream.abort(asError(err));
-    throw signal.aborted ? signal.reason : err;
+    throw signal.aborted ? (signal.reason ?? err) : err;
   }
 }
 

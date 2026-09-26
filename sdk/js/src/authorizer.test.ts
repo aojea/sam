@@ -93,8 +93,11 @@ test("the empty target is the protocol in the system namespace", async () => {
   await assert.rejects(authorizeCaller(request(token, "mcp://calc"), options([])), AuthorizationError);
 });
 
-test("a service the role was not granted is denied", async () => {
-  await assert.rejects(authorizeCaller(request(nodeToken(CALLER), "mcp://other"), options(NODE_ROLE_GRANTS)), AuthorizationError);
+test("a service the role was not granted is denied, and the refusal names the check", async () => {
+  await assert.rejects(
+    authorizeCaller(request(nodeToken(CALLER), "mcp://other"), options(NODE_ROLE_GRANTS)),
+    (err: unknown) => err instanceof AuthorizationError && /FailedLogic/.test(err.message) && !/\[object Object\]/.test(err.message),
+  );
 });
 
 test("a role with no grants at all is denied", async () => {
