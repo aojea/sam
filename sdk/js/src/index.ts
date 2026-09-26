@@ -67,6 +67,7 @@ export {
   type NodeRequestListener,
   type ProviderOptions,
 } from "./libp2p-http.ts";
-export { nodeIngressHandler, streamToNodeDuplex } from "./libp2p-http-node.ts";
+export { ingressHandler } from "./platform/ingress.ts";
+export type { StateStore } from "./platform/types.ts";
 export { BASELINE_DATALOG } from "./gen/datalog.ts";
 export { BanSet, EVENT_FRESHNESS_MS, GOSSIP_EVENTS_TOPIC, verifyMeshEvent, type VerifiedMeshEvent } from "./sync.ts";

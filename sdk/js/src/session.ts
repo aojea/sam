@@ -38,7 +38,7 @@ import {
   type HTTPResponse,
   type ProviderOptions,
 } from "./libp2p-http.ts";
-import { nodeIngressHandler } from "./libp2p-http-node.ts";
+import { ingressHandler } from "./platform/ingress.ts";
 import { BanSet, GOSSIP_EVENTS_TOPIC, MeshEvent_Type, verifyMeshEvent } from "./sync.ts";
 
 export interface JoinOptions extends MeshHostOptions {
@@ -491,7 +491,7 @@ export class MeshSession {
       isBanned: (peerId) => this.banned.has(peerId),
       onAuthorized: (peerId, verified) => this.authenticatedPeers.set(peerId, verified.expiration),
     };
-    await this.node.handle(HTTP_PROTOCOL, nodeIngressHandler(endpoint, providerOptions), HTTP_HANDLER_OPTIONS);
+    await this.node.handle(HTTP_PROTOCOL, ingressHandler(endpoint, providerOptions), HTTP_HANDLER_OPTIONS);
     this.#policyTimer = setInterval(() => void this.syncPolicy().catch(() => {}), this.#policySyncMs);
     this.#policyTimer.unref?.();
     this.endpoint = endpoint;
