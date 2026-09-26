@@ -342,11 +342,11 @@ test("a dot segment is refused however it is spelled", async () => {
   // Nothing in options is consulted before the path check.
   const options = providerOptions(new Uint8Array());
   for (const target of ["/a2a/agent/../x", "/a2a/agent/./x", "/a2a/agent/%2e%2e/x", "/a2a/agent/%2E%2E/x", "/a2a/agent/.%2e/x", "/a2a/agent/%2e/x", "/a2a/%2e%2e/other/x?q=1"]) {
-    assert.deepEqual(await admitIngress({ target, headers: new Headers(), remotePeer: "peer" }, endpoint, options), { status: 400, text: "Invalid path" }, target);
+    assert.deepEqual(await admitIngress({ method: "GET", target, headers: new Headers(), remotePeer: "peer" }, endpoint, options), { status: 400, text: "Invalid path" }, target);
   }
   // Not dot segments: the request reaches the next check, the missing biscuit.
   for (const target of ["/a2a/agent/%2e%2ex/x", "/a2a/agent/..x/x", "/a2a/agent/x?p=../y"]) {
-    assert.deepEqual(await admitIngress({ target, headers: new Headers(), remotePeer: "peer" }, endpoint, options), { status: 401, text: "Missing X-Sam-Biscuit header" }, target);
+    assert.deepEqual(await admitIngress({ method: "GET", target, headers: new Headers(), remotePeer: "peer" }, endpoint, options), { status: 401, text: "Missing X-Sam-Biscuit header" }, target);
   }
 });
 

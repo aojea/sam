@@ -97,7 +97,7 @@ function nodeHeaders(req: http.IncomingMessage): Headers {
 
 async function serveListener(req: http.IncomingMessage, res: http.ServerResponse, endpoint: A2AEndpoint, listener: NodeRequestListener, options: ProviderOptions): Promise<void> {
   const remotePeer = (req.socket as unknown as StreamSocket).remotePeer;
-  const admission = await admitIngress({ target: req.url ?? "/", headers: nodeHeaders(req), remotePeer }, endpoint, options);
+  const admission = await admitIngress({ method: req.method ?? "GET", target: req.url ?? "/", headers: nodeHeaders(req), remotePeer }, endpoint, options);
   if ("status" in admission) {
     res.writeHead(admission.status, { "content-type": "text/plain; charset=utf-8" });
     res.end(admission.text + "\n");

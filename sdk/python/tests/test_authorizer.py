@@ -136,10 +136,36 @@ def test_agent_claim_only_inside_a_granted_namespace():
     authorize_caller(request(node_token(CALLER)), options(NODE_ROLE_GRANTS))
 
 
+def test_narrowed_grant_follows_the_requests_method_and_path():
+    # Rendered as the control plane renders a role with
+    # http: [{service: "mcp://calc", methods: ["GET"], paths: ["/v1/*"]}]:
+    # the plain grant is withheld, the narrowed facts take its place.
+    rules = [
+        'http_granted_service_exact("mcp", "calc") <- role("sam:role:node")',
+        'granted_method("mcp", "calc", ["GET"]) <- role("sam:role:node")',
+        'granted_path_prefix("mcp", "calc", "/v1/") <- role("sam:role:node")',
+        'target_unrestricted(true) <- role("sam:role:node")',
+    ]
+
+    def http(method: str, path: str) -> AuthorizeRequest:
+        return AuthorizeRequest(biscuit=node_token(CALLER), peer_id=CALLER, target_service="mcp://calc", protocol="/libp2p-http", method=method, path=path)
+
+    authorize_caller(http("GET", "/v1/models"), options(rules))
+    with pytest.raises(AuthorizationError):
+        authorize_caller(http("POST", "/v1/models"), options(rules))
+    with pytest.raises(AuthorizationError):
+        authorize_caller(http("GET", "/v2/models"), options(rules))
+    # A tunnel, and a stream that carries no HTTP request: neither matches.
+    with pytest.raises(AuthorizationError):
+        authorize_caller(http("CONNECT", ""), options(rules))
+    with pytest.raises(AuthorizationError):
+        authorize_caller(request(node_token(CALLER)), options(rules))
+
+
 def test_every_baseline_item_parses_in_biscuit_python():
     for c in (BASELINE_DATALOG["time_check"], BASELINE_DATALOG["replay_check"], BASELINE_DATALOG["target_check"], BASELINE_DATALOG["agent_check"]):
         ba.Check(c)
-    for r in BASELINE_DATALOG["rules"] + BASELINE_DATALOG["agent_rules"] + BASELINE_DATALOG["target_fact_rules"]:
+    for r in BASELINE_DATALOG["rules"] + BASELINE_DATALOG["http_rules"] + BASELINE_DATALOG["agent_rules"] + BASELINE_DATALOG["target_fact_rules"]:
         ba.Rule(r)
     for p in BASELINE_DATALOG["policies"] + [BASELINE_DATALOG["allow_if_true"]]:
         ba.Policy(p)

@@ -33,6 +33,14 @@ export interface AuthorizeRequest {
   protocol: string;
   /** The agent the caller says it acts for; its own claim, checked against its grants. */
   agent?: string;
+  /**
+   * The HTTP method and the path as the backend sees it, when the request is
+   * HTTP. Both are injected together; a request without them (a stream that
+   * carries no HTTP request) does not match a grant narrowed by
+   * PolicyRole.http.
+   */
+  method?: string;
+  path?: string;
 }
 
 export interface ProviderAuthorizerOptions {
@@ -122,6 +130,12 @@ export async function authorizeCaller(req: AuthorizeRequest, options: ProviderAu
   fact(`${BASELINE_DATALOG.fact_connection_peer_id}({p})`, { p: req.peerId });
   fact(timeFact(now));
 
+  // The request as the wire carried it, never as the caller describes it.
+  if (req.method !== undefined) {
+    fact(`${BASELINE_DATALOG.fact_method}({m})`, { m: req.method });
+    fact(`${BASELINE_DATALOG.fact_path}({p})`, { p: req.path ?? "" });
+  }
+
   // The caller's word about which agent it acts for, limited to the agent
   // namespaces its own token grants.
   if (req.agent) {
@@ -146,6 +160,9 @@ export async function authorizeCaller(req: AuthorizeRequest, options: ProviderAu
     b.addPolicy(wasm.Policy.fromString(p));
   }
   for (const r of BASELINE_DATALOG.rules) {
+    b.addRule(wasm.Rule.fromString(r));
+  }
+  for (const r of BASELINE_DATALOG.http_rules) {
     b.addRule(wasm.Rule.fromString(r));
   }
   for (const r of options.policyRules()) {

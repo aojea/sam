@@ -238,6 +238,10 @@ async def _handle_ingress(
                 target_service=target_service,
                 protocol=str(HTTP_PROTOCOL),
                 agent=headers.get(HEADER_SAM_AGENT, ""),
+                # The path as the backend sees it, decided before authorization
+                # so path() is what policy meant, never the routing prefix.
+                method=request.method.decode("latin-1"),
+                path="/" + upstream_path,
             ),
             options.authorizer,
         )

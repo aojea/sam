@@ -54,6 +54,12 @@ class AuthorizeRequest:
     protocol: str
     # The agent the caller says it acts for; its own claim, checked against its grants.
     agent: str = ""
+    # The HTTP method and the path as the backend sees it, when the request is
+    # HTTP. Both are injected together; a request without them (a stream that
+    # carries no HTTP request) does not match a grant narrowed by
+    # PolicyRole.http.
+    method: Optional[str] = None
+    path: str = ""
 
 
 @dataclass(frozen=True)
@@ -105,6 +111,11 @@ def authorize_caller(req: AuthorizeRequest, options: ProviderAuthorizerOptions) 
     b.add_fact(ba.Fact(BASELINE_DATALOG["fact_connection_peer_id"] + "({p})", {"p": req.peer_id}))
     b.add_fact(ba.Fact(BASELINE_DATALOG["fact_time"] + "({now})", {"now": now}))
 
+    # The request as the wire carried it, never as the caller describes it.
+    if req.method is not None:
+        b.add_fact(ba.Fact(BASELINE_DATALOG["fact_method"] + "({m})", {"m": req.method}))
+        b.add_fact(ba.Fact(BASELINE_DATALOG["fact_path"] + "({p})", {"p": req.path}))
+
     # The caller's word about which agent it acts for, limited to the agent
     # namespaces its own token grants.
     if req.agent:
@@ -125,6 +136,8 @@ def authorize_caller(req: AuthorizeRequest, options: ProviderAuthorizerOptions) 
     for p in BASELINE_DATALOG["policies"]:
         b.add_policy(ba.Policy(p))
     for r in BASELINE_DATALOG["rules"]:
+        b.add_rule(ba.Rule(r))
+    for r in BASELINE_DATALOG["http_rules"]:
         b.add_rule(ba.Rule(r))
     for r in options.policy_rules():
         b.add_rule(ba.Rule(r))

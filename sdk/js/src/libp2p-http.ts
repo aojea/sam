@@ -132,6 +132,8 @@ function hasDotSegment(path: string): boolean {
 
 /** What the ingress looks at before anything reaches the agent. */
 export interface IngressRequest {
+  /** The request method as it came off the wire. */
+  method: string;
   /** The request target as it came off the wire, path and query. */
   target: string;
   headers: Headers;
@@ -199,7 +201,17 @@ export async function admitIngress(req: IngressRequest, endpoint: A2AEndpoint, o
   let verified: VerifiedBiscuit;
   try {
     verified = await authorizeCaller(
-      { biscuit, peerId: req.remotePeer, targetService, protocol: HTTP_PROTOCOL, agent: req.headers.get(HEADER_SAM_AGENT) ?? "" },
+      {
+        biscuit,
+        peerId: req.remotePeer,
+        targetService,
+        protocol: HTTP_PROTOCOL,
+        agent: req.headers.get(HEADER_SAM_AGENT) ?? "",
+        // The path as the backend sees it, decided before authorization so
+        // path() is what policy meant, never the routing prefix.
+        method: req.method,
+        path: "/" + upstreamPath,
+      },
       options,
     );
   } catch (err) {
@@ -302,7 +314,7 @@ async function serveIngress(stream: Stream, remotePeer: string, endpoint: A2AEnd
       return;
     }
     headOnly = head.method === "HEAD";
-    const admission = await admitIngress({ target: head.target, headers: head.headers, remotePeer }, endpoint, options);
+    const admission = await admitIngress({ method: head.method, target: head.target, headers: head.headers, remotePeer }, endpoint, options);
     if ("status" in admission) {
       response = refusalResponse(admission);
     } else if ("listener" in endpoint.target) {

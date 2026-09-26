@@ -155,11 +155,30 @@ test("an agent claim is accepted only inside a granted namespace", async () => {
   await authorizeCaller(request(nodeToken(CALLER)), options(NODE_ROLE_GRANTS));
 });
 
+test("a grant narrowed by PolicyRole.http follows the request's method and path", async () => {
+  // Rendered as the control plane renders a role with
+  // http: [{service: "mcp://calc", methods: ["GET"], paths: ["/v1/*"]}]:
+  // the plain grant is withheld, the narrowed facts take its place.
+  const rules = [
+    `http_granted_service_exact("mcp", "calc") <- role("sam:role:node")`,
+    `granted_method("mcp", "calc", ["GET"]) <- role("sam:role:node")`,
+    `granted_path_prefix("mcp", "calc", "/v1/") <- role("sam:role:node")`,
+    `target_unrestricted(true) <- role("sam:role:node")`,
+  ];
+  const http = (method: string, path: string): AuthorizeRequest => ({ ...request(nodeToken(CALLER)), method, path });
+  await authorizeCaller(http("GET", "/v1/models"), options(rules));
+  await assert.rejects(authorizeCaller(http("POST", "/v1/models"), options(rules)), AuthorizationError);
+  await assert.rejects(authorizeCaller(http("GET", "/v2/models"), options(rules)), AuthorizationError);
+  // A tunnel, and a stream that carries no HTTP request: neither matches.
+  await assert.rejects(authorizeCaller(http("CONNECT", ""), options(rules)), AuthorizationError);
+  await assert.rejects(authorizeCaller(request(nodeToken(CALLER)), options(rules)), AuthorizationError);
+});
+
 test("every baseline item parses in biscuit-wasm", () => {
   for (const c of [BASELINE_DATALOG.time_check, BASELINE_DATALOG.replay_check, BASELINE_DATALOG.target_check, BASELINE_DATALOG.agent_check]) {
     wasm.Check.fromString(c);
   }
-  for (const r of [...BASELINE_DATALOG.rules, ...BASELINE_DATALOG.agent_rules, ...BASELINE_DATALOG.target_fact_rules]) {
+  for (const r of [...BASELINE_DATALOG.rules, ...BASELINE_DATALOG.http_rules, ...BASELINE_DATALOG.agent_rules, ...BASELINE_DATALOG.target_fact_rules]) {
     wasm.Rule.fromString(r);
   }
   for (const p of [...BASELINE_DATALOG.policies, BASELINE_DATALOG.allow_if_true]) {
