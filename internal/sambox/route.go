@@ -127,6 +127,17 @@ func (p *EgressPolicy) Allows(host string) bool {
 	return false
 }
 
+// AllowsLiteral reports whether an address the guest dialled without ever
+// resolving a name may be reached. Only an exact entry can say so: a
+// wildcard names a DNS zone, and an address is in no zone.
+func (p *EgressPolicy) AllowsLiteral(addr string) bool {
+	if p == nil {
+		return false
+	}
+	_, ok := p.exact[api.NormalizeMeshHost(addr)]
+	return ok
+}
+
 // Router classifies destinations arriving on the sandbox boundary.
 type Router struct {
 	// Egress is the allowlist for destinations outside the mesh. Nil denies
@@ -159,10 +170,17 @@ func (r *Router) Route(dst Destination) (Route, error) {
 		return Route{Kind: RouteMeshService, ServiceURI: serviceURI, Destination: dst}, nil
 	}
 
-	// Literal addresses are not special-cased: they carry no name, so they are
-	// allowed only by an exact entry. CIDR ranges are deliberately not
-	// supported yet; adding them is a policy-language decision, not a routing
-	// one.
+	// An address carries no name. The guest stack forwards one when a flow
+	// was opened to an address it never resolved, so policy has nothing to
+	// decide on but the address itself: only an exact entry allows it. CIDR
+	// ranges are deliberately not supported; adding them is a policy-language
+	// decision, not a routing one.
+	if !dst.IsName {
+		if !r.Egress.AllowsLiteral(dst.Name) {
+			return Route{}, fmt.Errorf("%w: %s is an address, not a name", ErrNotAllowed, dst.Name)
+		}
+		return Route{Kind: RouteExternal, Destination: dst}, nil
+	}
 	if !r.Egress.Allows(dst.Name) {
 		return Route{}, fmt.Errorf("%w: %s", ErrNotAllowed, dst.Name)
 	}

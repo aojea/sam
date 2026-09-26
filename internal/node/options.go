@@ -87,6 +87,10 @@ type Options struct {
 	// is tight enough that even simple interpreted-language MCP servers can
 	// miss it on first spawn.
 	BackendProbeTimeout time.Duration
+	// SecretsDir is where the node resolves the credential names the control
+	// plane assigns with egress destinations: one file per name, put there by
+	// the platform (a Secret volume, a vault agent). Zero uses DefaultSecretsDir.
+	SecretsDir string
 	// CatalogReportInterval specifies how often the node self-reports its
 	// locally registered services to the control plane (POST
 	// /nodes/catalog), so an admin can see mesh-wide service topology
@@ -146,6 +150,9 @@ func (o *Options) Default() {
 	}
 	if o.ControlPlaneSyncInterval == 0 {
 		o.ControlPlaneSyncInterval = DefaultControlPlaneSyncInterval
+	}
+	if o.SecretsDir == "" {
+		o.SecretsDir = DefaultSecretsDir
 	}
 	if o.CatalogReportInterval <= 0 {
 		o.CatalogReportInterval = 1 * time.Minute

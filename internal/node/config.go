@@ -108,6 +108,11 @@ func CompleteNodeConfig(config api.NodeConfig) (*NodeConfigComplete, error) {
 		if err := api.ValidateServiceFormat(svc.Type + "://" + svc.Name); err != nil {
 			return nil, fmt.Errorf("invalid service config at index %d: %w", i, err)
 		}
+		// Nodes serve what the control plane assigns them; a destination
+		// declared here would give one node a policy of its own.
+		if t, err := api.ParseServiceType(svc.Type); err == nil && t == api.ServiceType_SERVICE_TYPE_EGRESS {
+			return nil, fmt.Errorf("service %q: egress destinations are assigned by the control plane (PolicyConfig.egress), not declared in the node config", svc.Name)
+		}
 		if svc.TargetAuthPath != "" && svc.TargetURL == "" {
 			return nil, fmt.Errorf("service %q: target_auth_path needs a target_url", svc.Name)
 		}

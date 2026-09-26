@@ -85,6 +85,9 @@ func serviceKeys(ctx context.Context, svc Service, t api.ServiceType) ([]string,
 		if lister, ok := svc.(toolLister); ok {
 			return lister.Tools(ctx)
 		}
+	case api.ServiceType_SERVICE_TYPE_EGRESS:
+		// The destination name is the only key: callers look a hostname up.
+		return []string{svc.Info().GetName()}, nil
 	}
 	return nil, nil
 }

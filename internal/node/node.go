@@ -172,7 +172,11 @@ type SamNode struct {
 	keysMu               sync.RWMutex
 	MeshPolicyRules      []biscuit.Rule
 	MeshPolicyMu         sync.RWMutex
-	rateLimiter          *ratelimit.PeerRateLimiter
+	// pendingEgress holds assignments that arrived before Start created the
+	// service registry (SyncControlPlane runs first); Start applies them.
+	pendingEgress   []*api.EgressDestination
+	pendingEgressMu sync.Mutex
+	rateLimiter     *ratelimit.PeerRateLimiter
 	// handshakeLimiter bounds /sam/auth attempts per peer separately from
 	// rateLimiter, so a peer's authenticated traffic cannot starve its own
 	// re-authentication and vice versa.
@@ -567,6 +571,7 @@ func (n *SamNode) Start(ctx context.Context) error {
 
 	n.services = NewServiceRegistry(n.DHT, n.config.BackendProbeTimeout)
 	n.services.reprovideNow = n.triggerReprovide
+	n.applyPendingEgress(ctx)
 
 	var authenticated bool
 	var fatalAuthErr error
@@ -2168,13 +2173,27 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 				Protocol: "/libp2p-http",
 				Target:   target,
 				Agent:    agentClaim(r.Header.Get(api.HeaderSamAgent)),
+				// The path policy sees is the one the backend will see, decided
+				// here so it can never be the routing prefix.
+				HTTP: &HTTPRequestFacts{Method: r.Method, Path: "/" + upstreamPath},
+			}
+			if serviceType == api.ServiceType_SERVICE_TYPE_EGRESS {
+				if svc, ok := n.services.GetTyped(serviceType, serviceName); ok {
+					reqCtx.Egress = egressFactsFor(svc)
+				}
 			}
 
 			// Verify authorization
 			if err := n.VerifyBiscuitToken(biscuitBytes, reqCtx); err != nil {
 				logger.Warnf("[Ingress] AuthZ Denied for %s: %v", remotePeer, err)
-				http.Error(w, "Authorization failed", http.StatusForbidden)
+				if serviceType == api.ServiceType_SERVICE_TYPE_EGRESS {
+					recordEgressDecision(serviceName, egressOutcomeDeny)
+				}
+				refuse(w, http.StatusForbidden, "Authorization failed", proxyStatusDenied)
 				return
+			}
+			if serviceType == api.ServiceType_SERVICE_TYPE_EGRESS {
+				recordEgressDecision(serviceName, egressOutcomeAllow)
 			}
 
 			// Strip the biscuit header so it doesn't leak to the backend service

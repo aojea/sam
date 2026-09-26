@@ -91,6 +91,35 @@ func TestRouteClassification(t *testing.T) {
 // TestMeshNamesIgnoreEgressPolicy pins that mesh routing is not reachable
 // through the allowlist: a mesh name is authorized by mesh policy, and an
 // operator listing it under egress must not change how it is routed.
+// TestLiteralAddressesNeedAnExactEntry: the guest stack forwards an address
+// when a flow was opened to one it never resolved. Policy is written on
+// names, so a wildcard cannot cover it; only an exact entry does, and with no
+// policy at all it is denied like everything else.
+func TestLiteralAddressesNeedAnExactEntry(t *testing.T) {
+	policy, err := NewEgressPolicy([]string{"*.3.4", "198.51.100.7", "api.github.com"})
+	if err != nil {
+		t.Fatalf("NewEgressPolicy: %v", err)
+	}
+	r := &Router{Egress: policy}
+
+	for _, addr := range []string{"1.2.3.4", "2001:db8::1", "10.0.0.1"} {
+		if _, err := r.Route(Destination{Name: addr, Port: 443, IsName: false}); !errors.Is(err, ErrNotAllowed) {
+			t.Errorf("Route(%q as address) = %v, want ErrNotAllowed", addr, err)
+		}
+	}
+	got, err := r.Route(Destination{Name: "198.51.100.7", Port: 5432, IsName: false})
+	if err != nil || got.Kind != RouteExternal {
+		t.Errorf("an exactly listed address = %+v, %v; want RouteExternal", got, err)
+	}
+	// The same string as a name is still matched as a name.
+	if _, err := r.Route(Destination{Name: "x.3.4", Port: 443, IsName: true}); err != nil {
+		t.Errorf("a name under the wildcard: %v", err)
+	}
+	if _, err := (&Router{}).Route(Destination{Name: "198.51.100.7", Port: 443, IsName: false}); !errors.Is(err, ErrNotAllowed) {
+		t.Errorf("an address with no policy = %v, want ErrNotAllowed", err)
+	}
+}
+
 func TestMeshNamesIgnoreEgressPolicy(t *testing.T) {
 	policy, err := NewEgressPolicy([]string{"*.sam.alt"})
 	if err != nil {

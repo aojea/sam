@@ -61,6 +61,9 @@ func (n *SamNode) SyncControlPlane(ctx context.Context) error {
 	if err := n.syncMeshPolicy(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("policy: %w", err))
 	}
+	if err := n.syncEgressAssignments(ctx, controlPlaneURL); err != nil {
+		errs = append(errs, fmt.Errorf("egress: %w", err))
+	}
 	return errors.Join(errs...)
 }
 

@@ -103,6 +103,7 @@ var (
 	dhtLookupLimitFlag           int
 	discoveryConcurrencyFlag     int
 	backendProbeTimeoutFlag      time.Duration
+	secretsDirFlag               string
 	controlPlaneSyncIntervalFlag time.Duration
 )
 
@@ -496,6 +497,7 @@ func main() {
 					DHTLookupLimit:           dhtLookupLimitFlag,
 					DiscoveryConcurrency:     discoveryConcurrencyFlag,
 					BackendProbeTimeout:      backendProbeTimeoutFlag,
+					SecretsDir:               secretsDirFlag,
 				})
 				if err != nil {
 					logger.Fatalf("Failed to initialize mesh node: %v", err)
@@ -566,6 +568,7 @@ func main() {
 					DHTLookupLimit:           dhtLookupLimitFlag,
 					DiscoveryConcurrency:     discoveryConcurrencyFlag,
 					BackendProbeTimeout:      backendProbeTimeoutFlag,
+					SecretsDir:               secretsDirFlag,
 				})
 				if err != nil {
 					enrollCancel()
@@ -633,6 +636,7 @@ func main() {
 					RequiredRole:             api.RoleNode,
 					ControlPlaneSyncInterval: controlPlaneSyncIntervalFlag,
 					BackendProbeTimeout:      backendProbeTimeoutFlag,
+					SecretsDir:               secretsDirFlag,
 				})
 				if err != nil {
 					logger.Fatalf("Failed to initialize node after enrollment: %v", err)
@@ -899,6 +903,7 @@ func main() {
 	runCmd.Flags().IntVar(&discoveryConcurrencyFlag, "discovery-concurrency", 0, "Max concurrent catalog fetches during discovery (0 uses default 10)")
 	runCmd.Flags().DurationVar(&controlPlaneSyncIntervalFlag, "control-plane-sync-interval", node.DefaultControlPlaneSyncInterval, "How often signing keys, bans, router addresses and mesh policy are pulled from the control plane. Keep it well below the control plane's --key-grace-period; raise it on large meshes.")
 	runCmd.Flags().DurationVar(&backendProbeTimeoutFlag, "backend-probe-timeout", 0, "Timeout for probing a command-spawned service backend before advertising it (0 uses default 2s); raise this for backends with slower cold-start times")
+	runCmd.Flags().StringVar(&secretsDirFlag, "secrets-dir", node.DefaultSecretsDir, "Directory holding the credentials named by the control plane's egress destinations, one file per credential name")
 	rootCmd.PersistentFlags().StringVar(&controlPlaneAddr, "control-plane", "", "Control plane URL")
 	rootCmd.PersistentFlags().BoolVar(&insecureControlPlaneFlag, "insecure-control-plane", false, "Accept a plaintext http:// control plane URL to a non-loopback host (whoever answers it becomes this node's trust root; only for networks you already trust)")
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", node.DefaultConfigFile, "Path to sam-node.yaml configuration file")

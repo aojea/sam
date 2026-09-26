@@ -130,6 +130,8 @@ func NewServiceFromRequest(req *api.RegisterServiceRequest) (Service, error) {
 		return &InferenceService{baseService: baseService{info: info, backend: req.Backend}}, nil
 	case api.ServiceType_SERVICE_TYPE_A2A:
 		return &A2AService{baseService: baseService{info: info, backend: req.Backend}}, nil
+	case api.ServiceType_SERVICE_TYPE_EGRESS:
+		return nil, fmt.Errorf("service %q: egress destinations are assigned by the control plane (PolicyConfig.egress), not registered on a node", info.GetName())
 	default:
 		return nil, fmt.Errorf("unspecified or unsupported service type: %v", info.Type)
 	}

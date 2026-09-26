@@ -93,6 +93,15 @@ func StartSidecarServer(node *SamNode, addr, socketPath, token, certFile, keyFil
 	mux.Handle("/v1/chat/completions", withAuth(token, true, withMeshConnection(node, http.HandlerFunc(facade.handleCompletions))))
 	mux.Handle("/v1/completions", withAuth(token, true, withMeshConnection(node, http.HandlerFunc(facade.handleCompletions))))
 
+	// Egress destinations this node serves, for local clients. Same gate as
+	// the facade: an SDK sends the sidecar token as its api_key. Whatever
+	// Authorization survives the gate is dropped by the egress handler, which
+	// presents the node's own credential to the destination. Not behind
+	// withMeshConnection: the destination is outside the mesh.
+	mux.Handle("/egress/", withAuth(token, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleLocalEgress(node, w, r)
+	})))
+
 	// Mount MCP handler
 	mcpHandler := NewMCPHandler(node)
 	mux.Handle("/", withAuth(token, true, withMeshConnection(node, mcpHandler)))

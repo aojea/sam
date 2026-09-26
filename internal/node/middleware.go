@@ -50,6 +50,35 @@ type RequestContext struct {
 	// So it is attribution, not proof. Policy that cares should also constrain
 	// which peers may speak for which agent namespaces.
 	Agent string
+
+	// HTTP is set when the node handles the request as HTTP: the method as
+	// received and the path as the backend sees it. Injected as method() and
+	// path() facts, taken from the wire and never from the caller's token. A
+	// tunnel the node opens without terminating HTTP carries Method "CONNECT"
+	// and an empty Path. Nil on a stream that carries no HTTP request.
+	HTTP *HTTPRequestFacts
+
+	// Egress is set on a request for an egress destination: the hostname and
+	// port the node connects to, injected as host() and port() facts.
+	Egress *EgressFacts
+
+	// Local marks a request this node makes for one of its own clients over the
+	// local API, for a destination it serves itself. The caller is then this
+	// node, evaluated on its own credential, and the target check is satisfied
+	// because a node is always allowed to reach itself. Never set from the wire.
+	Local bool
+}
+
+// HTTPRequestFacts is what an HTTP request contributes to policy.
+type HTTPRequestFacts struct {
+	Method string
+	Path   string
+}
+
+// EgressFacts is the destination of an egress request.
+type EgressFacts struct {
+	Host string
+	Port int
 }
 
 // recoverStreamHandler isolates a panic while processing untrusted peer bytes
@@ -280,6 +309,33 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	// Enforce client_peer_id matches connection_peer_id
 	authorizer.AddCheck(api.BaselineReplayCheck)
 
+	// The request as the wire carried it. Present only when there is an HTTP
+	// request, so a grant narrowed to methods and paths (PolicyRole.http) has
+	// nothing to match on a bare stream and fails closed.
+	if req.HTTP != nil {
+		authorizer.AddFact(biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: api.FactMethod,
+			IDs:  []biscuit.Term{biscuit.String(req.HTTP.Method)},
+		}})
+		authorizer.AddFact(biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: api.FactPath,
+			IDs:  []biscuit.Term{biscuit.String(req.HTTP.Path)},
+		}})
+	}
+	if req.Egress != nil {
+		authorizer.AddFact(biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: api.FactHost,
+			IDs:  []biscuit.Term{biscuit.String(req.Egress.Host)},
+		}})
+		authorizer.AddFact(biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: api.FactPort,
+			IDs:  []biscuit.Term{biscuit.Integer(req.Egress.Port)},
+		}})
+	}
+	if req.Local {
+		authorizer.AddFact(api.MarkerFact(api.FactTargetUnrestricted))
+	}
+
 	identity.EnforceExpiration(authorizer)
 
 	// Inject facts from our own identity token to support target matching
@@ -307,6 +363,9 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	for _, r := range api.BaselineRules {
 		authorizer.AddRule(r)
 	}
+	for _, r := range api.BaselineHTTPRules {
+		authorizer.AddRule(r)
+	}
 
 	// Apply Dynamic Mesh Policy Rules
 	n.MeshPolicyMu.RLock()
@@ -319,7 +378,8 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 
 	err = authorizer.Authorize()
 	if err != nil {
-		logger.Errorf("Authorizer failure: %v, token: %s", err, b.String())
+		logger.Infow("Audit Traceability", append(req.auditFields(), "decision", "deny", "reason", err.Error())...)
+		logger.Debugf("Authorizer failure: %v, token: %s", err, b.String())
 		logger.Debugf("Authorizer state: %s", authorizer.PrintWorld())
 		return err
 	}
@@ -353,16 +413,35 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 		}
 	}
 
-	logger.Infow("Audit Traceability",
-		"peer_id", req.PeerID.String(),
+	logger.Infow("Audit Traceability", append(req.auditFields(),
+		"decision", "allow",
 		"user", userStr,
 		"email", emailStr,
 		"role", roleStr,
-		"target", req.Target,
-		"protocol", req.Protocol,
-	)
+	)...)
 
 	return nil
+}
+
+// auditFields is what every authorization decision logs about the request:
+// who asked, for what, and the request facts policy saw. One line per
+// decision, allow or deny, is the audit trail of the PEP.
+func (req RequestContext) auditFields() []any {
+	fields := []any{
+		"peer_id", req.PeerID.String(),
+		"target", req.Target,
+		"protocol", req.Protocol,
+	}
+	if req.Agent != "" {
+		fields = append(fields, "agent", req.Agent)
+	}
+	if req.HTTP != nil {
+		fields = append(fields, "method", req.HTTP.Method, "path", req.HTTP.Path)
+	}
+	if req.Egress != nil {
+		fields = append(fields, "host", req.Egress.Host, "port", req.Egress.Port)
+	}
+	return fields
 }
 
 func (n *SamNode) injectIdentityFacts(authorizer biscuit.Authorizer, pubKey ed25519.PublicKey) error {
