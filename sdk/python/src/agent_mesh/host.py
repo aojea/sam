@@ -14,8 +14,8 @@
 
 """The libp2p host a member joins the mesh with, configured the way sam-node's
 is (internal/node/node.go): TLS for the security protocol, which every peer
-offers first, and yamux the muxer. py-libp2p is trio-based, so everything here
-is trio async."""
+offers first, Noise accepted beside it, and yamux the muxer. py-libp2p is
+trio-based, so everything here is trio async."""
 
 from __future__ import annotations
 
@@ -34,10 +34,13 @@ from cryptography.x509.oid import NameOID
 from libp2p import new_host
 from libp2p.abc import IHost, INetStream
 from libp2p.crypto.ed25519 import create_new_key_pair
+from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.custom_types import TProtocol
 from libp2p.network.config import ConnectionConfig
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
+from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
+from libp2p.security.noise.transport import Transport as NoiseTransport
 from libp2p.security.tls.transport import PROTOCOL_ID as TLS_PROTOCOL_ID
 from libp2p.security.tls.transport import IdentityConfig, TLSTransport
 from libp2p.stream_muxer.exceptions import MuxedStreamError
@@ -164,9 +167,13 @@ def create_mesh_host(identity: Identity, listen_addrs: Sequence[str] = ()) -> tu
     # but does not complete it, and go-libp2p then refuses the mux upgrade.
     # Without it the muxer is negotiated with multistream-select as before.
     tls = TLSTransport(key_pair, identity_config=IdentityConfig(cert_template=_certificate_template()))
+    # TLS first, as every Go peer and the JS SDK offer it; Noise accepted, so
+    # a member in a browser, which speaks Noise alone, is reached end to end
+    # through a relay. Both bind the connection to the peer ID.
+    noise = NoiseTransport(key_pair, noise_privkey=create_new_x25519_key_pair().private_key)
     host = new_host(
         key_pair=key_pair,
-        sec_opt={TLS_PROTOCOL_ID: tls},
+        sec_opt={TLS_PROTOCOL_ID: tls, NOISE_PROTOCOL_ID: noise},
         muxer_opt={TProtocol(YAMUX_PROTOCOL_ID): Yamux},
         enable_websocket=True,
         # py-libp2p 0.7 dials wss with certificate verification off unless

@@ -81,12 +81,18 @@ const result = await esbuild.build({
 });
 
 // The bytes the stub fetches: copy every .wasm the graph touched beside the bundle.
-const { copyFile, mkdir } = await import("node:fs/promises");
+const { copyFile, mkdir, readdir } = await import("node:fs/promises");
 await mkdir(outdir, { recursive: true });
 for (const input of Object.keys(result.metafile.inputs)) {
   if (input.startsWith("wasm-esm:")) {
     const file = input.slice("wasm-esm:".length);
     await copyFile(file, join(outdir, basename(file)));
+  }
+}
+// A page's static files beside the entry (index.html) go with it.
+for (const name of await readdir(dirname(entry))) {
+  if (name.endsWith(".html") || name.endsWith(".css")) {
+    await copyFile(join(dirname(entry), name), join(outdir, name));
   }
 }
 const nodeBuiltins = Object.keys(result.metafile.inputs).filter((p) => p.startsWith("node:"));

@@ -1,0 +1,53 @@
+<!doctype html>
+<!--
+  Copyright 2026 Google LLC
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SAM browser agent</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; margin: 2rem; max-width: 48rem; }
+      label { display: block; margin-top: 0.75rem; }
+      input { width: 100%; box-sizing: border-box; padding: 0.4rem; font: inherit; }
+      button { margin-top: 0.75rem; padding: 0.4rem 1rem; font: inherit; }
+      code, pre { font: 13px ui-monospace, monospace; }
+      pre { background: #f4f4f4; padding: 0.75rem; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>SAM browser agent</h1>
+    <p>
+      This page is a member of the mesh: it enrolls with the control plane, joins through a router over WebSocket and Noise,
+      answers A2A requests as <code>a2a://agent</code> and calls other agents by peer ID.
+    </p>
+    <form id="join-form">
+      <label>Control plane URL <input id="control-plane-url" name="controlPlaneUrl" required /></label>
+      <label>Join token (empty to resume a saved enrollment) <input id="bootstrap-token" name="bootstrapToken" autocomplete="off" /></label>
+      <button type="submit" id="join">Join</button>
+    </form>
+    <p>Status: <span id="status">not joined</span></p>
+    <p>Peer ID: <code id="peer-id"></code></p>
+    <form id="call-form">
+      <label>Agent peer ID <input id="target-peer" name="peerId" required /></label>
+      <label>Message <input id="message" name="text" value="hello from a browser" /></label>
+      <button type="submit" id="call">Call</button>
+    </form>
+    <p>Answer: <span id="answer"></span></p>
+    <h2>Requests received</h2>
+    <pre id="log"></pre>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

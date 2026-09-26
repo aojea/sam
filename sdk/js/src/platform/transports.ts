@@ -13,9 +13,11 @@
 // limitations under the License.
 
 // How a member on Node reaches the mesh: TCP and WebSocket, the transports
-// the routers listen on, secured with TLS 1.3, which every peer offers
-// first (internal/node/node.go).
+// the routers listen on. TLS 1.3 first, as every Go peer and the Python SDK
+// offer it (internal/node/node.go); Noise accepted, so a member in a
+// browser, which speaks Noise alone, is reached end to end through a relay.
 
+import { noise } from "@chainsafe/libp2p-noise";
 import { tcp } from "@libp2p/tcp";
 import { tls } from "@libp2p/tls";
 import { webSockets } from "@libp2p/websockets";
@@ -26,5 +28,5 @@ export function transports(): NonNullable<Libp2pOptions["transports"]> {
 }
 
 export function connectionEncrypters(): NonNullable<Libp2pOptions["connectionEncrypters"]> {
-  return [tls()];
+  return [tls(), noise()];
 }

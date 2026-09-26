@@ -226,7 +226,9 @@ export class ControlPlaneClient {
 
   constructor(options: ControlPlaneClientOptions) {
     this.url = validateControlPlaneURL(options.url, options.allowInsecure ?? false);
-    this.#fetch = options.fetch ?? globalThis.fetch;
+    // Unbound: a browser's fetch refuses to run as a method of anything else.
+    const f = options.fetch ?? globalThis.fetch;
+    this.#fetch = (input, init) => f(input, init);
     this.#timeoutMs = options.timeoutMs ?? 30_000;
   }
 
