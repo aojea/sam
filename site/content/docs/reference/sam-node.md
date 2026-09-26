@@ -112,6 +112,7 @@ enroll.
 | `--discovery-concurrency` | `10` | Concurrent catalog fetches during discovery. |
 | `--dht-provider-addr-ttl`, `--dht-max-record-age` | library defaults | DHT record lifetimes. |
 | `--backend-probe-timeout` | `2s` | How long a service backend may take to answer before the node declines to advertise it. Raise it for subprocesses that start slowly. |
+| `--secrets-dir` | `/etc/sam/secrets` | Directory holding the credentials that the control plane's [egress destinations](../policy/#egress-destinations) name, one file per credential name. The platform puts the files there; the node reads a file on every request to the destination. |
 | `--control-plane-sync-interval` | `15m` | How often signing keys, the ban set, router addresses and the mesh policy are pulled from the control plane. Keep it well below the control plane's `--key-grace-period`; raise it on large meshes. |
 | `--key-grace-period` | `24h` | How long a rotated-out control plane key is still accepted for verifying peers. |
 | `--monitor-bootstrap` | `2m` | Delay before the router-connection monitor starts. |

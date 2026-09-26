@@ -76,7 +76,7 @@ A list. Each entry has these keys:
 
 | Key | Required | Meaning |
 |---|---|---|
-| `type` | yes | `mcp`, `inference` or `a2a`. |
+| `type` | yes | `mcp`, `inference` or `a2a`. `egress` is refused here: a destination outside the mesh is assigned to nodes by the control plane, in the [egress section](../policy/#egress-destinations) of the mesh policy. |
 | `name` | yes | Unique on this node. DNS-style labels separated by dots (`db-reader`, `build.runner`). Policy grants refer to `type://name`. |
 | `description` | no | Shown in discovery results and in the console. |
 | `target_url` | `mcp`: this or `command`; `inference` and `a2a`: yes | Backend URL that the node proxies to. Embedded credentials (`http://user:pass@`) are refused. |
@@ -99,9 +99,10 @@ Before a service is advertised, the node probes the backend
 (`--backend-probe-timeout`, 2 seconds). A backend that does not answer is
 not advertised, and the log records this.
 
-Services exist only through this file. There is no runtime API that adds a
-service. An agent with access to the node's API therefore cannot point the
-mesh at a new backend.
+Services exist only through this file and through the control plane's
+egress assignments. There is no runtime API that adds a service. An agent
+with access to the node's API therefore cannot point the mesh at a new
+backend.
 
 ## `attenuation`
 
@@ -129,6 +130,11 @@ Facts available:
 | `granted_service_*`, `granted_target_*`, `granted_agent_*` | The caller's grants. |
 | `target_fact($name, $value)` | This node's own identity facts, for target matching. |
 | `agent($id)` | The agent the caller says it acts for, when present. |
+| `method($m)`, `path($p)` | The request, when it is HTTP: the method as received and the path as the backend sees it. On a tunnel, `CONNECT` and an empty path. Absent on a stream that carries no HTTP request. |
+| `host($h)`, `port($n)` | The destination of a request for an egress destination. |
+
+The dialect has no `!=`; write a negation with `!`, as in
+`deny if method($m), !($m == "GET")`.
 
 The mobile app has the same three lists in its settings, with the same
 syntax and the same errors.

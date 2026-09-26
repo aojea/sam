@@ -6,10 +6,11 @@ aliases:
   - /docs/development/policy/
 ---
 
-The mesh policy is one document held by the control plane: a list of roles
-and a list of bindings. It is posted as JSON (protojson of `PolicyConfig` in
-`api/sam.proto`) to `POST /policies`, read back from `GET /admin/policy`,
-edited in the console, or given to `sam-one --policy-file` for first boot.
+The mesh policy is one document held by the control plane: a list of roles,
+a list of bindings and a list of egress destinations. It is posted as JSON
+(protojson of `PolicyConfig` in `api/sam.proto`) to `POST /policies`, read
+back from `GET /admin/policy`, edited in the console, or given to
+`sam-one --policy-file` for first boot.
 
 ```json
 {
@@ -25,11 +26,23 @@ edited in the console, or given to `sam-one --policy-file` for first boot.
       "allowed_targets": ["group:dev-nodes", "node:12D3KooWSpecialNode"],
       "allowed_agents": ["*.dev.acme.example"],
       "custom_datalog": ["tier(\"standard\");"]
+    },
+    {
+      "name": "contractor",
+      "allowed_services": ["egress://api.github.com"],
+      "allowed_targets": ["*"],
+      "http": [
+        { "service": "egress://api.github.com", "methods": ["GET"], "paths": ["/repos/acme/*"] }
+      ]
     }
   ],
   "bindings": [
     { "role": "sam:role:node", "members": ["group:engineering", "user:system:serviceaccount:sam-nodes:calc-mcp-sam-node"] },
-    { "role": "developer",     "members": ["group:engineering"] }
+    { "role": "developer",     "members": ["group:engineering"] },
+    { "role": "contractor",    "members": ["group:external"] }
+  ],
+  "egress": [
+    { "name": "api.github.com", "credential": "github-eu", "served_by": ["site=eu"] }
   ]
 }
 ```
@@ -48,11 +61,16 @@ notice.
 | `allowed_labels` | list of label patterns | Labels that a node holding this role may declare at enrollment. If absent, no labels may be declared. |
 | `allowed_agents` | list of agent patterns | Agent identifiers that a node holding this role may claim to act for. If absent, no agent may be named. |
 | `custom_datalog` | list of Datalog statements | Facts are minted into the credentials of holders. Rules are distributed to nodes and applied when a holder is verified. |
+| `http` | list of HTTP grants | Narrows an `allowed_services` entry to HTTP methods and paths. See [HTTP grants](#http-grants). |
 
 ### Service patterns
 
-`type://name`, where `type` is `mcp`, `inference`, `a2a` or `system`, and
-`name` consists of dot-separated DNS-style labels.
+`type://name`, where `type` is `mcp`, `inference`, `a2a`, `egress` or
+`system`, and `name` consists of dot-separated DNS-style labels. For
+`egress` the name is the hostname of a destination outside the mesh, written
+lowercase, with no scheme, port or path: `egress://api.github.com/v3` is
+rejected, because the path belongs in the role's `http` entry. See
+[Egress destinations](#egress-destinations).
 
 | Pattern | Compiles to | Matches |
 |---|---|---|
@@ -97,6 +115,76 @@ agents it hosts.
 | `key=value` | exactly that pair |
 | `key=*` | any value for that key |
 | `*` | any label |
+
+### HTTP grants
+
+An entry of `http` narrows one `allowed_services` entry of the same role to
+HTTP methods and paths. The service must be written exactly as it appears in
+`allowed_services`; at least one of `methods` and `paths` must be set.
+
+| Field | Meaning |
+|---|---|
+| `service` | The `allowed_services` entry this narrows. |
+| `methods` | Methods the holder may use, uppercase, such as `GET`. Empty means any method. |
+| `paths` | Paths the holder may request, as the backend sees them. `/user` matches that path only; `/v2/public/*` matches every path under the prefix. Empty means any path. |
+
+```json
+{ "service": "egress://api.github.com", "methods": ["GET", "HEAD"], "paths": ["/repos/acme/*", "/user"] }
+```
+
+The control plane compiles the entry into facts in the holder's credential
+and withholds the plain service grant for that entry:
+
+```datalog
+http_granted_service_exact("egress", "api.github.com")
+granted_method("egress", "api.github.com", ["GET", "HEAD"])
+granted_path_prefix("egress", "api.github.com", "/repos/acme/")
+granted_path_exact("egress", "api.github.com", ["/user"])
+```
+
+Baseline rules on every node derive `granted_service_exact("egress",
+"api.github.com")` from these facts only when the request's `method()` and
+`path()` facts satisfy them. The ordinary allow policies then decide as they
+do for any grant. The rules are positive, so a request that carries no HTTP
+method (a tunnel, a non-HTTP stream) derives nothing and a narrowed grant
+denies it. A role that holds the same service plainly, through another
+entry or another role, is not narrowed: grants are a union.
+
+A node built before this field existed has no derivation rules, so it denies
+a narrowed grant entirely rather than treating it as unrestricted.
+
+## Egress destinations
+
+An entry of `egress` is a destination outside the mesh that selected nodes
+serve as `egress://<name>`. The admin writes it once; each selected node
+receives it at `GET /egress`, registers the service, announces it on the DHT
+and forwards requests to it. Nodes hold no egress configuration of their
+own, and `type: egress` in `sam-node.yaml` is refused.
+
+| Field | Meaning |
+|---|---|
+| `name` | The destination hostname, lowercase, without a port or a path. It is the service name in grants (`egress://<name>`) and in the `service()` fact. One hostname; no wildcard. |
+| `target_url` | Where the serving node forwards requests. Optional; `https://<name>` when empty. `http` or `https`, no credential, no query. |
+| `credential` | Name of the credential the serving node presents to the destination. The node reads the file `<--secrets-dir>/<credential>` (default `/etc/sam/secrets`): `TOKEN` is sent as `Authorization: Bearer TOKEN`, `user:pass` as HTTP Basic. The file is read on every request, so a rotation by the platform applies at once. The value never travels through the control plane. |
+| `served_by` | Role names or `key=value` labels selecting the serving nodes. A node matches when any entry names one of its roles or attested labels. |
+
+The control plane renders one rule per `served_by` entry into the mesh
+policy, `granted_service_exact("egress", "api.github.com") <- role("pep")`
+or `<- label("site", "eu")`, so a serving node authorizes a local request
+with its own credential. Every other caller needs `egress://<name>` on its
+own role. A destination that names a credential the platform did not deliver
+to a node is refused by that node at registration and logged; the other
+destinations are still served.
+
+On an egress request the destination node injects `host()` and `port()`
+next to `method()` and `path()`, and the destination sees the node's
+credential only: the caller's `Authorization`, `Cookie`, `X-Sam-*` and
+`X-Forwarded-*` headers are removed. See [Node API](../node-api/#egress)
+for how a local client reaches a destination.
+
+The control plane warns in its log when a posted destination selects no
+enrolled node, since a selector with a typo is valid in form and would
+otherwise surface only as `404` at the callers.
 
 Keys match `[a-zA-Z0-9_.-]{1,63}`. Values are up to 255 characters with no
 `,`, `=` or control characters. Every label that a node declares must be
@@ -163,7 +251,9 @@ and removals within the credential TTL.
 At the destination node, in this order:
 
 1. Facts for the request: `service($type, $name)`, `connection_peer_id($id)`,
-   `time($now)`, and `agent($id)` if a claim was made.
+   `time($now)`, and `agent($id)` if a claim was made. On an HTTP request,
+   `method($m)` and `path($p)`; on a request for an egress destination,
+   `host($h)` and `port($n)`.
 2. Checks that always apply: `client_peer_id($id), connection_peer_id($id)`,
    `time($t), expiration($e), $t <= $e`, and `agent_authorized(true)` when an
    agent was named.
@@ -171,7 +261,8 @@ At the destination node, in this order:
 4. The node's `attenuation` rules, checks and policies.
 5. Baseline policies: `allow if service($t,$n), granted_service_exact($t,$n)`
    and the set, prefix, suffix, per-type and global variants; the check
-   `allow_network_target($f,$v) or target_unrestricted(true)`.
+   `allow_network_target($f,$v) or target_unrestricted(true)`; the rules that
+   derive a service grant from an [HTTP grant](#http-grants).
 6. The synced mesh policy rules.
 
 All checks must hold, and the first matching policy decides. Without a
@@ -202,10 +293,30 @@ statements.
 | `granted_service_exact`, `_set`, `_prefix`, `_suffix`, `_all`, `_all_types` | type, name/set/pattern | control plane and node rules |
 | `granted_target_exact`, `_set`, `_prefix`, `_suffix`, `_all`, `_all_facts` | fact, value/set/pattern | control plane and node rules |
 | `granted_agent_exact`, `_set`, `_prefix`, `_suffix`, `_all` | pattern | control plane and node rules |
+| `http_granted_service_exact`, `_prefix`, `_suffix`, `_all`, `_all_types` | type, name/pattern | control plane and node rules, for an `http` entry |
+| `granted_method`, `granted_method_any` | type, key, set | control plane and node rules, for an `http` entry |
+| `granted_path_exact`, `granted_path_prefix`, `granted_path_any` | type, key, set/prefix | control plane and node rules, for an `http` entry |
 | `service` | type, name | destination node, per request |
 | `connection_peer_id` | peer ID | destination node, per request |
 | `time` | date | destination node, per request |
 | `agent` | identifier | destination node, from the caller's claim |
+| `method` | string | destination node, on an HTTP request: the method as received; `CONNECT` on a tunnel |
+| `path` | string | destination node, on an HTTP request: the path as the backend sees it, leading slash, no query; empty on a tunnel |
+| `host` | hostname | destination node, on an egress request |
+| `port` | integer | destination node, on an egress request |
 | `target_fact` | fact, value | destination node, from its own credential |
 | `allow_network_target` | fact, value | derived by baseline rules |
 | `agent_authorized` | | derived by baseline rules |
+| `http_method_ok`, `http_path_ok` | type, key | derived by baseline rules |
+
+A node's `attenuation` can refer to the request facts. The Datalog dialect
+has no `!=`; a negation is written with `!`:
+
+```yaml
+attenuation:
+  policies:
+    - 'deny if method($m), !($m == "GET");'
+    - 'deny if path($p), $p.starts_with("/admin/");'
+    - 'deny if port($p), !($p == 443);'
+    - 'deny if host("payroll.internal.example.com");'
+```

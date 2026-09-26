@@ -76,6 +76,7 @@ names. Every instant in a response (`expire_time` and the like) is a
 | `POST /refresh` | `TokenRefreshRequest`, current credential as `Authorization: Bearer <base64>` | Exchange a credential for a new one. Refuses a replayed (superseded) credential, a banned node, an expired session, and a credential signed by a retired key unless the node has `autonomous_recovery`. |
 | `POST /routers/lease` | `RouterLeaseRequest` (credential, addresses, telemetry) | Register or renew a router lease. Requires `role("sam:role:router")`. Announced addresses must end in the router's own peer ID. |
 | `GET /policies` | credential as `Authorization: Bearer <base64>` | The mesh policy as `PolicyConfigGetResponse`: the Datalog rules a member adds to its authorizer, one per entry. Operators read the document at `GET /admin/policy`. |
+| `GET /egress` | credential as `Authorization: Bearer <base64>` | `EgressAssignmentsResponse`: the [egress destinations](../policy/#egress-destinations) whose `served_by` selects the calling node, by its roles or labels. A node registers and serves what it receives here. |
 | `POST /nodes/catalog` | `NodeCatalogReport`, credential as bearer | A node's report of the services it publishes, for the console. Display only. Never used for authorization. |
 
 ### Admin

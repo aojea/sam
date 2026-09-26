@@ -35,6 +35,7 @@ proxy path does not accept it there.
 | `POST /v1/chat/completions`, `POST /v1/completions` | token | OpenAI-compatible inference, routed to a provider of the requested model. |
 | `GET /sam/service/discover` | token | Discover services on the mesh. |
 | `ANY /sam/{peer-id}/{type}/{name}[/{path}]` | token | Reverse proxy to one service on one peer. |
+| `ANY /egress/{destination}[/{path}]` | token | A destination outside the mesh that this node serves, for local clients. See [Egress](#egress). |
 | `GET /sam/identity` | token, socket or mTLS only | This node's credential and the key it verifies under. |
 | `GET /sam/peer/{peer-id}/evidence` | token, socket or mTLS only | A peer's credential as this node last verified it. |
 | `GET /debug/*` | token | Operator diagnostics. These answer even when the mesh is unreachable. |
@@ -204,6 +205,46 @@ the API token as `api_key`. The node accepts the token in `Authorization`
 here because nothing on this path forwards that header. Streaming responses
 are passed through. One provider can also be addressed directly, at
 `/sam/<peer-id>/inference/<name>/v1/chat/completions`.
+
+## Egress
+
+`/egress/<destination>/<path>` reaches a destination outside the mesh that
+the control plane assigned to this node (an entry of the
+[egress section](../policy/#egress-destinations) of the mesh policy whose
+`served_by` selects it). The node is the HTTP origin: it authorizes the
+request on its own credential, with the request's method and path and the
+destination's host and port as facts, forwards it to the destination's
+`target_url` with the credential the policy names, and returns the answer.
+
+```bash
+curl -s --unix-socket $SOCK "http://localhost/egress/api.github.com/repos/acme/dubbing/pulls?state=open"
+```
+
+An application that takes a base URL for the API it calls points it at the
+node, `http://127.0.0.1:8080/egress/api.github.com`, and sends the API
+token as its bearer, the way it would send a provider key. The node accepts
+the token in `Authorization` on this path and never forwards that header:
+the destination sees the node's credential and none of the client's
+headers. A client may name the agent it acts for in `X-Sam-Agent`; the
+claim is checked against the node's `allowed_agents` grant and is visible
+to policy as `agent()`.
+
+`403` is a policy decision: the node's role lacks the destination, an
+`http` narrowing excludes the method or path, or the node's `attenuation`
+refuses the request. `404` is a destination the control plane did not
+assign to this node. Both carry a `Proxy-Status` header (RFC 9209) naming
+the node as the source, `sam-node; error=http_request_denied` or
+`error=destination_not_found`, so a client can tell them from a `403` or
+`404` the destination itself sent, which carries none. A destination whose
+credential file went missing after registration answers `502` with
+`error=proxy_configuration_error`. The same destination is reachable from
+another mesh member at `/sam/<peer-id>/egress/<destination>/<path>` on that
+member's node, authorized on the member's credential.
+
+The path is a prefix under the destination, so a client that follows
+absolute URLs returned by the destination (a `Link` header, a URL in a
+body) leaves the node. Point it back at the prefix, or use a client that
+takes a base URL.
 
 ## Identity evidence
 

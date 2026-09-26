@@ -113,7 +113,10 @@ Biscuit authorizer and adds the following, in this order:
 1. **The request**: `service("mcp", "calculator")` for the requested
    service, and `connection_peer_id(P)` from the authenticated connection.
    If the caller named an agent, the agent claim is added together with the
-   check that the caller's own token grants that agent namespace.
+   check that the caller's own token grants that agent namespace. When the
+   node handles the request as HTTP it adds `method("GET")` and
+   `path("/v1/models")`, the path as the backend will see it; for a
+   destination outside the mesh it adds `host(...)` and `port(...)`.
 2. **The baseline checks**: `client_peer_id($id), connection_peer_id($id)`
    (the token belongs to the peer that presents it), and the expiration
    check against the current time.
@@ -128,7 +131,9 @@ Biscuit authorizer and adds the following, in this order:
 5. **The baseline policies**: `allow if service($t,$n), granted_service_exact($t,$n)`
    and the equivalent policies for sets, prefixes, suffixes, per-type and
    global wildcards, plus the target check
-   `allow_network_target(...) or target_unrestricted(true)`.
+   `allow_network_target(...) or target_unrestricted(true)`, and the rules
+   that turn an [HTTP grant](../../reference/policy/#http-grants) into a
+   service grant when the request's method and path match it.
 6. **The synced mesh policy rules** described above.
 
 Biscuit evaluates every `check` and requires all of them to pass. It then
@@ -141,6 +146,35 @@ never admit a caller that fails a check.
 Before any of this, the connection itself is gated. A peer on the ban list is
 dropped at the transport layer, and a peer whose credential does not verify
 under a trusted signing key cannot name a service at all.
+
+## Why a caller cannot forge a fact
+
+Two kinds of fact meet in the authorizer. The facts in the credential's
+authority block were written and signed by the control plane: roles,
+grants, labels, the peer the token is bound to. The facts about the request
+(`service`, `method`, `path`, `host`, `port`, `agent`, `connection_peer_id`,
+`time`) are added by the node that received the request, from what arrived
+on the wire. A caller writes neither. It cannot change the authority block
+without breaking the signature, and it cannot put a fact into the request
+set because the node computes that set itself.
+
+Biscuit does let a holder append a block to a token. That is how a token is
+attenuated: a holder can add a check that narrows what the token does. The
+facts of an appended block are visible only to that block's own checks and
+never to the authorizer's policies, so an appended `role("admin")` grants
+nothing. `internal/identity`'s
+`TestAttenuationBlockFactsAreInvisibleToTheAuthorizer` pins this, and nodes
+refuse an inbound token that carries appended blocks at all.
+
+This is what lets the policy grow without a schema change. A requirement
+that needs a new dimension is a new fact or a new rule, written in the same
+language that the existing grants compile to. A role's `custom_datalog` can
+mint `tier("contractor")` into every holder's credential, a node's
+`attenuation` can then say `deny if tier("contractor"), method($m), !($m == "GET")`,
+and neither `PolicyRole` nor any wire message changed. The structured fields
+(`allowed_services`, `allowed_agents`, `http`, ...) are the common cases,
+compiled to Datalog by the control plane; `custom_datalog` and
+`attenuation` are the same engine written by hand.
 
 ## Local rules
 
@@ -212,3 +246,6 @@ the namespace belongs to the node's role and not to the agent. The
   name.
 - [Node configuration reference](../../reference/node-config/): the
   `attenuation`, `labels` and `egress` blocks.
+- [Reaching services outside the mesh](../../guides/egress-destinations/):
+  the node as a policy enforcement point for an application's outbound
+  HTTP calls.
