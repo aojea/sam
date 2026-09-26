@@ -121,8 +121,13 @@ export interface ProviderOptions extends ProviderAuthorizerOptions {
   onAuthorized?(peerId: string, verified: VerifiedBiscuit, targetService: string): void;
 }
 
+// A URL parser reads %2e as a dot too (WHATWG URL, path state), so the check
+// sees what the parser and the backend will see.
 function hasDotSegment(path: string): boolean {
-  return path.split("/").some((seg) => seg === "." || seg === "..");
+  return path.split("/").some((seg) => {
+    const s = seg.replace(/%2e/gi, ".");
+    return s === "." || s === "..";
+  });
 }
 
 /** What the ingress looks at before anything reaches the agent. */

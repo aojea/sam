@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Awaitable, Callable, Mapping, Optional, Sequence, Union
 
@@ -114,8 +115,13 @@ class ProviderOptions:
     on_authorized: Optional[Callable[[str, VerifiedBiscuit, str], None]] = None
 
 
+_DOT_ENCODED = re.compile("%2e", re.IGNORECASE)
+
+
 def _has_dot_segment(path: str) -> bool:
-    return any(seg in (".", "..") for seg in path.split("/"))
+    # A URL parser reads %2e as a dot too (WHATWG URL, path state), so the
+    # check sees what the backend will see.
+    return any(_DOT_ENCODED.sub(".", seg) in (".", "..") for seg in path.split("/"))
 
 
 async def _read_http_request(stream: INetStream, conn: h11.Connection, limit: int) -> tuple[h11.Request, bytes]:
