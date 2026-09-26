@@ -13,8 +13,9 @@
 # limitations under the License.
 
 """The libp2p host a member joins the mesh with, configured the way sam-node's
-is (internal/node/node.go): TLS is the only security protocol and yamux the
-muxer. py-libp2p is trio-based, so everything here is trio async."""
+is (internal/node/node.go): TLS for the security protocol, which every peer
+offers first, and yamux the muxer. py-libp2p is trio-based, so everything here
+is trio async."""
 
 from __future__ import annotations
 

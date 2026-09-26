@@ -13,10 +13,11 @@
 // limitations under the License.
 
 // The libp2p host a member joins the mesh with, configured the way
-// sam-node's is (internal/node/node.go): TLS is the only security
-// protocol, yamux the muxer, circuit relay v2 for reachability through
-// the routers. TCP and WebSocket are the transports: the testnets' routers
-// listen on TCP, sam-one's single port is a WebSocket listener.
+// sam-node's is (internal/node/node.go): TLS for the security protocol,
+// which every peer offers first, yamux the muxer, circuit relay v2 for
+// reachability through the routers. TCP and WebSocket are the transports:
+// the testnets' routers listen on TCP, sam-one's single port is a WebSocket
+// listener.
 
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { circuitRelayTransport } from "@libp2p/circuit-relay-v2";

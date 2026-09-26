@@ -926,9 +926,9 @@ or a pattern) and the members it may reach; see
 - They do not serve the discovery table. A member is a client of it; the
   routers hold the records.
 - They do not run in a browser. Node.js and CPython only. The JS SDK
-  dials routers over WebSocket, which a browser can do, but routers and
-  nodes accept libp2p TLS alone, which a browser cannot speak, and the SDK
-  keeps its state and speaks HTTP on streams with Node's own modules.
+  dials routers over WebSocket, which a browser can do, and routers and
+  nodes accept Noise, which a browser can speak, but the SDK speaks libp2p
+  TLS and keeps its state and speaks HTTP on streams with Node's own modules.
 
 The wire contract and the interoperability facts the tests pin are in
 [`sdk/README.md`](https://github.com/google/sam/blob/main/sdk/README.md).

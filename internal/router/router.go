@@ -51,6 +51,7 @@ import (
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
+	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
@@ -353,7 +354,10 @@ func (r *Router) Start() error {
 		libp2p.Identity(r.privKey),
 		r.transportOptions(),
 		libp2p.ListenAddrStrings(r.config.ListenAddrs...),
+		// TLS first: Go peers and the Node/Python SDKs land on it. Noise is
+		// what a browser can speak; both bind the connection to the peer ID.
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
+		libp2p.Security(noise.ID, noise.New),
 		libp2p.ConnectionManager(cm),
 		libp2p.EnableAutoNATv2(),
 		libp2p.EnableNATService(),
