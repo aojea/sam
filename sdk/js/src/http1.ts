@@ -387,8 +387,10 @@ export function bodyStream(reader: ByteReader, framing: BodyFraming, onDone: (er
         finish(e);
       }
     },
-    cancel(reason) {
+    async cancel(reason) {
+      // The stream is torn down first, so a read the generator is blocked on ends.
       finish(reason instanceof Error ? reason : new Error(String(reason)));
+      await chunks.return(undefined).catch(() => {});
     },
   });
 }
