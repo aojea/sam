@@ -61,6 +61,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/host/autorelay"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-libp2p/p2p/net/swarm"
+	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
@@ -430,11 +431,15 @@ func (n *SamNode) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to create connection manager: %w", err)
 	}
 
-	// Layer 1: Establish FIPS-compliant Transports & NAT Services
+	// Layer 1: Transports & NAT Services. TLS first: Go peers and the
+	// Node/Python SDKs land on it. Noise is what a browser can speak, and a
+	// relayed connection from one is upgraded here, end to end; both bind
+	// the connection to the peer ID.
 	opts := []libp2p.Option{
 		libp2p.Identity(n.config.PrivKey),
 		libp2p.DefaultTransports,
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
+		libp2p.Security(noise.ID, noise.New),
 		libp2p.ConnectionGater(gater),
 		libp2p.ListenAddrStrings(n.config.ListenAddrs...),
 		libp2p.EnableNATService(),

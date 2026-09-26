@@ -89,9 +89,11 @@ sends any request data.
 
 ## What travels where
 
-Every hop between two nodes is encrypted by libp2p's TLS 1.3 secure channel.
-TLS is the only security transport enabled, so that FIPS-validated
-cryptography can be used end to end. A relay forwards ciphertext and learns
+Every hop between two nodes is encrypted by a libp2p secure channel that
+binds the connection to the peer's identity: TLS 1.3, which Go peers and the
+Node and Python SDKs use, or Noise, which a browser can speak. Routers and
+nodes offer TLS first and accept Noise; two peers that both have TLS land on
+it. A relay forwards ciphertext and learns
 only that the two peers are talking. The control plane sees enrollments,
 refreshes, router leases, policy fetches and catalog reports. It never sees a
 request.

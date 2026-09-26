@@ -226,9 +226,10 @@ messages in `api/sam.proto`. Bodies are capped at 1 MiB on both sides.
 ### libp2p host (`internal/node/node.go`)
 
 - Transports: `libp2p.DefaultTransports` (TCP, QUIC, WebSocket).
-- Security: **TLS only** (`libp2p.Security(libp2ptls.ID, libp2ptls.New)`).
-  There is no Noise on `sam-node` or `sam-router`. js-libp2p has TLS;
-  py-libp2p gained it in
+- Security: TLS first, Noise accepted (`libp2p.Security` twice, in that
+  order, on `sam-node` and `sam-router`). Both bind the connection to the
+  peer ID. The Node and Python SDKs speak TLS and land on it; Noise is what
+  a browser can speak. js-libp2p has both; py-libp2p gained TLS in
   [libp2p/py-libp2p#831](https://github.com/libp2p/py-libp2p/pull/831) and
   has passed the libp2p transport interoperability suite against the other
   implementations since
@@ -591,10 +592,9 @@ same commit as the Go components they talk to.
   service, a DHT record or a catalog entry. That is `sam-node`'s job; see
   [Agents, not services](#agents-not-services).
 - A browser build. The JS SDK dials routers over WebSocket, which a browser
-  can do, but it still runs on Node.js only: the routers and nodes accept
-  libp2p TLS alone, which a browser cannot speak (it would need Noise on the
-  Go side), and the SDK reads its state and speaks HTTP/1.1 on streams with
-  Node's `fs` and `http`.
+  can do, and routers and nodes accept Noise, which a browser can speak, but
+  it still runs on Node.js only: it speaks libp2p TLS, and reads its state
+  and speaks HTTP/1.1 on streams with Node's `fs` and `http`.
 - Any SDK-only wire protocol. If an SDK needs something the Go node does not
   speak, the Go node learns it first.
 
