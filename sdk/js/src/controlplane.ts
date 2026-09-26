@@ -26,10 +26,7 @@ import {
   EnrollResponseSchema,
   EnrollmentStatus,
   KeysResponseSchema,
-  NodeCatalogReportSchema,
   PolicyConfigGetResponseSchema,
-  ServiceInfoSchema,
-  ServiceType,
   TokenRefreshRequestSchema,
   TokenRefreshResponseSchema,
   type BootstrapEnrollResponse,
@@ -351,20 +348,6 @@ export class ControlPlaneClient {
       throw new Error("control plane predates datalog_rules in its policy response; upgrade the control plane");
     }
     return resp.datalogRules;
-  }
-
-  /**
-   * POST /nodes/catalog: this member's published services, for the console.
-   * Display only; the control plane takes the reporting peer from the biscuit.
-   */
-  async reportCatalog(biscuit: Uint8Array, services: { type: "mcp" | "inference" | "a2a"; name: string; description: string }[]): Promise<void> {
-    const types = { mcp: ServiceType.MCP, inference: ServiceType.INFERENCE, a2a: ServiceType.A2A };
-    const report = create(NodeCatalogReportSchema, {
-      services: services.map((s) => create(ServiceInfoSchema, { type: types[s.type], name: s.name, description: s.description })),
-    });
-    await this.#request("POST", "/nodes/catalog", toBinary(NodeCatalogReportSchema, report), {
-      Authorization: `Bearer ${Buffer.from(biscuit).toString("base64")}`,
-    });
   }
 
   async #request(method: "GET" | "POST", path: string, body?: Uint8Array, headers: Record<string, string> = {}): Promise<Uint8Array> {

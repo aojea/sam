@@ -30,30 +30,33 @@ from .controlplane import (
     verify_keys_response,
 )
 from .credential import MeshCredential, decode_auth_response, encode_auth_frame
-from .discovery import DHT_PROTOCOL, DiscoveredProvider, find_providers, parse_service_target, provide, service_key
+from .discovery import DHT_PROTOCOL, DiscoveredProvider, find_providers, parse_service_target, service_key
+from .httpx_transport import MESH_PATH_PREFIX, MeshTransport, split_mesh_url
 from .identity import Identity, canonical_peer_id, libp2p_public_key, peer_id_from_public_key, verify_ed25519
-from .mcp_client import LabelsNotSatisfiedError, ToolCallResult, ToolInfo, open_mcp_session, require_labels
-from .mesh import AgentMesh, ControlPlaneSync
-from .relay import dial_through_relay, reserve_relay
-from .serve import (
+from .libp2p_http import (
+    DEFAULT_A2A_NAME,
     HTTP_PROTOCOL,
+    A2AEndpoint,
     HTTPHandler,
     HTTPRequest,
     HTTPResponse,
-    HTTPService,
-    MCPService,
     ProviderOptions,
-    ServiceRegistry,
+    StreamedResponse,
     http_ingress_handler,
     http_request_over_stream,
-    mcp_stream_handler,
+    mesh_http_target,
+    open_http_request,
 )
+from .mcp_client import LabelsNotSatisfiedError, ToolCallResult, ToolInfo, open_mcp_session, require_labels
+from .mesh import AgentMesh, ControlPlaneSync
+from .relay import dial_through_relay, reserve_relay
 from .session import AdmittedRouter, MeshSession, Peer
 from .sync import GOSSIP_EVENTS_TOPIC, BanSet, verify_mesh_event
 
 __version__ = "0.1.0"
 
 __all__ = [
+    "A2AEndpoint",
     "AUTH_PROTOCOL",
     "AdmittedRouter",
     "AgentMesh",
@@ -66,6 +69,7 @@ __all__ = [
     "ControlPlaneClient",
     "ControlPlaneError",
     "ControlPlaneSync",
+    "DEFAULT_A2A_NAME",
     "DHT_PROTOCOL",
     "DiscoveredProvider",
     "Enrollment",
@@ -75,21 +79,21 @@ __all__ = [
     "HTTPHandler",
     "HTTPRequest",
     "HTTPResponse",
-    "HTTPService",
     "Identity",
     "InsecureControlPlaneURLError",
     "LabelsNotSatisfiedError",
     "MCP_PROTOCOL",
-    "MCPService",
+    "MESH_PATH_PREFIX",
     "MeshCredential",
     "MeshSession",
+    "MeshTransport",
     "Peer",
     "ProviderAuthorizerOptions",
     "ProviderOptions",
     "ROLE_NODE",
     "ROLE_ROUTER",
     "RefreshResult",
-    "ServiceRegistry",
+    "StreamedResponse",
     "ToolCallResult",
     "ToolInfo",
     "VerifiedBiscuit",
@@ -106,17 +110,18 @@ __all__ = [
     "http_ingress_handler",
     "http_request_over_stream",
     "libp2p_public_key",
-    "mcp_stream_handler",
+    "mesh_http_target",
+    "open_http_request",
     "open_mcp_session",
     "parse_service_target",
     "peer_id_from_public_key",
-    "provide",
     "refresh_challenge",
     "register_challenge",
     "require_labels",
     "require_role",
     "reserve_relay",
     "service_key",
+    "split_mesh_url",
     "validate_control_plane_url",
     "verify_ed25519",
     "verify_keys_response",

@@ -571,6 +571,19 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 		}
 	}
 
+	// A peer nothing announced an address for is still reachable through the
+	// routers that admitted both of us: an SDK agent publishes no service and
+	// no record, and is named by peer ID alone. Every router relays for the
+	// peers it authenticated, so each is a path worth trying.
+	if len(validAddrs) == 0 {
+		for _, router := range n.authenticatedRouterIDs() {
+			circuitAddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p/%s/p2p-circuit", router.String()))
+			if err == nil && addUnique(circuitAddr) {
+				changed = true
+			}
+		}
+	}
+
 	if changed && len(validAddrs) > 0 {
 		// Clear existing addresses to prevent libp2p from hanging on dead private IPs
 		n.Host.Peerstore().ClearAddrs(targetPeer)

@@ -1,14 +1,17 @@
 # The Python SDK with its example programs, as the testnet canaries run them:
-# `python examples/serve.py <name>` publishes services on the mesh,
-# `python examples/call.py <service> <tool|path> [args]` calls one. fastecdsa,
-# a py-libp2p dependency, builds from source against GMP, so the build stage
-# carries a compiler and the final image only libgmp10.
+# `python examples/agent.py [url]` joins as an agent that accepts A2A
+# requests, `python examples/call.py [peer] <service> <tool|path> [args]`
+# calls a service or an agent, and `examples/a2a_agent.py` and
+# `examples/a2a_call.py` do the same with the official A2A SDK, which the
+# `examples` extra installs. fastecdsa, a py-libp2p dependency, builds from
+# source against GMP, so the build stage carries a compiler and the final
+# image only libgmp10.
 
 # Stage 1: Build
 FROM python:3.12-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libgmp-dev python3-dev && rm -rf /var/lib/apt/lists/*
 COPY sdk/python /src
-RUN python -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir /src
+RUN python -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir '/src[examples]'
 
 # Stage 2: Final
 FROM python:3.12-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e
@@ -20,4 +23,4 @@ COPY --chown=nonroot:nonroot sdk/python/examples ./examples
 USER nonroot:nonroot
 ENV PATH=/opt/venv/bin:$PATH
 ENTRYPOINT ["python"]
-CMD ["examples/serve.py"]
+CMD ["examples/agent.py"]

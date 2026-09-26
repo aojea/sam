@@ -1,9 +1,12 @@
 # The JavaScript SDK with its example programs, as the testnet canaries run
-# them: `node build/examples/serve.js <name>` publishes services on the mesh,
-# `node build/examples/call.js <service> <tool|path> [args]` calls one. The
-# examples import "@sam-mesh/sdk" by name and resolve it through the package's
-# own exports, so the image keeps the package layout: package.json, dist/,
-# build/examples/ and the production node_modules/.
+# them: `node build/examples/agent.js [url]` joins as an agent that accepts
+# A2A requests, `node build/examples/call.js [peer] <service> <tool|path>
+# [args]` calls a service or an agent, and `a2a-agent.js` and `a2a-call.js`
+# do the same with the official A2A SDK. The examples import "@sam-mesh/sdk"
+# by name and resolve it through the package's own exports, so the image
+# keeps the package layout: package.json, dist/, build/examples/ and the
+# production node_modules/ plus the two packages the A2A examples need,
+# which are development dependencies of the SDK, not dependencies.
 
 # Stage 1: Build
 FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS builder
@@ -11,7 +14,8 @@ WORKDIR /src
 COPY sdk/js/package.json sdk/js/package-lock.json sdk/js/.npmrc ./
 RUN npm ci --no-fund --no-audit
 COPY sdk/js/ ./
-RUN npm run build && npm run examples && npm prune --omit=dev --no-fund --no-audit
+RUN npm run build && npm run examples && npm prune --omit=dev --no-fund --no-audit \
+    && npm install --no-save --no-fund --no-audit @a2a-js/sdk express
 
 # Stage 2: Final
 FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c
@@ -23,4 +27,4 @@ COPY --from=builder --chown=node:node /src/node_modules ./node_modules
 USER node
 ENV HOME=/home/node
 ENTRYPOINT ["node"]
-CMD ["build/examples/serve.js"]
+CMD ["build/examples/agent.js"]

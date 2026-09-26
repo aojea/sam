@@ -24,6 +24,7 @@ import (
 
 	"github.com/google/sam/api"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	"github.com/multiformats/go-multiaddr"
@@ -152,6 +153,56 @@ func TestResolveRelayAddresses(t *testing.T) {
 
 	if !foundDirect {
 		t.Errorf("Expected generic circuit address %s not found in peerstore. Got: %v", expectedDirectAddrStr, addrs)
+	}
+}
+
+// A peer named by ID alone, with no address anywhere (an SDK agent publishes
+// no record), is given a circuit through every router that admitted this
+// node, and through nothing else.
+func TestPreparePeerAddrsFallsBackToAuthenticatedRouters(t *testing.T) {
+	ctx := context.Background()
+	mn := mocknet.New()
+	localHost, err := mn.GenPeer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kdht, err := dht.New(localHost, dht.Mode(dht.ModeClient))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = kdht.Close() }()
+	admitted, err := mn.GenPeer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale, err := mn.GenPeer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = mn.LinkAll()
+	if _, err := mn.ConnectPeers(localHost.ID(), admitted.ID()); err != nil {
+		t.Fatal(err)
+	}
+	unknown, err := mn.GenPeer()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	node := &SamNode{
+		Host:                 localHost,
+		DHT:                  kdht,
+		BiscuitTimeout:       500 * time.Millisecond,
+		authenticatedRouters: map[peer.ID]bool{admitted.ID(): true, stale.ID(): true},
+	}
+	node.preparePeerAddrs(ctx, unknown.ID())
+
+	var got []string
+	for _, a := range localHost.Peerstore().Addrs(unknown.ID()) {
+		got = append(got, a.String())
+	}
+	want := []string{fmt.Sprintf("/p2p/%s/p2p-circuit", admitted.ID())}
+	if len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("addresses for an unknown peer: got %v, want only a circuit through the connected router %v", got, want)
 	}
 }
 

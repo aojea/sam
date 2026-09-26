@@ -806,9 +806,10 @@ jobs:
             exit 1
           }
 
-      # Two members with no sam-node: the SDK example servers, each
-      # publishing an MCP tool and an A2A endpoint. What the probes below
-      # reach from a node and from the other SDK.
+      # Two long-lived pairs with no sam-node: an agent written with one SDK
+      # and the official A2A SDK, and a caller written with the other that
+      # sends it a message with the A2A SDK's client every few minutes, by
+      # peer ID. The caller's readiness is the last call's outcome.
       - name: Deploy SDK Canaries
         env:
           VAR_ENV_NAME: ${{ vars.ENV_NAME }}
@@ -819,18 +820,23 @@ jobs:
           export NAMESPACE="sam-${ENV_NAME}"
           export IMAGE_TAG="${VAR_IMAGE_TAG}"
 
+          # The SDK canaries that published services, replaced by these.
+          kubectl delete deployment js-canary-${ENV_NAME} python-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --ignore-not-found
           envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/sam-sdk-canary-template.yaml | kubectl apply -f -
           for lang in js python; do
-            kubectl rollout status deployment/${lang}-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=180s || {
-              echo "${lang} SDK canary deployment failed!"
-              kubectl describe deployment/${lang}-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} || true
-              kubectl get pods -n ${CANARY_NAMESPACE} -l app=${lang}-canary-${ENV_NAME} -o wide || true
-              kubectl describe pods -n ${CANARY_NAMESPACE} -l app=${lang}-canary-${ENV_NAME} || true
-              kubectl logs -n ${CANARY_NAMESPACE} -l app=${lang}-canary-${ENV_NAME} --tail=-1 || true
+            kubectl rollout status deployment/${lang}-agent-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=180s || {
+              echo "${lang} agent canary deployment failed: the other SDK's caller could not reach the agent."
+              kubectl describe deployment/${lang}-agent-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} || true
+              kubectl get pods -n ${CANARY_NAMESPACE} -l app=${lang}-agent-canary-${ENV_NAME} -o wide || true
+              kubectl describe pods -n ${CANARY_NAMESPACE} -l app=${lang}-agent-canary-${ENV_NAME} || true
+              for c in agent caller; do
+                echo "==== ${c} log ===="
+                kubectl logs -n ${CANARY_NAMESPACE} -l app=${lang}-agent-canary-${ENV_NAME} -c ${c} --tail=-1 || true
+              done
 
-              echo "Rolling back ${lang} SDK canary deployment..."
-              kubectl rollout undo deployment/${lang}-canary-${ENV_NAME} -n ${CANARY_NAMESPACE}
-              kubectl rollout status deployment/${lang}-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} || true
+              echo "Rolling back ${lang} agent canary deployment..."
+              kubectl rollout undo deployment/${lang}-agent-canary-${ENV_NAME} -n ${CANARY_NAMESPACE}
+              kubectl rollout status deployment/${lang}-agent-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} || true
               exit 1
             }
           done
@@ -888,11 +894,11 @@ jobs:
             exit 1
           }
 
-      # A fresh node enrolls, reaches a router and calls the everything
-      # canary's MCP server through the mesh: what a new user does. The
-      # CronJob keeps doing it every 15 minutes; running it once here, after
-      # every canary is up, makes the rollout prove it before the deploy is
-      # called good.
+      # A fresh node enrolls, reaches a router, calls the everything
+      # canary's MCP server through the mesh and reaches an agent written
+      # with each SDK by peer ID: what a new user does. The CronJob keeps
+      # doing it every 15 minutes; running it once here, after every canary
+      # is up, makes the rollout prove it before the deploy is called good.
       - name: Deploy and run the cold-path probe
         env:
           VAR_ENV_NAME: ${{ vars.ENV_NAME }}
@@ -926,19 +932,23 @@ jobs:
           case "${status:-}" in
             *Complete=True*) echo "Cold-path probe passed." ;;
             *)
-              echo "Cold-path probe did not pass: a fresh node could not enroll, reach a router, or call a mesh service."
-              echo "==== sam-node sidecar log ===="
-              kubectl logs "job/${JOB}" -n "${CANARY_NAMESPACE}" -c sam-node --tail=200 || true
+              echo "Cold-path probe did not pass: a fresh node could not enroll, reach a router, call a mesh service, or reach an SDK agent."
+              for c in sam-node js-agent python-agent; do
+                echo "==== ${c} sidecar log ===="
+                kubectl logs "job/${JOB}" -n "${CANARY_NAMESPACE}" -c "${c}" --tail=200 || true
+              done
               kubectl describe job "${JOB}" -n "${CANARY_NAMESPACE}" || true
               exit 1
               ;;
           esac
 
-      # The same cold path through each SDK: a fresh identity enrolls with
-      # the JavaScript and the Python SDK, reaches the everything canary's
-      # MCP server (a sam-node) and the other SDK's canary, MCP and A2A. With
-      # the node probe above, every pair of implementations is crossed in
-      # both directions on every rollout and every 15 minutes after.
+      # The same cold path through each SDK: an agent written with the A2A
+      # SDK and a caller enroll with the JavaScript and the Python SDK; each
+      # caller reaches the everything canary's MCP server (a sam-node) by
+      # name and the other SDK's agent by peer ID, its card with the mesh
+      # SDK's client and a message with the A2A SDK's. With the node probe
+      # above, every pair of implementations is crossed in both directions
+      # on every rollout and every 15 minutes after.
       - name: Deploy and run the SDK cold-path probe
         env:
           VAR_ENV_NAME: ${{ vars.ENV_NAME }}
@@ -972,7 +982,11 @@ jobs:
           case "${status:-}" in
             *Complete=True*) echo "SDK cold-path probe passed." ;;
             *)
-              echo "SDK cold-path probe did not pass: an SDK could not enroll, reach a router, or call a service a node or the other SDK serves."
+              echo "SDK cold-path probe did not pass: an SDK could not enroll, reach a router, call a service a node serves, or reach the other SDK's agent."
+              for lang in js python; do
+                echo "==== ${lang} agent sidecar log ===="
+                kubectl logs "job/${JOB}" -n "${CANARY_NAMESPACE}" -c "${lang}-agent" --tail=200 || true
+              done
               kubectl describe job "${JOB}" -n "${CANARY_NAMESPACE}" || true
               exit 1
               ;;

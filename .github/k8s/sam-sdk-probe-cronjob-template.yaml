@@ -1,12 +1,16 @@
-# The cold path through the SDKs, on a schedule: a fresh identity enrolls with
-# the control plane through each SDK, joins through a router, and calls out
-# across every implementation boundary a user can cross: an MCP service a
-# sam-node serves (the everything canary), and an MCP tool and an A2A endpoint
-# the other language's SDK serves (the sdk canaries). The programs are the
+# The cold path through the SDKs, on a schedule. Four fresh identities enroll
+# with the control plane, two per SDK: an agent written with the official A2A
+# SDK, which joins through a router and accepts A2A requests for a2a://agent,
+# and a caller, which reaches an MCP service a sam-node serves (the everything
+# canary) by name and the other language's agent by peer ID, first with the
+# mesh SDK's own client for the agent card, then with the A2A SDK's client for
+# a message. An agent publishes nothing; the caller learns its peer ID from the
+# line the agent prints, through a volume the pod shares. The programs are the
 # examples the READMEs embed, unchanged; the shell around them only retries
-# discovery, which a member that joined seconds ago can miss, and prints one
-# verdict line. Each run enrolls a fresh identity per language; the control
-# plane's --node-retention sweep reclaims the rows.
+# discovery, which a member that joined seconds ago can miss, waits for the
+# agent, and prints one verdict line. The agents are native sidecars, stopped
+# when both callers exit, so the Job completes. The control plane's
+# --node-retention sweep reclaims the rows.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -20,19 +24,87 @@ spec:
   jobTemplate:
     spec:
       # One attempt: a retry would hide exactly the flakiness this exists to
-      # measure. A failed Job is the signal; both containers must succeed.
+      # measure. A failed Job is the signal; both callers must succeed.
       backoffLimit: 0
-      # Three calls with up to 120s of discovery each, plus enrollment.
-      activeDeadlineSeconds: 480
+      # Three calls with up to 120s each, plus enrollment.
+      activeDeadlineSeconds: 540
       template:
         metadata:
           labels:
             app: sam-sdk-probe-${ENV_NAME}
         spec:
           # Bound to the sam-canary role by deploy.yaml's policy seed, which
-          # is what lets the probe call the canaries' services.
+          # is what lets the callers reach the canaries and the agents.
           serviceAccountName: sam-node-sa
           restartPolicy: Never
+          # The agent sidecars run under a shell that pipes to tee; the shell
+          # gets the SIGTERM, the agent the SIGKILL that follows.
+          terminationGracePeriodSeconds: 10
+          # The agents' stdout goes both to the container log and to the
+          # shared volume, where the callers read the peer ID from it.
+          initContainers:
+          - name: js-agent
+            restartPolicy: Always
+            image: ghcr.io/google/sam-sdk-js:${IMAGE_TAG}
+            command: ["/bin/sh", "-c", "node build/examples/a2a-agent.js 2>&1 | tee /var/run/sam/js-agent.log"]
+            env:
+            - name: SAM_CONTROL_PLANE_URL
+              value: "http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
+            - name: SAM_INSECURE_CONTROL_PLANE
+              value: "true"
+            - name: SAM_JWT_PATH
+              value: /var/run/secrets/tokens/sam-token
+            - name: SAM_STATE_DIR
+              value: /var/run/sam/js-agent
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+            volumeMounts:
+            - name: sam-token
+              mountPath: /var/run/secrets/tokens
+              readOnly: true
+            - name: sam-state
+              mountPath: /var/run/sam
+          - name: python-agent
+            restartPolicy: Always
+            image: ghcr.io/google/sam-sdk-python:${IMAGE_TAG}
+            command: ["/bin/sh", "-c", "python examples/a2a_agent.py 2>&1 | tee /var/run/sam/python-agent.log"]
+            env:
+            - name: SAM_CONTROL_PLANE_URL
+              value: "http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
+            - name: SAM_INSECURE_CONTROL_PLANE
+              value: "true"
+            - name: SAM_JWT_PATH
+              value: /var/run/secrets/tokens/sam-token
+            - name: SAM_STATE_DIR
+              value: /var/run/sam/python-agent
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+            volumeMounts:
+            - name: sam-token
+              mountPath: /var/run/secrets/tokens
+              readOnly: true
+            - name: sam-state
+              mountPath: /var/run/sam
           containers:
           - name: js
             image: ghcr.io/google/sam-sdk-js:${IMAGE_TAG}
@@ -49,9 +121,11 @@ spec:
               value: sam-sdk-js
             - name: CALL
               value: "node build/examples/call.js"
-            - name: PEER_SERVICE
-              # The other SDK's canary (sam-sdk-canary-template.yaml).
-              value: greeter-py
+            - name: A2A_CALL
+              value: "node build/examples/a2a-call.js"
+            - name: AGENT_LOG
+              # Where the other SDK's agent prints its peer ID.
+              value: /var/run/sam/python-agent.log
             securityContext:
               allowPrivilegeEscalation: false
               capabilities:
@@ -90,8 +164,10 @@ spec:
               value: sam-sdk-python
             - name: CALL
               value: "python examples/call.py"
-            - name: PEER_SERVICE
-              value: greeter-js
+            - name: A2A_CALL
+              value: "python examples/a2a_call.py"
+            - name: AGENT_LOG
+              value: /var/run/sam/js-agent.log
             securityContext:
               allowPrivilegeEscalation: false
               capabilities:
@@ -135,12 +211,15 @@ metadata:
 data:
   probe.sh: |
     #!/bin/sh
-    # Runs the SDK's call example against three services and prints one JSON
-    # verdict line. PROBE names the run, CALL is the example's command line,
-    # PEER_SERVICE is the other SDK's canary. Discovery is retried: a member
-    # that joined seconds ago has a thin routing table, and a provider record
-    # can name a pod a rollout just replaced. The first call enrolls with the
-    # projected token; the later ones resume from SAM_STATE_DIR.
+    # Runs the SDK's call examples against a sam-node's MCP service and the
+    # other SDK's agent, and prints one JSON verdict line. PROBE names the
+    # run, CALL and A2A_CALL are the examples' command lines, AGENT_LOG is
+    # where the other SDK's agent prints "accepting a2a://agent as <peer>".
+    # Discovery is
+    # retried: a member that joined seconds ago has a thin routing table, and
+    # a provider record can name a pod a rollout just replaced. The first
+    # call enrolls with the projected token; the later ones resume from
+    # SAM_STATE_DIR.
     set -u
     START=$(date +%s)
 
@@ -150,14 +229,14 @@ data:
       exit 1
     }
 
-    # call <stage> <expected substring> <example arguments...>; sets PROVIDER.
+    # call <program> <stage> <expected substring> <arguments...>; sets PROVIDER.
     call() {
-      stage=$1; want=$2; shift 2
+      program=$1; stage=$2; want=$3; shift 3
       stage_start=$(date +%s)
       attempts=0
       while :; do
         attempts=$((attempts + 1))
-        out=$($CALL "$@" 2>&1); rc=$?
+        out=$($program "$@" 2>&1); rc=$?
         if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "$want"; then
           PROVIDER=$(printf '%s' "$out" | grep -o 'is served by [^ ]*' | tail -1 | cut -d' ' -f4)
           return 0
@@ -167,17 +246,34 @@ data:
       done
     }
 
+    # wait_for_agent <log>: sets AGENT_PEER from the agent's accepting line.
+    wait_for_agent() {
+      wait_start=$(date +%s)
+      while :; do
+        AGENT_PEER=$(grep -o 'accepting a2a://agent as [^ ]*' "$1" 2>/dev/null | tail -1 | cut -d' ' -f4)
+        [ -n "$AGENT_PEER" ] && return 0
+        [ $(( $(date +%s) - wait_start )) -ge 120 ] && fail agent "no agent announced itself in $1 within 120s"
+        sleep 2
+      done
+    }
+
     # 1. Enroll, join and call an MCP service a sam-node serves.
-    call node-mcp 'Echo: sam-sdk-probe' mcp://everything echo '{"message": "sam-sdk-probe"}'
+    call "$CALL" node-mcp 'Echo: sam-sdk-probe' mcp://everything echo '{"message": "sam-sdk-probe"}'
     NODE_PEER=$PROVIDER
     NODE_S=$(( $(date +%s) - START ))
 
-    # 2. The other SDK's MCP tool, then its A2A endpoint over /libp2p-http.
-    SDK_START=$(date +%s)
-    call sdk-mcp 'hello sam-sdk-probe' "mcp://${PEER_SERVICE}" greet '{"name": "sam-sdk-probe"}'
-    SDK_PEER=$PROVIDER
-    call sdk-a2a '"caller"' "a2a://${PEER_SERVICE}" /card
-    SDK_S=$(( $(date +%s) - SDK_START ))
+    # 2. The other SDK's agent, by peer ID, over /libp2p-http through the
+    #    router: its agent card, with the mesh SDK's own client.
+    wait_for_agent "$AGENT_LOG"
+    A2A_START=$(date +%s)
+    call "$CALL" sdk-card 'Echo agent' "$AGENT_PEER" a2a://agent /.well-known/agent-card.json
+    CARD_S=$(( $(date +%s) - A2A_START ))
 
-    printf '{"probe":"%s","ok":true,"node_s":%d,"node_provider":"%s","sdk_s":%d,"sdk_provider":"%s","elapsed_s":%d}\n' \
-      "$PROBE" "$NODE_S" "$NODE_PEER" "$SDK_S" "$SDK_PEER" "$(( $(date +%s) - START ))"
+    # 3. A message to the same agent with the A2A SDK's client: the answer
+    #    names the caller the agent's server saw as the verified peer.
+    MESSAGE_START=$(date +%s)
+    call "$A2A_CALL" sdk-message "said: hello from ${PROBE}" "$AGENT_PEER" "hello from ${PROBE}"
+    MESSAGE_S=$(( $(date +%s) - MESSAGE_START ))
+
+    printf '{"probe":"%s","ok":true,"node_s":%d,"node_provider":"%s","card_s":%d,"message_s":%d,"agent_peer":"%s","elapsed_s":%d}\n' \
+      "$PROBE" "$NODE_S" "$NODE_PEER" "$CARD_S" "$MESSAGE_S" "$AGENT_PEER" "$(( $(date +%s) - START ))"

@@ -761,6 +761,20 @@ func (n *SamNode) isAuthenticatedAndConnected(router peer.ID) bool {
 	return authed && n.Host.Network().Connectedness(router) == network.Connected
 }
 
+// authenticatedRouterIDs lists the routers this node passed the handshake
+// with and is still connected to: the relays that will open a circuit for it.
+func (n *SamNode) authenticatedRouterIDs() []peer.ID {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	ids := make([]peer.ID, 0, len(n.authenticatedRouters))
+	for pid := range n.authenticatedRouters {
+		if n.Host.Network().Connectedness(pid) == network.Connected {
+			ids = append(ids, pid)
+		}
+	}
+	return ids
+}
+
 func (n *SamNode) LoadMeshConfig() ([]byte, []string, error) {
 	return n.Store.LoadMeshConfig()
 }

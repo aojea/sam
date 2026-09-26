@@ -16,14 +16,14 @@
 record in the mesh DHT under a key derived from the service. The lookup is a
 bounded Kademlia GET_PROVIDERS walk spoken directly on go-libp2p-kad-dht's
 protocol: py-libp2p 0.7's DHT client hardcodes the /ipfs prefix and the mesh
-uses /sam."""
+uses /sam. An SDK member only looks records up; it announces none."""
 
 from __future__ import annotations
 
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from typing import Iterable, Literal, Sequence
+from typing import Iterable, Literal
 
 import multiaddr
 import trio
@@ -143,56 +143,3 @@ async def find_providers(host: IHost, key: bytes, seeds: Iterable[ID], limit: in
         if found:
             break
     return list(found.values())
-
-
-async def _add_provider(host: IHost, peer_id: ID, key: bytes, addrs: Sequence[multiaddr.Multiaddr]) -> bool:
-    """Sends one ADD_PROVIDER for key naming ourselves. go-libp2p-kad-dht
-    stores the record only when the sender is the provider and lists at
-    least one address, and answers nothing."""
-    try:
-        stream = await open_stream(host, peer_id, DHT_PROTOCOL, _QUERY_TIMEOUT)
-    except Exception as err:  # noqa: BLE001 - a peer that does not serve the DHT is skipped
-        logger.debug("dht: %s does not answer %s: %s", peer_id, DHT_PROTOCOL, err)
-        return False
-    try:
-        with trio.fail_after(_QUERY_TIMEOUT):
-            msg = kad.Message(type=kad.Message.ADD_PROVIDER, key=key)
-            provider = msg.providerPeers.add()
-            provider.id = host.get_id().to_bytes()
-            provider.addrs.extend(ma.to_bytes() for ma in addrs)
-            await stream.write(encode_varint_prefixed(msg.SerializeToString()))
-    except Exception as err:  # noqa: BLE001
-        logger.debug("dht: add_provider to %s failed: %s", peer_id, err)
-        return False
-    finally:
-        await stream.close()
-    return True
-
-
-async def provide(host: IHost, key: bytes, seeds: Iterable[ID], addrs: Sequence[multiaddr.Multiaddr]) -> int:
-    """Announces this host as a provider of key, as sam-node's DHT provide:
-    the record goes to the seed peers (the routers, which serve the DHT) and
-    to the closer peers they name for the key. Returns how many accepted a
-    stream; the DHT does not acknowledge the record itself."""
-    self_id = host.get_id()
-    targets: list[ID] = [p for p in seeds if p != self_id]
-    for seed in list(targets):
-        resp = await _get_providers(host, seed, key)
-        if resp is None:
-            continue
-        for info in _peer_infos(resp.closerPeers):
-            if info.peer_id == self_id or info.peer_id in targets:
-                continue
-            if info.peer_id not in host.get_connected_peers():
-                try:
-                    await host.connect(info)
-                except Exception:  # noqa: BLE001 - unreachable closer peers are skipped
-                    continue
-            targets.append(info.peer_id)
-            if len(targets) >= _MAX_PEERS_PER_ROUND:
-                break
-    sent = 0
-    for peer_id in targets[:_MAX_PEERS_PER_ROUND]:
-        if await _add_provider(host, peer_id, key, addrs):
-            sent += 1
-    return sent

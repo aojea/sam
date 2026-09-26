@@ -1,9 +1,10 @@
-// Finds a service on the mesh and calls it: a tool of an MCP service, or a
-// path of an inference or A2A service.
+// Calls something on the mesh: a tool of an MCP service or a path of an
+// inference or A2A service someone published, found by name, or an agent that
+// published nothing, reached by its peer ID.
 //
-//   node call.js mcp://greeter greet '{"name": "Ada"}'
-//   node call.js a2a://greeter /card
+//   node call.js mcp://everything echo '{"message": "hi"}'
 //   node call.js inference://ollama /v1/models
+//   node call.js 12D3KooW... a2a://agent /card
 //
 // SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
 // SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or
@@ -13,7 +14,13 @@
 import { homedir } from "node:os";
 import { AgentMesh, type DiscoveredProvider } from "@sam-mesh/sdk";
 
-const [service = "mcp://greeter", toolOrPath = "greet", args = '{"name": "world"}'] = process.argv.slice(2);
+let argv = process.argv.slice(2);
+// A first argument that is not a service target is the peer ID of an agent.
+let peerId: string | undefined;
+if (argv[0] !== undefined && !argv[0].includes("://")) {
+  [peerId, ...argv] = argv as [string, ...string[]];
+}
+const [service = peerId !== undefined ? "a2a://agent" : "mcp://everything", toolOrPath = peerId !== undefined ? "/card" : "echo", args = '{"message": "hi"}'] = argv;
 
 const mesh = await AgentMesh.enroll({
   controlPlaneUrl: process.env.SAM_CONTROL_PLANE_URL ?? "https://mesh.example.com",
@@ -26,23 +33,32 @@ const mesh = await AgentMesh.enroll({
 const session = await mesh.join();
 console.log(`on the mesh as ${session.peerId}`);
 
-const providers = await session.discover(service);
-if (providers.length === 0) {
-  throw new Error(`no member of the mesh serves ${service}`);
-}
-// A provider record can outlive its member; the first that answers is used.
-let provider: DiscoveredProvider | undefined;
-for (const candidate of providers) {
-  try {
-    await session.connect(candidate);
-    provider = candidate;
-    break;
-  } catch (err) {
-    console.error(`${candidate.peerId}: ${(err as Error).message}`);
+// The peer to call: an agent named by ID, or a provider of a published service.
+let provider: DiscoveredProvider = { peerId: peerId ?? "", addrs: [] };
+if (peerId !== undefined) {
+  // An agent is not in the discovery table; the SDK finds the path to its
+  // peer ID through the routers.
+  await session.connect(peerId);
+} else {
+  const providers = await session.discover(service);
+  if (providers.length === 0) {
+    throw new Error(`no member of the mesh serves ${service}`);
   }
-}
-if (provider === undefined) {
-  throw new Error(`no provider of ${service} is reachable`);
+  // A provider record can outlive its member; the first that answers is used.
+  let reached = false;
+  for (const candidate of providers) {
+    try {
+      await session.connect(candidate);
+      provider = candidate;
+      reached = true;
+      break;
+    } catch (err) {
+      console.error(`${candidate.peerId}: ${(err as Error).message}`);
+    }
+  }
+  if (!reached) {
+    throw new Error(`no provider of ${service} is reachable`);
+  }
 }
 console.log(`${service} is served by ${provider.peerId}`);
 

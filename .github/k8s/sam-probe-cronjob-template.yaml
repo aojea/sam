@@ -1,10 +1,10 @@
 # The cold path, on a schedule: a node with no identity enrolls with the
 # control plane, authenticates to a router, finds a service on the mesh and
-# speaks MCP to it through the mesh, then reaches the services the SDK
-# canaries serve, and exits. The long-lived canaries only do this when a pod
+# speaks MCP to it through the mesh, then reaches an agent written with each
+# SDK by peer ID, and exits. The long-lived canaries only do this when a pod
 # restarts, so between rollouts nobody re-checks that a new user could still
-# join. Each run enrolls a fresh identity; the control plane's
-# --node-retention sweep reclaims the rows.
+# join. Each run enrolls fresh identities, the node's and the agents'; the
+# control plane's --node-retention sweep reclaims the rows.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -21,7 +21,7 @@ spec:
       # measure. A failed Job is the signal.
       backoffLimit: 0
       # 180s to be ready, 120s to reach a provider, 120s for the SDK
-      # canaries, with headroom.
+      # agents, with headroom.
       activeDeadlineSeconds: 480
       template:
         metadata:
@@ -32,9 +32,12 @@ spec:
           # is what lets the probe call the canaries' services.
           serviceAccountName: sam-node-sa
           restartPolicy: Never
+          # The agent sidecars run under a shell that pipes to tee; the shell
+          # gets the SIGTERM, the agent the SIGKILL that follows.
+          terminationGracePeriodSeconds: 10
           initContainers:
-          # A native sidecar: it stays up for the probe container's lifetime
-          # and is stopped when that container exits, so the Job completes.
+          # Native sidecars: they stay up for the probe container's lifetime
+          # and are stopped when that container exits, so the Job completes.
           - name: sam-node
             restartPolicy: Always
             image: ghcr.io/google/sam-node:${IMAGE_TAG}
@@ -64,6 +67,73 @@ spec:
               readOnly: true
             - name: sam-uds
               mountPath: /var/run/sam
+          # An agent written with each SDK and the official A2A SDK
+          # (sdk/js/examples/a2a-agent.ts, sdk/python/examples/a2a_agent.py),
+          # the programs the docs embed. Each accepts A2A requests for
+          # a2a://agent and publishes nothing; its stdout goes to the container
+          # log and to the shared volume, where the probe reads its peer ID.
+          - name: js-agent
+            restartPolicy: Always
+            image: ghcr.io/google/sam-sdk-js:${IMAGE_TAG}
+            command: ["/bin/sh", "-c", "node build/examples/a2a-agent.js 2>&1 | tee /var/run/sam-agents/js-agent.log"]
+            env:
+            - name: SAM_CONTROL_PLANE_URL
+              value: "http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
+            - name: SAM_INSECURE_CONTROL_PLANE
+              value: "true"
+            - name: SAM_JWT_PATH
+              value: /var/run/secrets/tokens/sam-token
+            - name: SAM_STATE_DIR
+              value: /var/run/sam-agents/js-agent
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+            volumeMounts:
+            - name: sam-token
+              mountPath: /var/run/secrets/tokens
+              readOnly: true
+            - name: sam-agents
+              mountPath: /var/run/sam-agents
+          - name: python-agent
+            restartPolicy: Always
+            image: ghcr.io/google/sam-sdk-python:${IMAGE_TAG}
+            command: ["/bin/sh", "-c", "python examples/a2a_agent.py 2>&1 | tee /var/run/sam-agents/python-agent.log"]
+            env:
+            - name: SAM_CONTROL_PLANE_URL
+              value: "http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
+            - name: SAM_INSECURE_CONTROL_PLANE
+              value: "true"
+            - name: SAM_JWT_PATH
+              value: /var/run/secrets/tokens/sam-token
+            - name: SAM_STATE_DIR
+              value: /var/run/sam-agents/python-agent
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+            volumeMounts:
+            - name: sam-token
+              mountPath: /var/run/secrets/tokens
+              readOnly: true
+            - name: sam-agents
+              mountPath: /var/run/sam-agents
           containers:
           - name: probe
             image: alpine/curl:8.12.1
@@ -80,10 +150,9 @@ spec:
               # The everything canary's MCP server (sam-node-everything-template.yaml):
               # a real server, so the node advertises it and initialize succeeds.
               value: everything
-            - name: SDK_SERVICES
-              # What the SDK canaries publish (sam-sdk-canary-template.yaml),
-              # each with a `greet` tool and an A2A endpoint.
-              value: "greeter-js greeter-py"
+            - name: SDK_AGENTS
+              # The agent sidecars above, by the log each prints its peer ID to.
+              value: "js python"
             resources:
               requests:
                 cpu: 10m
@@ -94,6 +163,9 @@ spec:
             volumeMounts:
             - name: sam-uds
               mountPath: /var/run/sam
+            - name: sam-agents
+              mountPath: /var/run/sam-agents
+              readOnly: true
             command: ["/bin/sh", "-c"]
             args:
             - |
@@ -163,62 +235,48 @@ spec:
               done
               REACH_S=$(( $(date +%s) - REACH_START ))
 
-              # 4. A service an SDK member serves (sam-sdk-canary-template.yaml)
-              # is reachable from a node the way an agent behind a node
-              # reaches it: its MCP tool through the node's own MCP API
-              # (call_remote_tool opens /sam/mcp/1.0.0 to the provider), and
-              # its A2A endpoint through the egress proxy. The node's MCP
-              # endpoint is stateful, so one session is opened first.
-              MCP=http://localhost/mcp
-              SESSION=""
-              mcp_post() {
-                curl -s --unix-socket "$SOCK" -o "$2" -D /tmp/mcp.hdr -X POST "$MCP" \
-                  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-                  ${SESSION:+-H "Mcp-Session-Id: $SESSION"} -d "$1"
-              }
-              mcp_post '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"sam-probe","version":"0"}}}' /tmp/mcp-init.out \
-                || fail sdk "initialize on the node's MCP API failed"
-              SESSION=$(grep -i '^mcp-session-id:' /tmp/mcp.hdr | tr -d '\r' | cut -d' ' -f2)
-              [ -n "$SESSION" ] || fail sdk "the node's MCP API returned no session"
-              mcp_post '{"jsonrpc":"2.0","method":"notifications/initialized"}' /dev/null
-
+              # 4. An agent written with each SDK, reachable by peer ID alone:
+              # it published nothing, so there is nothing to discover, and the
+              # node finds the path through the router by itself. The probe
+              # reads the peer ID from the line the agent printed, then fetches
+              # its agent card through the egress proxy, the way an A2A client
+              # behind this node would; the node rewrites the card's URL to the
+              # mesh path it serves.
               SDK_START=$(date +%s)
-              SDK_PROVIDERS=""
-              for svc in ${SDK_SERVICES}; do
-                SDK_PEER=""
+              SDK_PEERS=""
+              for lang in ${SDK_AGENTS}; do
+                AGENT_LOG=/var/run/sam-agents/${lang}-agent.log
+                AGENT_PEER=""
+                while [ -z "$AGENT_PEER" ]; do
+                  AGENT_PEER=$(grep -o 'accepting a2a://agent as [^ ]*' "$AGENT_LOG" 2>/dev/null | tail -1 | cut -d' ' -f4)
+                  [ -n "$AGENT_PEER" ] && break
+                  [ $(( $(date +%s) - SDK_START )) -ge 120 ] && fail sdk "the ${lang} agent announced no peer ID in 120s"
+                  sleep 2
+                done
                 LAST_ERR=""
-                while [ -z "$SDK_PEER" ]; do
-                  if curl -sf --unix-socket "$SOCK" -o /tmp/sdk-providers.json \
-                    "http://localhost/sam/service/discover?type=mcp&name=${svc}&timeout=20s"; then
-                    for p in $(grep -oE '"peer_id":"[^"]+"' /tmp/sdk-providers.json | cut -d'"' -f4); do
-                      mcp_post '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"call_remote_tool","arguments":{"peer_id":"'"$p"'","tool_name":"mcp://'"$svc"'/greet","arguments":{"name":"sam-probe"}}}}' /tmp/sdk-call.out
-                      if grep -q 'hello sam-probe' /tmp/sdk-call.out; then
-                        CODE=$(curl -s --unix-socket "$SOCK" -o /tmp/sdk-card.out -w '%{http_code}' "http://localhost/sam/${p}/a2a/${svc}/card")
-                        if [ "$CODE" = "200" ] && grep -q '"caller"' /tmp/sdk-card.out; then
-                          SDK_PEER=$p
-                          break
-                        fi
-                        LAST_ERR="${p}: a2a card HTTP ${CODE} $(head -c 120 /tmp/sdk-card.out | tr -d '"\n')"
-                      else
-                        LAST_ERR="${p}: $(head -c 160 /tmp/sdk-call.out | tr -d '"\n')"
-                      fi
-                    done
+                CALL_START=$(date +%s)
+                while :; do
+                  CODE=$(curl -s --unix-socket "$SOCK" -o /tmp/sdk-card.out -w '%{http_code}' "http://localhost/sam/${AGENT_PEER}/a2a/agent/.well-known/agent-card.json")
+                  if [ "$CODE" = "200" ] && grep -q 'Echo agent' /tmp/sdk-card.out && grep -q "/sam/${AGENT_PEER}/a2a/agent" /tmp/sdk-card.out; then
+                    break
                   fi
-                  [ -n "$SDK_PEER" ] && break
-                  [ $(( $(date +%s) - SDK_START )) -ge 120 ] && fail sdk "no provider of ${svc} answered greet and its card in 120s (last: ${LAST_ERR:-none discovered})"
+                  LAST_ERR="HTTP ${CODE} $(head -c 160 /tmp/sdk-card.out | tr -d '"\n')"
+                  [ $(( $(date +%s) - CALL_START )) -ge 120 ] && fail sdk "the ${lang} agent ${AGENT_PEER} did not answer its card in 120s (last: ${LAST_ERR})"
                   sleep 5
                 done
-                SDK_PROVIDERS="${SDK_PROVIDERS}${SDK_PROVIDERS:+,}\"${svc}\":\"${SDK_PEER}\""
+                SDK_PEERS="${SDK_PEERS}${SDK_PEERS:+,}\"${lang}\":\"${AGENT_PEER}\""
               done
               SDK_S=$(( $(date +%s) - SDK_START ))
 
-              printf '{"probe":"sam-cold-path","ok":true,"ready_s":%d,"router_latency_ms":%s,"connected_peers":%s,"reach_s":%d,"providers_tried":%d,"call_s":%s,"provider":"%s","sdk_s":%d,"sdk_providers":{%s},"elapsed_s":%d}\n' \
-                "$READY_S" "${ROUTER_MS:-null}" "${PEERS:-null}" "$REACH_S" "$TRIED" "$CALL_S" "$PEER" "$SDK_S" "$SDK_PROVIDERS" "$(( $(date +%s) - START ))"
+              printf '{"probe":"sam-cold-path","ok":true,"ready_s":%d,"router_latency_ms":%s,"connected_peers":%s,"reach_s":%d,"providers_tried":%d,"call_s":%s,"provider":"%s","sdk_s":%d,"sdk_agents":{%s},"elapsed_s":%d}\n' \
+                "$READY_S" "${ROUTER_MS:-null}" "${PEERS:-null}" "$REACH_S" "$TRIED" "$CALL_S" "$PEER" "$SDK_S" "$SDK_PEERS" "$(( $(date +%s) - START ))"
           volumes:
           - name: config-volume
             configMap:
               name: sam-probe-config-${ENV_NAME}
           - name: sam-uds
+            emptyDir: {}
+          - name: sam-agents
             emptyDir: {}
           - name: sam-token
             projected:

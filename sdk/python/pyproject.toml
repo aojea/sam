@@ -28,6 +28,12 @@ dependencies = [
 test = [
     "pytest>=8",
 ]
+# What examples/a2a_agent.py and examples/a2a_call.py need: the official A2A
+# SDK and a server to run its app on. Not a dependency of the package.
+examples = [
+    "a2a-sdk[http-server]>=1.1",
+    "uvicorn>=0.30",
+]
 
 [project.urls]
 Homepage = "https://github.com/google/sam"
