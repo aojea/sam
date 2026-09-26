@@ -31,6 +31,7 @@ import { ROLE_NODE } from "./controlplane.ts";
 import {
   HTTP_PROTOCOL,
   a2aEndpoint,
+  admitIngress,
   fetchOverStream,
   httpIngressHandler,
   httpRequestOverStream,
@@ -316,6 +317,19 @@ test("the ingress rejects a request without a biscuit and a dotted path", async 
   });
   socket.destroy();
   assert.equal(status, 400);
+});
+
+test("a dot segment is refused however it is spelled", async () => {
+  const endpoint = a2aEndpoint({ handler: () => new Response() });
+  // Nothing in options is consulted before the path check.
+  const options = providerOptions(new Uint8Array());
+  for (const target of ["/a2a/agent/../x", "/a2a/agent/./x", "/a2a/agent/%2e%2e/x", "/a2a/agent/%2E%2E/x", "/a2a/agent/.%2e/x", "/a2a/agent/%2e/x", "/a2a/%2e%2e/other/x?q=1"]) {
+    assert.deepEqual(await admitIngress({ target, headers: new Headers(), remotePeer: "peer" }, endpoint, options), { status: 400, text: "Invalid path" }, target);
+  }
+  // Not dot segments: the request reaches the next check, the missing biscuit.
+  for (const target of ["/a2a/agent/%2e%2ex/x", "/a2a/agent/..x/x", "/a2a/agent/x?p=../y"]) {
+    assert.deepEqual(await admitIngress({ target, headers: new Headers(), remotePeer: "peer" }, endpoint, options), { status: 401, text: "Missing X-Sam-Biscuit header" }, target);
+  }
 });
 
 test("mesh URLs name a peer and a service", () => {

@@ -211,6 +211,9 @@ def test_the_agent_is_reachable_by_authorized_callers(backend_url):
                 assert (await http_request_over_stream(caller, pid, caller_biscuit, "a2a://other", "/card")).status == 404
                 assert (await http_request_over_stream(caller, pid, b"", "a2a://agent", "/card")).status == 401
                 assert (await http_request_over_stream(caller, pid, caller_biscuit, "a2a://agent", "/../other/x")).status == 400
+                # A URL parser reads %2e as a dot too; the spelling does not get past the check.
+                assert (await http_request_over_stream(caller, pid, caller_biscuit, "a2a://agent", "/%2e%2e/other/x")).status == 400
+                assert (await http_request_over_stream(caller, pid, caller_biscuit, "a2a://agent", "/.%2E/other/x")).status == 400
             nursery.cancel_scope.cancel()
 
     async def with_timeout():
