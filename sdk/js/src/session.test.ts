@@ -156,6 +156,39 @@ test("join authenticates with the router, reserves a relay slot and answers peer
   }
 });
 
+test("a router handed out as /dnsaddr still relays to peers", async () => {
+  // The testnets advertise their routers as /dnsaddr/<host>/p2p/<id>, one
+  // TXT lookup away from the addresses. A stub resolver answers with the
+  // real router's addresses, as the records would.
+  const dnsaddr = `/dnsaddr/router.test/p2p/${router.peerId.toString()}`;
+  const dns = {
+    query: async (domain: string) => {
+      assert.equal(domain, "_dnsaddr.router.test");
+      return { Answer: router.getMultiaddrs().map((ma) => ({ name: domain, type: 16, TTL: 60, data: `dnsaddr=${ma.toString()}` })) };
+    },
+  } as unknown as NonNullable<Parameters<typeof createLibp2p>[0]>["dns"];
+
+  const agent = await AgentMesh.enroll({ controlPlaneUrl: "http://127.0.0.1:1", bootstrapToken: "sbt", fetch: fakeControlPlane([routerAddr]) });
+  const agentSession = await agent.join({ refreshLeadMs: 0 });
+  const caller = await AgentMesh.enroll({ controlPlaneUrl: "http://127.0.0.1:1", bootstrapToken: "sbt", fetch: fakeControlPlane([dnsaddr]) });
+  const callerSession = await caller.join({ refreshLeadMs: 0, dns });
+  try {
+    // The router is known by the address the connection was made on: the
+    // relay address for a peer is dialable as it stands.
+    const routerAddrs = callerSession.routers.map((r) => r.addr.toString());
+    assert.deepEqual(routerAddrs, [routerAddr]);
+    assert.ok(callerSession.relayAddresses.some((ma) => ma.toString().startsWith(routerAddr)), `reserved on ${callerSession.relayAddresses.map(String).join(",")}`);
+    const targets = callerSession.dialTargets(agent.peerId).addrs.map(String);
+    assert.deepEqual(targets, [`${routerAddr}/p2p-circuit/p2p/${agent.peerId}`]);
+
+    const verified = await callerSession.authenticate(agent.peerId);
+    assert.equal(verified.peerId, agent.peerId);
+  } finally {
+    await callerSession.close();
+    await agentSession.close();
+  }
+});
+
 test("join fails closed when the router is not a router", async () => {
   // A relay whose credential lacks the router role must not admit us to the mesh.
   const impostor = await createLibp2p({

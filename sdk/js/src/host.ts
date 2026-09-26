@@ -28,7 +28,7 @@ import { ping } from "@libp2p/ping";
 import { tcp } from "@libp2p/tcp";
 import { tls } from "@libp2p/tls";
 import type { Multiaddr } from "@multiformats/multiaddr";
-import { createLibp2p } from "libp2p";
+import { createLibp2p, type Libp2pOptions } from "libp2p";
 import { DHT_PROTOCOL } from "./discovery.ts";
 import type { Identity } from "./identity.ts";
 
@@ -44,6 +44,8 @@ export interface MeshHostOptions {
    * it current from /info and the gossip events.
    */
   banned?: { has(peerId: string): boolean };
+  /** The resolver for `/dnsaddr` and `/dns*` addresses; the system's by default. */
+  dns?: Libp2pOptions["dns"];
 }
 
 /** The services a mesh host runs; `services.pubsub` carries the control plane's events. */
@@ -55,6 +57,7 @@ export async function createMeshHost(identity: Identity, options: MeshHostOption
   return createLibp2p({
     privateKey: privateKeyFromProtobuf(identity.toLibp2pPrivateKey()),
     addresses: { listen: options.listenAddrs ?? [] },
+    ...(options.dns !== undefined ? { dns: options.dns } : {}),
     transports: [tcp(), circuitRelayTransport()],
     connectionEncrypters: [tls()],
     streamMuxers: [yamux()],

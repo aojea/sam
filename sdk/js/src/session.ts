@@ -68,6 +68,14 @@ export interface JoinOptions extends MeshHostOptions {
 
 export interface AdmittedRouter {
   peerId: string;
+  /**
+   * The address the connection to the router was made on, resolved: a
+   * `/ip4` or `/ip6` address ending in `/p2p/<router>`. Relay addresses
+   * are built on it. The control plane may hand a router out as
+   * `/dnsaddr/<host>/p2p/<router>`; js-libp2p resolves such an address to
+   * the TXT records themselves and drops what follows it, so a
+   * `/dnsaddr/.../p2p-circuit/p2p/<peer>` address reaches nobody.
+   */
   addr: Multiaddr;
   credential: VerifiedBiscuit;
 }
@@ -557,7 +565,7 @@ export async function joinMesh(mesh: AgentMesh, options: JoinOptions = {}): Prom
         // Enforced under the key that verified the token; a relay that is
         // not a router must not become our way onto the mesh.
         requireRole(credential, ROLE_ROUTER);
-        admitted.push({ peerId: routerPeer, addr, credential });
+        admitted.push({ peerId: routerPeer, addr: connectedAddress(conn, routerPeer), credential });
       } catch (err) {
         failures.push(`${addr.toString()}: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -581,6 +589,11 @@ export async function joinMesh(mesh: AgentMesh, options: JoinOptions = {}): Prom
 function targetPeerOf(ma: Multiaddr): string | undefined {
   const last = ma.getComponents().at(-1);
   return last?.name === "p2p" && last.value !== undefined ? canonicalPeerId(last.value) : undefined;
+}
+
+/** The remote address of a connection, ending in `/p2p/<peerId>`. */
+function connectedAddress(conn: Connection, peerId: string): Multiaddr {
+  return targetPeerOf(conn.remoteAddr) === undefined ? conn.remoteAddr.encapsulate(`/p2p/${peerId}`) : conn.remoteAddr;
 }
 
 /** Canonicalizes a list from the control plane, dropping entries that are not peer IDs. */
