@@ -40,7 +40,7 @@ Milestones 1 to 5 are implemented and tested in both languages:
 | Signed key-set sync (`GET /keys`) | yes | yes |
 | Persisted state (identity and credential, owner-only files) | yes | yes |
 | Biscuit verification of a peer's credential (signature, expiry, peer binding, roles, labels) | yes | yes |
-| libp2p host as `sam-node` configures it (TCP, TLS, yamux) | yes | yes |
+| libp2p host as `sam-node` configures it (TCP and WebSocket, TLS, yamux) | yes | yes |
 | `/sam/auth/1.0.0`, both sides; join = handshake with a router and check its role | yes | yes |
 | Circuit relay v2 reservation on the router; dial and accept through it | yes | yes |
 | Service discovery in the mesh DHT (`/sam/kad/1.0.0`) | yes | yes |
@@ -373,8 +373,12 @@ holds against the control plane's records.
 
 ### Milestone 2 — join the mesh (done)
 
-- libp2p host per SDK, configured as `sam-node`'s: TCP, TLS, yamux,
-  identify, circuit relay v2 client. JS: `libp2p`, `@libp2p/tcp`,
+- libp2p host per SDK, configured as `sam-node`'s: TCP and WebSocket, TLS,
+  yamux, identify, circuit relay v2 client. The testnets' routers listen on
+  TCP; `sam-one`'s router is a WebSocket listener on the port that serves
+  its API (`/ws`, or `/wss` behind a tunnel), so a member reaches it over
+  WebSocket or not at all; `tests/integration/standalone_sdk_test.go` holds
+  both SDKs to it. JS: `libp2p`, `@libp2p/tcp`, `@libp2p/websockets`,
   `@libp2p/tls`, `@chainsafe/libp2p-yamux`, `@libp2p/circuit-relay-v2`,
   `@libp2p/identify`. Python: `libp2p>=0.7` (`security.tls`,
   `stream_muxer.yamux`) plus the SDK's own relay client; py-libp2p is
@@ -586,8 +590,11 @@ same commit as the Go components they talk to.
 - Publishing services from an SDK: an MCP server, a named inference or A2A
   service, a DHT record or a catalog entry. That is `sam-node`'s job; see
   [Agents, not services](#agents-not-services).
-- A browser build. Node.js only until the transport story for browsers
-  (WebTransport or WebRTC to routers) is designed.
+- A browser build. The JS SDK dials routers over WebSocket, which a browser
+  can do, but it still runs on Node.js only: the routers and nodes accept
+  libp2p TLS alone, which a browser cannot speak (it would need Noise on the
+  Go side), and the SDK reads its state and speaks HTTP/1.1 on streams with
+  Node's `fs` and `http`.
 - Any SDK-only wire protocol. If an SDK needs something the Go node does not
   speak, the Go node learns it first.
 
