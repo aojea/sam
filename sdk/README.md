@@ -38,9 +38,9 @@ Milestones 1 to 5 are implemented and tested in both languages:
 | Enrollment with an OIDC token (`POST /register`) | yes | yes |
 | Credential refresh (`POST /refresh`), also in the background while joined | yes | yes |
 | Signed key-set sync (`GET /keys`) | yes | yes |
-| Persisted state (identity and credential, owner-only files) | yes | yes |
+| Persisted state (identity and credential, owner-only files; IndexedDB in a browser) | yes | yes |
 | Biscuit verification of a peer's credential (signature, expiry, peer binding, roles, labels) | yes | yes |
-| libp2p host as `sam-node` configures it (TCP and WebSocket, TLS, yamux) | yes | yes |
+| libp2p host as `sam-node` configures it (TCP and WebSocket, TLS first and Noise, yamux) | yes | yes |
 | `/sam/auth/1.0.0`, both sides; join = handshake with a router and check its role | yes | yes |
 | Circuit relay v2 reservation on the router; dial and accept through it | yes | yes |
 | Service discovery in the mesh DHT (`/sam/kad/1.0.0`) | yes | yes |
@@ -53,6 +53,7 @@ Milestones 1 to 5 are implemented and tested in both languages:
 | Control plane pull on `sam-node`'s interval: `/keys` verified against the trusted set, credential refresh after a rotation, `/info` bans and router addresses | yes | yes |
 | Gossip events from the control plane (`/sam/mesh/events/v1`, StrictSign): ban enforced at once, key rotation adopted, policy update pulls | yes | yes |
 | Banned peers refused: connections dropped and denied, handshakes and requests refused, dials refused | yes | yes |
+| Runs in a browser page: WebSocket and Noise to the router, state in IndexedDB, the agent answered by a fetch handler; `sdk/js/examples/browser` against `sam-one`, tested in Chromium | yes | — |
 | Published to a registry from the release workflow | npm `@sam-mesh/sdk` | PyPI `sam-mesh` |
 
 A member built this way is on the mesh and uses it in both directions: it
@@ -173,6 +174,9 @@ names (`control_plane_url`, `biscuit`, `expire_time` as RFC 3339,
 `trusted_keys[].public_key`, `issued_under_keys`, `router_addresses`,
 `oidc_session`), written with mode `0600` in a directory of mode `0700`.
 An unknown field is an error. `control_plane_url` has no trailing slash.
+In a browser the JS SDK keeps the same two records in an IndexedDB
+database named after the state location, kept by the browser for the
+page's origin.
 `sam-node` keeps the same message in `agent.db`, and `sam-node state
 export|import <dir>` moves a member between the two
 (`internal/node/statedir.go`). `TestNativeSDKExamples` resumes each SDK's
@@ -198,6 +202,11 @@ messages in `api/sam.proto`. Bodies are capped at 1 MiB on both sides.
 
 - `<ts>` is the request's `challenge_unix_ms`, unix milliseconds, and must
   be within 5 minutes of the control plane's clock (`challengeMaxAge`).
+- The endpoints above answer a CORS preflight and mark their responses for
+  any origin (`Access-Control-Allow-Origin: *`), so a page on another origin
+  can call them. They authenticate by what the request carries, a token in
+  the body or a biscuit as a bearer, never by a cookie. The operator plane
+  (`/admin/*`, `/user/*`) and `/routers/lease` do not.
   Challenges are defined in `api/network.go`. It is the one instant on the
   wire that is an `int64`: it is the number in the signed text. Every other
   instant (`expire_time`, `sign_time`, `event_time`, `announce_time`) is a
@@ -228,8 +237,11 @@ messages in `api/sam.proto`. Bodies are capped at 1 MiB on both sides.
 - Transports: `libp2p.DefaultTransports` (TCP, QUIC, WebSocket).
 - Security: TLS first, Noise accepted (`libp2p.Security` twice, in that
   order, on `sam-node` and `sam-router`). Both bind the connection to the
-  peer ID. The Node and Python SDKs speak TLS and land on it; Noise is what
-  a browser can speak. js-libp2p has both; py-libp2p gained TLS in
+  peer ID. The Node and Python SDKs offer the same two in the same order and
+  land on TLS with a Go peer and with each other; in a browser the JS SDK
+  offers Noise alone, since a page cannot run libp2p's TLS, and a Node or
+  Python member reached through a relay meets it on Noise. js-libp2p has
+  both; py-libp2p gained TLS in
   [libp2p/py-libp2p#831](https://github.com/libp2p/py-libp2p/pull/831) and
   has passed the libp2p transport interoperability suite against the other
   implementations since
@@ -269,7 +281,10 @@ bytes), with a 64 KiB cap on the first frame.
   the same authorizer, then forwards `<upstream>` to the service with those
   two headers stripped and `X-Peer-Id` set to the verified caller. The SDKs
   are clients of this for `inference://` and `a2a://` services, and servers
-  of it for their own agent, `a2a://<name>`, only.
+  of it for their own agent, `a2a://<name>`, only. Bodies are framed by
+  `Content-Length` or chunked transfer coding; a response with neither runs
+  to the end of the stream. The JS SDK frames these itself
+  (`http1.ts`), so the same code runs in a browser.
 
 ### Discovery (`internal/node/service.go`)
 
@@ -341,7 +356,10 @@ service, no DHT record, no catalog entry. The reasons:
   protocols times a registry of services.
 - **The browser.** A browser cannot listen. An agent in a browser is
   reachable through a router's relay and nothing else, which is what
-  `accept_a2a` is.
+  `accept_a2a` is. The JS SDK runs in a page: it reaches the router over
+  WebSocket (`wss` when the router sits behind a TLS-terminating edge, as
+  `sam-one --tunnel` puts it), secures the connection with Noise, keeps its
+  state in IndexedDB and answers its agent with a fetch handler.
 
 What an SDK agent is on the wire: a peer with a relay reservation on a
 router, answering `/sam/auth/1.0.0` and `/libp2p-http` for `a2a://<name>`,
@@ -354,7 +372,8 @@ need no special case.
 Two agents that both wrote nothing down still meet: A learns B's peer ID
 (an invite, an agent card, a coordinator), dials it through a router, both
 present their credentials, and A opens the A2A conversation on that
-connection; libp2p's TLS is end to end, so the router carries ciphertext.
+connection; libp2p's secure channel is end to end, so the router carries
+ciphertext.
 An agent that must be *found* by name runs behind a `sam-node`. Two agents
 that both can only call out (two browsers) meet at a third agent behind a
 `sam-node` that both call.
@@ -591,10 +610,6 @@ same commit as the Go components they talk to.
 - Publishing services from an SDK: an MCP server, a named inference or A2A
   service, a DHT record or a catalog entry. That is `sam-node`'s job; see
   [Agents, not services](#agents-not-services).
-- A browser build. The JS SDK dials routers over WebSocket, which a browser
-  can do, and routers and nodes accept Noise, which a browser can speak, but
-  it still runs on Node.js only: it speaks libp2p TLS, and reads its state
-  and speaks HTTP/1.1 on streams with Node's `fs` and `http`.
 - Any SDK-only wire protocol. If an SDK needs something the Go node does not
   speak, the Go node learns it first.
 
@@ -616,6 +631,11 @@ sdk/python/.venv/bin/pytest sdk/python/tests
 # Both against a real control plane, router and sam-node, and the example
 # programs the docs embed against the same
 go test ./tests/integration -run TestNativeSDK -v
+
+# The JS SDK in a browser page against sam-one, in Chromium (Playwright);
+# also run by `make ui-test`
+cd sdk/js && node scripts/bundle-browser.mjs examples/browser/app.js build/browser-example
+cd tests/ui && npm ci && npx playwright install chromium && npx playwright test browser-sdk
 ```
 
 `make sdk-test` runs all of the above. The integration tests skip an SDK
@@ -669,10 +689,13 @@ one follows is named so a change on one side can be carried to the others.
 | `mcp.ts` | `mcp_client.py` | MCP over `/sam/mcp/1.0.0`, the client side of `internal/node/gate.go` |
 | `authorizer.ts` | `authorizer.py` | the provider authorizer, as `internal/node.(*SamNode).Authorize`, over the generated baseline and `datalog_rules` |
 | `libp2p-http.ts` | `libp2p_http.py` | `/libp2p-http` client (streaming) and the A2A ingress for the agent, as go-libp2p-http and `StartIngressServer`; mesh URLs |
+| `http1.ts` | — | HTTP/1.1 heads and bodies on a libp2p stream, for `libp2p-http.ts` (Python uses `h11` in `libp2p_http.py`) |
+| `libp2p-http-node.ts` | — | the ingress for a Node request listener (an Express app), Node's own HTTP server over the stream |
+| `platform/*.ts`, `platform/*.browser.ts` | — | what differs between Node and a browser: transports and security (TCP+WebSocket with TLS then Noise; WebSocket with Noise), state (files; IndexedDB), the biscuit WASM loader, the ingress. `package.json`'s `browser` field maps each to its twin; `scripts/bundle-browser.mjs` bundles for a page and fails if the browser graph reaches a `node:` module |
 | — | `httpx_transport.py` | `MeshTransport`, the mesh as an `httpx.AsyncBaseTransport` (JS has `session.fetch()` instead) |
 | `sync.ts` | `sync.py` | ban set and mesh event verification, as `reconcileBannedPeers` and `verifyEvent` |
 | `conformance.ts`, `conformance-join.ts` | `conformance.py`, `conformance_join.py` | the runners the integration tests drive |
-| `../examples/` | `../../examples/` | the programs the docs embed and `TestNativeSDKExamples` runs |
+| `../examples/` | `../../examples/` | the programs the docs embed and `TestNativeSDKExamples` runs; `../examples/browser/` is the page `tests/ui/browser-sdk.spec.js` drives |
 | `gen/` | `_proto/`, `_gen/` | generated by `hack/gen-sdk-proto.sh` from `api/sam.proto`, `sdk/python/proto/circuit.proto` and `api/datalog.go` |
 
 Unit tests sit beside the code (`*.test.ts`, `tests/test_*.py`) and build a

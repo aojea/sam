@@ -110,6 +110,9 @@ pip install sam-mesh               # Python 3.11 or later
 The Python package is imported as `agent_mesh`. It runs on trio, because
 py-libp2p does; under asyncio, use it through `anyio` with the trio backend.
 
+The JS package also runs in a browser page; see
+[In a browser](#in-a-browser) below.
+
 ## 3. Be an agent
 
 This program joins the mesh and answers A2A requests for `a2a://agent`
@@ -916,6 +919,45 @@ or a pattern) and the members it may reach; see
 - **Reading the policy.** `session.policyRules` (`session.policy_rules`)
   holds the Datalog the session enforces, for logging or tests.
 
+## In a browser
+
+The JS SDK is the same package in a page. `AgentMesh.enroll`, `join`,
+`acceptA2A`, `fetch()` and the rest work as above; what differs is how
+the page reaches the mesh and where it keeps its state:
+
+- The page connects to a router over WebSocket and secures the connection
+  with Noise. Routers and nodes offer TLS first and accept Noise, so a
+  Node, Python or Go member reached through a relay meets the page on
+  Noise, end to end. `sam-one` listens on WebSocket by default; behind
+  `--tunnel` or any TLS-terminating proxy it advertises the router as
+  `wss`, which a page served over `https` needs.
+- The control plane answers the page's requests from any origin. Enrollment
+  and refresh authenticate by the token or biscuit the request carries, so a
+  page on another origin sends nothing a program could not send already.
+- `stateDir` names an IndexedDB database instead of a directory; a reload
+  resumes the saved enrollment without a token. `bootstrapTokenPath` and
+  `jwtPath` are refused, a browser has no files: pass `bootstrapToken` or
+  `jwt`.
+- `acceptA2A` takes a `handler` (a function from `Request` to `Response`) or
+  a `url`; a Node `listener` has no HTTP server to run on in a page.
+
+The example `sdk/js/examples/browser` is the Echo agent above in a page,
+answering with the A2A SDK's `JsonRpcTransportHandler` behind a handler.
+Bundle it with the page's own bundler, or with the script the repository
+uses:
+
+```bash
+cd sdk/js && npm run build
+node scripts/bundle-browser.mjs examples/browser/app.js build/browser-example
+```
+
+and serve `build/browser-example`. The `browser` field of `package.json`
+tells a bundler which files to swap for the browser; `@biscuit-auth/biscuit-wasm`
+imports its `.wasm` as a module, which webpack (`asyncWebAssembly`), Vite
+(`vite-plugin-wasm`) and the script above resolve. `tests/ui/browser-sdk.spec.js`
+runs the page in Chromium against `sam-one`, once directly and once behind
+a TLS-terminating edge, with Node members calling it and being called.
+
 ## What the SDKs do not do
 
 - They do not publish services. An MCP server, a model or an agent that
@@ -925,10 +967,8 @@ or a pattern) and the members it may reach; see
   policy enforcement of `sam-box` runs beside a `sam-node`.
 - They do not serve the discovery table. A member is a client of it; the
   routers hold the records.
-- They do not run in a browser. Node.js and CPython only. The JS SDK
-  dials routers over WebSocket, which a browser can do, and routers and
-  nodes accept Noise, which a browser can speak, but the SDK speaks libp2p
-  TLS and keeps its state and speaks HTTP on streams with Node's own modules.
+- The Python SDK does not run in a browser; the JS SDK does, see
+  [In a browser](#in-a-browser).
 
 The wire contract and the interoperability facts the tests pin are in
 [`sdk/README.md`](https://github.com/google/sam/blob/main/sdk/README.md).

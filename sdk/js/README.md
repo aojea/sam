@@ -1,7 +1,8 @@
 # @sam-mesh/sdk
 
 Native JavaScript SDK for joining a SAM agent mesh from inside the agent
-process. It replaces the `sam-node` sidecar for agents written for Node.js:
+process. It replaces the `sam-node` sidecar for agents written for Node.js
+or running in a browser page:
 the agent enrolls with the control plane, joins the mesh through a router,
 finds services and calls them, answers A2A requests for the agent itself,
 and follows the control plane's keys, bans and policy while it runs. It
@@ -18,7 +19,10 @@ Source: [github.com/google/sam/tree/main/sdk/js](https://github.com/google/sam/t
 npm install @sam-mesh/sdk @modelcontextprotocol/sdk zod
 ```
 
-Requires Node.js 22.18 or later.
+Requires Node.js 22.18 or later. In a browser, bundle it with the page
+(the package's `browser` field selects the browser files); the guide's
+[In a browser](https://sam-mesh.dev/docs/guides/native-sdks/#in-a-browser)
+section has the details and an example page.
 
 ## Use
 
