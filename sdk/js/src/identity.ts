@@ -14,13 +14,17 @@
 
 // A mesh identity is an ed25519 key pair. Its peer ID is the one libp2p
 // derives, so the same key works in the SDK, in sam-node and on the wire.
+// The arithmetic is @noble/curves, the implementation libp2p itself uses,
+// so an identity is built and used the same way in Node and in a browser.
 
-import { createPrivateKey, createPublicKey, sign, verify, type KeyObject } from "node:crypto";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { peerIdFromString } from "@libp2p/peer-id";
 import { encodeBase58 } from "./base58.ts";
+import { bytesEqual, concatBytes as concat } from "./bytes.ts";
 
 const PUBLIC_KEY_SIZE = 32;
 const SEED_SIZE = 32;
+const SIGNATURE_SIZE = 64;
 
 // libp2p crypto.proto PublicKey{Type: Ed25519 (1), Data: <32 bytes>}.
 const LIBP2P_PUBLIC_KEY_PREFIX = Uint8Array.of(0x08, 0x01, 0x12, 0x20);
@@ -29,29 +33,21 @@ const LIBP2P_PRIVATE_KEY_PREFIX = Uint8Array.of(0x08, 0x01, 0x12, 0x40);
 // multihash: identity function (0x00), digest length 36.
 const IDENTITY_MULTIHASH_PREFIX = Uint8Array.of(0x00, 0x24);
 
-// PKCS#8 wrapper for a raw ed25519 seed (RFC 8410): what node:crypto imports.
-const PKCS8_ED25519_PREFIX = Uint8Array.of(
-  0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
-);
-// SubjectPublicKeyInfo wrapper for a raw ed25519 public key (RFC 8410).
-const SPKI_ED25519_PREFIX = Uint8Array.of(0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00);
-
-function concat(...parts: Uint8Array[]): Uint8Array {
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let offset = 0;
-  for (const p of parts) {
-    out.set(p, offset);
-    offset += p.length;
-  }
-  return out;
-}
-
 function startsWith(bytes: Uint8Array, prefix: Uint8Array): boolean {
   return prefix.every((b, i) => bytes[i] === b);
 }
 
-function publicKeyObject(publicKeyRaw: Uint8Array): KeyObject {
-  return createPublicKey({ key: Buffer.from(concat(SPKI_ED25519_PREFIX, publicKeyRaw)), format: "der", type: "spki" });
+// RFC 8032 verification, as Go crypto/ed25519 and node:crypto do it; the
+// looser ZIP 215 rules noble defaults to accept signatures those reject.
+function verifyRaw(publicKeyRaw: Uint8Array, data: Uint8Array, signature: Uint8Array): boolean {
+  if (publicKeyRaw.length !== PUBLIC_KEY_SIZE || signature.length !== SIGNATURE_SIZE) {
+    return false;
+  }
+  try {
+    return ed25519.verify(signature, data, publicKeyRaw, { zip215: false });
+  } catch {
+    return false;
+  }
 }
 
 /** The libp2p protobuf encoding of an ed25519 public key. */
@@ -83,8 +79,6 @@ export function canonicalPeerId(text: string): string {
 }
 
 export class Identity {
-  readonly #privateKey: KeyObject;
-  readonly #publicKey: KeyObject;
   readonly #seed: Uint8Array;
   /** Raw 32-byte ed25519 public key. */
   readonly publicKeyRaw: Uint8Array;
@@ -95,17 +89,7 @@ export class Identity {
       throw new Error(`ed25519 seed must be ${SEED_SIZE} bytes, got ${seed.length}`);
     }
     this.#seed = new Uint8Array(seed);
-    this.#privateKey = createPrivateKey({
-      key: Buffer.from(concat(PKCS8_ED25519_PREFIX, this.#seed)),
-      format: "der",
-      type: "pkcs8",
-    });
-    this.#publicKey = createPublicKey(this.#privateKey);
-    const spki = new Uint8Array(this.#publicKey.export({ format: "der", type: "spki" }));
-    if (spki.length !== SPKI_ED25519_PREFIX.length + PUBLIC_KEY_SIZE || !startsWith(spki, SPKI_ED25519_PREFIX)) {
-      throw new Error("unexpected ed25519 public key encoding");
-    }
-    this.publicKeyRaw = spki.slice(SPKI_ED25519_PREFIX.length);
+    this.publicKeyRaw = ed25519.getPublicKey(this.#seed);
     this.peerId = peerIdFromPublicKey(this.publicKeyRaw);
   }
 
@@ -127,7 +111,7 @@ export class Identity {
     const seed = bytes.subarray(LIBP2P_PRIVATE_KEY_PREFIX.length, LIBP2P_PRIVATE_KEY_PREFIX.length + SEED_SIZE);
     const pub = bytes.subarray(LIBP2P_PRIVATE_KEY_PREFIX.length + SEED_SIZE);
     const id = new Identity(seed);
-    if (!pub.every((b, i) => id.publicKeyRaw[i] === b)) {
+    if (!bytesEqual(pub, id.publicKeyRaw)) {
       throw new Error("libp2p private key: public half does not match the seed");
     }
     return id;
@@ -144,18 +128,15 @@ export class Identity {
   }
 
   sign(data: Uint8Array): Uint8Array {
-    return new Uint8Array(sign(null, data, this.#privateKey));
+    return ed25519.sign(data, this.#seed);
   }
 
   verify(data: Uint8Array, signature: Uint8Array): boolean {
-    return verify(null, data, this.#publicKey, signature);
+    return verifyRaw(this.publicKeyRaw, data, signature);
   }
 }
 
 /** Verifies an ed25519 signature with a raw 32-byte public key. */
 export function verifyEd25519(publicKeyRaw: Uint8Array, data: Uint8Array, signature: Uint8Array): boolean {
-  if (publicKeyRaw.length !== PUBLIC_KEY_SIZE) {
-    return false;
-  }
-  return verify(null, data, publicKeyObject(publicKeyRaw), signature);
+  return verifyRaw(publicKeyRaw, data, signature);
 }
