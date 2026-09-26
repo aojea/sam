@@ -13,11 +13,10 @@
 // limitations under the License.
 
 // The libp2p host a member joins the mesh with, configured the way
-// sam-node's is (internal/node/node.go): TLS for the security protocol,
-// which every peer offers first, yamux the muxer, circuit relay v2 for
-// reachability through the routers. TCP and WebSocket are the transports:
-// the testnets' routers listen on TCP, sam-one's single port is a WebSocket
-// listener.
+// sam-node's is (internal/node/node.go): yamux the muxer, circuit relay v2
+// for reachability through the routers. Transports and the security
+// protocol come from the runtime (platform/transports.ts): on Node TCP and
+// WebSocket with TLS, in a browser WebSocket with Noise.
 
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { circuitRelayTransport } from "@libp2p/circuit-relay-v2";
@@ -27,13 +26,11 @@ import { identify } from "@libp2p/identify";
 import type { Libp2p, PeerId } from "@libp2p/interface";
 import { kadDHT, passthroughMapper } from "@libp2p/kad-dht";
 import { ping } from "@libp2p/ping";
-import { tcp } from "@libp2p/tcp";
-import { tls } from "@libp2p/tls";
-import { webSockets } from "@libp2p/websockets";
 import type { Multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p, type Libp2pOptions } from "libp2p";
 import { DHT_PROTOCOL } from "./discovery.ts";
 import type { Identity } from "./identity.ts";
+import { connectionEncrypters, transports } from "./platform/transports.ts";
 
 export interface MeshHostOptions {
   /**
@@ -62,8 +59,8 @@ export async function createMeshHost(identity: Identity, options: MeshHostOption
     privateKey: privateKeyFromProtobuf(identity.toLibp2pPrivateKey()),
     addresses: { listen: options.listenAddrs ?? [] },
     ...(options.dns !== undefined ? { dns: options.dns } : {}),
-    transports: [tcp(), webSockets(), circuitRelayTransport()],
-    connectionEncrypters: [tls()],
+    transports: [...transports(), circuitRelayTransport()],
+    connectionEncrypters: connectionEncrypters(),
     streamMuxers: [yamux()],
     connectionGater: {
       denyDialPeer: denyBanned,

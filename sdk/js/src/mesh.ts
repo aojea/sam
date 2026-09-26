@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { toHex } from "./bytes.ts";
 import { ControlPlaneClient, ROLE_NODE, type Enrollment } from "./controlplane.ts";
 import { credentialFromJSON, credentialPredatesRotation, credentialTimeToLiveSeconds, credentialToJSON, encodeAuthFrame, type MeshCredential } from "./credential.ts";
 import { Identity } from "./identity.ts";
+import { openState, readTextFile } from "./platform/state.ts";
+import type { StateStore } from "./platform/types.ts";
 import { joinMesh, type JoinOptions, type MeshSession } from "./session.ts";
 
 const IDENTITY_FILE = "identity.key";
@@ -31,8 +31,9 @@ export interface AgentMeshOptions {
   /** Accept plaintext http:// to a non-loopback control plane. Off by default. */
   allowInsecure?: boolean;
   /**
-   * Directory that keeps the identity key and the credential across
-   * restarts. Without it the identity lives only in this process.
+   * Where the identity key and the credential are kept across restarts: a
+   * directory on Node, an IndexedDB database of that name in a browser.
+   * Without it the identity lives only in this process.
    */
   stateDir?: string | undefined;
   /** Use this identity instead of the persisted or a freshly generated one. */
@@ -48,7 +49,7 @@ export interface AgentMeshOptions {
 export interface EnrollOptions extends AgentMeshOptions {
   /** A bootstrap token value, when the caller already holds it in memory. */
   bootstrapToken?: string | undefined;
-  /** Path of a file holding the bootstrap token. Preferred over a value. */
+  /** Path of a file holding the bootstrap token. Preferred over a value on Node; a browser has no files. */
   bootstrapTokenPath?: string | undefined;
   /** An OIDC ID token, for meshes that enroll identities interactively. */
   jwt?: string | undefined;
@@ -87,13 +88,13 @@ export class AgentMesh {
   readonly identity: Identity;
   readonly controlPlane: ControlPlaneClient;
   #credential: MeshCredential;
-  readonly #stateDir: string | undefined;
+  readonly #state: StateStore | undefined;
 
-  private constructor(identity: Identity, controlPlane: ControlPlaneClient, credential: MeshCredential, stateDir: string | undefined) {
+  private constructor(identity: Identity, controlPlane: ControlPlaneClient, credential: MeshCredential, state: StateStore | undefined) {
     this.identity = identity;
     this.controlPlane = controlPlane;
     this.#credential = credential;
-    this.#stateDir = stateDir;
+    this.#state = state;
   }
 
   get peerId(): string {
@@ -115,13 +116,14 @@ export class AgentMesh {
    * the state directory to enroll afresh, for instance with other labels.
    */
   static async enroll(options: EnrollOptions): Promise<AgentMesh> {
-    const saved = await loadIdentity(options.stateDir);
+    const state = options.stateDir !== undefined ? openState(options.stateDir) : undefined;
+    const saved = await loadIdentity(state);
     const identity = options.identity ?? saved ?? Identity.generate();
     const controlPlane = newClient(options);
-    if (options.stateDir !== undefined && saved !== undefined && saved.peerId === identity.peerId) {
-      const credential = await loadCredential(options.stateDir);
+    if (state !== undefined && saved !== undefined && saved.peerId === identity.peerId) {
+      const credential = await loadCredential(state);
       if (credential !== undefined && sameBaseUrl(credential.controlPlaneUrl, controlPlane.url) && credentialTimeToLiveSeconds(credential) > REUSE_MIN_TTL_SECONDS) {
-        return new AgentMesh(identity, controlPlane, credential, options.stateDir);
+        return new AgentMesh(identity, controlPlane, credential, state);
       }
     }
     const given = [options.bootstrapToken, options.bootstrapTokenPath, options.jwt, options.jwtPath].filter((v) => v !== undefined).length;
@@ -133,10 +135,10 @@ export class AgentMesh {
 
     let enrollment: Enrollment;
     if (options.jwt !== undefined || options.jwtPath !== undefined) {
-      const jwt = options.jwtPath !== undefined ? (await readFile(options.jwtPath, "utf8")).trim() : (options.jwt as string);
+      const jwt = options.jwtPath !== undefined ? (await readTextFile(options.jwtPath)).trim() : (options.jwt as string);
       enrollment = await controlPlane.register({ identity, jwt, role, ...labelsOf(options) });
     } else {
-      const bootstrapToken = options.bootstrapTokenPath !== undefined ? (await readFile(options.bootstrapTokenPath, "utf8")).trim() : (options.bootstrapToken as string);
+      const bootstrapToken = options.bootstrapTokenPath !== undefined ? (await readTextFile(options.bootstrapTokenPath)).trim() : (options.bootstrapToken as string);
       enrollment = await controlPlane.enrollBootstrap({
         identity,
         bootstrapToken,
@@ -168,7 +170,7 @@ export class AgentMesh {
         issuedUnderKeys: controlPlaneKeys,
         routerAddresses: enrollment.routerAddresses,
       },
-      options.stateDir,
+      state,
     );
     await mesh.save();
     return mesh;
@@ -180,15 +182,16 @@ export class AgentMesh {
    * plane URL comes from the saved credential.
    */
   static async load(options: Omit<AgentMeshOptions, "controlPlaneUrl"> & { stateDir: string }): Promise<AgentMesh> {
-    const identity = options.identity ?? (await loadIdentity(options.stateDir));
+    const state = openState(options.stateDir);
+    const identity = options.identity ?? (await loadIdentity(state));
     if (!identity) {
       throw new Error(`no identity in ${options.stateDir}; enroll first`);
     }
-    const credential = await loadCredential(options.stateDir);
+    const credential = await loadCredential(state);
     if (credential === undefined) {
       throw new Error(`no credential in ${options.stateDir}; enroll first`);
     }
-    return new AgentMesh(identity, newClient({ ...options, controlPlaneUrl: credential.controlPlaneUrl }), credential, options.stateDir);
+    return new AgentMesh(identity, newClient({ ...options, controlPlaneUrl: credential.controlPlaneUrl }), credential, state);
   }
 
   /**
@@ -286,14 +289,13 @@ export class AgentMesh {
     return joinMesh(this, options);
   }
 
-  /** Writes identity and credential to the state directory, if one is configured. */
+  /** Writes identity and credential to the state store, if one is configured. */
   async save(): Promise<void> {
-    if (this.#stateDir === undefined) {
+    if (this.#state === undefined) {
       return;
     }
-    await mkdir(this.#stateDir, { recursive: true, mode: 0o700 });
-    await writeAtomic(join(this.#stateDir, IDENTITY_FILE), this.identity.toLibp2pPrivateKey(), 0o600);
-    await writeAtomic(join(this.#stateDir, CREDENTIAL_FILE), credentialToJSON(this.#credential), 0o600);
+    await this.#state.write(IDENTITY_FILE, this.identity.toLibp2pPrivateKey());
+    await this.#state.write(CREDENTIAL_FILE, new TextEncoder().encode(credentialToJSON(this.#credential)));
   }
 }
 
@@ -318,29 +320,14 @@ function labelsOf(options: AgentMeshOptions): { labels?: Record<string, string> 
   return options.labels !== undefined ? { labels: options.labels } : {};
 }
 
-async function loadIdentity(stateDir: string | undefined): Promise<Identity | undefined> {
-  if (stateDir === undefined) {
-    return undefined;
-  }
-  try {
-    return Identity.fromLibp2pPrivateKey(new Uint8Array(await readFile(join(stateDir, IDENTITY_FILE))));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return undefined;
-    }
-    throw err;
-  }
+async function loadIdentity(state: StateStore | undefined): Promise<Identity | undefined> {
+  const bytes = await state?.read(IDENTITY_FILE);
+  return bytes === undefined ? undefined : Identity.fromLibp2pPrivateKey(bytes);
 }
 
-async function loadCredential(stateDir: string): Promise<MeshCredential | undefined> {
-  try {
-    return credentialFromJSON(await readFile(join(stateDir, CREDENTIAL_FILE), "utf8"));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return undefined;
-    }
-    throw err;
-  }
+async function loadCredential(state: StateStore): Promise<MeshCredential | undefined> {
+  const bytes = await state.read(CREDENTIAL_FILE);
+  return bytes === undefined ? undefined : credentialFromJSON(new TextDecoder().decode(bytes));
 }
 
 /** The form every implementation persists: scheme, host, port, path, no trailing slash. */
@@ -350,10 +337,4 @@ function baseUrl(url: URL | string): string {
 
 function sameBaseUrl(a: URL | string, b: URL | string): boolean {
   return baseUrl(a) === baseUrl(b);
-}
-
-async function writeAtomic(path: string, data: Uint8Array | string, mode: number): Promise<void> {
-  const tmp = `${path}.tmp`;
-  await writeFile(tmp, data, { mode });
-  await rename(tmp, path);
 }
