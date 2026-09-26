@@ -230,14 +230,14 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	handle := func(pattern string, h http.HandlerFunc) {
 		mux.Handle(pattern, observeRoute(pattern, h))
 	}
-	handle("/info", s.HandleInfo)
-	handle("/register", noStore(s.HandleRegister))
-	handle("/keys", s.HandleKeys)
+	handle("/info", meshSurface(s.HandleInfo))
+	handle("/register", meshSurface(noStore(s.HandleRegister)))
+	handle("/keys", meshSurface(s.HandleKeys))
 	handle("/routers/lease", s.HandleRouterLease)
-	handle("/policies", s.HandlePolicies)
-	handle("/enroll", noStore(s.HandleEnroll))
-	handle("/enroll/status", noStore(s.HandleEnrollStatus))
-	handle("/refresh", noStore(s.HandleRefresh))
+	handle("/policies", meshSurface(s.HandlePolicies))
+	handle("/enroll", meshSurface(noStore(s.HandleEnroll)))
+	handle("/enroll/status", meshSurface(noStore(s.HandleEnrollStatus)))
+	handle("/refresh", meshSurface(noStore(s.HandleRefresh)))
 	handle("/nodes/catalog", s.HandleNodeCatalog)
 	handle("/admin/bootstrap-tokens", noStore(s.HandleAdminBootstrapTokens))
 	handle("/admin/bootstrap-tokens/", noStore(s.HandleAdminBootstrapTokenAction))
@@ -257,6 +257,26 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 func noStore(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
+		h(w, r)
+	}
+}
+
+// meshSurface lets a member running in a browser call an endpoint of the
+// mesh protocol from any origin. These endpoints authenticate by what the
+// request carries, a bootstrap token or an OIDC token in the body or a
+// biscuit as a bearer, never by a cookie, so a page on another origin can
+// send nothing a program could not send already. The operator plane
+// (/admin, /user) is cookie-authenticated and gets no such header.
+func meshSurface(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if r.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", strings.Join([]string{"Authorization", "Content-Type", api.HeaderChallengeTimestamp, api.HeaderChallengeSignature}, ", "))
+			w.Header().Set("Access-Control-Max-Age", "600")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		h(w, r)
 	}
 }
