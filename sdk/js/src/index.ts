@@ -51,13 +51,13 @@ export {
   HTTP_PROTOCOL,
   MESH_PATH_PREFIX,
   a2aEndpoint,
+  admitIngress,
   fetchOverStream,
   httpIngressHandler,
   httpRequestOverStream,
   meshHTTPTarget,
   meshURL,
   splitMeshURL,
-  streamToNodeDuplex,
   type A2AEndpoint,
   type A2AEndpointSpec,
   type HTTPHandler,
@@ -67,5 +67,6 @@ export {
   type NodeRequestListener,
   type ProviderOptions,
 } from "./libp2p-http.ts";
+export { nodeIngressHandler, streamToNodeDuplex } from "./libp2p-http-node.ts";
 export { BASELINE_DATALOG } from "./gen/datalog.ts";
 export { BanSet, EVENT_FRESHNESS_MS, GOSSIP_EVENTS_TOPIC, verifyMeshEvent, type VerifiedMeshEvent } from "./sync.ts";

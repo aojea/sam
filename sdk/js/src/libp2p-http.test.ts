@@ -37,9 +37,9 @@ import {
   meshHTTPTarget,
   meshURL,
   splitMeshURL,
-  streamToNodeDuplex,
   type ProviderOptions,
 } from "./libp2p-http.ts";
+import { nodeIngressHandler, streamToNodeDuplex } from "./libp2p-http-node.ts";
 
 type Wasm = Awaited<ReturnType<typeof loadBiscuit>>;
 
@@ -48,6 +48,7 @@ let cpKeyPair: InstanceType<Wasm["KeyPair"]>;
 let cpKey: Uint8Array;
 let agent: Libp2p;
 let listenerAgent: Libp2p;
+let handlerAgent: Libp2p;
 let caller: Libp2p;
 let callerBiscuit: Uint8Array;
 let guestBiscuit: Uint8Array;
@@ -148,9 +149,35 @@ before(async () => {
   };
   await listenerAgent.handle(
     HTTP_PROTOCOL,
-    httpIngressHandler(a2aEndpoint({ name: "worker", listener }), providerOptions(mint(listenerAgent.peerId.toString(), ROLE_NODE))),
+    nodeIngressHandler(a2aEndpoint({ name: "worker", listener }), providerOptions(mint(listenerAgent.peerId.toString(), ROLE_NODE))),
     { runOnLimitedConnection: true },
   );
+
+  // An agent answering with a fetch handler, the shape a browser member uses:
+  // echoes what it was given and, on /stream, writes three SSE events one at
+  // a time into a streaming body.
+  handlerAgent = await newHost();
+  const handler = async (request: Request): Promise<Response> => {
+    const url = new URL(request.url);
+    if (url.pathname === "/stream") {
+      const encoder = new TextEncoder();
+      let i = 0;
+      const body = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          await new Promise((r) => setTimeout(r, 10));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ event: i })}\n\n`));
+          if (++i === 3) {
+            controller.close();
+          }
+        },
+      });
+      return new Response(body, { headers: { "content-type": "text/event-stream" } });
+    }
+    return Response.json({ path: url.pathname + url.search, method: request.method, peer: request.headers.get("x-peer-id"), biscuit: request.headers.get("x-sam-biscuit"), echo: await request.text() });
+  };
+  await handlerAgent.handle(HTTP_PROTOCOL, httpIngressHandler(a2aEndpoint({ handler }), providerOptions(mint(handlerAgent.peerId.toString(), ROLE_NODE))), {
+    runOnLimitedConnection: true,
+  });
 
   caller = await newHost();
   callerBiscuit = mint(caller.peerId.toString(), ROLE_NODE);
@@ -161,6 +188,7 @@ after(async () => {
   await caller.stop();
   await agent.stop();
   await listenerAgent.stop();
+  await handlerAgent.stop();
   await new Promise<void>((resolve) => backend.close(() => resolve()));
 });
 
@@ -207,6 +235,43 @@ test("a fetch over the stream delivers an SSE body event by event", async () => 
       .filter((l) => l.startsWith("data:")),
     ['data: {"event":0}', 'data: {"event":1}', 'data: {"event":2}'],
   );
+});
+
+test("a fetch handler sees the caller and the path, and its streaming body goes out as it is written", async () => {
+  const conn = await dial(handlerAgent);
+  const res = await httpRequestOverStream(conn, callerBiscuit, "a2a://agent", "/tasks?x=1", { method: "POST", headers: { "x-sam-biscuit": "spoof", "content-type": "text/plain" }, body: "hello" });
+  assert.equal(res.status, 200);
+  assert.deepEqual(JSON.parse(res.text()), { path: "/tasks?x=1", method: "POST", peer: caller.peerId.toString(), biscuit: null, echo: "hello" });
+
+  const response = await fetchOverStream(conn, callerBiscuit, new Request(meshURL(handlerAgent.peerId.toString(), "a2a://agent", "/stream")));
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "text/event-stream");
+  const chunks: string[] = [];
+  const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+  for (let next = await reader.read(); !next.done; next = await reader.read()) {
+    chunks.push(new TextDecoder().decode(next.value));
+  }
+  assert.ok(chunks.length >= 3, `want at least three chunks, got ${JSON.stringify(chunks)}`);
+  assert.deepEqual(chunks.join("").split("\n").filter((l) => l.startsWith("data:")), ['data: {"event":0}', 'data: {"event":1}', 'data: {"event":2}']);
+
+  // Node's own client reads the chunked response the ingress writes.
+  const stream = await conn.newStream(HTTP_PROTOCOL, { runOnLimitedConnection: true });
+  const socket = streamToNodeDuplex(stream, handlerAgent.peerId.toString());
+  const viaNode = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const req = http.request(
+      { method: "GET", path: "/a2a/agent/card", headers: { host: handlerAgent.peerId.toString(), "x-sam-biscuit": Buffer.from(callerBiscuit).toString("base64") }, createConnection: () => socket },
+      (r) => {
+        let body = "";
+        r.on("data", (c: Buffer) => (body += c.toString()));
+        r.on("end", () => resolve({ status: r.statusCode ?? 0, body }));
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+  socket.destroy();
+  assert.equal(viaNode.status, 200);
+  assert.equal(JSON.parse(viaNode.body).path, "/card");
 });
 
 test("a Node request listener sees the path relative to the agent and the verified caller", async () => {
