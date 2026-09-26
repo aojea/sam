@@ -47,7 +47,7 @@ func requireAllFieldsSet(t *testing.T, v any, skip ...string) {
 	}
 
 	val := reflect.ValueOf(v)
-	if val.Kind() == reflect.Ptr {
+	if val.Kind() == reflect.Pointer {
 		val = val.Elem()
 	}
 	for i := 0; i < val.NumField(); i++ {
@@ -73,7 +73,7 @@ func requireFieldsRoundTrip(t *testing.T, want, got any, skip ...string) {
 
 	w := reflect.ValueOf(want)
 	g := reflect.ValueOf(got)
-	if w.Kind() == reflect.Ptr {
+	if w.Kind() == reflect.Pointer {
 		w, g = w.Elem(), g.Elem()
 	}
 	for i := 0; i < w.NumField(); i++ {

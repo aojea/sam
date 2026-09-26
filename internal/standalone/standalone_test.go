@@ -202,4 +202,3 @@ func TestResponseRecorder(t *testing.T) {
 		t.Fatalf("rec.Header(Content-Length) = %q, want 12", got)
 	}
 }
-
