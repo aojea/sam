@@ -3018,6 +3018,79 @@ func TestInitRegisterRoutesEmbedded(t *testing.T) {
 	}
 }
 
+// TestMeshSurfaceCORS pins what a member in a browser needs from the control
+// plane and what it must not get: the mesh protocol's endpoints answer a
+// preflight and mark every response for any origin, the operator plane
+// does neither.
+func TestMeshSurfaceCORS(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "cp-cors.db")
+	store, err := storage.NewSQLStore("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	srv, err := NewServer(Options{DriverName: "sqlite", DataSourceName: dbPath, AllowedAudiences: []string{"sam-mesh-audience"}, AdminToken: "admin-token"}, store)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+	if err := srv.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = srv.Close() }()
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	for _, path := range []string{"/info", "/keys", "/enroll", "/enroll/status", "/register", "/refresh", "/policies"} {
+		req, _ := http.NewRequest(http.MethodOptions, ts.URL+path, nil)
+		req.Header.Set("Origin", "https://agent.example")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		req.Header.Set("Access-Control-Request-Headers", "content-type, "+api.HeaderChallengeTimestamp)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Errorf("OPTIONS %s = %s, want 204", path, resp.Status)
+		}
+		if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
+			t.Errorf("OPTIONS %s Access-Control-Allow-Origin = %q, want *", path, got)
+		}
+		for _, h := range []string{"Authorization", "Content-Type", api.HeaderChallengeTimestamp, api.HeaderChallengeSignature} {
+			if !strings.Contains(resp.Header.Get("Access-Control-Allow-Headers"), h) {
+				t.Errorf("OPTIONS %s does not allow header %s: %q", path, h, resp.Header.Get("Access-Control-Allow-Headers"))
+			}
+		}
+	}
+	resp, err := client.Get(ts.URL + "/info")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Errorf("GET /info Access-Control-Allow-Origin = %q, want *", got)
+	}
+
+	for _, path := range []string{"/admin/status", "/user/status", "/routers/lease"} {
+		req, _ := http.NewRequest(http.MethodOptions, ts.URL+path, nil)
+		req.Header.Set("Origin", "https://agent.example")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
+			t.Errorf("OPTIONS %s Access-Control-Allow-Origin = %q, want none", path, got)
+		}
+		if resp.StatusCode == http.StatusNoContent {
+			t.Errorf("OPTIONS %s answered a preflight", path)
+		}
+	}
+}
+
 // TestAdminBootstrapTokensList pins the admin listing surface used by
 // `sam-one token list`: created tokens show up, and the list is admin-gated.
 func TestAdminBootstrapTokensList(t *testing.T) {
