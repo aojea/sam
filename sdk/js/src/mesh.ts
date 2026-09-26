@@ -14,6 +14,7 @@
 
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { toHex } from "./bytes.ts";
 import { ControlPlaneClient, ROLE_NODE, type Enrollment } from "./controlplane.ts";
 import { credentialFromJSON, credentialPredatesRotation, credentialTimeToLiveSeconds, credentialToJSON, encodeAuthFrame, type MeshCredential } from "./credential.ts";
 import { Identity } from "./identity.ts";
@@ -213,8 +214,8 @@ export class AgentMesh {
    * credentials the new key signs verify before the next pull confirms it.
    */
   addTrustedKey(key: Uint8Array): boolean {
-    const hex = Buffer.from(key).toString("hex");
-    if (this.#credential.controlPlaneKeys.some((k) => Buffer.from(k).toString("hex") === hex)) {
+    const hex = toHex(key);
+    if (this.#credential.controlPlaneKeys.some((k) => toHex(k) === hex)) {
       return false;
     }
     this.#credential = { ...this.#credential, controlPlaneKeys: [...this.#credential.controlPlaneKeys, key] };
@@ -307,7 +308,7 @@ function newClient(options: AgentMeshOptions): ControlPlaneClient {
 function sameKeySet(a: Uint8Array[], b: Uint8Array[]): boolean {
   const hex = (keys: Uint8Array[]) =>
     keys
-      .map((k) => Buffer.from(k).toString("hex"))
+      .map((k) => toHex(k))
       .sort()
       .join(",");
   return hex(a) === hex(b);

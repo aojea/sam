@@ -14,6 +14,7 @@
 
 import { create, fromBinary, fromJson, toBinary, toJson } from "@bufbuild/protobuf";
 import { timestampDate, timestampFromDate, type Timestamp } from "@bufbuild/protobuf/wkt";
+import { toHex } from "./bytes.ts";
 import { AuthFrameSchema, AuthResponseSchema, MemberCredentialSchema, type AuthResponse, type OIDCSession } from "./gen/sam_pb.ts";
 
 /** What a member holds after enrolling: its biscuit and what it trusts. */
@@ -44,8 +45,8 @@ export interface MeshCredential {
 
 /** Whether a key trusted now was unknown when the credential was issued. */
 export function credentialPredatesRotation(c: MeshCredential): boolean {
-  const issued = new Set(c.issuedUnderKeys.map((k) => Buffer.from(k).toString("hex")));
-  return c.controlPlaneKeys.some((k) => !issued.has(Buffer.from(k).toString("hex")));
+  const issued = new Set(c.issuedUnderKeys.map((k) => toHex(k)));
+  return c.controlPlaneKeys.some((k) => !issued.has(toHex(k)));
 }
 
 /** Seconds of validity left on the biscuit; negative once expired. */
@@ -78,7 +79,7 @@ export function credentialToJSON(c: MeshCredential): string {
     biscuit: c.biscuit,
     expireTime: timestampFromDate(new Date(c.expiration * 1000)),
     trustedKeys: c.controlPlaneKeys.map((k) => {
-      const receiveTime = c.extra?.receiveTime.get(Buffer.from(k).toString("hex"));
+      const receiveTime = c.extra?.receiveTime.get(toHex(k));
       return receiveTime !== undefined ? { publicKey: k, receiveTime } : { publicKey: k };
     }),
     issuedUnderKeys: c.issuedUnderKeys,
@@ -97,7 +98,7 @@ export function credentialFromJSON(text: string): MeshCredential {
   const receiveTime = new Map<string, Timestamp>();
   for (const k of message.trustedKeys) {
     if (k.receiveTime !== undefined) {
-      receiveTime.set(Buffer.from(k.publicKey).toString("hex"), k.receiveTime);
+      receiveTime.set(toHex(k.publicKey), k.receiveTime);
     }
   }
   return {

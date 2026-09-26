@@ -34,6 +34,7 @@ import {
   type KeysResponse,
 } from "./gen/sam_pb.ts";
 import type { Identity } from "./identity.ts";
+import { bytesEqual, toBase64, toBase64Url } from "./bytes.ts";
 import { verifyEd25519 } from "./identity.ts";
 
 export const PROTOBUF_CONTENT_TYPE = "application/x-protobuf";
@@ -152,10 +153,6 @@ export function validateControlPlaneURL(rawUrl: string, allowInsecure = false): 
     throw new InsecureControlPlaneURLError(rawUrl);
   }
   throw new Error(`control plane URL ${JSON.stringify(rawUrl)} must use http:// or https://`);
-}
-
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
 /**
@@ -280,7 +277,7 @@ export class ControlPlaneClient {
     const sig = identity.sign(enrollStatusChallenge(identity.peerId, ts));
     const body = await this.#request("GET", `/enroll/status?peer_id=${encodeURIComponent(identity.peerId)}`, undefined, {
       [HEADER_CHALLENGE_TIMESTAMP]: String(ts),
-      [HEADER_CHALLENGE_SIGNATURE]: Buffer.from(sig).toString("base64url"),
+      [HEADER_CHALLENGE_SIGNATURE]: toBase64Url(sig),
     });
     return fromBinary(BootstrapEnrollResponseSchema, body);
   }
@@ -322,7 +319,7 @@ export class ControlPlaneClient {
       peerId: identity.peerId,
     });
     const body = await this.#request("POST", "/refresh", toBinary(TokenRefreshRequestSchema, req), {
-      Authorization: `Bearer ${Buffer.from(params.biscuit).toString("base64")}`,
+      Authorization: `Bearer ${toBase64(params.biscuit)}`,
     });
     const resp = fromBinary(TokenRefreshResponseSchema, body);
     if (resp.errorMessage) {
@@ -341,7 +338,7 @@ export class ControlPlaneClient {
    */
   async policyRules(biscuit: Uint8Array): Promise<string[]> {
     const body = await this.#request("GET", "/policies", undefined, {
-      Authorization: `Bearer ${Buffer.from(biscuit).toString("base64")}`,
+      Authorization: `Bearer ${toBase64(biscuit)}`,
     });
     const resp = fromBinary(PolicyConfigGetResponseSchema, body);
     if (resp.$unknown !== undefined && resp.$unknown.length > 0) {
@@ -360,7 +357,7 @@ export class ControlPlaneClient {
         signal: controller.signal,
       };
       if (body !== undefined) {
-        init.body = Buffer.from(body);
+        init.body = new Uint8Array(body);
         init.headers = { ...init.headers, "Content-Type": PROTOBUF_CONTENT_TYPE };
       }
       const resp = await this.#fetch(new URL(path, this.url), init);
