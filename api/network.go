@@ -212,6 +212,11 @@ const (
 	// InferenceServicePrefix is the scheme prefix for LLM Inference services.
 	// Fully qualified inference services use the URI format: inference://<service-name>
 	InferenceServicePrefix = "inference://"
+
+	// EgressServicePrefix is the scheme prefix for destinations outside the
+	// mesh, served by a node that enforces policy on them. The name is the
+	// destination hostname: egress://api.github.com
+	EgressServicePrefix = "egress://"
 )
 
 // ============================================================================
@@ -227,6 +232,9 @@ const (
 
 	// ServiceTypeStringA2A is the string identifier for A2A (Agent2Agent) services.
 	ServiceTypeStringA2A = "a2a"
+
+	// ServiceTypeStringEgress is the string identifier for egress destinations.
+	ServiceTypeStringEgress = "egress"
 )
 
 // ParseServiceType converts a string identifier (e.g. from JSON or REST) to the ServiceType protobuf enum.
@@ -238,6 +246,8 @@ func ParseServiceType(s string) (ServiceType, error) {
 		return ServiceType_SERVICE_TYPE_INFERENCE, nil
 	case ServiceTypeStringA2A:
 		return ServiceType_SERVICE_TYPE_A2A, nil
+	case ServiceTypeStringEgress:
+		return ServiceType_SERVICE_TYPE_EGRESS, nil
 	default:
 		return ServiceType_SERVICE_TYPE_UNSPECIFIED, fmt.Errorf("invalid service type: %s", s)
 	}
@@ -252,6 +262,8 @@ func ServiceTypeToString(t ServiceType) (string, error) {
 		return ServiceTypeStringInference, nil
 	case ServiceType_SERVICE_TYPE_A2A:
 		return ServiceTypeStringA2A, nil
+	case ServiceType_SERVICE_TYPE_EGRESS:
+		return ServiceTypeStringEgress, nil
 	default:
 		return "", fmt.Errorf("invalid or unspecified service type")
 	}

@@ -242,6 +242,9 @@ func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []stri
 	// is accepted, which is what stops an unconfigured mesh from letting any
 	// peer name any agent.
 	var allAgents []string
+	// Narrowed grants (PolicyRole.http) are minted per entry: they are keyed
+	// by the entry they narrow, so there is nothing to merge across roles.
+	var allHTTP []*api.HTTPGrant
 	for _, role := range roles {
 		if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 			Name: api.FactRole,
@@ -265,7 +268,9 @@ func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []stri
 		}
 
 		if pr, ok := rolesMap[role]; ok {
-			allServices = append(allServices, pr.AllowedServices...)
+			plainServices, narrowed := api.SplitHTTPGrants(pr)
+			allServices = append(allServices, plainServices...)
+			allHTTP = append(allHTTP, narrowed...)
 			allTargets = append(allTargets, pr.AllowedTargets...)
 			allAgents = append(allAgents, pr.AllowedAgents...)
 
@@ -295,6 +300,13 @@ func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []stri
 	for _, fact := range api.BuildServiceDatalogFacts(allServices) {
 		if err := addFact(fact); err != nil {
 			errs = append(errs, fmt.Errorf("failed to add service fact: %w", err))
+		}
+	}
+	for _, g := range allHTTP {
+		for _, fact := range api.BuildHTTPGrantFacts(g) {
+			if err := addFact(fact); err != nil {
+				errs = append(errs, fmt.Errorf("failed to add http grant fact: %w", err))
+			}
 		}
 	}
 	for _, fact := range api.BuildTargetDatalogFacts(allTargets) {

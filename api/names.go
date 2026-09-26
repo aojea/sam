@@ -131,8 +131,14 @@ func ParseMeshHost(host string) (serviceURI string, err error) {
 	}
 	name, typeStr := rest[:dot], rest[dot+1:]
 
-	if _, err := ParseServiceType(typeStr); err != nil {
+	serviceType, err := ParseServiceType(typeStr)
+	if err != nil {
 		return "", fmt.Errorf("mesh host %q: %w", host, err)
+	}
+	// An egress destination is addressed by its own name; projecting it into
+	// the zone would give one destination two names on the boundary.
+	if serviceType == ServiceType_SERVICE_TYPE_EGRESS {
+		return "", fmt.Errorf("mesh host %q: egress destinations have no %s name; connect to %q itself", host, MeshZone, name)
 	}
 
 	uri := typeStr + "://" + name
@@ -145,6 +151,9 @@ func ParseMeshHost(host string) (serviceURI string, err error) {
 // MeshHost is the inverse of ParseMeshHost: it renders the hostname a sandboxed
 // agent should connect to in order to reach the given service.
 func MeshHost(t ServiceType, serviceName string) (string, error) {
+	if t == ServiceType_SERVICE_TYPE_EGRESS {
+		return "", fmt.Errorf("egress destination %q has no %s name; it is reached by its own name", serviceName, MeshZone)
+	}
 	typeStr, err := ServiceTypeToString(t)
 	if err != nil {
 		return "", err

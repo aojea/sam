@@ -95,6 +95,12 @@ const (
 	ServiceType_SERVICE_TYPE_MCP         ServiceType = 1
 	ServiceType_SERVICE_TYPE_INFERENCE   ServiceType = 2
 	ServiceType_SERVICE_TYPE_A2A         ServiceType = 3
+	// A destination outside the mesh, reached through a node that enforces
+	// policy on it. The service name is the destination hostname, so a grant
+	// reads egress://api.github.com and the request fact
+	// service("egress", "api.github.com"). Egress names have no .sam.alt form:
+	// a sandboxed agent connects to the destination name itself.
+	ServiceType_SERVICE_TYPE_EGRESS ServiceType = 4
 )
 
 // Enum value maps for ServiceType.
@@ -104,12 +110,14 @@ var (
 		1: "SERVICE_TYPE_MCP",
 		2: "SERVICE_TYPE_INFERENCE",
 		3: "SERVICE_TYPE_A2A",
+		4: "SERVICE_TYPE_EGRESS",
 	}
 	ServiceType_value = map[string]int32{
 		"SERVICE_TYPE_UNSPECIFIED": 0,
 		"SERVICE_TYPE_MCP":         1,
 		"SERVICE_TYPE_INFERENCE":   2,
 		"SERVICE_TYPE_A2A":         3,
+		"SERVICE_TYPE_EGRESS":      4,
 	}
 )
 
@@ -1403,6 +1411,8 @@ type PolicyRole struct {
 	// or "key=value". A node declares its own labels, so this is what turns a
 	// declaration into something the control plane is willing to sign.
 	AllowedLabels []string `protobuf:"bytes,6,rep,name=allowed_labels,json=allowedLabels,proto3" json:"allowed_labels,omitempty"`
+	// HTTP narrowing of allowed_services entries; see HTTPGrant.
+	Http          []*HTTPGrant `protobuf:"bytes,7,rep,name=http,proto3" json:"http,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1479,6 +1489,168 @@ func (x *PolicyRole) GetAllowedLabels() []string {
 	return nil
 }
 
+func (x *PolicyRole) GetHttp() []*HTTPGrant {
+	if x != nil {
+		return x.Http
+	}
+	return nil
+}
+
+// HTTPGrant narrows one allowed_services entry to HTTP methods and paths.
+// The control plane compiles it into granted_method and granted_path_* facts
+// in the holder's credential and withholds the plain service grant for that
+// entry. The baseline rules derive the service grant only for a request
+// whose method($m) and path($p) facts match, so a request that carries no
+// HTTP method (a tunnel, a non-HTTP stream) does not match a narrowed entry.
+type HTTPGrant struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// One of the role's allowed_services entries, written identically.
+	Service string `protobuf:"bytes,1,opt,name=service,proto3" json:"service,omitempty"`
+	// Methods the holder may use, e.g. "GET", "HEAD". Empty means any method.
+	Methods []string `protobuf:"bytes,2,rep,name=methods,proto3" json:"methods,omitempty"`
+	// Paths the holder may request, as the backend sees them: "/user" matches
+	// that path only, "/v2/public/*" matches every path under the prefix.
+	// Empty means any path. At least one of methods and paths must be set.
+	Paths         []string `protobuf:"bytes,3,rep,name=paths,proto3" json:"paths,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HTTPGrant) Reset() {
+	*x = HTTPGrant{}
+	mi := &file_api_sam_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HTTPGrant) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HTTPGrant) ProtoMessage() {}
+
+func (x *HTTPGrant) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HTTPGrant.ProtoReflect.Descriptor instead.
+func (*HTTPGrant) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *HTTPGrant) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+func (x *HTTPGrant) GetMethods() []string {
+	if x != nil {
+		return x.Methods
+	}
+	return nil
+}
+
+func (x *HTTPGrant) GetPaths() []string {
+	if x != nil {
+		return x.Paths
+	}
+	return nil
+}
+
+// EgressDestination is a destination outside the mesh that selected nodes
+// serve as egress://<name>. It is part of the policy document the admin
+// writes; a node receives the destinations that select it at GET /egress
+// and serves them without configuration of its own.
+type EgressDestination struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The destination hostname, lowercase, without a port or a path. It is the
+	// service name in grants (egress://<name>) and the DHT key.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Where the serving node forwards requests. Optional; https://<name> when
+	// empty. Must not carry a credential.
+	TargetUrl string `protobuf:"bytes,2,opt,name=target_url,json=targetUrl,proto3" json:"target_url,omitempty"`
+	// Name of the credential the serving node presents upstream, resolved by
+	// the node from its secrets directory. Never a value: secret material does
+	// not travel through this API.
+	Credential string `protobuf:"bytes,3,opt,name=credential,proto3" json:"credential,omitempty"`
+	// Role names or key=value labels selecting the nodes that serve this
+	// destination. A node matches when any entry names one of its roles or
+	// labels. The control plane also grants the destination to the selected
+	// nodes, so the serving node authorizes local requests with its own
+	// credential; other callers need the grant on their own role.
+	ServedBy      []string `protobuf:"bytes,4,rep,name=served_by,json=servedBy,proto3" json:"served_by,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EgressDestination) Reset() {
+	*x = EgressDestination{}
+	mi := &file_api_sam_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EgressDestination) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EgressDestination) ProtoMessage() {}
+
+func (x *EgressDestination) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EgressDestination.ProtoReflect.Descriptor instead.
+func (*EgressDestination) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *EgressDestination) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *EgressDestination) GetTargetUrl() string {
+	if x != nil {
+		return x.TargetUrl
+	}
+	return ""
+}
+
+func (x *EgressDestination) GetCredential() string {
+	if x != nil {
+		return x.Credential
+	}
+	return ""
+}
+
+func (x *EgressDestination) GetServedBy() []string {
+	if x != nil {
+		return x.ServedBy
+	}
+	return nil
+}
+
 type PolicyBinding struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Role          string                 `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`
@@ -1489,7 +1661,7 @@ type PolicyBinding struct {
 
 func (x *PolicyBinding) Reset() {
 	*x = PolicyBinding{}
-	mi := &file_api_sam_proto_msgTypes[16]
+	mi := &file_api_sam_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1501,7 +1673,7 @@ func (x *PolicyBinding) String() string {
 func (*PolicyBinding) ProtoMessage() {}
 
 func (x *PolicyBinding) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[16]
+	mi := &file_api_sam_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1514,7 +1686,7 @@ func (x *PolicyBinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolicyBinding.ProtoReflect.Descriptor instead.
 func (*PolicyBinding) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{16}
+	return file_api_sam_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *PolicyBinding) GetRole() string {
@@ -1539,13 +1711,14 @@ type PolicyConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Roles         []*PolicyRole          `protobuf:"bytes,1,rep,name=roles,proto3" json:"roles,omitempty"`
 	Bindings      []*PolicyBinding       `protobuf:"bytes,2,rep,name=bindings,proto3" json:"bindings,omitempty"`
+	Egress        []*EgressDestination   `protobuf:"bytes,3,rep,name=egress,proto3" json:"egress,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PolicyConfig) Reset() {
 	*x = PolicyConfig{}
-	mi := &file_api_sam_proto_msgTypes[17]
+	mi := &file_api_sam_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1557,7 +1730,7 @@ func (x *PolicyConfig) String() string {
 func (*PolicyConfig) ProtoMessage() {}
 
 func (x *PolicyConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[17]
+	mi := &file_api_sam_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1570,7 +1743,7 @@ func (x *PolicyConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolicyConfig.ProtoReflect.Descriptor instead.
 func (*PolicyConfig) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{17}
+	return file_api_sam_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *PolicyConfig) GetRoles() []*PolicyRole {
@@ -1587,6 +1760,13 @@ func (x *PolicyConfig) GetBindings() []*PolicyBinding {
 	return nil
 }
 
+func (x *PolicyConfig) GetEgress() []*EgressDestination {
+	if x != nil {
+		return x.Egress
+	}
+	return nil
+}
+
 type PolicyConfigGetRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1595,7 +1775,7 @@ type PolicyConfigGetRequest struct {
 
 func (x *PolicyConfigGetRequest) Reset() {
 	*x = PolicyConfigGetRequest{}
-	mi := &file_api_sam_proto_msgTypes[18]
+	mi := &file_api_sam_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1607,7 +1787,7 @@ func (x *PolicyConfigGetRequest) String() string {
 func (*PolicyConfigGetRequest) ProtoMessage() {}
 
 func (x *PolicyConfigGetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[18]
+	mi := &file_api_sam_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1620,7 +1800,7 @@ func (x *PolicyConfigGetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolicyConfigGetRequest.ProtoReflect.Descriptor instead.
 func (*PolicyConfigGetRequest) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{18}
+	return file_api_sam_proto_rawDescGZIP(), []int{20}
 }
 
 // PolicyConfigGetResponse answers GET /policies for a mesh member holding a
@@ -1636,7 +1816,7 @@ type PolicyConfigGetResponse struct {
 
 func (x *PolicyConfigGetResponse) Reset() {
 	*x = PolicyConfigGetResponse{}
-	mi := &file_api_sam_proto_msgTypes[19]
+	mi := &file_api_sam_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1648,7 +1828,7 @@ func (x *PolicyConfigGetResponse) String() string {
 func (*PolicyConfigGetResponse) ProtoMessage() {}
 
 func (x *PolicyConfigGetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[19]
+	mi := &file_api_sam_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1661,7 +1841,7 @@ func (x *PolicyConfigGetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolicyConfigGetResponse.ProtoReflect.Descriptor instead.
 func (*PolicyConfigGetResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{19}
+	return file_api_sam_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *PolicyConfigGetResponse) GetDatalogRules() []string {
@@ -1681,7 +1861,7 @@ type PolicyConfigUpdateResponse struct {
 
 func (x *PolicyConfigUpdateResponse) Reset() {
 	*x = PolicyConfigUpdateResponse{}
-	mi := &file_api_sam_proto_msgTypes[20]
+	mi := &file_api_sam_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1693,7 +1873,7 @@ func (x *PolicyConfigUpdateResponse) String() string {
 func (*PolicyConfigUpdateResponse) ProtoMessage() {}
 
 func (x *PolicyConfigUpdateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[20]
+	mi := &file_api_sam_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1706,7 +1886,7 @@ func (x *PolicyConfigUpdateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolicyConfigUpdateResponse.ProtoReflect.Descriptor instead.
 func (*PolicyConfigUpdateResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{20}
+	return file_api_sam_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *PolicyConfigUpdateResponse) GetSuccess() bool {
@@ -1721,6 +1901,90 @@ func (x *PolicyConfigUpdateResponse) GetError() string {
 		return x.Error
 	}
 	return ""
+}
+
+type EgressAssignmentsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EgressAssignmentsRequest) Reset() {
+	*x = EgressAssignmentsRequest{}
+	mi := &file_api_sam_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EgressAssignmentsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EgressAssignmentsRequest) ProtoMessage() {}
+
+func (x *EgressAssignmentsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EgressAssignmentsRequest.ProtoReflect.Descriptor instead.
+func (*EgressAssignmentsRequest) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{23}
+}
+
+// EgressAssignmentsResponse answers GET /egress for a mesh member holding a
+// biscuit: the destinations whose served_by selects that node. It is a
+// separate endpoint from GET /policies so that a node predating it keeps
+// syncing rules unchanged.
+type EgressAssignmentsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Egress        []*EgressDestination   `protobuf:"bytes,1,rep,name=egress,proto3" json:"egress,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EgressAssignmentsResponse) Reset() {
+	*x = EgressAssignmentsResponse{}
+	mi := &file_api_sam_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EgressAssignmentsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EgressAssignmentsResponse) ProtoMessage() {}
+
+func (x *EgressAssignmentsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EgressAssignmentsResponse.ProtoReflect.Descriptor instead.
+func (*EgressAssignmentsResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *EgressAssignmentsResponse) GetEgress() []*EgressDestination {
+	if x != nil {
+		return x.Egress
+	}
+	return nil
 }
 
 type KeysResponse struct {
@@ -1740,7 +2004,7 @@ type KeysResponse struct {
 
 func (x *KeysResponse) Reset() {
 	*x = KeysResponse{}
-	mi := &file_api_sam_proto_msgTypes[21]
+	mi := &file_api_sam_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1752,7 +2016,7 @@ func (x *KeysResponse) String() string {
 func (*KeysResponse) ProtoMessage() {}
 
 func (x *KeysResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[21]
+	mi := &file_api_sam_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1765,7 +2029,7 @@ func (x *KeysResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeysResponse.ProtoReflect.Descriptor instead.
 func (*KeysResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{21}
+	return file_api_sam_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *KeysResponse) GetPublicKeys() [][]byte {
@@ -1813,7 +2077,7 @@ type TokenRefreshRequest struct {
 
 func (x *TokenRefreshRequest) Reset() {
 	*x = TokenRefreshRequest{}
-	mi := &file_api_sam_proto_msgTypes[22]
+	mi := &file_api_sam_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1825,7 +2089,7 @@ func (x *TokenRefreshRequest) String() string {
 func (*TokenRefreshRequest) ProtoMessage() {}
 
 func (x *TokenRefreshRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[22]
+	mi := &file_api_sam_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1838,7 +2102,7 @@ func (x *TokenRefreshRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenRefreshRequest.ProtoReflect.Descriptor instead.
 func (*TokenRefreshRequest) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{22}
+	return file_api_sam_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *TokenRefreshRequest) GetChallengeSignature() []byte {
@@ -1873,7 +2137,7 @@ type TokenRefreshResponse struct {
 
 func (x *TokenRefreshResponse) Reset() {
 	*x = TokenRefreshResponse{}
-	mi := &file_api_sam_proto_msgTypes[23]
+	mi := &file_api_sam_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1885,7 +2149,7 @@ func (x *TokenRefreshResponse) String() string {
 func (*TokenRefreshResponse) ProtoMessage() {}
 
 func (x *TokenRefreshResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[23]
+	mi := &file_api_sam_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1898,7 +2162,7 @@ func (x *TokenRefreshResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenRefreshResponse.ProtoReflect.Descriptor instead.
 func (*TokenRefreshResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{23}
+	return file_api_sam_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *TokenRefreshResponse) GetBiscuitToken() []byte {
@@ -1935,7 +2199,7 @@ type NodeCatalogReport struct {
 
 func (x *NodeCatalogReport) Reset() {
 	*x = NodeCatalogReport{}
-	mi := &file_api_sam_proto_msgTypes[24]
+	mi := &file_api_sam_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1947,7 +2211,7 @@ func (x *NodeCatalogReport) String() string {
 func (*NodeCatalogReport) ProtoMessage() {}
 
 func (x *NodeCatalogReport) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[24]
+	mi := &file_api_sam_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1960,7 +2224,7 @@ func (x *NodeCatalogReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeCatalogReport.ProtoReflect.Descriptor instead.
 func (*NodeCatalogReport) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{24}
+	return file_api_sam_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *NodeCatalogReport) GetServices() []*ServiceInfo {
@@ -1979,7 +2243,7 @@ type TokenRevokeRequest struct {
 
 func (x *TokenRevokeRequest) Reset() {
 	*x = TokenRevokeRequest{}
-	mi := &file_api_sam_proto_msgTypes[25]
+	mi := &file_api_sam_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1991,7 +2255,7 @@ func (x *TokenRevokeRequest) String() string {
 func (*TokenRevokeRequest) ProtoMessage() {}
 
 func (x *TokenRevokeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[25]
+	mi := &file_api_sam_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2004,7 +2268,7 @@ func (x *TokenRevokeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenRevokeRequest.ProtoReflect.Descriptor instead.
 func (*TokenRevokeRequest) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{25}
+	return file_api_sam_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *TokenRevokeRequest) GetPeerId() string {
@@ -2024,7 +2288,7 @@ type TokenRevokeResponse struct {
 
 func (x *TokenRevokeResponse) Reset() {
 	*x = TokenRevokeResponse{}
-	mi := &file_api_sam_proto_msgTypes[26]
+	mi := &file_api_sam_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2036,7 +2300,7 @@ func (x *TokenRevokeResponse) String() string {
 func (*TokenRevokeResponse) ProtoMessage() {}
 
 func (x *TokenRevokeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[26]
+	mi := &file_api_sam_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2049,7 +2313,7 @@ func (x *TokenRevokeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenRevokeResponse.ProtoReflect.Descriptor instead.
 func (*TokenRevokeResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{26}
+	return file_api_sam_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *TokenRevokeResponse) GetSuccess() bool {
@@ -2080,7 +2344,7 @@ type AgentSecret struct {
 
 func (x *AgentSecret) Reset() {
 	*x = AgentSecret{}
-	mi := &file_api_sam_proto_msgTypes[27]
+	mi := &file_api_sam_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2092,7 +2356,7 @@ func (x *AgentSecret) String() string {
 func (*AgentSecret) ProtoMessage() {}
 
 func (x *AgentSecret) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[27]
+	mi := &file_api_sam_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2105,7 +2369,7 @@ func (x *AgentSecret) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentSecret.ProtoReflect.Descriptor instead.
 func (*AgentSecret) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{27}
+	return file_api_sam_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *AgentSecret) GetHost() string {
@@ -2148,7 +2412,7 @@ type AgentEgress struct {
 
 func (x *AgentEgress) Reset() {
 	*x = AgentEgress{}
-	mi := &file_api_sam_proto_msgTypes[28]
+	mi := &file_api_sam_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2160,7 +2424,7 @@ func (x *AgentEgress) String() string {
 func (*AgentEgress) ProtoMessage() {}
 
 func (x *AgentEgress) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[28]
+	mi := &file_api_sam_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2173,7 +2437,7 @@ func (x *AgentEgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentEgress.ProtoReflect.Descriptor instead.
 func (*AgentEgress) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{28}
+	return file_api_sam_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *AgentEgress) GetAllow() []string {
@@ -2205,7 +2469,7 @@ type AgentIngress struct {
 
 func (x *AgentIngress) Reset() {
 	*x = AgentIngress{}
-	mi := &file_api_sam_proto_msgTypes[29]
+	mi := &file_api_sam_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2217,7 +2481,7 @@ func (x *AgentIngress) String() string {
 func (*AgentIngress) ProtoMessage() {}
 
 func (x *AgentIngress) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[29]
+	mi := &file_api_sam_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2230,7 +2494,7 @@ func (x *AgentIngress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentIngress.ProtoReflect.Descriptor instead.
 func (*AgentIngress) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{29}
+	return file_api_sam_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *AgentIngress) GetType() ServiceType {
@@ -2288,7 +2552,7 @@ type AgentBundle struct {
 
 func (x *AgentBundle) Reset() {
 	*x = AgentBundle{}
-	mi := &file_api_sam_proto_msgTypes[30]
+	mi := &file_api_sam_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2300,7 +2564,7 @@ func (x *AgentBundle) String() string {
 func (*AgentBundle) ProtoMessage() {}
 
 func (x *AgentBundle) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[30]
+	mi := &file_api_sam_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2313,7 +2577,7 @@ func (x *AgentBundle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentBundle.ProtoReflect.Descriptor instead.
 func (*AgentBundle) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{30}
+	return file_api_sam_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *AgentBundle) GetVersion() string {
@@ -2369,7 +2633,7 @@ type AgentAttachRequest struct {
 
 func (x *AgentAttachRequest) Reset() {
 	*x = AgentAttachRequest{}
-	mi := &file_api_sam_proto_msgTypes[31]
+	mi := &file_api_sam_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2381,7 +2645,7 @@ func (x *AgentAttachRequest) String() string {
 func (*AgentAttachRequest) ProtoMessage() {}
 
 func (x *AgentAttachRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[31]
+	mi := &file_api_sam_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2394,7 +2658,7 @@ func (x *AgentAttachRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentAttachRequest.ProtoReflect.Descriptor instead.
 func (*AgentAttachRequest) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{31}
+	return file_api_sam_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *AgentAttachRequest) GetBundle() *AgentBundle {
@@ -2418,7 +2682,7 @@ type AgentAttachResponse struct {
 
 func (x *AgentAttachResponse) Reset() {
 	*x = AgentAttachResponse{}
-	mi := &file_api_sam_proto_msgTypes[32]
+	mi := &file_api_sam_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2430,7 +2694,7 @@ func (x *AgentAttachResponse) String() string {
 func (*AgentAttachResponse) ProtoMessage() {}
 
 func (x *AgentAttachResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[32]
+	mi := &file_api_sam_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2443,7 +2707,7 @@ func (x *AgentAttachResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentAttachResponse.ProtoReflect.Descriptor instead.
 func (*AgentAttachResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{32}
+	return file_api_sam_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *AgentAttachResponse) GetEgressSocket() string {
@@ -2478,7 +2742,7 @@ type AgentDetachRequest struct {
 
 func (x *AgentDetachRequest) Reset() {
 	*x = AgentDetachRequest{}
-	mi := &file_api_sam_proto_msgTypes[33]
+	mi := &file_api_sam_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2490,7 +2754,7 @@ func (x *AgentDetachRequest) String() string {
 func (*AgentDetachRequest) ProtoMessage() {}
 
 func (x *AgentDetachRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[33]
+	mi := &file_api_sam_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2503,7 +2767,7 @@ func (x *AgentDetachRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentDetachRequest.ProtoReflect.Descriptor instead.
 func (*AgentDetachRequest) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{33}
+	return file_api_sam_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *AgentDetachRequest) GetAgentId() string {
@@ -2523,7 +2787,7 @@ type AgentDetachResponse struct {
 
 func (x *AgentDetachResponse) Reset() {
 	*x = AgentDetachResponse{}
-	mi := &file_api_sam_proto_msgTypes[34]
+	mi := &file_api_sam_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2535,7 +2799,7 @@ func (x *AgentDetachResponse) String() string {
 func (*AgentDetachResponse) ProtoMessage() {}
 
 func (x *AgentDetachResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[34]
+	mi := &file_api_sam_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2548,7 +2812,7 @@ func (x *AgentDetachResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentDetachResponse.ProtoReflect.Descriptor instead.
 func (*AgentDetachResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{34}
+	return file_api_sam_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *AgentDetachResponse) GetSuccess() bool {
@@ -2578,7 +2842,7 @@ type AgentRefreshRequest struct {
 
 func (x *AgentRefreshRequest) Reset() {
 	*x = AgentRefreshRequest{}
-	mi := &file_api_sam_proto_msgTypes[35]
+	mi := &file_api_sam_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2590,7 +2854,7 @@ func (x *AgentRefreshRequest) String() string {
 func (*AgentRefreshRequest) ProtoMessage() {}
 
 func (x *AgentRefreshRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[35]
+	mi := &file_api_sam_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2603,7 +2867,7 @@ func (x *AgentRefreshRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentRefreshRequest.ProtoReflect.Descriptor instead.
 func (*AgentRefreshRequest) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{35}
+	return file_api_sam_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *AgentRefreshRequest) GetAgentId() string {
@@ -2631,7 +2895,7 @@ type AgentRefreshResponse struct {
 
 func (x *AgentRefreshResponse) Reset() {
 	*x = AgentRefreshResponse{}
-	mi := &file_api_sam_proto_msgTypes[36]
+	mi := &file_api_sam_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2643,7 +2907,7 @@ func (x *AgentRefreshResponse) String() string {
 func (*AgentRefreshResponse) ProtoMessage() {}
 
 func (x *AgentRefreshResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[36]
+	mi := &file_api_sam_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2656,7 +2920,7 @@ func (x *AgentRefreshResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentRefreshResponse.ProtoReflect.Descriptor instead.
 func (*AgentRefreshResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{36}
+	return file_api_sam_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *AgentRefreshResponse) GetSuccess() bool {
@@ -2691,7 +2955,7 @@ type AgentStatusRequest struct {
 
 func (x *AgentStatusRequest) Reset() {
 	*x = AgentStatusRequest{}
-	mi := &file_api_sam_proto_msgTypes[37]
+	mi := &file_api_sam_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2703,7 +2967,7 @@ func (x *AgentStatusRequest) String() string {
 func (*AgentStatusRequest) ProtoMessage() {}
 
 func (x *AgentStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[37]
+	mi := &file_api_sam_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2716,7 +2980,7 @@ func (x *AgentStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentStatusRequest.ProtoReflect.Descriptor instead.
 func (*AgentStatusRequest) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{37}
+	return file_api_sam_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *AgentStatusRequest) GetAgentId() string {
@@ -2738,7 +3002,7 @@ type AgentStatus struct {
 
 func (x *AgentStatus) Reset() {
 	*x = AgentStatus{}
-	mi := &file_api_sam_proto_msgTypes[38]
+	mi := &file_api_sam_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2750,7 +3014,7 @@ func (x *AgentStatus) String() string {
 func (*AgentStatus) ProtoMessage() {}
 
 func (x *AgentStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[38]
+	mi := &file_api_sam_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2763,7 +3027,7 @@ func (x *AgentStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentStatus.ProtoReflect.Descriptor instead.
 func (*AgentStatus) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{38}
+	return file_api_sam_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *AgentStatus) GetAgentId() string {
@@ -2804,7 +3068,7 @@ type AgentStatusResponse struct {
 
 func (x *AgentStatusResponse) Reset() {
 	*x = AgentStatusResponse{}
-	mi := &file_api_sam_proto_msgTypes[39]
+	mi := &file_api_sam_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2816,7 +3080,7 @@ func (x *AgentStatusResponse) String() string {
 func (*AgentStatusResponse) ProtoMessage() {}
 
 func (x *AgentStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[39]
+	mi := &file_api_sam_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2829,7 +3093,7 @@ func (x *AgentStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentStatusResponse.ProtoReflect.Descriptor instead.
 func (*AgentStatusResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{39}
+	return file_api_sam_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *AgentStatusResponse) GetAgents() []*AgentStatus {
@@ -2860,7 +3124,7 @@ type IdentityEvidenceResponse struct {
 
 func (x *IdentityEvidenceResponse) Reset() {
 	*x = IdentityEvidenceResponse{}
-	mi := &file_api_sam_proto_msgTypes[40]
+	mi := &file_api_sam_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2872,7 +3136,7 @@ func (x *IdentityEvidenceResponse) String() string {
 func (*IdentityEvidenceResponse) ProtoMessage() {}
 
 func (x *IdentityEvidenceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[40]
+	mi := &file_api_sam_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2885,7 +3149,7 @@ func (x *IdentityEvidenceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdentityEvidenceResponse.ProtoReflect.Descriptor instead.
 func (*IdentityEvidenceResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{40}
+	return file_api_sam_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *IdentityEvidenceResponse) GetPeerId() string {
@@ -2946,7 +3210,7 @@ type PeerEvidenceResponse struct {
 
 func (x *PeerEvidenceResponse) Reset() {
 	*x = PeerEvidenceResponse{}
-	mi := &file_api_sam_proto_msgTypes[41]
+	mi := &file_api_sam_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2958,7 +3222,7 @@ func (x *PeerEvidenceResponse) String() string {
 func (*PeerEvidenceResponse) ProtoMessage() {}
 
 func (x *PeerEvidenceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[41]
+	mi := &file_api_sam_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2971,7 +3235,7 @@ func (x *PeerEvidenceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerEvidenceResponse.ProtoReflect.Descriptor instead.
 func (*PeerEvidenceResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{41}
+	return file_api_sam_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *PeerEvidenceResponse) GetPeerId() string {
@@ -3056,7 +3320,7 @@ type MemberCredential struct {
 
 func (x *MemberCredential) Reset() {
 	*x = MemberCredential{}
-	mi := &file_api_sam_proto_msgTypes[42]
+	mi := &file_api_sam_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3068,7 +3332,7 @@ func (x *MemberCredential) String() string {
 func (*MemberCredential) ProtoMessage() {}
 
 func (x *MemberCredential) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[42]
+	mi := &file_api_sam_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3081,7 +3345,7 @@ func (x *MemberCredential) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemberCredential.ProtoReflect.Descriptor instead.
 func (*MemberCredential) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{42}
+	return file_api_sam_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *MemberCredential) GetControlPlaneUrl() string {
@@ -3146,7 +3410,7 @@ type TrustedSigningKey struct {
 
 func (x *TrustedSigningKey) Reset() {
 	*x = TrustedSigningKey{}
-	mi := &file_api_sam_proto_msgTypes[43]
+	mi := &file_api_sam_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3158,7 +3422,7 @@ func (x *TrustedSigningKey) String() string {
 func (*TrustedSigningKey) ProtoMessage() {}
 
 func (x *TrustedSigningKey) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[43]
+	mi := &file_api_sam_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3171,7 +3435,7 @@ func (x *TrustedSigningKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TrustedSigningKey.ProtoReflect.Descriptor instead.
 func (*TrustedSigningKey) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{43}
+	return file_api_sam_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *TrustedSigningKey) GetPublicKey() []byte {
@@ -3200,7 +3464,7 @@ type OIDCSession struct {
 
 func (x *OIDCSession) Reset() {
 	*x = OIDCSession{}
-	mi := &file_api_sam_proto_msgTypes[44]
+	mi := &file_api_sam_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3212,7 +3476,7 @@ func (x *OIDCSession) String() string {
 func (*OIDCSession) ProtoMessage() {}
 
 func (x *OIDCSession) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[44]
+	mi := &file_api_sam_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3225,7 +3489,7 @@ func (x *OIDCSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OIDCSession.ProtoReflect.Descriptor instead.
 func (*OIDCSession) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{44}
+	return file_api_sam_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *OIDCSession) GetIssuer() string {
@@ -3373,7 +3637,7 @@ const file_api_sam_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12;\n" +
 	"\vexpire_time\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"expireTime\"\xe9\x01\n" +
+	"expireTime\"\x90\x02\n" +
 	"\n" +
 	"PolicyRole\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
@@ -3381,19 +3645,36 @@ const file_api_sam_proto_rawDesc = "" +
 	"\x10allowed_services\x18\x03 \x03(\tR\x0fallowedServices\x12%\n" +
 	"\x0ecustom_datalog\x18\x04 \x03(\tR\rcustomDatalog\x12%\n" +
 	"\x0eallowed_agents\x18\x05 \x03(\tR\rallowedAgents\x12%\n" +
-	"\x0eallowed_labels\x18\x06 \x03(\tR\rallowedLabels\"=\n" +
+	"\x0eallowed_labels\x18\x06 \x03(\tR\rallowedLabels\x12%\n" +
+	"\x04http\x18\a \x03(\v2\x11.sam.v1.HTTPGrantR\x04http\"U\n" +
+	"\tHTTPGrant\x12\x18\n" +
+	"\aservice\x18\x01 \x01(\tR\aservice\x12\x18\n" +
+	"\amethods\x18\x02 \x03(\tR\amethods\x12\x14\n" +
+	"\x05paths\x18\x03 \x03(\tR\x05paths\"\x83\x01\n" +
+	"\x11EgressDestination\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"target_url\x18\x02 \x01(\tR\ttargetUrl\x12\x1e\n" +
+	"\n" +
+	"credential\x18\x03 \x01(\tR\n" +
+	"credential\x12\x1b\n" +
+	"\tserved_by\x18\x04 \x03(\tR\bservedBy\"=\n" +
 	"\rPolicyBinding\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x18\n" +
-	"\amembers\x18\x02 \x03(\tR\amembers\"k\n" +
+	"\amembers\x18\x02 \x03(\tR\amembers\"\x9e\x01\n" +
 	"\fPolicyConfig\x12(\n" +
 	"\x05roles\x18\x01 \x03(\v2\x12.sam.v1.PolicyRoleR\x05roles\x121\n" +
-	"\bbindings\x18\x02 \x03(\v2\x15.sam.v1.PolicyBindingR\bbindings\"\x18\n" +
+	"\bbindings\x18\x02 \x03(\v2\x15.sam.v1.PolicyBindingR\bbindings\x121\n" +
+	"\x06egress\x18\x03 \x03(\v2\x19.sam.v1.EgressDestinationR\x06egress\"\x18\n" +
 	"\x16PolicyConfigGetRequest\"[\n" +
 	"\x17PolicyConfigGetResponse\x12#\n" +
 	"\rdatalog_rules\x18\x03 \x03(\tR\fdatalogRulesJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\x05rolesR\bbindings\"L\n" +
 	"\x1aPolicyConfigUpdateResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\x88\x01\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\x1a\n" +
+	"\x18EgressAssignmentsRequest\"N\n" +
+	"\x19EgressAssignmentsResponse\x121\n" +
+	"\x06egress\x18\x01 \x03(\v2\x19.sam.v1.EgressDestinationR\x06egress\"\x88\x01\n" +
 	"\fKeysResponse\x12\x1f\n" +
 	"\vpublic_keys\x18\x01 \x03(\fR\n" +
 	"publicKeys\x127\n" +
@@ -3513,12 +3794,13 @@ const file_api_sam_proto_rawDesc = "" +
 	"\x1dENROLLMENT_STATUS_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19ENROLLMENT_STATUS_PENDING\x10\x01\x12\x1e\n" +
 	"\x1aENROLLMENT_STATUS_APPROVED\x10\x02\x12\x1e\n" +
-	"\x1aENROLLMENT_STATUS_REJECTED\x10\x03*s\n" +
+	"\x1aENROLLMENT_STATUS_REJECTED\x10\x03*\x8c\x01\n" +
 	"\vServiceType\x12\x1c\n" +
 	"\x18SERVICE_TYPE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10SERVICE_TYPE_MCP\x10\x01\x12\x1a\n" +
 	"\x16SERVICE_TYPE_INFERENCE\x10\x02\x12\x14\n" +
-	"\x10SERVICE_TYPE_A2A\x10\x03B\x1bZ\x19github.com/google/sam/apib\x06proto3"
+	"\x10SERVICE_TYPE_A2A\x10\x03\x12\x17\n" +
+	"\x13SERVICE_TYPE_EGRESS\x10\x04B\x1bZ\x19github.com/google/sam/apib\x06proto3"
 
 var (
 	file_api_sam_proto_rawDescOnce sync.Once
@@ -3533,7 +3815,7 @@ func file_api_sam_proto_rawDescGZIP() []byte {
 }
 
 var file_api_sam_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 50)
+var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
 var file_api_sam_proto_goTypes = []any{
 	(EnrollmentStatus)(0),              // 0: sam.v1.EnrollmentStatus
 	(ServiceType)(0),                   // 1: sam.v1.ServiceType
@@ -3554,86 +3836,93 @@ var file_api_sam_proto_goTypes = []any{
 	(*RouterLeaseRequest)(nil),         // 16: sam.v1.RouterLeaseRequest
 	(*RouterLeaseResponse)(nil),        // 17: sam.v1.RouterLeaseResponse
 	(*PolicyRole)(nil),                 // 18: sam.v1.PolicyRole
-	(*PolicyBinding)(nil),              // 19: sam.v1.PolicyBinding
-	(*PolicyConfig)(nil),               // 20: sam.v1.PolicyConfig
-	(*PolicyConfigGetRequest)(nil),     // 21: sam.v1.PolicyConfigGetRequest
-	(*PolicyConfigGetResponse)(nil),    // 22: sam.v1.PolicyConfigGetResponse
-	(*PolicyConfigUpdateResponse)(nil), // 23: sam.v1.PolicyConfigUpdateResponse
-	(*KeysResponse)(nil),               // 24: sam.v1.KeysResponse
-	(*TokenRefreshRequest)(nil),        // 25: sam.v1.TokenRefreshRequest
-	(*TokenRefreshResponse)(nil),       // 26: sam.v1.TokenRefreshResponse
-	(*NodeCatalogReport)(nil),          // 27: sam.v1.NodeCatalogReport
-	(*TokenRevokeRequest)(nil),         // 28: sam.v1.TokenRevokeRequest
-	(*TokenRevokeResponse)(nil),        // 29: sam.v1.TokenRevokeResponse
-	(*AgentSecret)(nil),                // 30: sam.v1.AgentSecret
-	(*AgentEgress)(nil),                // 31: sam.v1.AgentEgress
-	(*AgentIngress)(nil),               // 32: sam.v1.AgentIngress
-	(*AgentBundle)(nil),                // 33: sam.v1.AgentBundle
-	(*AgentAttachRequest)(nil),         // 34: sam.v1.AgentAttachRequest
-	(*AgentAttachResponse)(nil),        // 35: sam.v1.AgentAttachResponse
-	(*AgentDetachRequest)(nil),         // 36: sam.v1.AgentDetachRequest
-	(*AgentDetachResponse)(nil),        // 37: sam.v1.AgentDetachResponse
-	(*AgentRefreshRequest)(nil),        // 38: sam.v1.AgentRefreshRequest
-	(*AgentRefreshResponse)(nil),       // 39: sam.v1.AgentRefreshResponse
-	(*AgentStatusRequest)(nil),         // 40: sam.v1.AgentStatusRequest
-	(*AgentStatus)(nil),                // 41: sam.v1.AgentStatus
-	(*AgentStatusResponse)(nil),        // 42: sam.v1.AgentStatusResponse
-	(*IdentityEvidenceResponse)(nil),   // 43: sam.v1.IdentityEvidenceResponse
-	(*PeerEvidenceResponse)(nil),       // 44: sam.v1.PeerEvidenceResponse
-	(*MemberCredential)(nil),           // 45: sam.v1.MemberCredential
-	(*TrustedSigningKey)(nil),          // 46: sam.v1.TrustedSigningKey
-	(*OIDCSession)(nil),                // 47: sam.v1.OIDCSession
-	nil,                                // 48: sam.v1.EnrollRequest.LabelsEntry
-	nil,                                // 49: sam.v1.BootstrapEnrollRequest.LabelsEntry
-	nil,                                // 50: sam.v1.CommandBackend.EnvEntry
-	nil,                                // 51: sam.v1.ServiceAnnounce.LabelsEntry
-	nil,                                // 52: sam.v1.PeerEvidenceResponse.LabelsEntry
-	(*timestamppb.Timestamp)(nil),      // 53: google.protobuf.Timestamp
+	(*HTTPGrant)(nil),                  // 19: sam.v1.HTTPGrant
+	(*EgressDestination)(nil),          // 20: sam.v1.EgressDestination
+	(*PolicyBinding)(nil),              // 21: sam.v1.PolicyBinding
+	(*PolicyConfig)(nil),               // 22: sam.v1.PolicyConfig
+	(*PolicyConfigGetRequest)(nil),     // 23: sam.v1.PolicyConfigGetRequest
+	(*PolicyConfigGetResponse)(nil),    // 24: sam.v1.PolicyConfigGetResponse
+	(*PolicyConfigUpdateResponse)(nil), // 25: sam.v1.PolicyConfigUpdateResponse
+	(*EgressAssignmentsRequest)(nil),   // 26: sam.v1.EgressAssignmentsRequest
+	(*EgressAssignmentsResponse)(nil),  // 27: sam.v1.EgressAssignmentsResponse
+	(*KeysResponse)(nil),               // 28: sam.v1.KeysResponse
+	(*TokenRefreshRequest)(nil),        // 29: sam.v1.TokenRefreshRequest
+	(*TokenRefreshResponse)(nil),       // 30: sam.v1.TokenRefreshResponse
+	(*NodeCatalogReport)(nil),          // 31: sam.v1.NodeCatalogReport
+	(*TokenRevokeRequest)(nil),         // 32: sam.v1.TokenRevokeRequest
+	(*TokenRevokeResponse)(nil),        // 33: sam.v1.TokenRevokeResponse
+	(*AgentSecret)(nil),                // 34: sam.v1.AgentSecret
+	(*AgentEgress)(nil),                // 35: sam.v1.AgentEgress
+	(*AgentIngress)(nil),               // 36: sam.v1.AgentIngress
+	(*AgentBundle)(nil),                // 37: sam.v1.AgentBundle
+	(*AgentAttachRequest)(nil),         // 38: sam.v1.AgentAttachRequest
+	(*AgentAttachResponse)(nil),        // 39: sam.v1.AgentAttachResponse
+	(*AgentDetachRequest)(nil),         // 40: sam.v1.AgentDetachRequest
+	(*AgentDetachResponse)(nil),        // 41: sam.v1.AgentDetachResponse
+	(*AgentRefreshRequest)(nil),        // 42: sam.v1.AgentRefreshRequest
+	(*AgentRefreshResponse)(nil),       // 43: sam.v1.AgentRefreshResponse
+	(*AgentStatusRequest)(nil),         // 44: sam.v1.AgentStatusRequest
+	(*AgentStatus)(nil),                // 45: sam.v1.AgentStatus
+	(*AgentStatusResponse)(nil),        // 46: sam.v1.AgentStatusResponse
+	(*IdentityEvidenceResponse)(nil),   // 47: sam.v1.IdentityEvidenceResponse
+	(*PeerEvidenceResponse)(nil),       // 48: sam.v1.PeerEvidenceResponse
+	(*MemberCredential)(nil),           // 49: sam.v1.MemberCredential
+	(*TrustedSigningKey)(nil),          // 50: sam.v1.TrustedSigningKey
+	(*OIDCSession)(nil),                // 51: sam.v1.OIDCSession
+	nil,                                // 52: sam.v1.EnrollRequest.LabelsEntry
+	nil,                                // 53: sam.v1.BootstrapEnrollRequest.LabelsEntry
+	nil,                                // 54: sam.v1.CommandBackend.EnvEntry
+	nil,                                // 55: sam.v1.ServiceAnnounce.LabelsEntry
+	nil,                                // 56: sam.v1.PeerEvidenceResponse.LabelsEntry
+	(*timestamppb.Timestamp)(nil),      // 57: google.protobuf.Timestamp
 }
 var file_api_sam_proto_depIdxs = []int32{
 	2,  // 0: sam.v1.MeshEvent.type:type_name -> sam.v1.MeshEvent.Type
-	53, // 1: sam.v1.MeshEvent.event_time:type_name -> google.protobuf.Timestamp
-	48, // 2: sam.v1.EnrollRequest.labels:type_name -> sam.v1.EnrollRequest.LabelsEntry
-	53, // 3: sam.v1.EnrollResponse.expire_time:type_name -> google.protobuf.Timestamp
-	49, // 4: sam.v1.BootstrapEnrollRequest.labels:type_name -> sam.v1.BootstrapEnrollRequest.LabelsEntry
+	57, // 1: sam.v1.MeshEvent.event_time:type_name -> google.protobuf.Timestamp
+	52, // 2: sam.v1.EnrollRequest.labels:type_name -> sam.v1.EnrollRequest.LabelsEntry
+	57, // 3: sam.v1.EnrollResponse.expire_time:type_name -> google.protobuf.Timestamp
+	53, // 4: sam.v1.BootstrapEnrollRequest.labels:type_name -> sam.v1.BootstrapEnrollRequest.LabelsEntry
 	0,  // 5: sam.v1.BootstrapEnrollResponse.status:type_name -> sam.v1.EnrollmentStatus
-	53, // 6: sam.v1.BootstrapEnrollResponse.expire_time:type_name -> google.protobuf.Timestamp
+	57, // 6: sam.v1.BootstrapEnrollResponse.expire_time:type_name -> google.protobuf.Timestamp
 	1,  // 7: sam.v1.ServiceInfo.type:type_name -> sam.v1.ServiceType
-	50, // 8: sam.v1.CommandBackend.env:type_name -> sam.v1.CommandBackend.EnvEntry
+	54, // 8: sam.v1.CommandBackend.env:type_name -> sam.v1.CommandBackend.EnvEntry
 	10, // 9: sam.v1.RegisterServiceRequest.service:type_name -> sam.v1.ServiceInfo
 	11, // 10: sam.v1.RegisterServiceRequest.command:type_name -> sam.v1.CommandBackend
 	1,  // 11: sam.v1.ServiceAnnounce.type:type_name -> sam.v1.ServiceType
-	51, // 12: sam.v1.ServiceAnnounce.labels:type_name -> sam.v1.ServiceAnnounce.LabelsEntry
-	53, // 13: sam.v1.ServiceAnnounce.announce_time:type_name -> google.protobuf.Timestamp
-	53, // 14: sam.v1.RouterLeaseResponse.expire_time:type_name -> google.protobuf.Timestamp
-	18, // 15: sam.v1.PolicyConfig.roles:type_name -> sam.v1.PolicyRole
-	19, // 16: sam.v1.PolicyConfig.bindings:type_name -> sam.v1.PolicyBinding
-	53, // 17: sam.v1.KeysResponse.sign_time:type_name -> google.protobuf.Timestamp
-	53, // 18: sam.v1.TokenRefreshResponse.expire_time:type_name -> google.protobuf.Timestamp
-	10, // 19: sam.v1.NodeCatalogReport.services:type_name -> sam.v1.ServiceInfo
-	30, // 20: sam.v1.AgentEgress.secrets:type_name -> sam.v1.AgentSecret
-	1,  // 21: sam.v1.AgentIngress.type:type_name -> sam.v1.ServiceType
-	31, // 22: sam.v1.AgentBundle.egress:type_name -> sam.v1.AgentEgress
-	32, // 23: sam.v1.AgentBundle.ingress:type_name -> sam.v1.AgentIngress
-	33, // 24: sam.v1.AgentAttachRequest.bundle:type_name -> sam.v1.AgentBundle
-	53, // 25: sam.v1.AgentRefreshResponse.expire_time:type_name -> google.protobuf.Timestamp
-	32, // 26: sam.v1.AgentStatus.ingress:type_name -> sam.v1.AgentIngress
-	53, // 27: sam.v1.AgentStatus.credential_expire_time:type_name -> google.protobuf.Timestamp
-	41, // 28: sam.v1.AgentStatusResponse.agents:type_name -> sam.v1.AgentStatus
-	53, // 29: sam.v1.IdentityEvidenceResponse.biscuit_expire_time:type_name -> google.protobuf.Timestamp
-	53, // 30: sam.v1.IdentityEvidenceResponse.check_time:type_name -> google.protobuf.Timestamp
-	52, // 31: sam.v1.PeerEvidenceResponse.labels:type_name -> sam.v1.PeerEvidenceResponse.LabelsEntry
-	53, // 32: sam.v1.PeerEvidenceResponse.expire_time:type_name -> google.protobuf.Timestamp
-	53, // 33: sam.v1.PeerEvidenceResponse.check_time:type_name -> google.protobuf.Timestamp
-	53, // 34: sam.v1.MemberCredential.expire_time:type_name -> google.protobuf.Timestamp
-	46, // 35: sam.v1.MemberCredential.trusted_keys:type_name -> sam.v1.TrustedSigningKey
-	47, // 36: sam.v1.MemberCredential.oidc_session:type_name -> sam.v1.OIDCSession
-	53, // 37: sam.v1.TrustedSigningKey.receive_time:type_name -> google.protobuf.Timestamp
-	38, // [38:38] is the sub-list for method output_type
-	38, // [38:38] is the sub-list for method input_type
-	38, // [38:38] is the sub-list for extension type_name
-	38, // [38:38] is the sub-list for extension extendee
-	0,  // [0:38] is the sub-list for field type_name
+	55, // 12: sam.v1.ServiceAnnounce.labels:type_name -> sam.v1.ServiceAnnounce.LabelsEntry
+	57, // 13: sam.v1.ServiceAnnounce.announce_time:type_name -> google.protobuf.Timestamp
+	57, // 14: sam.v1.RouterLeaseResponse.expire_time:type_name -> google.protobuf.Timestamp
+	19, // 15: sam.v1.PolicyRole.http:type_name -> sam.v1.HTTPGrant
+	18, // 16: sam.v1.PolicyConfig.roles:type_name -> sam.v1.PolicyRole
+	21, // 17: sam.v1.PolicyConfig.bindings:type_name -> sam.v1.PolicyBinding
+	20, // 18: sam.v1.PolicyConfig.egress:type_name -> sam.v1.EgressDestination
+	20, // 19: sam.v1.EgressAssignmentsResponse.egress:type_name -> sam.v1.EgressDestination
+	57, // 20: sam.v1.KeysResponse.sign_time:type_name -> google.protobuf.Timestamp
+	57, // 21: sam.v1.TokenRefreshResponse.expire_time:type_name -> google.protobuf.Timestamp
+	10, // 22: sam.v1.NodeCatalogReport.services:type_name -> sam.v1.ServiceInfo
+	34, // 23: sam.v1.AgentEgress.secrets:type_name -> sam.v1.AgentSecret
+	1,  // 24: sam.v1.AgentIngress.type:type_name -> sam.v1.ServiceType
+	35, // 25: sam.v1.AgentBundle.egress:type_name -> sam.v1.AgentEgress
+	36, // 26: sam.v1.AgentBundle.ingress:type_name -> sam.v1.AgentIngress
+	37, // 27: sam.v1.AgentAttachRequest.bundle:type_name -> sam.v1.AgentBundle
+	57, // 28: sam.v1.AgentRefreshResponse.expire_time:type_name -> google.protobuf.Timestamp
+	36, // 29: sam.v1.AgentStatus.ingress:type_name -> sam.v1.AgentIngress
+	57, // 30: sam.v1.AgentStatus.credential_expire_time:type_name -> google.protobuf.Timestamp
+	45, // 31: sam.v1.AgentStatusResponse.agents:type_name -> sam.v1.AgentStatus
+	57, // 32: sam.v1.IdentityEvidenceResponse.biscuit_expire_time:type_name -> google.protobuf.Timestamp
+	57, // 33: sam.v1.IdentityEvidenceResponse.check_time:type_name -> google.protobuf.Timestamp
+	56, // 34: sam.v1.PeerEvidenceResponse.labels:type_name -> sam.v1.PeerEvidenceResponse.LabelsEntry
+	57, // 35: sam.v1.PeerEvidenceResponse.expire_time:type_name -> google.protobuf.Timestamp
+	57, // 36: sam.v1.PeerEvidenceResponse.check_time:type_name -> google.protobuf.Timestamp
+	57, // 37: sam.v1.MemberCredential.expire_time:type_name -> google.protobuf.Timestamp
+	50, // 38: sam.v1.MemberCredential.trusted_keys:type_name -> sam.v1.TrustedSigningKey
+	51, // 39: sam.v1.MemberCredential.oidc_session:type_name -> sam.v1.OIDCSession
+	57, // 40: sam.v1.TrustedSigningKey.receive_time:type_name -> google.protobuf.Timestamp
+	41, // [41:41] is the sub-list for method output_type
+	41, // [41:41] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_api_sam_proto_init() }
@@ -3651,7 +3940,7 @@ func file_api_sam_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_sam_proto_rawDesc), len(file_api_sam_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   50,
+			NumMessages:   54,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

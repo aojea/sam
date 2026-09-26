@@ -11,6 +11,7 @@ ENROLLMENT_STATUS_PENDING: EnrollmentStatus
 ENROLLMENT_STATUS_REJECTED: EnrollmentStatus
 ENROLLMENT_STATUS_UNSPECIFIED: EnrollmentStatus
 SERVICE_TYPE_A2A: ServiceType
+SERVICE_TYPE_EGRESS: ServiceType
 SERVICE_TYPE_INFERENCE: ServiceType
 SERVICE_TYPE_MCP: ServiceType
 SERVICE_TYPE_UNSPECIFIED: ServiceType
@@ -241,6 +242,28 @@ class DiscoveredProvider(_message.Message):
     srv_name: str
     def __init__(self, peer_id: _Optional[str] = ..., local_proxy_url: _Optional[str] = ..., srv_name: _Optional[str] = ..., srv_description: _Optional[str] = ...) -> None: ...
 
+class EgressAssignmentsRequest(_message.Message):
+    __slots__ = []
+    def __init__(self) -> None: ...
+
+class EgressAssignmentsResponse(_message.Message):
+    __slots__ = ["egress"]
+    EGRESS_FIELD_NUMBER: _ClassVar[int]
+    egress: _containers.RepeatedCompositeFieldContainer[EgressDestination]
+    def __init__(self, egress: _Optional[_Iterable[_Union[EgressDestination, _Mapping]]] = ...) -> None: ...
+
+class EgressDestination(_message.Message):
+    __slots__ = ["credential", "name", "served_by", "target_url"]
+    CREDENTIAL_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    SERVED_BY_FIELD_NUMBER: _ClassVar[int]
+    TARGET_URL_FIELD_NUMBER: _ClassVar[int]
+    credential: str
+    name: str
+    served_by: _containers.RepeatedScalarFieldContainer[str]
+    target_url: str
+    def __init__(self, name: _Optional[str] = ..., target_url: _Optional[str] = ..., credential: _Optional[str] = ..., served_by: _Optional[_Iterable[str]] = ...) -> None: ...
+
 class EnrollRequest(_message.Message):
     __slots__ = ["challenge_signature", "challenge_unix_ms", "jwt", "labels", "peer_id", "public_key", "requested_role"]
     class LabelsEntry(_message.Message):
@@ -279,6 +302,16 @@ class EnrollResponse(_message.Message):
     expire_time: _timestamp_pb2.Timestamp
     router_addresses: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, biscuit_token: _Optional[bytes] = ..., error_message: _Optional[str] = ..., control_plane_public_key: _Optional[bytes] = ..., router_addresses: _Optional[_Iterable[str]] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class HTTPGrant(_message.Message):
+    __slots__ = ["methods", "paths", "service"]
+    METHODS_FIELD_NUMBER: _ClassVar[int]
+    PATHS_FIELD_NUMBER: _ClassVar[int]
+    SERVICE_FIELD_NUMBER: _ClassVar[int]
+    methods: _containers.RepeatedScalarFieldContainer[str]
+    paths: _containers.RepeatedScalarFieldContainer[str]
+    service: str
+    def __init__(self, service: _Optional[str] = ..., methods: _Optional[_Iterable[str]] = ..., paths: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class IdentityEvidenceResponse(_message.Message):
     __slots__ = ["biscuit", "biscuit_expire_time", "check_time", "control_plane_url", "peer_id", "trusted_control_plane_keys"]
@@ -397,12 +430,14 @@ class PolicyBinding(_message.Message):
     def __init__(self, role: _Optional[str] = ..., members: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class PolicyConfig(_message.Message):
-    __slots__ = ["bindings", "roles"]
+    __slots__ = ["bindings", "egress", "roles"]
     BINDINGS_FIELD_NUMBER: _ClassVar[int]
+    EGRESS_FIELD_NUMBER: _ClassVar[int]
     ROLES_FIELD_NUMBER: _ClassVar[int]
     bindings: _containers.RepeatedCompositeFieldContainer[PolicyBinding]
+    egress: _containers.RepeatedCompositeFieldContainer[EgressDestination]
     roles: _containers.RepeatedCompositeFieldContainer[PolicyRole]
-    def __init__(self, roles: _Optional[_Iterable[_Union[PolicyRole, _Mapping]]] = ..., bindings: _Optional[_Iterable[_Union[PolicyBinding, _Mapping]]] = ...) -> None: ...
+    def __init__(self, roles: _Optional[_Iterable[_Union[PolicyRole, _Mapping]]] = ..., bindings: _Optional[_Iterable[_Union[PolicyBinding, _Mapping]]] = ..., egress: _Optional[_Iterable[_Union[EgressDestination, _Mapping]]] = ...) -> None: ...
 
 class PolicyConfigGetRequest(_message.Message):
     __slots__ = []
@@ -423,20 +458,22 @@ class PolicyConfigUpdateResponse(_message.Message):
     def __init__(self, success: bool = ..., error: _Optional[str] = ...) -> None: ...
 
 class PolicyRole(_message.Message):
-    __slots__ = ["allowed_agents", "allowed_labels", "allowed_services", "allowed_targets", "custom_datalog", "name"]
+    __slots__ = ["allowed_agents", "allowed_labels", "allowed_services", "allowed_targets", "custom_datalog", "http", "name"]
     ALLOWED_AGENTS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_LABELS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_SERVICES_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_TARGETS_FIELD_NUMBER: _ClassVar[int]
     CUSTOM_DATALOG_FIELD_NUMBER: _ClassVar[int]
+    HTTP_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     allowed_agents: _containers.RepeatedScalarFieldContainer[str]
     allowed_labels: _containers.RepeatedScalarFieldContainer[str]
     allowed_services: _containers.RepeatedScalarFieldContainer[str]
     allowed_targets: _containers.RepeatedScalarFieldContainer[str]
     custom_datalog: _containers.RepeatedScalarFieldContainer[str]
+    http: _containers.RepeatedCompositeFieldContainer[HTTPGrant]
     name: str
-    def __init__(self, name: _Optional[str] = ..., allowed_targets: _Optional[_Iterable[str]] = ..., allowed_services: _Optional[_Iterable[str]] = ..., custom_datalog: _Optional[_Iterable[str]] = ..., allowed_agents: _Optional[_Iterable[str]] = ..., allowed_labels: _Optional[_Iterable[str]] = ...) -> None: ...
+    def __init__(self, name: _Optional[str] = ..., allowed_targets: _Optional[_Iterable[str]] = ..., allowed_services: _Optional[_Iterable[str]] = ..., custom_datalog: _Optional[_Iterable[str]] = ..., allowed_agents: _Optional[_Iterable[str]] = ..., allowed_labels: _Optional[_Iterable[str]] = ..., http: _Optional[_Iterable[_Union[HTTPGrant, _Mapping]]] = ...) -> None: ...
 
 class RegisterServiceRequest(_message.Message):
     __slots__ = ["command", "service", "target_url"]

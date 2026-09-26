@@ -133,6 +133,12 @@ enum ServiceType {
   SERVICE_TYPE_MCP = 1;
   SERVICE_TYPE_INFERENCE = 2;
   SERVICE_TYPE_A2A = 3;
+  // A destination outside the mesh, reached through a node that enforces
+  // policy on it. The service name is the destination hostname, so a grant
+  // reads egress://api.github.com and the request fact
+  // service("egress", "api.github.com"). Egress names have no .sam.alt form:
+  // a sandboxed agent connects to the destination name itself.
+  SERVICE_TYPE_EGRESS = 4;
 }
 
 message ServiceInfo {
@@ -230,6 +236,48 @@ message PolicyRole {
   // or "key=value". A node declares its own labels, so this is what turns a
   // declaration into something the control plane is willing to sign.
   repeated string allowed_labels = 6;
+  // HTTP narrowing of allowed_services entries; see HTTPGrant.
+  repeated HTTPGrant http = 7;
+}
+
+// HTTPGrant narrows one allowed_services entry to HTTP methods and paths.
+// The control plane compiles it into granted_method and granted_path_* facts
+// in the holder's credential and withholds the plain service grant for that
+// entry. The baseline rules derive the service grant only for a request
+// whose method($m) and path($p) facts match, so a request that carries no
+// HTTP method (a tunnel, a non-HTTP stream) does not match a narrowed entry.
+message HTTPGrant {
+  // One of the role's allowed_services entries, written identically.
+  string service = 1;
+  // Methods the holder may use, e.g. "GET", "HEAD". Empty means any method.
+  repeated string methods = 2;
+  // Paths the holder may request, as the backend sees them: "/user" matches
+  // that path only, "/v2/public/*" matches every path under the prefix.
+  // Empty means any path. At least one of methods and paths must be set.
+  repeated string paths = 3;
+}
+
+// EgressDestination is a destination outside the mesh that selected nodes
+// serve as egress://<name>. It is part of the policy document the admin
+// writes; a node receives the destinations that select it at GET /egress
+// and serves them without configuration of its own.
+message EgressDestination {
+  // The destination hostname, lowercase, without a port or a path. It is the
+  // service name in grants (egress://<name>) and the DHT key.
+  string name = 1;
+  // Where the serving node forwards requests. Optional; https://<name> when
+  // empty. Must not carry a credential.
+  string target_url = 2;
+  // Name of the credential the serving node presents upstream, resolved by
+  // the node from its secrets directory. Never a value: secret material does
+  // not travel through this API.
+  string credential = 3;
+  // Role names or key=value labels selecting the nodes that serve this
+  // destination. A node matches when any entry names one of its roles or
+  // labels. The control plane also grants the destination to the selected
+  // nodes, so the serving node authorizes local requests with its own
+  // credential; other callers need the grant on their own role.
+  repeated string served_by = 4;
 }
 
 message PolicyBinding {
@@ -244,6 +292,7 @@ message PolicyBinding {
 message PolicyConfig {
   repeated PolicyRole roles = 1;
   repeated PolicyBinding bindings = 2;
+  repeated EgressDestination egress = 3;
 }
 
 message PolicyConfigGetRequest {}
@@ -263,6 +312,16 @@ message PolicyConfigGetResponse {
 message PolicyConfigUpdateResponse {
   bool success = 1;
   string error = 2;
+}
+
+message EgressAssignmentsRequest {}
+
+// EgressAssignmentsResponse answers GET /egress for a mesh member holding a
+// biscuit: the destinations whose served_by selects that node. It is a
+// separate endpoint from GET /policies so that a node predating it keeps
+// syncing rules unchanged.
+message EgressAssignmentsResponse {
+  repeated EgressDestination egress = 1;
 }
 
 message KeysResponse {

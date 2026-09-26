@@ -86,8 +86,14 @@ func BuildPolicyRules(roles []*PolicyRole, bindings []*PolicyBinding) (rules []P
 		roleName := role.Name
 		fromRole := biscuit.Predicate{Name: FactRole, IDs: []biscuit.Term{biscuit.String(roleName)}}
 
-		for _, fact := range BuildServiceDatalogFacts(role.AllowedServices) {
+		plainServices, narrowed := SplitHTTPGrants(role)
+		for _, fact := range BuildServiceDatalogFacts(plainServices) {
 			add(fact.Predicate, fromRole)
+		}
+		for _, g := range narrowed {
+			for _, fact := range BuildHTTPGrantFacts(g) {
+				add(fact.Predicate, fromRole)
+			}
 		}
 
 		hasUnrestricted := false

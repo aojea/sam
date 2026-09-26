@@ -261,6 +261,94 @@ const (
 	// Example Datalog: service("mcp", "calculator")
 	FactService = "service"
 
+	// Request facts. The verifying node injects them from the request on the
+	// wire, never from the token, so a holder cannot assert them. They are
+	// present when the node handles the request as HTTP, and absent on a
+	// stream that carries no HTTP request.
+
+	// FactMethod is the HTTP method of the request as received, or "CONNECT"
+	// for a tunnel the node opens without terminating HTTP.
+	// Contains: biscuit.String(method)
+	// Example Datalog: deny if method($m), !($m == "GET")
+	FactMethod = "method"
+
+	// FactPath is the request path as the backend sees it: leading slash, no
+	// query, with the mesh routing prefix removed. A tunnel carries path("").
+	// Contains: biscuit.String(path)
+	// Example Datalog: deny if path($p), !$p.starts_with("/v2/public/")
+	FactPath = "path"
+
+	// FactHost is the destination hostname of an egress request, lowercase,
+	// as authorized: the same string as the service name.
+	// Contains: biscuit.String(host)
+	// Example Datalog: deny if host("payroll.internal.example.com")
+	FactHost = "host"
+
+	// FactPort is the destination port of an egress request.
+	// Contains: biscuit.Integer(port)
+	// Example Datalog: deny if port($p), !($p == 443)
+	FactPort = "port"
+
+	// HTTP narrowing (PolicyRole.http). A narrowed allowed_services entry is
+	// minted as an http_granted_service_* fact instead of the plain
+	// granted_service_* one, together with the methods and paths it permits.
+	// BaselineHTTPRules derive the plain grant only for a request whose
+	// method() and path() facts match, so the ordinary allow policies apply
+	// unchanged and a request without those facts matches nothing.
+	//
+	// Every fact below is keyed by ($type, $key), where $key is the term the
+	// corresponding granted_service_* fact would carry: the exact name, the
+	// suffix with its leading dot, the prefix with its trailing dot, or "*".
+
+	// FactHTTPGrantedServiceExact is granted_service_exact, narrowed.
+	// Contains: biscuit.String(serviceType), biscuit.String(serviceName)
+	FactHTTPGrantedServiceExact = "http_granted_service_exact"
+
+	// FactHTTPGrantedServiceSuffix is granted_service_suffix, narrowed.
+	// Contains: biscuit.String(serviceType), biscuit.String(suffixPattern)
+	FactHTTPGrantedServiceSuffix = "http_granted_service_suffix"
+
+	// FactHTTPGrantedServicePrefix is granted_service_prefix, narrowed.
+	// Contains: biscuit.String(serviceType), biscuit.String(prefixPattern)
+	FactHTTPGrantedServicePrefix = "http_granted_service_prefix"
+
+	// FactHTTPGrantedServiceAll is granted_service_all, narrowed. Its key is "*".
+	// Contains: biscuit.String(serviceType)
+	FactHTTPGrantedServiceAll = "http_granted_service_all"
+
+	// FactHTTPGrantedServiceAllTypes is granted_service_all_types, narrowed.
+	// Its type and key are both "*".
+	// Contains: biscuit.Bool(true) (marker fact)
+	FactHTTPGrantedServiceAllTypes = "http_granted_service_all_types"
+
+	// FactGrantedMethod lists the methods a narrowed grant permits.
+	// Contains: biscuit.String(serviceType), biscuit.String(key), biscuit.Set of biscuit.String(method)
+	FactGrantedMethod = "granted_method"
+
+	// FactGrantedMethodAny marks a narrowed grant that permits every method.
+	// Contains: biscuit.String(serviceType), biscuit.String(key)
+	FactGrantedMethodAny = "granted_method_any"
+
+	// FactGrantedPathExact lists the exact paths a narrowed grant permits.
+	// Contains: biscuit.String(serviceType), biscuit.String(key), biscuit.Set of biscuit.String(path)
+	FactGrantedPathExact = "granted_path_exact"
+
+	// FactGrantedPathPrefix permits every path under one prefix, one fact per prefix.
+	// Contains: biscuit.String(serviceType), biscuit.String(key), biscuit.String(prefix)
+	FactGrantedPathPrefix = "granted_path_prefix"
+
+	// FactGrantedPathAny marks a narrowed grant that permits every path.
+	// Contains: biscuit.String(serviceType), biscuit.String(key)
+	FactGrantedPathAny = "granted_path_any"
+
+	// FactHTTPMethodOK is derived when the request method satisfies a narrowed grant.
+	// Contains: biscuit.String(serviceType), biscuit.String(key)
+	FactHTTPMethodOK = "http_method_ok"
+
+	// FactHTTPPathOK is derived when the request path satisfies a narrowed grant.
+	// Contains: biscuit.String(serviceType), biscuit.String(key)
+	FactHTTPPathOK = "http_path_ok"
+
 	// FactLabel is a control-plane-attested key=value label on the token's
 	// node (see api/labels.go). The control plane mints one fact per
 	// declared label, so a requirement is a single exact match: a node
@@ -338,6 +426,11 @@ var (
 	// BaselineRules are the pre-compiled target evaluation rules for the node middleware.
 	BaselineRules []biscuit.Rule
 
+	// BaselineHTTPRules derive the plain granted_service_* facts from the
+	// http_granted_service_* facts of a narrowed grant when the request's
+	// method() and path() satisfy it. Added wherever BaselineRules are.
+	BaselineHTTPRules []biscuit.Rule
+
 	// BaselineReplayCheck verifies that the client peer ID matches the connection peer ID.
 	BaselineReplayCheck biscuit.Check
 
@@ -375,6 +468,8 @@ type DatalogSources struct {
 	Policies []string `json:"policies"`
 	// Rules derive allow_network_target from target grants (BaselineRules).
 	Rules []string `json:"rules"`
+	// HTTPRules derive service grants from narrowed grants (BaselineHTTPRules).
+	HTTPRules []string `json:"http_rules"`
 	// AgentRules derive agent_authorized from agent grants (BaselineAgentRules).
 	AgentRules []string `json:"agent_rules"`
 	// TargetFactRules map identity facts to target_fact (TargetFactRules).
@@ -456,6 +551,33 @@ func init() {
 			panic(fmt.Sprintf("failed to parse baseline rule %d: %v", i, err))
 		}
 		BaselineRules = append(BaselineRules, r)
+	}
+
+	// 2b. HTTP Narrowing Rules (PolicyRole.http).
+	// A narrowed grant yields the plain granted_service_* fact only when the
+	// request's method and path match, so the allow policies above decide as
+	// they do for any grant. Both axes must hold; an axis with no restriction
+	// carries the *_any marker. The rules are positive, so a request with no
+	// method() or path() fact derives nothing and a narrowed grant fails closed.
+	BaselineSources.HTTPRules = []string{
+		fmt.Sprintf(`%s($t, $k) <- %s($m), %s($t, $k, $set), $set.contains($m)`, FactHTTPMethodOK, FactMethod, FactGrantedMethod),
+		fmt.Sprintf(`%s($t, $k) <- %s($t, $k)`, FactHTTPMethodOK, FactGrantedMethodAny),
+		fmt.Sprintf(`%s($t, $k) <- %s($p), %s($t, $k, $set), $set.contains($p)`, FactHTTPPathOK, FactPath, FactGrantedPathExact),
+		fmt.Sprintf(`%s($t, $k) <- %s($p), %s($t, $k, $prefix), $p.starts_with($prefix)`, FactHTTPPathOK, FactPath, FactGrantedPathPrefix),
+		fmt.Sprintf(`%s($t, $k) <- %s($t, $k)`, FactHTTPPathOK, FactGrantedPathAny),
+		fmt.Sprintf(`%s($t, $n) <- %s($t, $n), %s($t, $n), %s($t, $n), %s($t, $n)`, FactGrantedServiceExact, FactService, FactHTTPGrantedServiceExact, FactHTTPMethodOK, FactHTTPPathOK),
+		fmt.Sprintf(`%s($t, $s) <- %s($t, $n), %s($t, $s), $n.ends_with($s), %s($t, $s), %s($t, $s)`, FactGrantedServiceSuffix, FactService, FactHTTPGrantedServiceSuffix, FactHTTPMethodOK, FactHTTPPathOK),
+		fmt.Sprintf(`%s($t, $p) <- %s($t, $n), %s($t, $p), $n.starts_with($p), %s($t, $p), %s($t, $p)`, FactGrantedServicePrefix, FactService, FactHTTPGrantedServicePrefix, FactHTTPMethodOK, FactHTTPPathOK),
+		fmt.Sprintf(`%s($t) <- %s($t, $n), %s($t), %s($t, "*"), %s($t, "*")`, FactGrantedServiceAll, FactService, FactHTTPGrantedServiceAll, FactHTTPMethodOK, FactHTTPPathOK),
+		fmt.Sprintf(`%s(true) <- %s($t, $n), %s(true), %s("*", "*"), %s("*", "*")`, FactGrantedServiceAllTypes, FactService, FactHTTPGrantedServiceAllTypes, FactHTTPMethodOK, FactHTTPPathOK),
+	}
+
+	for i, rStr := range BaselineSources.HTTPRules {
+		r, err := parser.FromStringRule(rStr)
+		if err != nil {
+			panic(fmt.Sprintf("failed to parse baseline http rule %d: %v", i, err))
+		}
+		BaselineHTTPRules = append(BaselineHTTPRules, r)
 	}
 
 	var err error

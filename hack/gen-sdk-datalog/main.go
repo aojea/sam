@@ -34,6 +34,8 @@ type artifact struct {
 	FactService         string   `json:"fact_service"`
 	FactConnectionPeer  string   `json:"fact_connection_peer_id"`
 	FactAgent           string   `json:"fact_agent"`
+	FactMethod          string   `json:"fact_method"`
+	FactPath            string   `json:"fact_path"`
 	FactTime            string   `json:"fact_time"`
 	FactRole            string   `json:"fact_role"`
 	FactTargetFact      string   `json:"fact_target_fact"`
@@ -54,6 +56,8 @@ func main() {
 		FactService:         api.FactService,
 		FactConnectionPeer:  api.FactConnectionPeerID,
 		FactAgent:           api.FactAgent,
+		FactMethod:          api.FactMethod,
+		FactPath:            api.FactPath,
 		FactTime:            api.FactTime,
 		FactRole:            api.FactRole,
 		FactTargetFact:      api.FactTargetFact,
