@@ -651,21 +651,37 @@ async def _admit(host: IHost, mesh: "AgentMesh", router_addrs: list[multiaddr.Mu
     and sam-node do, and reserves a relay slot on the first that admits us.
     A peer reserves on the first router of its own list, so a caller that
     only knew one router could not reach a peer whose list started
-    elsewhere; `connect` tries the relayed path through each of these."""
-    admitted: list[AdmittedRouter] = []
+    elsewhere; `connect` tries the relayed path through each of these. The
+    routers are dialed at once: one the control plane lists but this member
+    cannot reach costs a dial timeout, not one per router behind it."""
+    admitted: dict[int, AdmittedRouter] = {}
     failures: list[str] = []
-    for addr in router_addrs:
+
+    async def admit(index: int, addr: multiaddr.Multiaddr) -> None:
         try:
             info = await peer_info(addr)
             await dial(host, info)
             credential = await _authenticate_router(host, mesh, info.peer_id)
-            reservation = await reserve_relay(host, info.peer_id) if reserve and not any(r.reservation for r in admitted) else None
-            admitted.append(AdmittedRouter(peer_id=str(info.peer_id), addr=addr, credential=credential, reservation=reservation))
+            admitted[index] = AdmittedRouter(peer_id=str(info.peer_id), addr=addr, credential=credential)
         except Exception as err:  # noqa: BLE001 - every router is tried, the summary names each failure
             failures.append(f"{addr}: {err}")
-    if not admitted:
+
+    async with trio.open_nursery() as nursery:
+        for index, addr in enumerate(router_addrs):
+            nursery.start_soon(admit, index, addr)
+    routers = [admitted[i] for i in sorted(admitted)]
+    if not routers:
         raise RuntimeError("no router admitted this member:\n  " + "\n  ".join(failures))
-    return admitted
+    if reserve:
+        for index, router in enumerate(routers):
+            try:
+                routers[index] = replace(router, reservation=await reserve_relay(host, ID.from_base58(router.peer_id)))
+                break
+            except Exception as err:  # noqa: BLE001 - the next admitted router is asked
+                failures.append(f"{router.addr}: {err}")
+        else:
+            raise RuntimeError("no router reserved a relay slot for this member:\n  " + "\n  ".join(failures))
+    return routers
 
 
 async def _authenticate_router(host: IHost, mesh: "AgentMesh", peer_id: ID) -> VerifiedBiscuit:

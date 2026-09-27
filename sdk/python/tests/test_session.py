@@ -24,6 +24,7 @@ import biscuit_auth as ba
 import multiaddr
 import pytest
 import trio
+import trio.testing
 from libp2p import new_host
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.custom_types import TProtocol
@@ -256,6 +257,45 @@ def test_join_admits_every_router_and_reserves_on_the_first():
             nursery.cancel_scope.cancel()
 
     trio.run(with_timeout, 30, main)
+
+
+def test_a_router_nobody_answers_costs_join_one_dial_timeout(monkeypatch):
+    """The control plane may list a router this member cannot reach (a
+    public address a network policy drops). Every router is dialed at once,
+    so join ends at DIAL_TIMEOUT whatever the dark one's position, and the
+    reservation still goes to the first *admitted* router of the list."""
+    from agent_mesh import session as session_module
+    from agent_mesh.host import DIAL_TIMEOUT
+
+    dark = "/ip4/203.0.113.7/tcp/4501/p2p/12D3KooWGvdRCJLYATauVWfsieF2j3a2wXZoEQJUS2MsvRdDtgLM"
+    router_a = "/ip4/10.0.0.1/tcp/4501/p2p/12D3KooWG1pA6goegCncqwbZLSr8pnjUZ6JMAAe6SmnHTgUNCk88"
+    router_b = "/ip4/10.0.0.2/tcp/4501/p2p/12D3KooWBTdQ3QQZztZFaxQSTzJx5ZSbpgM8zfs43VYzBXAFkdZm"
+    reserved = []
+
+    class Host:
+        async def connect(self, info):
+            if str(info.addrs[0]).startswith("/ip4/203.0.113.7/"):
+                await trio.sleep_forever()
+
+    async def authenticated(host, mesh, peer_id):
+        return f"credential of {peer_id}"
+
+    async def reserve(host, peer_id):
+        reserved.append(str(peer_id))
+        return circuit.Reservation()
+
+    monkeypatch.setattr(session_module, "_authenticate_router", authenticated)
+    monkeypatch.setattr(session_module, "reserve_relay", reserve)
+
+    async def main():
+        started = trio.current_time()
+        routers = await session_module._admit(Host(), None, [multiaddr.Multiaddr(a) for a in (dark, router_a, router_b)], reserve=True)
+        assert trio.current_time() - started == pytest.approx(DIAL_TIMEOUT)
+        assert [r.peer_id[-6:] for r in routers] == ["UNCk88", "AFkdZm"]
+        assert [r.reservation is not None for r in routers] == [True, False]
+        assert [p[-6:] for p in reserved] == ["UNCk88"]
+
+    trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
 
 
 def test_a_dropped_router_connection_is_reserved_again_before_the_ttl():

@@ -24,7 +24,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from typing import Iterable, Literal
+from typing import Callable, Iterable, Literal
 
 import multiaddr
 import trio
@@ -76,25 +76,6 @@ def parse_service_target(target: str) -> tuple[str, str]:
     return scheme, name
 
 
-async def _get_providers(host: IHost, peer_id: ID, key: bytes) -> kad.Message | None:
-    try:
-        stream = await open_stream(host, peer_id, DHT_PROTOCOL, _QUERY_TIMEOUT)
-    except Exception as err:  # noqa: BLE001 - a peer that does not serve the DHT is skipped
-        logger.debug("dht: %s does not answer %s: %s", peer_id, DHT_PROTOCOL, err)
-        return None
-    try:
-        with trio.fail_after(_QUERY_TIMEOUT):
-            req = kad.Message(type=kad.Message.GET_PROVIDERS, key=key)
-            await stream.write(encode_varint_prefixed(req.SerializeToString()))
-            resp = kad.Message.FromString(await read_varint_prefixed_bytes(stream))
-    except Exception as err:  # noqa: BLE001
-        logger.debug("dht: query to %s failed: %s", peer_id, err)
-        return None
-    finally:
-        await stream.close()
-    return resp if resp.type == kad.Message.GET_PROVIDERS else None
-
-
 def _peer_infos(peers: Iterable[kad.Message.Peer]) -> list[PeerInfo]:
     out = []
     for p in peers:
@@ -131,71 +112,86 @@ async def find_peer(host: IHost, target: ID, seeds: Iterable[ID]) -> list[multia
     learns them: a router answers FIND_NODE for a peer it is connected to with
     that peer and its addresses, its relayed one included, and names the
     routers closer to it otherwise. Empty when nobody knows the peer."""
-    asked: set[ID] = set()
-    frontier: list[ID] = list(seeds)
-    self_id = host.get_id()
-    req = kad.Message(type=kad.Message.FIND_NODE, key=target.to_bytes())
-    for _ in range(_MAX_ROUNDS):
-        batch = [p for p in frontier if p not in asked and p != self_id][:_MAX_PEERS_PER_ROUND]
-        if not batch:
-            break
-        frontier = []
-        for peer_id in batch:
-            asked.add(peer_id)
-            resp = await _query(host, peer_id, req)
-            if resp is None:
-                continue
-            for info in _peer_infos(resp.closerPeers):
-                if info.peer_id == target and info.addrs:
-                    return list(info.addrs)
-                if info.peer_id in asked or info.peer_id in (self_id, target):
-                    continue
-                if info.peer_id not in host.get_connected_peers():
-                    try:
-                        await dial(host, info)
-                    except Exception:  # noqa: BLE001 - unreachable closer peers are skipped
-                        asked.add(info.peer_id)
-                        continue
-                frontier.append(info.peer_id)
-    return []
+    found: list[multiaddr.Multiaddr] = []
+
+    def take(resp: kad.Message) -> bool:
+        for info in _peer_infos(resp.closerPeers):
+            if info.peer_id == target and info.addrs:
+                found.extend(info.addrs)
+                return True
+        return False
+
+    await _walk(host, kad.Message(type=kad.Message.FIND_NODE, key=target.to_bytes()), seeds, take, skip={target})
+    return found
 
 
 async def find_providers(host: IHost, key: bytes, seeds: Iterable[ID], limit: int = 20) -> list[DiscoveredProvider]:
     """Asks the seed peers (the routers we are connected to) for providers of
     key and follows the closer peers they name for a few rounds."""
     found: dict[str, DiscoveredProvider] = {}
+    self_id = host.get_id()
+
+    def take(resp: kad.Message) -> bool:
+        for info in _peer_infos(resp.providerPeers):
+            if info.peer_id == self_id:
+                continue
+            entry = found.setdefault(str(info.peer_id), DiscoveredProvider(peer_id=str(info.peer_id)))
+            for ma in info.addrs:
+                if str(ma) not in entry.addrs:
+                    entry.addrs.append(str(ma))
+        return bool(found)
+
+    await _walk(host, kad.Message(type=kad.Message.GET_PROVIDERS, key=key), seeds, take)
+    return list(found.values())[:limit]
+
+
+async def _walk(host: IHost, req: kad.Message, seeds: Iterable[ID], take: Callable[[kad.Message], bool], skip: frozenset[ID] | set[ID] = frozenset()) -> None:
+    """The Kademlia walk both lookups share. A round asks its peers at once
+    and ends when an answer satisfies `take`; only otherwise are the closer
+    peers the answers named dialed, at once as well. A round thus costs one
+    query and one dial timeout, not one per peer: right after a rollout the
+    routers' tables still name the pods it replaced, and the control plane
+    may list a router this member cannot reach. A peer that did not answer
+    its dial is not dialed again."""
+    self_id = host.get_id()
     asked: set[ID] = set()
     frontier: list[ID] = list(seeds)
-    self_id = host.get_id()
     for _ in range(_MAX_ROUNDS):
         batch = [p for p in frontier if p not in asked and p != self_id][:_MAX_PEERS_PER_ROUND]
         if not batch:
-            break
-        frontier = []
-        for peer_id in batch:
-            asked.add(peer_id)
-            resp = await _get_providers(host, peer_id, key)
-            if resp is None:
-                continue
-            for info in _peer_infos(resp.providerPeers):
-                if info.peer_id == self_id:
-                    continue
-                entry = found.setdefault(str(info.peer_id), DiscoveredProvider(peer_id=str(info.peer_id)))
-                for ma in info.addrs:
-                    if str(ma) not in entry.addrs:
-                        entry.addrs.append(str(ma))
-                if len(found) >= limit:
-                    return list(found.values())
+            return
+        asked.update(batch)
+        answers: list[kad.Message] = []
+
+        async def ask(peer_id: ID) -> None:
+            resp = await _query(host, peer_id, req)
+            if resp is not None:
+                answers.append(resp)
+
+        async with trio.open_nursery() as nursery:
+            for peer_id in batch:
+                nursery.start_soon(ask, peer_id)
+        # Every answer is taken: the providers each router knows add up.
+        if any([take(resp) for resp in answers]):
+            return
+
+        closer: dict[ID, PeerInfo] = {}
+        for resp in answers:
             for info in _peer_infos(resp.closerPeers):
-                if info.peer_id in asked or info.peer_id == self_id:
-                    continue
-                if info.peer_id not in host.get_connected_peers():
-                    try:
-                        await dial(host, info)
-                    except Exception:  # noqa: BLE001 - unreachable closer peers are skipped
-                        asked.add(info.peer_id)
-                        continue
-                frontier.append(info.peer_id)
-        if found:
-            break
-    return list(found.values())
+                if info.peer_id not in asked and info.peer_id != self_id and info.peer_id not in skip:
+                    closer.setdefault(info.peer_id, info)
+        connected = set(host.get_connected_peers())
+        frontier = [p for p in closer if p in connected]
+
+        async def reach(info: PeerInfo) -> None:
+            try:
+                await dial(host, info)
+            except Exception:  # noqa: BLE001 - unreachable closer peers are skipped
+                asked.add(info.peer_id)
+                return
+            frontier.append(info.peer_id)
+
+        async with trio.open_nursery() as nursery:
+            for peer_id, info in closer.items():
+                if peer_id not in connected:
+                    nursery.start_soon(reach, info)
