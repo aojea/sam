@@ -122,6 +122,24 @@ def _dial_websockets_by_name(transport: WebsocketTransport) -> None:
     transport.dial = dial  # type: ignore[method-assign]
 
 
+# sam-node's swarm dial timeout. py-libp2p has none of its own: a SYN to an
+# address nobody answers waits on the kernel, about two minutes, and is then
+# retried, and a provider record can name a pod a rollout just replaced. A
+# router the control plane lists may be unreachable from where a member runs
+# (a public address a network policy drops), and the routers' DHT names it as
+# a closer peer to every lookup.
+DIAL_TIMEOUT = 15.0
+
+
+async def dial(host: IHost, info: PeerInfo) -> None:
+    """host.connect, bounded by DIAL_TIMEOUT."""
+    try:
+        with trio.fail_after(DIAL_TIMEOUT):
+            await host.connect(info)
+    except trio.TooSlowError:
+        raise ConnectionError(f"no connection to {info.peer_id} within {DIAL_TIMEOUT:g}s") from None
+
+
 async def open_stream(host: IHost, peer_id: ID, protocol: TProtocol, timeout: float) -> INetStream:
     """host.new_stream bounded by a timeout. py-libp2p bounds the protocol
     negotiation but not the muxer, and a muxer that cannot open a stream
@@ -133,7 +151,9 @@ async def open_stream(host: IHost, peer_id: ID, protocol: TProtocol, timeout: fl
         with trio.fail_after(timeout):
             return await host.new_stream(peer_id, [protocol])
     except trio.TooSlowError:
-        with trio.CancelScope(shield=True):
+        # Closing writes a GO_AWAY on the very connection that stalled; give
+        # it a moment, then let the peer time the socket out on its own.
+        with trio.CancelScope(shield=True), trio.move_on_after(timeout):
             try:
                 await host.disconnect(peer_id)
             except Exception:  # noqa: BLE001 - already gone

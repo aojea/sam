@@ -236,11 +236,13 @@ data:
       attempts=0
       while :; do
         attempts=$((attempts + 1))
-        out=$($program "$@" 2>&1); rc=$?
+        # A program that hangs is a failure to report, not a job to let the deadline kill silently.
+        out=$(timeout -k 5 120 $program "$@" 2>&1); rc=$?
         if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "$want"; then
           PROVIDER=$(printf '%s' "$out" | grep -o 'is served by [^ ]*' | tail -1 | cut -d' ' -f4)
           return 0
         fi
+        [ $rc -eq 124 ] && out="$out (hung for 120s)"
         [ $(( $(date +%s) - stage_start )) -ge 120 ] && fail "$stage" "no answer with '$want' in 120s ($attempts attempts; last: $(printf '%s' "$out" | tail -c 200))"
         sleep 5
       done

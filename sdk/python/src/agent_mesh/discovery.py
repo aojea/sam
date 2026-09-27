@@ -35,7 +35,7 @@ from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.utils.varint import encode_varint_prefixed, read_varint_prefixed_bytes
 
-from .host import open_stream
+from .host import dial, open_stream
 
 logger = logging.getLogger("agent_mesh")
 
@@ -152,8 +152,9 @@ async def find_peer(host: IHost, target: ID, seeds: Iterable[ID]) -> list[multia
                     continue
                 if info.peer_id not in host.get_connected_peers():
                     try:
-                        await host.connect(info)
+                        await dial(host, info)
                     except Exception:  # noqa: BLE001 - unreachable closer peers are skipped
+                        asked.add(info.peer_id)
                         continue
                 frontier.append(info.peer_id)
     return []
@@ -190,8 +191,9 @@ async def find_providers(host: IHost, key: bytes, seeds: Iterable[ID], limit: in
                     continue
                 if info.peer_id not in host.get_connected_peers():
                     try:
-                        await host.connect(info)
+                        await dial(host, info)
                     except Exception:  # noqa: BLE001 - unreachable closer peers are skipped
+                        asked.add(info.peer_id)
                         continue
                 frontier.append(info.peer_id)
         if found:

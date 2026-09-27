@@ -41,7 +41,7 @@ from .auth import AUTH_PROTOCOL, auth_stream_handler, authenticate_with_peer
 from .authorizer import ProviderAuthorizerOptions
 from .biscuit import ROLE_ROUTER, VerifiedBiscuit, require_role
 from .discovery import DiscoveredProvider, find_peer, find_providers, parse_service_target, service_key
-from .host import create_mesh_host, dial_addrs, peer_info
+from .host import create_mesh_host, dial, dial_addrs, peer_info
 from .httpx_transport import MESH_PATH_PREFIX
 from .identity import canonical_peer_id
 from .libp2p_http import (
@@ -82,11 +82,6 @@ DEFAULT_CONTROL_PLANE_SYNC = 15 * 60.0
 FIRST_CONTROL_PLANE_SYNC = 2.0
 DEFAULT_CONTROL_PLANE_SYNC_JITTER = 2.0
 
-# sam-node's swarm dial timeout. py-libp2p has none of its own: a SYN to an
-# address nobody answers waits on the kernel, about two minutes, and is then
-# retried, and a provider record can name a pod a rollout just replaced.
-DIAL_TIMEOUT = 15.0
-
 # How a caller names the peer it wants to reach: a provider `discover` returned,
 # a peer id, or a multiaddr. For a provider or a peer id the SDK dials the
 # addresses the peer advertised and then the relayed path through every router
@@ -98,15 +93,6 @@ Peer = Union[DiscoveredProvider, str, multiaddr.Multiaddr]
 def parse_peer_id(text: str) -> ID:
     """The libp2p peer ID for a string in any encoding libp2p accepts."""
     return ID.from_base58(canonical_peer_id(text))
-
-
-async def dial(host: IHost, info: PeerInfo) -> None:
-    """host.connect, bounded by DIAL_TIMEOUT."""
-    try:
-        with trio.fail_after(DIAL_TIMEOUT):
-            await host.connect(info)
-    except trio.TooSlowError:
-        raise ConnectionError(f"no connection to {info.peer_id} within {DIAL_TIMEOUT:g}s") from None
 
 
 def canonical_peer_ids(ids: Sequence[str]) -> list[str]:
