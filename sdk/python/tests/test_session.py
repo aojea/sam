@@ -235,6 +235,58 @@ def test_join_fails_when_the_relay_refuses_the_reservation():
     trio.run(with_timeout, 30, main)
 
 
+def test_join_admits_every_router_and_reserves_on_the_first():
+    """A peer reserves its relay slot on the first router of its list; a
+    caller reaches it only through that router. So the member authenticates
+    with every router the control plane named and connect() can try each,
+    while one reservation is enough to be reachable."""
+
+    async def main():
+        async with trio.open_nursery() as nursery:
+            events = []
+            router_a, addr_a = await start_router(nursery, events=events)
+            router_b, addr_b = await start_router(nursery, events=events)
+            mesh = AgentMesh.enroll("http://127.0.0.1:1", bootstrap_token="sbt", transport=fake_control_plane([addr_a, addr_b]))
+            async with mesh.join(refresh_lead=0) as session:
+                assert [r.peer_id for r in session.routers] == [str(router_a.get_id()), str(router_b.get_id())]
+                assert [r.reservation is not None for r in session.routers] == [True, False]
+                assert session.relay_addresses == [f"{addr_a}/p2p-circuit/p2p/{mesh.peer_id}"]
+                assert events.count(("auth", mesh.peer_id)) == 2
+                assert events.count(("reserve", mesh.peer_id)) == 1
+            nursery.cancel_scope.cancel()
+
+    trio.run(with_timeout, 30, main)
+
+
+def test_a_dropped_router_connection_is_reserved_again_before_the_ttl():
+    """A router restart takes the reservation with the connection. The member
+    notices within the check interval and reserves again, authenticated
+    anew, long before the TTL would have had it renew."""
+
+    async def wait_for(predicate):
+        while not predicate():
+            await trio.sleep(0.1)
+
+    async def main():
+        async with trio.open_nursery() as nursery:
+            events = []
+            router, addr = await start_router(nursery, ttl=3600, events=events)
+            mesh = AgentMesh.enroll("http://127.0.0.1:1", bootstrap_token="sbt", transport=fake_control_plane([addr]))
+            async with mesh.join(refresh_lead=0, reservation_check_interval=0.5) as session:
+                member = session.host.get_id()
+                assert events == [("auth", mesh.peer_id), ("reserve", mesh.peer_id)]
+
+                await router.disconnect(member)
+                await wait_for(lambda: member not in router.get_connected_peers())
+                await wait_for(lambda: events.count(("reserve", mesh.peer_id)) >= 2)
+                assert events[2:] == [("auth", mesh.peer_id), ("reserve", mesh.peer_id)]
+                assert member in router.get_connected_peers()
+                assert session.relay_addresses == [f"{addr}/p2p-circuit/p2p/{mesh.peer_id}"]
+            nursery.cancel_scope.cancel()
+
+    trio.run(with_timeout, 60, main)
+
+
 def test_join_renews_the_reservation_and_reauthenticates_after_a_disconnect():
     """go-libp2p's relay drops a reservation when its TTL passes and grants one
     only to a peer authenticated on the current connection. The member renews

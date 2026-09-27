@@ -70,6 +70,11 @@ MIN_REFRESH_DELAY = 2.0
 # go-libp2p's relay grants a reservation for an hour and drops it on expiry;
 # its own clients renew two minutes before that.
 RESERVATION_RENEW_LEAD = 2 * 60.0
+# The relay also drops the reservation when the connection goes, with a
+# router restart or a trimmed connection; this is how long the member is
+# unreachable through that router at most before it notices and reserves
+# again.
+RESERVATION_CHECK_INTERVAL = 30.0
 # sam-node's --control-plane-sync-interval default.
 DEFAULT_POLICY_SYNC = 15 * 60.0
 # sam-node's --control-plane-sync-interval default, and its 2s first pull.
@@ -157,6 +162,7 @@ class MeshSession:
     control_plane_sync_jitter: float = DEFAULT_CONTROL_PLANE_SYNC_JITTER
     reservation_lead: float = RESERVATION_RENEW_LEAD
     reservation_retry: float = DEFAULT_REFRESH_RETRY
+    reservation_check_interval: float = RESERVATION_CHECK_INTERVAL
     _nursery: Optional[trio.Nursery] = field(default=None, repr=False)
     _policy_rules: Optional[list[str]] = field(default=None, repr=False)
     _sync_lock: trio.Lock = field(default_factory=trio.Lock, repr=False)
@@ -373,20 +379,24 @@ class MeshSession:
 
     async def _reservation_loop(self) -> None:
         """Renews the relay reservation on each admitted router before the
-        relay lets it expire. A member whose reservation lapsed still
-        advertises the relayed address, and every dial to it fails with
-        NO_RESERVATION. A router that dropped the connection forgets the
-        admission with it, so that one is dialed and authenticated again
-        before the reservation is asked for."""
+        relay lets it expire, and again as soon as the connection to that
+        router is found gone: the relay drops the reservation with the
+        connection, and a member that kept advertising the relayed address
+        would have every dial to it fail with NO_RESERVATION. A router that
+        dropped the connection forgets the admission with it, so that one is
+        dialed and authenticated again before the reservation is asked for."""
         while True:
             reserved = [r for r in self.routers if r.reservation is not None]
             if not reserved:
                 return
             due = min(r.reservation.expire for r in reserved) - self.reservation_lead - time.time()  # type: ignore[union-attr]
-            await trio.sleep(max(MIN_REFRESH_DELAY, due))
+            await trio.sleep(min(max(MIN_REFRESH_DELAY, due), self.reservation_check_interval))
             failed = False
             for i, r in enumerate(self.routers):
-                if r.reservation is None or r.reservation.expire - time.time() > self.reservation_lead + MIN_REFRESH_DELAY:
+                if r.reservation is None:
+                    continue
+                expiring = r.reservation.expire - time.time() <= self.reservation_lead + MIN_REFRESH_DELAY
+                if not expiring and ID.from_base58(r.peer_id) in self.host.get_connected_peers():
                     continue
                 try:
                     self.routers[i] = await _reserve_again(self.host, self.mesh, r)
@@ -510,6 +520,7 @@ async def join_mesh(
     refresh_lead: float = DEFAULT_REFRESH_LEAD,
     refresh_retry: float = DEFAULT_REFRESH_RETRY,
     reservation_lead: float = RESERVATION_RENEW_LEAD,
+    reservation_check_interval: float = RESERVATION_CHECK_INTERVAL,
     policy_sync_interval: float = DEFAULT_POLICY_SYNC,
     control_plane_sync_interval: float = DEFAULT_CONTROL_PLANE_SYNC,
     control_plane_sync_jitter: float = DEFAULT_CONTROL_PLANE_SYNC_JITTER,
@@ -555,6 +566,7 @@ async def join_mesh(
                     control_plane_sync_jitter=control_plane_sync_jitter,
                     reservation_lead=reservation_lead,
                     reservation_retry=refresh_retry,
+                    reservation_check_interval=reservation_check_interval,
                     _nursery=nursery,
                 )
                 nursery.start_soon(session._events_loop, pubsub)  # noqa: SLF001
@@ -572,6 +584,11 @@ async def join_mesh(
 
 
 async def _admit(host: IHost, mesh: "AgentMesh", router_addrs: list[multiaddr.Multiaddr], reserve: bool) -> list[AdmittedRouter]:
+    """Authenticates with every router the control plane named, as the JS SDK
+    and sam-node do, and reserves a relay slot on the first that admits us.
+    A peer reserves on the first router of its own list, so a caller that
+    only knew one router could not reach a peer whose list started
+    elsewhere; `connect` tries the relayed path through each of these."""
     admitted: list[AdmittedRouter] = []
     failures: list[str] = []
     for addr in router_addrs:
@@ -579,10 +596,8 @@ async def _admit(host: IHost, mesh: "AgentMesh", router_addrs: list[multiaddr.Mu
             info = await peer_info(addr)
             await dial(host, info)
             credential = await _authenticate_router(host, mesh, info.peer_id)
-            reservation = await reserve_relay(host, info.peer_id) if reserve else None
+            reservation = await reserve_relay(host, info.peer_id) if reserve and not any(r.reservation for r in admitted) else None
             admitted.append(AdmittedRouter(peer_id=str(info.peer_id), addr=addr, credential=credential, reservation=reservation))
-            if reserve:
-                break
         except Exception as err:  # noqa: BLE001 - every router is tried, the summary names each failure
             failures.append(f"{addr}: {err}")
     if not admitted:
