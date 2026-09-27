@@ -30,9 +30,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -66,8 +68,14 @@ type sdkMesh struct {
 	cpPub      ed25519.PublicKey
 	routerAddr string
 	routerPeer string
-	samNode    *backgroundNode
-	nodeAPI    string
+	// routerAddrs lists every router, in the order the control plane hands them
+	// out (by peer ID); routerAddr is the first, where members reserve.
+	routerAddrs []string
+	samNode     *backgroundNode
+	nodeAPI     string
+	// egressSeen records what sdkMeshEgressHost received: the node presents
+	// sdkMeshEgressCredential to it and nothing of the caller.
+	egressSeen func() []*http.Request
 	// mintToken mints an OIDC token the control plane accepts, as a platform's
 	// workload identity token would be.
 	mintToken func(map[string]interface{}) string
@@ -78,6 +86,13 @@ type sdkMesh struct {
 // case of internal/node/labels_gate_test.go, so the caller-side check can be
 // run against a real credential from every implementation.
 var sdkMeshLabels = map[string]string{"region": "na-us", "team": "platform"}
+
+// The egress destination the sam-node serves, assigned to it by label, and
+// the credential the platform delivered to the node's host for it.
+const (
+	sdkMeshEgressHost       = "api.example.test"
+	sdkMeshEgressCredential = "ghp_node_secret"
+)
 
 // sdkMeshLabelRequirements are the caller requirements the matrix runs against
 // sdkMeshLabels: one pair of two matches, so a requirement is met by any of its
@@ -101,6 +116,8 @@ func startSDKMesh(t *testing.T) *sdkMesh {
 	t.Helper()
 	root := repoRoot(t)
 	oidcURL, mintToken := startCustomMockOIDC(t)
+	var egressMu sync.Mutex
+	var egressSeen []*http.Request
 
 	store, err := storage.NewSQLStore("sqlite", filepath.Join(t.TempDir(), "cp.db"))
 	if err != nil {
@@ -139,7 +156,15 @@ func startSDKMesh(t *testing.T) *sdkMesh {
 	// user mock-user. Every member holds the node role, which may reach any
 	// service on any target and declare the two labels the matrix uses; the
 	// SDK members get it from their bootstrap token and the node from its
-	// binding.
+	// binding. The node alone carries team=platform, which is what selects it
+	// to serve the egress destination.
+	egress := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		egressMu.Lock()
+		egressSeen = append(egressSeen, r.Clone(context.Background()))
+		egressMu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(egress.Close)
 	policyFile := filepath.Join(t.TempDir(), "policy.yaml")
 	policy := fmt.Sprintf(`roles:
   - name: %s
@@ -154,13 +179,25 @@ bindings:
     members: ["group:routers"]
   - role: %s
     members: ["user:mock-user"]
-`, api.RoleRouter, api.RoleNode, api.RoleRouter, api.RoleNode)
+egress:
+  - name: %s
+    target_url: %q
+    credential: github
+    served_by: ["team=platform"]
+`, api.RoleRouter, api.RoleNode, api.RoleRouter, api.RoleNode, sdkMeshEgressHost, egress.URL)
 	if err := os.WriteFile(policyFile, []byte(policy), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	injectPolicyYAML(t, cpPort, sdkMeshAdminToken, policyFile)
 
-	routerAddr, _ := startRouter(t, t.TempDir(), cpPort, mintToken, "router")
+	// Two routers, as the testnets run several: a member authenticates with
+	// every one and reserves a relay slot on the first the control plane
+	// lists, so a caller finds a peer's reservation where it looks first.
+	routerA, _ := startRouter(t, t.TempDir(), cpPort, mintToken, "router-a")
+	routerB, _ := startRouter(t, t.TempDir(), cpPort, mintToken, "router-b")
+	routerAddrs := []string{routerA, routerB}
+	sort.Slice(routerAddrs, func(i, j int) bool { return extractPeerID(routerAddrs[i]) < extractPeerID(routerAddrs[j]) })
+	routerAddr := routerAddrs[0]
 
 	cpPriv, cpPub, err := store.GetCurrentKey(context.Background())
 	if err != nil {
@@ -176,6 +213,13 @@ bindings:
 	if err := os.MkdirAll(nodeHome, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	secrets := filepath.Join(nodeHome, "secrets")
+	if err := os.MkdirAll(secrets, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secrets, "github"), []byte(sdkMeshEgressCredential+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	samNode := launchNode(t, nodeBin,
 		append(os.Environ(), "HOME="+nodeHome, "XDG_CONFIG_HOME="+filepath.Join(nodeHome, ".config")),
 		nodeHome, "run",
@@ -185,22 +229,29 @@ bindings:
 		"--api-token-path", tokenPath(t, "node-token"),
 		"--discovery-interval", "100ms",
 		"--config", writeNodeConfig(t, nodeHome, sdkMeshLabels, svcDecl{Type: "mcp", Name: "calc", TargetURL: backend.URL}),
+		"--secrets-dir", secrets,
 		"--log-level", "debug",
 	)
 	return &sdkMesh{
-		root:       root,
-		store:      store,
-		publisher:  publisher,
-		baseURL:    baseURL,
-		adminToken: sdkMeshAdminToken,
-		cpPort:     cpPort,
-		cpPriv:     cpPriv,
-		cpPub:      cpPub,
-		routerAddr: routerAddr,
-		routerPeer: extractPeerID(routerAddr),
-		samNode:    samNode,
-		nodeAPI:    samNode.waitForAPI(t),
-		mintToken:  mintToken,
+		root:        root,
+		store:       store,
+		publisher:   publisher,
+		baseURL:     baseURL,
+		adminToken:  sdkMeshAdminToken,
+		cpPort:      cpPort,
+		cpPriv:      cpPriv,
+		cpPub:       cpPub,
+		routerAddr:  routerAddr,
+		routerPeer:  extractPeerID(routerAddr),
+		routerAddrs: routerAddrs,
+		samNode:     samNode,
+		nodeAPI:     samNode.waitForAPI(t),
+		egressSeen: func() []*http.Request {
+			egressMu.Lock()
+			defer egressMu.Unlock()
+			return append([]*http.Request(nil), egressSeen...)
+		},
+		mintToken: mintToken,
 	}
 }
 
@@ -299,7 +350,7 @@ var sdkMemberLaunchers = []sdkRunner{
 func TestNativeSDKsMesh(t *testing.T) {
 	mesh := startSDKMesh(t)
 	root, baseURL, adminToken, cpPort := mesh.root, mesh.baseURL, mesh.adminToken, mesh.cpPort
-	routerAddr, routerPeer, cpPriv, cpPub := mesh.routerAddr, mesh.routerPeer, mesh.cpPriv, mesh.cpPub
+	routerAddr, cpPriv, cpPub := mesh.routerAddr, mesh.cpPriv, mesh.cpPub
 	store, publisher, samNode, nodeAPI := mesh.store, mesh.publisher, mesh.samNode, mesh.nodeAPI
 	const serviceName = "calc"
 	ctx := context.Background()
@@ -313,7 +364,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 			t.Logf("%s SDK skipped: %s", launcher.name, skip)
 			continue
 		}
-		members = append(members, startSDKMember(t, launcher.name, cmd, root, baseURL, adminToken, routerAddr, routerPeer))
+		members = append(members, startSDKMember(t, launcher.name, cmd, root, baseURL, adminToken, mesh.routerAddrs))
 	}
 	if len(members) == 0 {
 		t.Skip("no SDK toolchain available; see sdk/README.md")
@@ -664,8 +715,9 @@ func TestNativeSDKsMesh(t *testing.T) {
 	}
 }
 
-func startSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, adminToken, routerAddr, routerPeer string) *sdkMember {
+func startSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, adminToken string, routerAddrs []string) *sdkMember {
 	t.Helper()
+	routerAddr, routerPeer := routerAddrs[0], extractPeerID(routerAddrs[0])
 	tokenPath := filepath.Join(t.TempDir(), "bootstrap.token")
 	if err := os.WriteFile(tokenPath, []byte(mintBootstrapToken(t, baseURL, adminToken)+"\n"), 0o600); err != nil {
 		t.Fatalf("failed to write bootstrap token: %v", err)
@@ -708,11 +760,23 @@ func startSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, adm
 	if line := m.readLine(t, 20*time.Second); json.Unmarshal(line, &m.report) != nil {
 		t.Fatalf("%s member printed no join report, got: %q", name, line)
 	}
-	if len(m.report.Routers) != 1 || m.report.Routers[0].PeerID != routerPeer {
-		t.Fatalf("%s report routers %+v, want the router %s", name, m.report.Routers, routerPeer)
+	// Every router the control plane named admitted the member, in the
+	// control plane's order: a peer reserves on the first, and a caller that
+	// knew only its own first router could not reach a peer whose list
+	// started elsewhere.
+	var admitted []string
+	for _, r := range m.report.Routers {
+		admitted = append(admitted, r.PeerID)
+		if !contains(r.Roles, api.RoleRouter) {
+			t.Fatalf("%s: router %s credential roles %v lack %s", name, r.PeerID, r.Roles, api.RoleRouter)
+		}
 	}
-	if !contains(m.report.Routers[0].Roles, api.RoleRouter) {
-		t.Fatalf("%s: router credential roles %v lack %s", name, m.report.Routers[0].Roles, api.RoleRouter)
+	var want []string
+	for _, a := range routerAddrs {
+		want = append(want, extractPeerID(a))
+	}
+	if !reflect.DeepEqual(admitted, want) {
+		t.Fatalf("%s report routers %v, want every router the control plane listed %v", name, admitted, want)
 	}
 	if _, err := peer.Decode(m.report.PeerID); err != nil {
 		t.Fatalf("%s report peer_id %q: %v", name, m.report.PeerID, err)
@@ -722,7 +786,7 @@ func startSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, adm
 	}
 	for _, a := range m.report.RelayAddresses {
 		if !strings.HasPrefix(a, routerAddr) || !strings.HasSuffix(a, "/p2p-circuit/p2p/"+m.report.PeerID) {
-			t.Fatalf("%s relay address %s is not <router>/p2p-circuit/p2p/<self> for router %s", name, a, routerAddr)
+			t.Fatalf("%s relay address %s is not <router>/p2p-circuit/p2p/<self> for the first router %s (%s)", name, a, routerPeer, routerAddr)
 		}
 	}
 	return m

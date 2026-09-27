@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -191,6 +192,33 @@ func TestNativeSDKExamples(t *testing.T) {
 			}
 			if !strings.Contains(card, caller) {
 				t.Fatalf("a2a card %q does not name the verified caller %s", card, caller)
+			}
+
+			// An egress destination is a service of the node that serves it,
+			// found by name like any other; the destination sees the node's
+			// credential and nothing of the caller.
+			egressPath := "/repos/acme/" + l.name
+			out = runExample(t, mesh.root, l, withoutToken, "call", "egress://"+sdkMeshEgressHost, egressPath)
+			if got := expectLine(t, out, "egress://"+sdkMeshEgressHost+" is served by "); got != mesh.samNode.peerID.String() {
+				t.Fatalf("egress://%s is served by %s, want the sam-node %s", sdkMeshEgressHost, got, mesh.samNode.peerID)
+			}
+			expectLine(t, out, "204 ")
+			var reached *http.Request
+			for _, r := range mesh.egressSeen() {
+				if r.URL.Path == egressPath {
+					reached = r
+				}
+			}
+			if reached == nil {
+				t.Fatalf("the destination never saw %s", egressPath)
+			}
+			if got := reached.Header.Get("Authorization"); got != "Bearer "+sdkMeshEgressCredential {
+				t.Fatalf("the destination saw Authorization %q, want the node's credential", got)
+			}
+			for name := range reached.Header {
+				if strings.HasPrefix(name, "X-Sam-") || strings.HasPrefix(name, "X-Forwarded-") || name == api.HeaderPeerID {
+					t.Fatalf("the destination saw %s", name)
+				}
 			}
 
 			// The state directory is the same layout in every implementation:
