@@ -102,6 +102,15 @@ updates:
       interval: "weekly"
     cooldown:
       default-days: 7
+    # A new Python or Node release is a deliberate move, not a digest
+    # refresh: the SDK images track what the SDKs' dependencies build on
+    # (py-libp2p pins coincurve, which has no wheel for a Python released
+    # this year) and Node stays on an LTS line. Digests keep flowing.
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
     groups:
       docker-digests:
         patterns:
