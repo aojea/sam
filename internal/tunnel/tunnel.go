@@ -15,8 +15,9 @@
 // Package tunnel publishes a local HTTP listener on a public https URL
 // through a third-party connector, so devices that cannot route to the host
 // (a phone on cellular, a laptop on another network) can still enroll and
-// join the mesh. Providers wrap external programs; the mesh only learns the
-// resulting URL, which it advertises exactly like a configured external URL.
+// join the mesh. Providers wrap external programs, or name a forwarder the
+// hosting platform already runs; the mesh only learns the resulting URL,
+// which it advertises exactly like a configured external URL.
 package tunnel
 
 import (
@@ -49,6 +50,7 @@ type Provider interface {
 
 var providers = map[string]func() Provider{
 	"cloudflare": func() Provider { return &Cloudflare{} },
+	"codespaces": func() Provider { return &Codespaces{} },
 }
 
 // Names lists the registered providers.
