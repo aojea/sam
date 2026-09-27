@@ -104,6 +104,8 @@ async def _handle(session: MeshSession, command: dict) -> dict:
             return {"cmd": cmd, "ok": True, "is_error": result.is_error, "text": result.text}
         if cmd == "peers":
             return {"cmd": cmd, "authenticated_peers": sorted(session.authenticated_peers)}
+        if cmd == "routers":
+            return {"cmd": cmd, "ok": True, "routers": [r.peer_id for r in session.routers], "relay_addresses": session.relay_addresses}
         if cmd == "sync":
             result = await session.sync()
             return {
@@ -171,7 +173,11 @@ async def main() -> None:
         poll_interval=0.2,
     )
     # The test drives every pull itself; only gossip events bring one forward.
-    async with mesh.join(listen_addrs=listen, control_plane_sync_interval=0, control_plane_sync_jitter=0) as session:
+    # SAM_SDK_ROUTERS, peer IDs, joins through those routers only, so the test
+    # can put two members on different routers.
+    only = {p for p in os.environ.get("SAM_SDK_ROUTERS", "").split(",") if p}
+    router_addresses = [a for a in mesh.credential.router_addresses if any(a.endswith(f"/p2p/{p}") for p in only)] if only else None
+    async with mesh.join(listen_addrs=listen, router_addresses=router_addresses, control_plane_sync_interval=0, control_plane_sync_jitter=0) as session:
         _emit(
             {
                 "sdk": "python",

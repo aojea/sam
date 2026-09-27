@@ -117,6 +117,8 @@ async function handle(session: MeshSession, command: Command): Promise<unknown> 
       }
       case "peers":
         return { cmd: "peers", authenticated_peers: [...session.authenticatedPeers.keys()].sort() };
+      case "routers":
+        return { cmd: "routers", ok: true, routers: session.routers.map((r) => r.peerId), relay_addresses: session.relayAddresses.map((ma) => ma.toString()) };
       case "sync": {
         const result = await session.sync();
         return {
@@ -188,7 +190,17 @@ async function main(): Promise<void> {
     ...(Object.keys(labels).length > 0 ? { labels } : {}),
   });
   // The test drives every pull itself; only gossip events bring one forward.
-  const session = await mesh.join({ listenAddrs, signal: AbortSignal.timeout(20_000), controlPlaneSyncIntervalMs: 0, controlPlaneSyncJitterMs: 0 });
+  // SAM_SDK_ROUTERS, peer IDs, joins through those routers only, so the test
+  // can put two members on different routers.
+  const only = new Set((process.env.SAM_SDK_ROUTERS ?? "").split(",").filter((id) => id !== ""));
+  const routerAddresses = only.size === 0 ? undefined : mesh.credential.routerAddresses.filter((a) => [...only].some((id) => a.endsWith(`/p2p/${id}`)));
+  const session = await mesh.join({
+    listenAddrs,
+    ...(routerAddresses !== undefined ? { routerAddresses } : {}),
+    signal: AbortSignal.timeout(20_000),
+    controlPlaneSyncIntervalMs: 0,
+    controlPlaneSyncJitterMs: 0,
+  });
 
   emit({
     sdk: "js",

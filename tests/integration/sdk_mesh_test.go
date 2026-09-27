@@ -715,20 +715,149 @@ func TestNativeSDKsMesh(t *testing.T) {
 	}
 }
 
+// TestNativeSDKsAcrossRouters is the datapath between two members that joined
+// through different routers: one member per SDK on router A and one on router
+// B, none with an address of its own, so the relayed path is the only one.
+// Every member on one router calls the agent of every member on the other by
+// peer ID, over /libp2p-http, and authenticates with it. Which router a peer
+// happened to reserve on must not decide whether it can be reached; the
+// caller finds the peer through the routers and is admitted by the one that
+// relays for it on the way.
+func TestNativeSDKsAcrossRouters(t *testing.T) {
+	mesh := startSDKMesh(t)
+	if len(mesh.routerAddrs) < 2 {
+		t.Fatalf("the fixture runs %d router(s), want two", len(mesh.routerAddrs))
+	}
+
+	type placed struct {
+		*sdkMember
+		router string
+	}
+	var members []placed
+	for _, launcher := range sdkMemberLaunchers {
+		for _, routerAddr := range mesh.routerAddrs {
+			cmd, skip := launcher.cmd(mesh.root)
+			if skip != "" {
+				t.Logf("%s SDK skipped: %s", launcher.name, skip)
+				break
+			}
+			router := extractPeerID(routerAddr)
+			m := launchSDKMember(t, launcher.name+"@"+router[len(router)-6:], cmd, mesh.root, mesh.baseURL, mesh.adminToken, "SAM_SDK_ROUTERS="+router)
+			if got := routerIDs(m.report); !reflect.DeepEqual(got, []string{router}) {
+				t.Fatalf("%s joined through %v, want %s only", m.name, got, router)
+			}
+			for _, a := range m.report.RelayAddresses {
+				if !strings.HasPrefix(a, routerAddr) {
+					t.Fatalf("%s reserved on %s, want %s", m.name, a, routerAddr)
+				}
+			}
+			if len(m.report.DirectAddresses) != 0 {
+				t.Fatalf("%s listens on %v, want the relayed path to be the only one", m.name, m.report.DirectAddresses)
+			}
+			m.accept(t, "agent")
+			members = append(members, placed{m, router})
+		}
+	}
+	if len(members) == 0 {
+		t.Skip("no SDK toolchain available; see sdk/README.md")
+	}
+	for _, m := range members {
+		waitForPeerOnRouter(t, mesh.cpPort, mesh.adminToken, m.report.PeerID, 5*time.Second)
+	}
+
+	// A pair that talked once stays connected, so only the first contact
+	// between two members has to find its way through the other router.
+	connected := map[[2]string]bool{}
+	for _, caller := range members {
+		for _, agent := range members {
+			if caller.router == agent.router {
+				continue
+			}
+			t.Run(caller.name+"-reaches-"+agent.name, func(t *testing.T) {
+				pair := [2]string{caller.report.PeerID, agent.report.PeerID}
+				if pair[0] > pair[1] {
+					pair[0], pair[1] = pair[1], pair[0]
+				}
+				firstContact := !connected[pair]
+				connected[pair] = true
+
+				// The agent names the verified caller in its answer.
+				res := caller.http(t, agent.report.PeerID, "a2a://agent", "/hello")
+				if res.Status != 200 || !strings.Contains(res.Body, caller.report.PeerID) {
+					t.Fatalf("%s -> %s: %d %s", caller.name, agent.name, res.Status, res.Body)
+				}
+				verified := caller.auth(t, agent.report.PeerID)
+				if verified.PeerID != agent.report.PeerID {
+					t.Fatalf("%s authenticated %s, want %s", caller.name, verified.PeerID, agent.report.PeerID)
+				}
+				// The agent's router admitted the caller on the way and stays admitted.
+				if got := caller.routers(t); firstContact && !contains(got, agent.router) {
+					t.Fatalf("%s admitted routers %v after reaching a peer on %s", caller.name, got, agent.router)
+				}
+			})
+		}
+	}
+	for _, m := range members {
+		m.quit(t)
+	}
+}
+
+// routerIDs lists the routers a join report says admitted the member.
+func routerIDs(report sdkJoinReport) []string {
+	var ids []string
+	for _, r := range report.Routers {
+		ids = append(ids, r.PeerID)
+	}
+	return ids
+}
+
 func startSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, adminToken string, routerAddrs []string) *sdkMember {
 	t.Helper()
 	routerAddr, routerPeer := routerAddrs[0], extractPeerID(routerAddrs[0])
+	m := launchSDKMember(t, name, cmd, root, baseURL, adminToken, "SAM_SDK_LISTEN_ADDRS=/ip4/127.0.0.1/tcp/0")
+	// Every router the control plane named admitted the member, in the
+	// control plane's order: a peer reserves on the first, and a caller that
+	// knew only its own first router could not reach a peer whose list
+	// started elsewhere.
+	var admitted []string
+	for _, r := range m.report.Routers {
+		admitted = append(admitted, r.PeerID)
+		if !contains(r.Roles, api.RoleRouter) {
+			t.Fatalf("%s: router %s credential roles %v lack %s", name, r.PeerID, r.Roles, api.RoleRouter)
+		}
+	}
+	var want []string
+	for _, a := range routerAddrs {
+		want = append(want, extractPeerID(a))
+	}
+	if !reflect.DeepEqual(admitted, want) {
+		t.Fatalf("%s report routers %v, want every router the control plane listed %v", name, admitted, want)
+	}
+	if len(m.report.RelayAddresses) == 0 {
+		t.Fatalf("%s: no relay address, the router did not grant a reservation", name)
+	}
+	for _, a := range m.report.RelayAddresses {
+		if !strings.HasPrefix(a, routerAddr) || !strings.HasSuffix(a, "/p2p-circuit/p2p/"+m.report.PeerID) {
+			t.Fatalf("%s relay address %s is not <router>/p2p-circuit/p2p/<self> for the first router %s (%s)", name, a, routerPeer, routerAddr)
+		}
+	}
+	return m
+}
+
+// launchSDKMember starts a conformance-join runner with a fresh bootstrap
+// token and the labels the matrix uses, plus env, and reads its join report.
+func launchSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, adminToken string, env ...string) *sdkMember {
+	t.Helper()
 	tokenPath := filepath.Join(t.TempDir(), "bootstrap.token")
 	if err := os.WriteFile(tokenPath, []byte(mintBootstrapToken(t, baseURL, adminToken)+"\n"), 0o600); err != nil {
 		t.Fatalf("failed to write bootstrap token: %v", err)
 	}
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(append(os.Environ(),
 		"SAM_CONTROL_PLANE_URL="+baseURL,
 		"SAM_BOOTSTRAP_TOKEN_PATH="+tokenPath,
 		"SAM_SDK_STATE_DIR="+filepath.Join(t.TempDir(), "state"),
-		"SAM_SDK_LISTEN_ADDRS=/ip4/127.0.0.1/tcp/0",
 		"SAM_SDK_LABELS="+labelsEnv(sdkMeshLabels),
-	)
+	), env...)
 	cmd.Dir = root
 	m := &sdkMember{name: name, cmd: cmd, stderr: &bytes.Buffer{}}
 	cmd.Stderr = m.stderr
@@ -760,34 +889,8 @@ func startSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, adm
 	if line := m.readLine(t, 20*time.Second); json.Unmarshal(line, &m.report) != nil {
 		t.Fatalf("%s member printed no join report, got: %q", name, line)
 	}
-	// Every router the control plane named admitted the member, in the
-	// control plane's order: a peer reserves on the first, and a caller that
-	// knew only its own first router could not reach a peer whose list
-	// started elsewhere.
-	var admitted []string
-	for _, r := range m.report.Routers {
-		admitted = append(admitted, r.PeerID)
-		if !contains(r.Roles, api.RoleRouter) {
-			t.Fatalf("%s: router %s credential roles %v lack %s", name, r.PeerID, r.Roles, api.RoleRouter)
-		}
-	}
-	var want []string
-	for _, a := range routerAddrs {
-		want = append(want, extractPeerID(a))
-	}
-	if !reflect.DeepEqual(admitted, want) {
-		t.Fatalf("%s report routers %v, want every router the control plane listed %v", name, admitted, want)
-	}
 	if _, err := peer.Decode(m.report.PeerID); err != nil {
 		t.Fatalf("%s report peer_id %q: %v", name, m.report.PeerID, err)
-	}
-	if len(m.report.RelayAddresses) == 0 {
-		t.Fatalf("%s: no relay address, the router did not grant a reservation", name)
-	}
-	for _, a := range m.report.RelayAddresses {
-		if !strings.HasPrefix(a, routerAddr) || !strings.HasSuffix(a, "/p2p-circuit/p2p/"+m.report.PeerID) {
-			t.Fatalf("%s relay address %s is not <router>/p2p-circuit/p2p/<self> for the first router %s (%s)", name, a, routerPeer, routerAddr)
-		}
 	}
 	return m
 }
@@ -1049,6 +1152,23 @@ func (m *sdkMember) http(t *testing.T, addr, service, path string) sdkHTTPResult
 		t.Fatalf("%s member could not call %s%s at %s: %s", m.name, service, path, addr, res.Error)
 	}
 	return res
+}
+
+// routers asks the member which routers admitted it so far.
+func (m *sdkMember) routers(t *testing.T) []string {
+	t.Helper()
+	var res struct {
+		OK      bool     `json:"ok"`
+		Error   string   `json:"error"`
+		Routers []string `json:"routers"`
+	}
+	if line := m.send(t, map[string]string{"cmd": "routers"}); json.Unmarshal(line, &res) != nil {
+		t.Fatalf("%s member: routers answered %q", m.name, line)
+	}
+	if !res.OK {
+		t.Fatalf("%s member: routers: %s", m.name, res.Error)
+	}
+	return res.Routers
 }
 
 func (m *sdkMember) quit(t *testing.T) {

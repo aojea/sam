@@ -253,6 +253,48 @@ test("a dropped router connection is authenticated and reserved again", async ()
   }
 });
 
+test("a member on one router reaches a member on another", async () => {
+  // The caller joined through router A only and the agent reserved on router
+  // B only; the credential lists both, as the control plane's does. The
+  // caller must not depend on having joined through the agent's router:
+  // it admits B on the way and dials the circuit.
+  const routerB = await createLibp2p({
+    addresses: { listen: ["/ip4/127.0.0.1/tcp/0"] },
+    transports: [tcp()],
+    connectionEncrypters: [tls()],
+    streamMuxers: [yamux()],
+    services: { identify: identify(), relay: circuitRelayServer() },
+  });
+  try {
+    const routerBBiscuit = mint(routerB.peerId.toString(), ROLE_ROUTER);
+    const handshakesB: string[] = [];
+    await routerB.handle(AUTH_PROTOCOL, authStreamHandler({ ownBiscuit: () => routerBBiscuit, trustedKeys: () => [cpKey], onAuthenticated: (p) => handshakesB.push(p) }));
+    const routerBAddr = (routerB.getMultiaddrs()[0] as ReturnType<typeof multiaddr>).toString();
+    const both = [routerAddr, routerBAddr];
+
+    const agent = await AgentMesh.enroll({ controlPlaneUrl: "http://127.0.0.1:1", bootstrapToken: "sbt", fetch: fakeControlPlane(both) });
+    const agentSession = await agent.join({ refreshLeadMs: 0, routerAddresses: [routerBAddr] });
+    const caller = await AgentMesh.enroll({ controlPlaneUrl: "http://127.0.0.1:1", bootstrapToken: "sbt", fetch: fakeControlPlane(both) });
+    const callerSession = await caller.join({ refreshLeadMs: 0, routerAddresses: [routerAddr], reserveRelay: false });
+    try {
+      assert.deepEqual(agentSession.routers.map((r) => r.peerId), [routerB.peerId.toString()]);
+      assert.deepEqual(callerSession.routers.map((r) => r.peerId), [router.peerId.toString()]);
+      assert.deepEqual(handshakesB, [agent.peerId]);
+
+      const verified = await callerSession.authenticate(agent.peerId, AbortSignal.timeout(15_000));
+      assert.equal(verified.peerId, agent.peerId);
+      // Router B admitted the caller on the way and stays admitted.
+      assert.deepEqual(handshakesB, [agent.peerId, caller.peerId]);
+      assert.deepEqual(callerSession.routers.map((r) => r.peerId).sort(), [router.peerId.toString(), routerB.peerId.toString()].sort());
+    } finally {
+      await callerSession.close();
+      await agentSession.close();
+    }
+  } finally {
+    await routerB.stop();
+  }
+});
+
 test("join fails closed when the router is not a router", async () => {
   // A relay whose credential lacks the router role must not admit us to the mesh.
   const impostor = await createLibp2p({

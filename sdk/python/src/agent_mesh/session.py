@@ -40,7 +40,7 @@ from ._proto import sam_pb2 as pb
 from .auth import AUTH_PROTOCOL, auth_stream_handler, authenticate_with_peer
 from .authorizer import ProviderAuthorizerOptions
 from .biscuit import ROLE_ROUTER, VerifiedBiscuit, require_role
-from .discovery import DiscoveredProvider, find_providers, parse_service_target, service_key
+from .discovery import DiscoveredProvider, find_peer, find_providers, parse_service_target, service_key
 from .host import create_mesh_host, dial_addrs, peer_info
 from .httpx_transport import MESH_PATH_PREFIX
 from .identity import canonical_peer_id
@@ -204,7 +204,12 @@ class MeshSession:
 
     async def connect(self, peer: Peer) -> ID:
         """Connects to a peer, see `Peer`, and returns its peer ID. A banned
-        peer is refused."""
+        peer is refused. A peer named by ID that no admitted router relays for
+        is looked up in the routers' DHT, and failing that tried through every
+        router the control plane lists that this member has not joined
+        through; a relay opens a circuit only for a source it authenticated,
+        so each such router is admitted first. Which router each side joined
+        through does not decide whether they can talk."""
         if isinstance(peer, multiaddr.Multiaddr) or (isinstance(peer, str) and peer.startswith("/")):
             return await self._connect_addr(multiaddr.Multiaddr(str(peer)))
         if isinstance(peer, str):
@@ -236,7 +241,75 @@ class MeshSession:
                 return target
             except Exception as err:  # noqa: BLE001 - the next router is tried
                 failures.append(f"via router {r.peer_id}: {err}")
+        for more in (self._routed_addresses, self._unjoined_router_addresses):
+            for ma in await more(target):
+                try:
+                    await self._connect_addr(ma)
+                    return target
+                except Exception as err:  # noqa: BLE001 - the next address is tried
+                    failures.append(f"{ma}: {err}")
         raise ConnectionError(f"cannot reach {target}:\n  " + "\n  ".join(failures))
+
+    async def _unjoined_router_addresses(self, target: ID) -> list[multiaddr.Multiaddr]:
+        """The relayed paths to a peer through the routers the control plane
+        lists that this member has not joined through, each admitted first.
+        The list is the one the credential carries, refreshed by every
+        control plane pull, so a router that came up after join is tried too."""
+        out: list[multiaddr.Multiaddr] = []
+        for text in self.mesh.credential.router_addresses:
+            try:
+                addr = multiaddr.Multiaddr(text)
+                router = info_from_p2p_addr(addr).peer_id
+            except Exception:  # noqa: BLE001 - not a router address
+                continue
+            if router == target or str(router) in self.banned or any(r.peer_id == str(router) for r in self.routers):
+                continue
+            try:
+                admitted = await self._admit_router(addr)
+            except Exception as err:  # noqa: BLE001 - a router that does not admit us is not a path
+                logger.debug("router %s did not admit us: %s", router, err)
+                continue
+            out.append(multiaddr.Multiaddr(f"{admitted.addr}/p2p-circuit/p2p/{target}"))
+        return out
+
+    async def _routed_addresses(self, target: ID) -> list[multiaddr.Multiaddr]:
+        """The addresses the routers' DHT knows for a peer, relayed ones
+        through routers this member has admitted by then: a relay opens a
+        circuit only for a source it authenticated, so a router met this way
+        is dialed and passed the handshake first, and joins the admitted set."""
+        out: list[multiaddr.Multiaddr] = []
+        seeds = [ID.from_base58(r.peer_id) for r in self.routers]
+        for ma in await find_peer(self.host, target, seeds):
+            text = str(ma)
+            if "/p2p-circuit" not in text:
+                out.append(ma if text.endswith(f"/p2p/{target}") else multiaddr.Multiaddr(f"{text}/p2p/{target}"))
+                continue
+            relay_addr = multiaddr.Multiaddr(text[: text.index("/p2p-circuit")])
+            try:
+                relay = info_from_p2p_addr(relay_addr).peer_id
+            except Exception:  # noqa: BLE001 - a circuit address naming no relay is useless
+                continue
+            if str(relay) in self.banned:
+                continue
+            if not any(r.peer_id == str(relay) for r in self.routers):
+                try:
+                    await self._admit_router(relay_addr)
+                except Exception as err:  # noqa: BLE001 - a relay that is not a router of this mesh is not used
+                    logger.debug("router %s named by the DHT did not admit us: %s", relay, err)
+                    continue
+            out.append(multiaddr.Multiaddr(f"{relay_addr}/p2p-circuit/p2p/{target}"))
+        return out
+
+    async def _admit_router(self, addr: multiaddr.Multiaddr) -> AdmittedRouter:
+        """Dials a router, runs the handshake and, its role verified, adds it
+        to the admitted set."""
+        info = await peer_info(addr)
+        await dial(self.host, info)
+        credential = await _authenticate_router(self.host, self.mesh, info.peer_id)
+        router = AdmittedRouter(peer_id=str(info.peer_id), addr=addr, credential=credential)
+        if not any(r.peer_id == router.peer_id for r in self.routers):
+            self.routers.append(router)
+        return router
 
     async def _connect_addr(self, ma: multiaddr.Multiaddr) -> ID:
         """Dials one multiaddr, through a relay when it says `/p2p-circuit`."""
@@ -516,6 +589,7 @@ async def join_mesh(
     mesh: "AgentMesh",
     *,
     listen_addrs: Sequence[str] = (),
+    router_addresses: Optional[Sequence[str]] = None,
     reserve: bool = True,
     refresh_lead: float = DEFAULT_REFRESH_LEAD,
     refresh_retry: float = DEFAULT_REFRESH_RETRY,
@@ -525,10 +599,13 @@ async def join_mesh(
     control_plane_sync_interval: float = DEFAULT_CONTROL_PLANE_SYNC,
     control_plane_sync_jitter: float = DEFAULT_CONTROL_PLANE_SYNC_JITTER,
 ) -> AsyncIterator[MeshSession]:
-    """Implements AgentMesh.join(); lives here to keep mesh.py free of libp2p."""
-    router_addrs = [multiaddr.Multiaddr(a) for a in mesh.credential.router_addresses]
+    """Implements AgentMesh.join(); lives here to keep mesh.py free of libp2p.
+    router_addresses names the routers to join through instead of the ones the
+    credential lists; a peer behind another router is still reached, see
+    MeshSession.connect."""
+    router_addrs = [multiaddr.Multiaddr(a) for a in (mesh.credential.router_addresses if router_addresses is None else router_addresses)]
     if not router_addrs:
-        raise RuntimeError("credential lists no router addresses; the control plane had no active router at enrollment")
+        raise RuntimeError("credential lists no router addresses; the control plane had no active router at enrollment" if router_addresses is None else "router_addresses names no router")
 
     host, listen = create_mesh_host(mesh.identity, listen_addrs)
     authenticated: dict[str, datetime] = {}

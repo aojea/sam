@@ -14,9 +14,10 @@
 
 """Service discovery as sam-node does it (internal/node/service.go): a provider
 record in the mesh DHT under a key derived from the service. The lookup is a
-bounded Kademlia GET_PROVIDERS walk spoken directly on go-libp2p-kad-dht's
-protocol: py-libp2p 0.7's DHT client hardcodes the /ipfs prefix and the mesh
-uses /sam. An SDK member only looks records up; it announces none."""
+bounded Kademlia GET_PROVIDERS walk, and a peer lookup a FIND_NODE one,
+spoken directly on go-libp2p-kad-dht's protocol: py-libp2p's DHT client
+(0.8 included) hardcodes the /ipfs prefix and the mesh uses /sam. An SDK
+member only looks records up; it announces none."""
 
 from __future__ import annotations
 
@@ -103,6 +104,59 @@ def _peer_infos(peers: Iterable[kad.Message.Peer]) -> list[PeerInfo]:
         except Exception:  # noqa: BLE001 - a malformed entry from a peer is dropped, not fatal
             continue
     return out
+
+
+async def _query(host: IHost, peer_id: ID, req: kad.Message) -> kad.Message | None:
+    """One request to a peer's DHT, answered or None: a peer that does not
+    serve the DHT, or does not answer in time, is skipped."""
+    try:
+        stream = await open_stream(host, peer_id, DHT_PROTOCOL, _QUERY_TIMEOUT)
+    except Exception as err:  # noqa: BLE001 - a peer that does not serve the DHT is skipped
+        logger.debug("dht: %s does not answer %s: %s", peer_id, DHT_PROTOCOL, err)
+        return None
+    try:
+        with trio.fail_after(_QUERY_TIMEOUT):
+            await stream.write(encode_varint_prefixed(req.SerializeToString()))
+            resp = kad.Message.FromString(await read_varint_prefixed_bytes(stream))
+    except Exception as err:  # noqa: BLE001
+        logger.debug("dht: query to %s failed: %s", peer_id, err)
+        return None
+    finally:
+        await stream.close()
+    return resp if resp.type == req.type else None
+
+
+async def find_peer(host: IHost, target: ID, seeds: Iterable[ID]) -> list[multiaddr.Multiaddr]:
+    """The addresses the DHT knows for a peer, as go-libp2p-kad-dht's FindPeer
+    learns them: a router answers FIND_NODE for a peer it is connected to with
+    that peer and its addresses, its relayed one included, and names the
+    routers closer to it otherwise. Empty when nobody knows the peer."""
+    asked: set[ID] = set()
+    frontier: list[ID] = list(seeds)
+    self_id = host.get_id()
+    req = kad.Message(type=kad.Message.FIND_NODE, key=target.to_bytes())
+    for _ in range(_MAX_ROUNDS):
+        batch = [p for p in frontier if p not in asked and p != self_id][:_MAX_PEERS_PER_ROUND]
+        if not batch:
+            break
+        frontier = []
+        for peer_id in batch:
+            asked.add(peer_id)
+            resp = await _query(host, peer_id, req)
+            if resp is None:
+                continue
+            for info in _peer_infos(resp.closerPeers):
+                if info.peer_id == target and info.addrs:
+                    return list(info.addrs)
+                if info.peer_id in asked or info.peer_id in (self_id, target):
+                    continue
+                if info.peer_id not in host.get_connected_peers():
+                    try:
+                        await host.connect(info)
+                    except Exception:  # noqa: BLE001 - unreachable closer peers are skipped
+                        continue
+                frontier.append(info.peer_id)
+    return []
 
 
 async def find_providers(host: IHost, key: bytes, seeds: Iterable[ID], limit: int = 20) -> list[DiscoveredProvider]:

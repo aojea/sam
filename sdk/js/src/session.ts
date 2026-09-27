@@ -43,6 +43,13 @@ import { BanSet, GOSSIP_EVENTS_TOPIC, MeshEvent_Type, verifyMeshEvent } from "./
 
 export interface JoinOptions extends MeshHostOptions {
   /**
+   * The routers to join through, `/…/p2p/<router>` multiaddrs, instead of
+   * the ones the credential lists. A peer behind a router not named here is
+   * still reached: connect() finds it through the routers' DHT and
+   * authenticates with the router that relays for it.
+   */
+  routerAddresses?: string[];
+  /**
    * Reserve a relay slot on the first router that admits us, so peers can
    * reach this member through the router. On by default; a member that
    * only calls out can turn it off.
@@ -112,6 +119,8 @@ export interface ToolCallResult {
 }
 
 const DISCOVERY_TIMEOUT_MS = 5_000;
+/** Bounds the DHT walk connect() falls back to for a peer no admitted router relays. */
+const PEER_ROUTING_TIMEOUT_MS = 10_000;
 
 const DEFAULT_REFRESH_LEAD_MS = 60 * 60 * 1000;
 const DEFAULT_REFRESH_RETRY_MS = 30 * 1000;
@@ -213,10 +222,9 @@ export class MeshSession {
    * reservation then still passes the router's check.
    */
   #keepRouterAdmissions(): void {
-    const routers = new Set(this.routers.map((r) => r.peerId));
     this.node.addEventListener("connection:open", (evt) => {
       const conn = evt.detail;
-      if (this.#closed || !routers.has(conn.remotePeer.toString())) {
+      if (this.#closed || !this.routers.some((r) => r.peerId === conn.remotePeer.toString())) {
         return;
       }
       void authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys).catch(() => {});
@@ -260,14 +268,118 @@ export class MeshSession {
   /**
    * Connects to a peer; see Peer for how it is named. Returns the
    * connection, reused if one is already open. A banned peer is refused
-   * here and by the connection gater.
+   * here and by the connection gater. A peer named by ID that no admitted
+   * router relays for is looked up in the routers' DHT, and failing that
+   * tried through every router the control plane lists that this member
+   * has not joined through; a relay opens a circuit only for a source it
+   * authenticated, so each such router is admitted first. Which router each
+   * side joined through does not decide whether they can talk.
    */
-  connect(peer: Peer, signal?: AbortSignal): Promise<Connection> {
+  async connect(peer: Peer, signal?: AbortSignal): Promise<Connection> {
     const { peerId, addrs } = this.dialTargets(peer);
     if (peerId !== undefined && this.banned.has(peerId)) {
-      return Promise.reject(new Error(`peer ${peerId} is banned by the control plane`));
+      throw new Error(`peer ${peerId} is banned by the control plane`);
     }
-    return this.node.dial(addrs, signal !== undefined ? { signal } : {});
+    const options = signal !== undefined ? { signal } : {};
+    try {
+      return await this.node.dial(addrs, options);
+    } catch (err) {
+      if (peerId === undefined || (typeof peer === "string" && peer.startsWith("/")) || isMultiaddr(peer) || signal?.aborted === true) {
+        throw err;
+      }
+      for (const more of [() => this.#routedAddresses(peerId, signal), () => this.#unjoinedRouterAddresses(peerId, signal)]) {
+        const routed = await more();
+        if (routed.length === 0) {
+          continue;
+        }
+        try {
+          return await this.node.dial(routed, options);
+        } catch (routedErr) {
+          err = routedErr;
+        }
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * The relayed paths to a peer through the routers the control plane lists
+   * that this member has not joined through, each admitted first. The list
+   * is the one the credential carries, refreshed by every control plane
+   * pull, so a router that came up after join is tried too.
+   */
+  async #unjoinedRouterAddresses(peerId: string, signal?: AbortSignal): Promise<Multiaddr[]> {
+    const out: Multiaddr[] = [];
+    for (const text of this.mesh.credential.routerAddresses) {
+      let addr: Multiaddr;
+      try {
+        addr = multiaddr(text);
+      } catch {
+        continue;
+      }
+      const router = targetPeerOf(addr);
+      if (router === undefined || router === peerId || this.banned.has(router) || this.routers.some((r) => r.peerId === router)) {
+        continue;
+      }
+      try {
+        out.push((await this.#admitRouter(addr, signal)).addr.encapsulate(`/p2p-circuit/p2p/${peerId}`));
+      } catch {
+        continue;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * The addresses the routers' DHT knows for a peer, its relayed ones
+   * through routers this member has admitted by then: a relay opens a
+   * circuit only for a source it authenticated, so a router met this way is
+   * dialed and passed the handshake first, and joins the admitted set.
+   */
+  async #routedAddresses(peerId: string, signal?: AbortSignal): Promise<Multiaddr[]> {
+    const lookup = signal ?? AbortSignal.timeout(PEER_ROUTING_TIMEOUT_MS);
+    let found: { multiaddrs: Multiaddr[] };
+    try {
+      found = await this.node.peerRouting.findPeer(peerIdFromString(peerId), { signal: lookup });
+    } catch {
+      return [];
+    }
+    const out: Multiaddr[] = [];
+    for (const ma of found.multiaddrs) {
+      const text = ma.toString();
+      const circuit = text.indexOf("/p2p-circuit");
+      if (circuit === -1) {
+        out.push(targetPeerOf(ma) === undefined ? ma.encapsulate(`/p2p/${peerId}`) : ma);
+        continue;
+      }
+      const relayAddr = multiaddr(text.slice(0, circuit));
+      const relay = targetPeerOf(relayAddr);
+      if (relay === undefined || this.banned.has(relay)) {
+        continue;
+      }
+      if (!this.routers.some((r) => r.peerId === relay)) {
+        try {
+          await this.#admitRouter(relayAddr, signal);
+        } catch {
+          continue;
+        }
+      }
+      out.push(relayAddr.encapsulate(`/p2p-circuit/p2p/${peerId}`));
+    }
+    return out;
+  }
+
+  /** Dials a router, runs the handshake and, its role verified, adds it to the admitted set. */
+  async #admitRouter(addr: Multiaddr, signal?: AbortSignal): Promise<AdmittedRouter> {
+    const conn = await this.node.dial(addr, signal !== undefined ? { signal } : {});
+    const credential = await authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys);
+    requireRole(credential, ROLE_ROUTER);
+    const peerId = conn.remotePeer.toString();
+    const router = { peerId, addr: connectedAddress(conn, peerId), credential };
+    if (!this.routers.some((r) => r.peerId === peerId)) {
+      this.routers.push(router);
+    }
+    return router;
   }
 
   /** The addresses connect() dials for a peer, in the order libp2p tries them. */
@@ -599,9 +711,9 @@ export class MeshSession {
 
 /** Implements AgentMesh.join(); lives here to keep mesh.ts free of libp2p. */
 export async function joinMesh(mesh: AgentMesh, options: JoinOptions = {}): Promise<MeshSession> {
-  const routerAddrs = mesh.credential.routerAddresses.map((a) => multiaddr(a));
+  const routerAddrs = (options.routerAddresses ?? mesh.credential.routerAddresses).map((a) => multiaddr(a));
   if (routerAddrs.length === 0) {
-    throw new Error("credential lists no router addresses; the control plane had no active router at enrollment");
+    throw new Error(options.routerAddresses === undefined ? "credential lists no router addresses; the control plane had no active router at enrollment" : "routerAddresses names no router");
   }
 
   const banned = new BanSet();
