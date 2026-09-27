@@ -88,8 +88,10 @@ so `sam-one` tells you in its log, after a few seconds:
 WARN  tunnel  GitHub answers for https://octocat-sam-abc123-8080.app.github.dev: port 8080 is private, so only your own browser can open it. To let devices enroll, make it public: PORTS tab -> right-click 8080 -> Port Visibility -> Public (or `gh codespace ports visibility 8080:public -c octocat-sam-abc123`)
 ```
 
-Do that once, in the **PORTS** tab next to the terminal. `sam-one` keeps
-checking and confirms:
+Do that once, in the **PORTS** tab next to the terminal, or from your own
+machine with the `gh` command from the message (the codespace image does
+not include `gh`). `sam-one` keeps checking and confirms within a few
+seconds:
 
 ```text
 INFO  tunnel  https://octocat-sam-abc123-8080.app.github.dev answers from the internet; devices can enroll
@@ -143,7 +145,8 @@ Scan the QR code under the banner with the mobile app to enroll a phone.
 In the **develop** configuration, `make testnet` runs `./bin/sam-one`, the
 binary built from your branch. Edit, `make build`, stop the mesh with
 `Ctrl-C` and start it again; the data directory keeps the identity and the
-tokens, so enrolled devices reconnect without doing anything.
+tokens, and enrolled devices reconnect on their own as long as the mesh is
+back within about three minutes.
 
 A program written with a [native SDK](../../guides/native-sdks/) on your
 laptop, or a page using the browser SDK, points at the same URL and the
@@ -157,15 +160,19 @@ CI.
   the URL survives stop and start.
 - **The mesh state.** `.sam-one` in the checkout holds the database (members,
   policy, bootstrap tokens), the router key and the two tokens. Git ignores
-  it, and it survives stops, starts and container rebuilds. Devices keep
-  their identity across restarts and reconnect on their own.
+  it, and it survives stops, starts and container rebuilds, so the router
+  keeps its peer ID and devices keep their identity: nothing enrolls twice.
 - **The idle stop.** A codespace stops after 30 minutes without activity by
   default; you can raise that to four hours in your GitHub settings. While it
-  is stopped nothing answers at the URL and devices retry until it returns.
-  Resume it from [github.com/codespaces](https://github.com/codespaces), the
-  README badge, or by connecting to it with `gh codespace code`.
-- **Port visibility.** Check the PORTS tab after a restart; set it to public
-  again if it reverted.
+  is stopped nothing answers at the URL. A `sam-node` that finds no router
+  for about three minutes exits on purpose, so after a longer stop you start
+  your nodes again (`sam-node run --daemonize`; they need no new
+  enrollment) or run them under a service manager that restarts them.
+  Resume the codespace from [github.com/codespaces](https://github.com/codespaces),
+  the README badge, or by connecting to it with `gh codespace code`, and run
+  `make testnet` again.
+- **Port visibility.** A restart makes the port private again. `sam-one`
+  says so in its log, and you set it to public once more.
 - **Deletion.** A stopped codespace is deleted after 30 days by default. The
   mesh is gone with it, and devices enroll elsewhere.
 - **One mesh per codespace.** The router's relay and discovery state live in

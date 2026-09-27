@@ -27,7 +27,7 @@ downloaded tunnel connector.
 |---|---|---|
 | `--bind-address` | `0.0.0.0` | Host to bind. |
 | `--port` | `0` | TCP port. `0` picks a free one and prints it in the banner. |
-| `--external-url` | | Public URL on which nodes reach this instance, for a reverse proxy or a hosted platform. Can also be set with `SAM_EXTERNAL_URL`. When omitted behind an HTTPS proxy (Cloud Run, Fly.io), `/info` infers the advertised `wss` address from the incoming `Host` / `X-Forwarded-Proto` headers automatically. |
+| `--external-url` | | Public URL on which nodes reach this instance, for a reverse proxy or a hosted platform. Can also be set with `SAM_EXTERNAL_URL`. When omitted behind an HTTPS proxy (Cloud Run, Fly.io, a forwarded Codespaces port), `/info` infers the advertised `wss` address from the incoming `Host` or `X-Forwarded-Host` and `X-Forwarded-Proto` headers automatically. |
 | `--tunnel` | | Publish the port through a tunnel provider and use the resulting URL as the external URL. Providers: `cloudflare` (a free quick tunnel on `*.trycloudflare.com` by default, no account needed) and `codespaces` (the `https` URL GitHub Codespaces assigns to the forwarded port, read from `CODESPACE_NAME` and `GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN`; nothing is started, and the log reports whether the port answers from the internet). |
 | `--tunnel-token-path` | | File containing the tunnel provider authentication token (can also be set with `SAM_TUNNEL_TOKEN`). Use together with `--tunnel <provider> --external-url https://mesh.example.com` for a permanent custom domain. |
 | `--tunnel-install` | `false` | Download the pinned, digest-verified `cloudflared` into `<data-dir>/bin` without asking. Implies acceptance of its license. |
