@@ -89,14 +89,31 @@ export async function createMeshHost(identity: Identity, options: MeshHostOption
   });
 }
 
+/** The relay listener a member holds, to ask for its reservation again. */
+export interface RelayListener {
+  listen(addr: Multiaddr): Promise<void>;
+}
+
 /**
- * Starts listening on a relay after the caller has authenticated with it.
- * js-libp2p reserves a relay slot when it starts listening on
- * `<relay>/p2p-circuit`; a router refuses that until the peer has passed
- * the auth handshake, so the listen cannot be part of the host's config.
- * The transport manager is not on the public Libp2p interface.
+ * Starts listening on a relay after the caller has authenticated with it,
+ * and returns the listener. js-libp2p reserves a relay slot when it starts
+ * listening on `<relay>/p2p-circuit`; a router refuses that until the peer
+ * has passed the auth handshake, so the listen cannot be part of the host's
+ * config. The transport manager is not on the public Libp2p interface.
+ *
+ * The reservation goes with the connection it was made on: a router that
+ * restarts or trims the connection drops it, and js-libp2p does not ask a
+ * configured relay again. Calling `listen` on the returned listener does,
+ * without registering a second listener.
  */
-export async function listenThroughRelay(node: Libp2p, relayAddr: Multiaddr): Promise<void> {
-  const internals = node as unknown as { components: { transportManager: { listen(addrs: Multiaddr[]): Promise<void> } } };
-  await internals.components.transportManager.listen([relayAddr.encapsulate("/p2p-circuit")]);
+export async function listenThroughRelay(node: Libp2p, relayAddr: Multiaddr): Promise<RelayListener> {
+  const internals = node as unknown as { components: { transportManager: { listen(addrs: Multiaddr[]): Promise<void>; getListeners(): RelayListener[] } } };
+  const manager = internals.components.transportManager;
+  const before = new Set(manager.getListeners());
+  await manager.listen([relayAddr.encapsulate("/p2p-circuit")]);
+  const listener = manager.getListeners().find((l) => !before.has(l));
+  if (listener === undefined) {
+    throw new Error("libp2p registered no listener for the relay address");
+  }
+  return listener;
 }

@@ -21,7 +21,7 @@ import { AUTH_HANDLER_OPTIONS, AUTH_PROTOCOL, authenticateWithPeer, authStreamHa
 import { ROLE_ROUTER, requireRole, type VerifiedBiscuit } from "./biscuit.ts";
 import { canonicalPeerId } from "./identity.ts";
 import { isServiceType, parseServiceTarget, serviceCID } from "./discovery.ts";
-import { createMeshHost, listenThroughRelay, type MeshHost, type MeshHostOptions } from "./host.ts";
+import { createMeshHost, listenThroughRelay, type MeshHost, type MeshHostOptions, type RelayListener } from "./host.ts";
 import { openMCPSession, type MCPSession, type MCPSessionOptions } from "./mcp.ts";
 import type { AgentMesh, ControlPlaneSync } from "./mesh.ts";
 import {
@@ -62,6 +62,12 @@ export interface JoinOptions extends MeshHostOptions {
   controlPlaneSyncIntervalMs?: number;
   /** Upper bound of the random delay before a pull an event triggered. */
   controlPlaneSyncJitterMs?: number;
+  /**
+   * How often the relay reservation is checked while reserveRelay is on: a
+   * router that restarted or trimmed the connection dropped it, and this is
+   * how long the member is unreachable at most before it reserves again.
+   */
+  relayCheckIntervalMs?: number;
   /** Bounds the whole join. */
   signal?: AbortSignal;
 }
@@ -116,6 +122,7 @@ const DEFAULT_POLICY_SYNC_MS = 15 * 60 * 1000;
 const DEFAULT_CONTROL_PLANE_SYNC_MS = 15 * 60 * 1000;
 const FIRST_CONTROL_PLANE_SYNC_MS = 2_000;
 const DEFAULT_CONTROL_PLANE_SYNC_JITTER_MS = 2_000;
+const DEFAULT_RELAY_CHECK_MS = 30 * 1000;
 
 /**
  * A member that is on the mesh: a libp2p host authenticated with at least
@@ -135,7 +142,10 @@ export class MeshSession {
   #refreshTimer: ReturnType<typeof setTimeout> | undefined;
   #policyTimer: ReturnType<typeof setInterval> | undefined;
   #syncTimer: ReturnType<typeof setTimeout> | undefined;
+  #relayTimer: ReturnType<typeof setInterval> | undefined;
   #syncing: Promise<ControlPlaneSync> | undefined;
+  #keepingRelay: Promise<void> | undefined;
+  readonly #relayListener: RelayListener | undefined;
   readonly #refreshLeadMs: number;
   readonly #refreshRetryMs: number;
   readonly #policySyncMs: number;
@@ -144,12 +154,13 @@ export class MeshSession {
   #policyRules: string[] | undefined;
   #closed = false;
 
-  constructor(mesh: AgentMesh, node: MeshHost, routers: AdmittedRouter[], authenticatedPeers: Map<string, Date>, banned: BanSet, options: JoinOptions) {
+  constructor(mesh: AgentMesh, node: MeshHost, routers: AdmittedRouter[], authenticatedPeers: Map<string, Date>, banned: BanSet, options: JoinOptions, relayListener?: RelayListener) {
     this.mesh = mesh;
     this.node = node;
     this.routers = routers;
     this.authenticatedPeers = authenticatedPeers;
     this.banned = banned;
+    this.#relayListener = relayListener;
     this.#refreshLeadMs = options.refreshLeadMs ?? DEFAULT_REFRESH_LEAD_MS;
     this.#refreshRetryMs = options.refreshRetryMs ?? DEFAULT_REFRESH_RETRY_MS;
     this.#policySyncMs = options.policySyncIntervalMs ?? DEFAULT_POLICY_SYNC_MS;
@@ -157,8 +168,13 @@ export class MeshSession {
     this.#syncJitterMs = options.controlPlaneSyncJitterMs ?? DEFAULT_CONTROL_PLANE_SYNC_JITTER_MS;
     this.#scheduleRefresh();
     this.#listenForEvents();
+    this.#keepRouterAdmissions();
     if (this.#syncIntervalMs > 0) {
       this.#scheduleSync(Math.min(FIRST_CONTROL_PLANE_SYNC_MS, this.#syncIntervalMs));
+    }
+    if (relayListener !== undefined) {
+      this.#relayTimer = setInterval(() => void this.keepRelay().catch(() => {}), options.relayCheckIntervalMs ?? DEFAULT_RELAY_CHECK_MS);
+      this.#relayTimer.unref?.();
     }
   }
 
@@ -188,6 +204,57 @@ export class MeshSession {
   /** The `.../p2p-circuit/p2p/<self>` addresses reserved on routers. */
   get relayAddresses(): Multiaddr[] {
     return this.node.getMultiaddrs().filter((ma) => ma.toString().includes("/p2p-circuit"));
+  }
+
+  /**
+   * A router forgets the admission with the connection it came on, and
+   * js-libp2p reconnects to a relay on its own, so every new connection to a
+   * router runs the handshake again: the relay's own renewal of the
+   * reservation then still passes the router's check.
+   */
+  #keepRouterAdmissions(): void {
+    const routers = new Set(this.routers.map((r) => r.peerId));
+    this.node.addEventListener("connection:open", (evt) => {
+      const conn = evt.detail;
+      if (this.#closed || !routers.has(conn.remotePeer.toString())) {
+        return;
+      }
+      void authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys).catch(() => {});
+    });
+  }
+
+  /**
+   * Makes sure this member holds a relay reservation when it asked for one
+   * at join: a router that restarted or trimmed the connection dropped it
+   * and with it the relayed address peers reach this member on. Routers are
+   * tried in order, each dialed and authenticated again first, since the
+   * router forgot the admission with the connection. Runs on
+   * relayCheckIntervalMs; exposed so a caller can force it. Concurrent
+   * calls share one attempt.
+   */
+  keepRelay(): Promise<void> {
+    this.#keepingRelay ??= this.#keepRelayOnce().finally(() => {
+      this.#keepingRelay = undefined;
+    });
+    return this.#keepingRelay;
+  }
+
+  async #keepRelayOnce(): Promise<void> {
+    if (this.#relayListener === undefined || this.#closed || this.relayAddresses.length > 0) {
+      return;
+    }
+    const failures: string[] = [];
+    for (const r of this.routers) {
+      try {
+        const conn = await this.node.dial(r.addr);
+        await authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys);
+        await this.#relayListener.listen(r.addr.encapsulate("/p2p-circuit"));
+        return;
+      } catch (err) {
+        failures.push(`${r.peerId}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    throw new Error(`no router granted a relay reservation:\n  ${failures.join("\n  ")}`);
   }
 
   /**
@@ -525,6 +592,7 @@ export class MeshSession {
     clearTimeout(this.#refreshTimer);
     clearTimeout(this.#syncTimer);
     clearInterval(this.#policyTimer);
+    clearInterval(this.#relayTimer);
     await this.node.stop();
   }
 }
@@ -574,15 +642,15 @@ export async function joinMesh(mesh: AgentMesh, options: JoinOptions = {}): Prom
       throw new Error(`no router admitted this member:\n  ${failures.join("\n  ")}`);
     }
 
+    let relayListener: RelayListener | undefined;
     if (options.reserveRelay ?? true) {
-      await listenThroughRelay(node, (admitted[0] as AdmittedRouter).addr);
+      relayListener = await listenThroughRelay(node, (admitted[0] as AdmittedRouter).addr);
     }
+    return new MeshSession(mesh, node, admitted, authenticatedPeers, banned, options, relayListener);
   } catch (err) {
     await Promise.resolve(node.stop()).catch(() => {});
     throw err;
   }
-
-  return new MeshSession(mesh, node, admitted, authenticatedPeers, banned, options);
 }
 
 /** The peer a multiaddr ends at, in canonical form: its trailing `/p2p/<id>`, or undefined for a relay address with no target yet. */

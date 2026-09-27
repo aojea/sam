@@ -189,6 +189,70 @@ test("a router handed out as /dnsaddr still relays to peers", async () => {
   }
 });
 
+test("a dropped router connection is authenticated and reserved again", async () => {
+  // A router that restarts or trims the connection forgets the admission
+  // and drops the reservation with it; js-libp2p does not ask a configured
+  // relay again. The member notices within the check interval, runs the
+  // handshake again and holds a relayed address once more.
+  const handshakes: string[] = [];
+  const strict = await createLibp2p({
+    addresses: { listen: ["/ip4/127.0.0.1/tcp/0"] },
+    transports: [tcp()],
+    connectionEncrypters: [tls()],
+    streamMuxers: [yamux()],
+    services: { identify: identify(), relay: circuitRelayServer() },
+  });
+  try {
+    const strictBiscuit = mint(strict.peerId.toString(), ROLE_ROUTER);
+    await strict.handle(
+      AUTH_PROTOCOL,
+      authStreamHandler({ ownBiscuit: () => strictBiscuit, trustedKeys: () => [cpKey], onAuthenticated: (peerId) => handshakes.push(peerId) }),
+    );
+    const addr = (strict.getMultiaddrs()[0] as ReturnType<typeof multiaddr>).toString();
+    const mesh = await AgentMesh.enroll({ controlPlaneUrl: "http://127.0.0.1:1", bootstrapToken: "sbt", fetch: fakeControlPlane([addr]) });
+    const session = await mesh.join({ refreshLeadMs: 0, relayCheckIntervalMs: 200 });
+    try {
+      assert.deepEqual(handshakes, [mesh.peerId]);
+      const reserved = session.relayAddresses.map(String);
+      assert.equal(reserved.length, 1);
+
+      await strict.hangUp(session.node.peerId);
+      const deadline = Date.now() + 10_000;
+      while (session.relayAddresses.length > 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      assert.equal(session.relayAddresses.length, 0, "the reservation should go with the connection");
+
+      while ((session.relayAddresses.length === 0 || handshakes.length < 2) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      assert.deepEqual(session.relayAddresses.map(String), reserved, "the relayed address is back");
+      // Once on the connection js-libp2p reopened, once ahead of the new
+      // reservation; both are the member, and both after the drop.
+      assert.ok(handshakes.length >= 2, "the member authenticated again before reserving");
+      assert.ok(handshakes.every((p) => p === mesh.peerId));
+
+      // And a peer reaches the member through the router as before.
+      const peer = await createLibp2p({
+        transports: [tcp(), circuitRelayTransport()],
+        connectionEncrypters: [tls()],
+        streamMuxers: [yamux()],
+        services: { identify: identify() },
+      });
+      try {
+        const conn = await peer.dial(multiaddr(reserved[0] as string));
+        assert.equal(conn.remotePeer.toString(), mesh.peerId);
+      } finally {
+        await peer.stop();
+      }
+    } finally {
+      await session.close();
+    }
+  } finally {
+    await strict.stop();
+  }
+});
+
 test("join fails closed when the router is not a router", async () => {
   // A relay whose credential lacks the router role must not admit us to the mesh.
   const impostor = await createLibp2p({
