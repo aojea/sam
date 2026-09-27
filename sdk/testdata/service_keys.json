@@ -4,6 +4,7 @@
     { "type": "mcp", "name": "calc", "cid": "bafkreihp6rcivmw3pt27d4d6m73zeblbqueoo5cju6vcqyphqxcnmp563a", "multihash": "1220eff4448ab2db7cf5f1f07e67f79205618508e77449a7aa2861e785c4d63fbed8" },
     { "type": "mcp", "name": "", "cid": "bafkreigld2lseddb5lpjmdy7drpmgzf5nle6gam4yjwdbvximrodw4mwre", "multihash": "1220cb1e97220c61eade960f1f1c5ec364bd6ac9e3019cc26c30d6e8645c3b719689" },
     { "type": "inference", "name": "gpt", "cid": "bafkreifg2wo7urhcxh6vuv7q2tsvgo4agtjc52fbfxprc53d6ivtmlwkni", "multihash": "1220a6d59dfa44e2b9fd5a57f0d4e5533b8034d22ee8a12ddf117763f22b362eca6a" },
-    { "type": "a2a", "name": "echo", "cid": "bafkreiheyiafb5vwp6njr6jctvoeji5yavj7st74vfoarsh47u462azeze", "multihash": "1220e4c20050f6b67f9a98f9229d5c44a3b80553f94ffca95c08c8fcfd39ed0324c9" }
+    { "type": "a2a", "name": "echo", "cid": "bafkreiheyiafb5vwp6njr6jctvoeji5yavj7st74vfoarsh47u462azeze", "multihash": "1220e4c20050f6b67f9a98f9229d5c44a3b80553f94ffca95c08c8fcfd39ed0324c9" },
+    { "type": "egress", "name": "api.github.com", "cid": "bafkreihy5fvpsh6b62yg5qb62qqrcjosc7nn2u2nnlqipvmbqhgxnwcwty", "multihash": "1220f8e96af91fc1f6b06ec03ed4211125d217dadd534d6ae087d58181cd76d8569e" }
   ]
 }

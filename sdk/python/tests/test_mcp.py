@@ -157,6 +157,7 @@ def test_service_keys_match_internal_node_service():
     for s in FIXTURE["services"]:
         assert service_key(s["type"], s["name"] or None).hex() == s["multihash"], f"{s['type']}:{s['name']}"
     assert parse_service_target("mcp://calc") == ("mcp", "calc")
+    assert parse_service_target("egress://api.github.com") == ("egress", "api.github.com")
     assert parse_service_target("") == ("", "")
     with pytest.raises(ValueError, match="must look like"):
         parse_service_target("calc")

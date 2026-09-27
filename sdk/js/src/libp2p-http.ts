@@ -175,7 +175,7 @@ export async function admitIngress(req: IngressRequest, endpoint: A2AEndpoint, o
     return { status: 400, text: "Invalid path" };
   }
   const [serviceType, serviceName, ...rest] = parts as [string, string, ...string[]];
-  if (serviceType !== "inference" && serviceType !== "a2a" && serviceType !== "mcp") {
+  if (serviceType !== "inference" && serviceType !== "a2a" && serviceType !== "mcp" && serviceType !== "egress") {
     return { status: 400, text: "Invalid service type" };
   }
   const upstreamPath = rest.join("/");
@@ -357,7 +357,7 @@ export function httpIngressHandler(endpoint: A2AEndpoint, options: ProviderOptio
 
 /** The request target for a service on a peer: /<type>/<name>/<path>. */
 export function meshHTTPTarget(targetService: string, path = ""): string {
-  const m = /^(inference|a2a|mcp):\/\/(.+)$/.exec(targetService);
+  const m = /^(inference|a2a|mcp|egress):\/\/(.+)$/.exec(targetService);
   if (m === null) {
     throw new Error(`service target must look like inference://<name>, got ${JSON.stringify(targetService)}`);
   }

@@ -41,7 +41,7 @@ logger = logging.getLogger("agent_mesh")
 # go-libp2p-kad-dht with dht.ProtocolPrefix("/sam").
 DHT_PROTOCOL = TProtocol("/sam/kad/1.0.0")
 
-ServiceType = Literal["mcp", "inference", "a2a"]
+ServiceType = Literal["mcp", "inference", "a2a", "egress"]
 
 _QUERY_TIMEOUT = 5.0
 _MAX_ROUNDS = 3
@@ -70,7 +70,7 @@ def parse_service_target(target: str) -> tuple[str, str]:
     if target == "":
         return "", ""
     scheme, sep, name = target.partition("://")
-    if not sep or scheme not in ("mcp", "inference", "a2a") or not name:
+    if not sep or scheme not in ("mcp", "inference", "a2a", "egress") or not name:
         raise ValueError(f"service target must look like mcp://<name>, got {target!r}")
     return scheme, name
 

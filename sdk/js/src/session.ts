@@ -241,7 +241,7 @@ export class MeshSession {
   async discover(service: string, name?: string, options: { timeoutMs?: number; limit?: number } = {}): Promise<DiscoveredProvider[]> {
     const target = service.includes("://") ? parseServiceTarget(service) : { type: service, name };
     if (!isServiceType(target.type)) {
-      throw new Error(`service type must be mcp, inference or a2a, got ${JSON.stringify(target.type)}`);
+      throw new Error(`service type must be mcp, inference, a2a or egress, got ${JSON.stringify(target.type)}`);
     }
     const cid = await serviceCID(target.type, target.name);
     const signal = AbortSignal.timeout(options.timeoutMs ?? DISCOVERY_TIMEOUT_MS);

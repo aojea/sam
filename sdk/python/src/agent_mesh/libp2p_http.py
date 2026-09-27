@@ -211,7 +211,7 @@ async def _handle_ingress(
     if len(parts) < 2 or not parts[0] or not parts[1]:
         return plain(400, "Invalid path")
     service_type, service_name, rest = parts[0], parts[1], parts[2:]
-    if service_type not in ("inference", "a2a", "mcp"):
+    if service_type not in ("inference", "a2a", "mcp", "egress"):
         return plain(400, "Invalid service type")
     upstream_path = "/".join(rest)
 
@@ -294,7 +294,7 @@ async def _read_or_eof(stream: INetStream, peer_id: ID) -> bytes:
 def mesh_http_target(target_service: str, path: str = "") -> str:
     """The request target for a service on a peer: /<type>/<name>/<path>."""
     scheme, sep, name = target_service.partition("://")
-    if not sep or scheme not in ("inference", "a2a", "mcp") or not name:
+    if not sep or scheme not in ("inference", "a2a", "mcp", "egress") or not name:
         raise ValueError(f"service target must look like inference://<name>, got {target_service!r}")
     if not path:
         return f"/{scheme}/{name}"

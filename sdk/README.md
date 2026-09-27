@@ -280,8 +280,11 @@ bytes), with a 64 KiB cap on the first frame.
   `/<type>/<name>/<upstream>`; the server authorizes `<type>://<name>` with
   the same authorizer, then forwards `<upstream>` to the service with those
   two headers stripped and `X-Peer-Id` set to the verified caller. The SDKs
-  are clients of this for `inference://` and `a2a://` services, and servers
-  of it for their own agent, `a2a://<name>`, only. Bodies are framed by
+  are clients of this for `inference://`, `a2a://` and `egress://` services
+  (an egress destination is one a `sam-node` serves for a hostname outside
+  the mesh, as the control plane assigned it; the SDK reaches it as any
+  other service, `/egress/<hostname>/<path>` on that node), and servers of
+  it for their own agent, `a2a://<name>`, only. Bodies are framed by
   `Content-Length` or chunked transfer coding; a response with neither runs
   to the end of the stream. The JS SDK frames these itself
   (`http1.ts`), so the same code runs in a browser.
@@ -290,7 +293,7 @@ bytes), with a 64 KiB cap on the first frame.
 
 A provider announces a service as a DHT provider record for
 `cidv1(raw, sha256("sam:service:<type>[:<name>]"))`, once for the type and
-once for the name (`<type>` is `mcp`, `inference` or `a2a`). A consumer
+once for the name (`<type>` is `mcp`, `inference`, `a2a` or `egress`). A consumer
 looks up providers for the same CID, dials one and opens `/sam/mcp/1.0.0`.
 Gossip topics under `/sam/discovery/v1/...` carry `ServiceAnnounce` for
 interest-scoped updates; the DHT is the source of truth. The SDKs look

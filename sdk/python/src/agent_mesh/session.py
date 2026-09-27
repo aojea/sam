@@ -264,8 +264,8 @@ class MeshSession:
         service of that type, or (type, name). The routers we are connected to
         seed the walk."""
         service_type, service_name = parse_service_target(service) if "://" in service else (service, name)
-        if service_type not in ("mcp", "inference", "a2a"):
-            raise ValueError(f"service type must be mcp, inference or a2a, got {service_type!r}")
+        if service_type not in ("mcp", "inference", "a2a", "egress"):
+            raise ValueError(f"service type must be mcp, inference, a2a or egress, got {service_type!r}")
         seeds = [ID.from_base58(r.peer_id) for r in self.routers]
         return await find_providers(self.host, service_key(service_type, service_name), seeds, limit)
 

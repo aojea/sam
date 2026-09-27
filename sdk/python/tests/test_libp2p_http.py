@@ -254,6 +254,7 @@ def test_mesh_urls_name_a_peer_and_a_service():
             split_mesh_url(httpx.URL(bad))
     assert mesh_http_target("a2a://agent") == "/a2a/agent"
     assert mesh_http_target("a2a://agent", "card") == "/a2a/agent/card"
+    assert mesh_http_target("egress://api.github.com", "/repos/acme/x") == "/egress/api.github.com/repos/acme/x"
     with pytest.raises(ValueError):
         mesh_http_target("ftp://agent", "/")
 

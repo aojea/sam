@@ -129,6 +129,7 @@ test("service keys match internal/node/service.go", async () => {
     assert.equal(Buffer.from(cid.multihash.bytes).toString("hex"), s.multihash);
   }
   assert.deepEqual(parseServiceTarget("mcp://calc"), { type: "mcp", name: "calc" });
+  assert.deepEqual(parseServiceTarget("egress://api.github.com"), { type: "egress", name: "api.github.com" });
   assert.deepEqual(parseServiceTarget(""), { type: "", name: "" });
   assert.throws(() => parseServiceTarget("calc"), /must look like/);
 });

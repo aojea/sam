@@ -359,6 +359,7 @@ test("mesh URLs name a peer and a service", () => {
   }
   assert.equal(meshHTTPTarget("a2a://agent"), "/a2a/agent");
   assert.equal(meshHTTPTarget("a2a://agent", "card"), "/a2a/agent/card");
+  assert.equal(meshHTTPTarget("egress://api.github.com", "/repos/acme/x"), "/egress/api.github.com/repos/acme/x");
   assert.throws(() => meshHTTPTarget("ftp://agent", "/"));
   assert.throws(() => a2aEndpoint({}), /exactly one/);
   assert.throws(() => a2aEndpoint({ url: "http://x", handler: () => new Response() }), /exactly one/);

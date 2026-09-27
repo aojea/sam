@@ -22,10 +22,10 @@ import { sha256 } from "multiformats/hashes/sha2";
 /** The DHT protocol, go-libp2p-kad-dht with dht.ProtocolPrefix("/sam"). */
 export const DHT_PROTOCOL = "/sam/kad/1.0.0";
 
-export type ServiceType = "mcp" | "inference" | "a2a";
+export type ServiceType = "mcp" | "inference" | "a2a" | "egress";
 
 export function isServiceType(value: unknown): value is ServiceType {
-  return value === "mcp" || value === "inference" || value === "a2a";
+  return value === "mcp" || value === "inference" || value === "a2a" || value === "egress";
 }
 
 /** The DHT key of a service: by type and name, or by type alone when name is omitted. */
@@ -39,7 +39,7 @@ export function parseServiceTarget(target: string): { type: ServiceType | "" ; n
   if (target === "") {
     return { type: "", name: "" };
   }
-  const m = /^(mcp|inference|a2a):\/\/(.+)$/.exec(target);
+  const m = /^(mcp|inference|a2a|egress):\/\/(.+)$/.exec(target);
   if (!m) {
     throw new Error(`service target must look like mcp://<name>, got ${JSON.stringify(target)}`);
   }
