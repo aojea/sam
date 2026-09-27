@@ -1,0 +1,15 @@
+# The node in the office. It fronts two things that listen on loopback and
+# are reachable from nowhere else; api.github.com is assigned to it by the
+# mesh policy (egress.served_by selects the label below), not declared here.
+version: "v1alpha1"
+labels:
+  site: office
+services:
+  - type: inference
+    name: office-llm
+    description: "Ollama on the office workstation"
+    target_url: "http://127.0.0.1:11434"
+  - type: mcp
+    name: tools
+    description: "MCP reference server"
+    target_url: "http://127.0.0.1:3001/mcp"

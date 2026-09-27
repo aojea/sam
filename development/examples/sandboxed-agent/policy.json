@@ -1,0 +1,21 @@
+{
+  "roles": [
+    {
+      "name": "sam:role:node",
+      "allowed_services": ["system://sam.catalog"],
+      "allowed_targets": ["*"],
+      "allowed_labels": ["site=office"]
+    },
+    {
+      "name": "agent",
+      "allowed_services": ["inference://office-llm", "mcp://tools", "egress://api.github.com"],
+      "allowed_targets": ["*"],
+      "http": [
+        { "service": "egress://api.github.com", "methods": ["GET"], "paths": ["/repos/google/sam/*"] }
+      ]
+    }
+  ],
+  "egress": [
+    { "name": "api.github.com", "credential": "github-ro", "served_by": ["site=office"] }
+  ]
+}

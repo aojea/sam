@@ -69,3 +69,6 @@ mobile/logcat.txt
 key.properties
 google-services.json
 
+
+# Recordings of development/examples/sandboxed-agent/record.sh
+development/examples/sandboxed-agent/out/
