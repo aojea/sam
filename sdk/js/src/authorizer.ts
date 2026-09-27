@@ -17,7 +17,7 @@
 // api/datalog.go (gen/datalog.ts) and the mesh policy rules the control
 // plane renders (GET /policies). Nothing here derives rules from roles.
 
-import { AUTHORIZER_LIMITS, BiscuitVerificationError, loadBiscuit, verifyPeerBiscuit, type VerifiedBiscuit } from "./biscuit.ts";
+import { AUTHORIZER_LIMITS, BiscuitVerificationError, loadBiscuit, verifyPeerBiscuit, withinLimits, type VerifiedBiscuit } from "./biscuit.ts";
 import { parseServiceTarget } from "./discovery.ts";
 import { BASELINE_DATALOG } from "./gen/datalog.ts";
 
@@ -171,7 +171,7 @@ export async function authorizeCaller(req: AuthorizeRequest, options: ProviderAu
 
   const authorizer = b.buildAuthenticated(token);
   try {
-    authorizer.authorizeWithLimits(AUTHORIZER_LIMITS);
+    withinLimits(() => authorizer.authorizeWithLimits(AUTHORIZER_LIMITS));
   } catch (err) {
     throw new AuthorizationError(req.peerId, describe(err));
   }
@@ -200,10 +200,10 @@ async function identityTargetFacts(ownBiscuit: Uint8Array, keys: Uint8Array[], n
   b.addFact(wasm.Fact.fromString(timeFact(now)));
   b.addPolicy(wasm.Policy.fromString(BASELINE_DATALOG.allow_if_true));
   const authorizer = b.buildAuthenticated(token);
-  authorizer.authorizeWithLimits(AUTHORIZER_LIMITS);
+  withinLimits(() => authorizer.authorizeWithLimits(AUTHORIZER_LIMITS));
   const facts: WasmFact[] = [];
   for (const r of BASELINE_DATALOG.target_fact_rules) {
-    facts.push(...(authorizer.queryWithLimits(wasm.Rule.fromString(r), AUTHORIZER_LIMITS) as WasmFact[]));
+    facts.push(...withinLimits(() => authorizer.queryWithLimits(wasm.Rule.fromString(r), AUTHORIZER_LIMITS) as WasmFact[]));
   }
   return facts;
 }
@@ -218,7 +218,7 @@ async function boundPeer(biscuit: Uint8Array, keys: Uint8Array[]): Promise<strin
       const b = new wasm.AuthorizerBuilder();
       b.addPolicy(wasm.Policy.fromString(BASELINE_DATALOG.allow_if_true));
       const authorizer = b.buildAuthenticated(token);
-      const bound = (authorizer.queryWithLimits(wasm.Rule.fromString("p($p) <- node($p)"), AUTHORIZER_LIMITS) as WasmFact[])
+      const bound = withinLimits(() => authorizer.queryWithLimits(wasm.Rule.fromString("p($p) <- node($p)"), AUTHORIZER_LIMITS) as WasmFact[])
         .map((f) => f.terms()[0])
         .find((t): t is string => typeof t === "string");
       if (bound === undefined) {

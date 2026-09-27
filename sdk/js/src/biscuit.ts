@@ -29,6 +29,33 @@ export function loadBiscuit(): Promise<BiscuitWasm> {
 /** Datalog evaluation budget, as in internal/identity.AuthorizerOptions. */
 export const AUTHORIZER_LIMITS = { max_facts: 1000, max_iterations: 100, max_time_micro: 1_000_000 };
 
+/**
+ * Runs an authorize or query call under AUTHORIZER_LIMITS. biscuit-wasm
+ * applies the limits it is passed to the checks and policies only; the
+ * fact-generation pass runs under the builder's own limits, 1 ms of wall
+ * clock, which it does not let a caller change. A paused event loop or a
+ * throttled CPU then answers a valid request with RunLimit Timeout. The
+ * facts derived before that deadline stay in the authorizer and the next
+ * call resumes from them, so the pass is driven to completion here until
+ * the budget above is spent.
+ */
+export function withinLimits<T>(run: () => T): T {
+  const deadline = performance.now() + AUTHORIZER_LIMITS.max_time_micro / 1000;
+  for (;;) {
+    try {
+      return run();
+    } catch (err) {
+      if (!isTimeout(err) || performance.now() >= deadline) {
+        throw err;
+      }
+    }
+  }
+}
+
+function isTimeout(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as { RunLimit?: unknown }).RunLimit === "Timeout";
+}
+
 export const ROLE_ROUTER = "sam:role:router";
 
 export class BiscuitVerificationError extends Error {
@@ -107,12 +134,12 @@ export async function verifyPeerBiscuit(
   builder.addPolicy(wasm.Policy.fromString("allow if true"));
   const authorizer = builder.buildAuthenticated(token);
   try {
-    authorizer.authorizeWithLimits(AUTHORIZER_LIMITS);
+    withinLimits(() => authorizer.authorizeWithLimits(AUTHORIZER_LIMITS));
   } catch (err) {
     throw new BiscuitVerificationError(`biscuit is expired or fails its checks: ${describe(err)}`);
   }
 
-  const query = (rule: string) => authorizer.queryWithLimits(wasm.Rule.fromString(rule), AUTHORIZER_LIMITS) as QueriedFact[];
+  const query = (rule: string) => withinLimits(() => authorizer.queryWithLimits(wasm.Rule.fromString(rule), AUTHORIZER_LIMITS) as QueriedFact[]);
   const strings = (facts: QueriedFact[]) => facts.map((f) => f.terms()[0]).filter((t): t is string => typeof t === "string");
 
   const bound = strings(query("p($p) <- node($p)"));

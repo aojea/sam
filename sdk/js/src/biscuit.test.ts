@@ -15,7 +15,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { BiscuitVerificationError, ROLE_ROUTER, loadBiscuit, requireRole, verifyPeerBiscuit } from "./biscuit.ts";
+import { AUTHORIZER_LIMITS, BiscuitVerificationError, ROLE_ROUTER, loadBiscuit, requireRole, verifyPeerBiscuit, withinLimits } from "./biscuit.ts";
 import { ROLE_NODE } from "./controlplane.ts";
 
 interface Vector {
@@ -92,4 +92,37 @@ test("tokens minted here verify and report their facts", async () => {
   assert.equal(verified.expiration.toISOString(), "2034-06-01T00:00:00.000Z");
   assert.deepEqual(verified.labels, { team: 'plat"form' });
   assert.deepEqual(verified.roles, ["sam:role:node"]);
+});
+
+test("a fact-generation pass longer than biscuit-wasm's own 1 ms budget still completes", async () => {
+  const wasm = await loadBiscuit();
+  const kp = new wasm.KeyPair(wasm.SignatureAlgorithm.Ed25519);
+  const token = wasm.Biscuit.builder().build(kp.getPrivateKey());
+  // A join over a few hundred facts takes well over a millisecond in wasm;
+  // before withinLimits the fixpoint was cut short there and the request
+  // refused with RunLimit Timeout however generous AUTHORIZER_LIMITS were.
+  const b = new wasm.AuthorizerBuilder();
+  for (let i = 0; i < 300; i++) {
+    b.addFact(wasm.Fact.fromString(`f(${i})`));
+  }
+  b.addRule(wasm.Rule.fromString("g($a, $b) <- f($a), f($b), $a + 1 == $b"));
+  b.addCheck(wasm.Check.fromString("check if g(298, 299)"));
+  b.addPolicy(wasm.Policy.fromString("allow if true"));
+  const authorizer = b.buildAuthenticated(token);
+  const limits = { ...AUTHORIZER_LIMITS, max_facts: 100_000 };
+
+  const start = performance.now();
+  assert.equal(withinLimits(() => authorizer.authorizeWithLimits(limits)), 0);
+  assert.ok(performance.now() - start > 1, "the pass has to be slow enough to exercise the retry");
+
+  // Only the budget is retried; a denial after the same slow pass stands.
+  const denied = new wasm.AuthorizerBuilder();
+  for (let i = 0; i < 300; i++) {
+    denied.addFact(wasm.Fact.fromString(`f(${i})`));
+  }
+  denied.addRule(wasm.Rule.fromString("g($a, $b) <- f($a), f($b), $a + 1 == $b"));
+  denied.addCheck(wasm.Check.fromString("check if g(299, 298)"));
+  denied.addPolicy(wasm.Policy.fromString("allow if true"));
+  const a2 = denied.buildAuthenticated(token);
+  assert.throws(() => withinLimits(() => a2.authorizeWithLimits(limits)), (err: unknown) => "FailedLogic" in (err as object));
 });
