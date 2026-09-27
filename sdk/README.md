@@ -68,19 +68,23 @@ its credential under the new key.
 Facts about the libp2p implementations that the SDKs work around, each
 pinned by a test:
 
-- py-libp2p 0.7 advertises early muxer negotiation in TLS ALPN but does not
-  complete it, and go-libp2p then refuses the mux upgrade. The Python host
-  sets no ALPN muxer list, so the muxer is negotiated with
-  multistream-select (`sdk/python/src/agent_mesh/host.py`).
+- py-libp2p's TLS transport advertises early muxer negotiation in ALPN but
+  cannot complete it (Python's `ssl` has no ALPN select callback), and
+  go-libp2p then refuses the mux upgrade. The Python host sets no ALPN
+  muxer list, so the muxer is negotiated with multistream-select
+  (`sdk/python/src/agent_mesh/host.py`).
 - js-libp2p's `@libp2p/tls` reads the libp2p extension from
   `extensions[0]` of the peer certificate. py-libp2p's default certificate
   puts BasicConstraints and KeyUsage first, so the Python host uses a
   certificate template with only the libp2p extension.
-- py-libp2p's circuit relay v2 client sends its protobufs without the
-  varint length prefix that go-libp2p (and js-libp2p) use, so it cannot talk
-  to a router. The Python SDK carries the relay protocol itself
-  (`sdk/python/src/agent_mesh/relay.py`, `sdk/python/proto/circuit.proto`)
-  on top of py-libp2p's raw-connection upgrade.
+- A router grants a relay reservation only after the auth handshake on
+  the same connection, and drops it with the connection. The Python SDK
+  carries the relay protocol itself (`sdk/python/src/agent_mesh/relay.py`,
+  `sdk/python/proto/circuit.proto`) on top of py-libp2p's raw-connection
+  upgrade, so the session decides when to reserve, renew and, after a
+  dropped connection, authenticate and reserve again; py-libp2p's own
+  `RelayDiscovery` reserves again only after the expiry has passed, when
+  the router has already dropped the slot.
 - go-libp2p's relay leaves private addresses out of a reservation, so a
   router on loopback (every test) grants a reservation that lists no
   address. js-libp2p falls back to the connection's address; the Python SDK
@@ -90,26 +94,32 @@ pinned by a test:
   handshake. The JS SDK starts the listener after the handshake, through the
   transport manager, which is not on the public `Libp2p` interface.
 - go-libp2p's relay grants a reservation for one hour and drops it when
-  that passes; a member that still advertises the relayed address is then
-  unreachable (`NO_RESERVATION`). js-libp2p's listener renews on its own.
-  The Python SDK renews two minutes before the expiry the router returned,
-  and runs the auth handshake again first when the router has closed the
-  connection in between, since the router forgets the admission with it.
-  py-libp2p 0.7 cannot take this over: its relay client has the framing
-  problem above, and its `RelayDiscovery` reserves again only after the
-  expiry has passed, when the router has already dropped the slot.
-- py-libp2p 0.7's yamux takes one of 256 per-connection backlog slots for
-  every outbound stream and returns it only when sending the SYN fails, so
-  the 257th `open_stream` on a connection blocks forever with no error. A
-  member that keeps one connection to its router reaches that in hours (a
-  reservation renewal every hour, a control plane pull every fifteen
-  minutes). `main`
-  releases the slot on close (libp2p/py-libp2p#1426); until that is
-  released, `host.py` replaces `Yamux.open_stream` with one that does the
-  same, since py-libp2p constructs `Yamux` by name whatever `muxer_opt`
-  says. Every stream the SDK opens also goes through `open_stream`, which
-  bounds `new_stream` with the caller's deadline, so a muxer that cannot
-  open a stream fails the call instead of parking it.
+  that passes, and with the connection it was made on; a member that still
+  advertises the relayed address is then unreachable (`NO_RESERVATION`).
+  js-libp2p's listener renews on its own, but only on a connection the
+  router still holds the admission of; the JS SDK runs the handshake again
+  on every new connection to a router and, when the relayed address is
+  gone, authenticates and reserves again within thirty seconds. The Python
+  SDK renews two minutes before the expiry the router returned, and within
+  thirty seconds of the connection to that router going, running the auth
+  handshake again first.
+- py-libp2p's yamux gives a stream's backlog slot (256 per connection) back
+  when the stream closes since 0.8, but not for the `trio.Cancelled` of a
+  caller's deadline while the SYN waits on a stalled connection. Every
+  stream the SDK opens goes through `open_stream`, which bounds
+  `new_stream` with the caller's deadline and hangs up on a connection that
+  cannot open a stream in time, so the call fails instead of parking and
+  the slots go with the connection.
+- py-libp2p's yamux drops a reset stream's bookkeeping once its buffer is
+  drained, and a bounded read then reports the end of the stream. The
+  Python `/libp2p-http` client reads the muxed stream's reset flag on EOF,
+  so a body cut by a reset is an error and not a body that ended.
+- py-libp2p's WebSocket transport resolves a `/dns4/<host>/tcp/443/wss`
+  address to its IP before dialing and names the IP in the TLS SNI and the
+  Host header, which a TLS-terminating edge answers with 403; the Python
+  host dials such addresses by name (libp2p/py-libp2p#1549). It also dials
+  `wss` with certificate verification off unless given a TLS context
+  (libp2p/py-libp2p#1550); the host gives it the system roots.
 - py-libp2p's Kademlia client takes a protocol prefix but its provider
   lookups still speak `/ipfs/kad/1.0.0`, so it cannot reach the mesh DHT.
   The Python SDK does a bounded GET_PROVIDERS walk itself on
@@ -403,7 +413,7 @@ holds against the control plane's records.
   WebSocket or not at all; `tests/integration/standalone_sdk_test.go` holds
   both SDKs to it. JS: `libp2p`, `@libp2p/tcp`, `@libp2p/websockets`,
   `@libp2p/tls`, `@chainsafe/libp2p-yamux`, `@libp2p/circuit-relay-v2`,
-  `@libp2p/identify`. Python: `libp2p>=0.7` (`security.tls`,
+  `@libp2p/identify`. Python: `libp2p>=0.8` (`security.tls`,
   `stream_muxer.yamux`) plus the SDK's own relay client; py-libp2p is
   trio-based, so `join()` is an async context manager.
 - Biscuit verification of a peer's credential: signature under any trusted

@@ -14,9 +14,11 @@
 
 """Circuit relay v2 as a client of a router: reserve a slot, dial a peer
 through the router, accept a peer the router relays to us. Messages are
-varint-length-prefixed protobufs (go-libp2p's pbio framing); py-libp2p 0.7's
-own relay client sends them unframed and cannot talk to a Go relay, which is
-why this module speaks the protocol directly."""
+varint-length-prefixed protobufs (go-libp2p's pbio framing). The module
+speaks the protocol directly rather than through py-libp2p's relay client:
+a router grants a reservation only after the auth handshake on the same
+connection, and the session owns when to reserve, renew and, after a
+dropped connection, authenticate and reserve again."""
 
 from __future__ import annotations
 

@@ -285,7 +285,12 @@ async def _read_or_eof(stream: INetStream, peer_id: ID) -> bytes:
     tell a body that ended from one that was cut."""
     try:
         return await stream.read(_READ_CHUNK)
-    except StreamEOF:
+    except StreamEOF as err:
+        # py-libp2p 0.8's yamux drops a reset stream's bookkeeping once its
+        # buffer is drained, and a bounded read then reports the end of the
+        # stream; the muxed stream itself still knows it was reset.
+        if getattr(getattr(stream, "muxed_stream", None), "reset_received", False):
+            raise ConnectionError(f"peer {peer_id} broke the stream mid-response: reset") from err
         return b""
     except Exception as err:
         raise ConnectionError(f"peer {peer_id} broke the stream mid-response: {err}") from err

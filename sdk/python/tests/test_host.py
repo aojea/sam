@@ -32,7 +32,7 @@ from libp2p.stream_muxer.yamux.yamux import FLAG_SYN, YAMUX_HEADER_FORMAT
 from libp2p.transport.websocket.transport import WebsocketTransport
 from multiaddr.resolvers import DNSResolver
 
-from agent_mesh.host import LIBP2P_LEAKS_CONNECTION_SCOPES, LIBP2P_LEAKS_STREAM_SLOTS, create_mesh_host, dial_addrs, open_stream, peer_info
+from agent_mesh.host import create_mesh_host, dial_addrs, open_stream, peer_info
 from agent_mesh.identity import Identity
 from agent_mesh.session import DIAL_TIMEOUT, dial
 
@@ -112,9 +112,9 @@ def test_a_concrete_address_passes_through():
 def test_a_websocket_address_is_dialed_by_its_name():
     """A TLS-terminating edge in front of the router (sam-one behind a tunnel)
     selects the origin by the name in the TLS SNI and the Host header.
-    py-libp2p 0.7 resolves the name first and sends the IP; the host sends
-    the name. Pinned on the Host header of the upgrade request, the SNI is
-    the same string."""
+    py-libp2p resolves the name first and sends the IP (libp2p/py-libp2p#1549
+    not yet released); the host sends the name. Pinned on the Host header of
+    the upgrade request, the SNI is the same string."""
     seen: dict[str, str] = {}
 
     async def record(stream):
@@ -190,8 +190,9 @@ ECHO = TProtocol("/test/echo/1.0.0")
 def test_a_connection_outlives_the_yamux_stream_backlog():
     """A member keeps one connection to its router for days and opens a
     short stream on it every few minutes (DHT provide, reservation renewal).
-    py-libp2p 0.7 never returns a closed stream's slot to the connection's
-    256-slot backlog, so the 257th open_stream parks forever; ours must not."""
+    py-libp2p 0.7 never returned a closed stream's slot to the connection's
+    256-slot backlog, so the 257th open_stream parked forever; 0.8 returns
+    it, and this holds it to that."""
 
     async def echo(stream):
         try:
@@ -218,19 +219,22 @@ def test_a_connection_outlives_the_yamux_stream_backlog():
     trio.run(main)
 
 
-def test_a_stream_open_cut_by_its_deadline_returns_the_slot():
-    """py-libp2p 0.7 releases the backlog slot only for an Exception; a
-    trio.Cancelled from the caller's deadline, raised while the SYN waits on
-    a stalled connection, kept it. Every such timeout was one slot fewer."""
+def test_a_stream_open_cut_by_its_deadline_ends_the_connection():
+    """py-libp2p's yamux gives a backlog slot back for an Exception while
+    sending the SYN, not for the trio.Cancelled of the caller's deadline: a
+    SYN that stalls on a dead connection would keep one of the 256 slots
+    each time. A connection that cannot open a stream in time is no path to
+    the peer, so open_stream hangs up on it, slots and all, and the next
+    dial starts afresh."""
 
     async def main():
         server, server_listen = create_mesh_host(Identity.generate(), ["/ip4/127.0.0.1/tcp/0"])
         client, _ = create_mesh_host(Identity.generate())
         server.set_stream_handler(ECHO, lambda stream: stream.close())
         async with server.run(listen_addrs=server_listen), client.run(listen_addrs=[]):
-            await client.connect(info_from_p2p_addr(multiaddr.Multiaddr(f"{server.get_addrs()[0]}")))
+            info = info_from_p2p_addr(multiaddr.Multiaddr(f"{server.get_addrs()[0]}"))
+            await client.connect(info)
             mux = client.get_network().connections[server.get_id()][0].muxed_conn
-            slots = mux.stream_backlog_semaphore.value
             write_frame = mux._write_frame
 
             async def syn_stalls(header):
@@ -240,11 +244,14 @@ def test_a_stream_open_cut_by_its_deadline_returns_the_slot():
                 await write_frame(header)
 
             mux._write_frame = syn_stalls
-            for _ in range(3):
-                with pytest.raises(ConnectionError, match="within 0.2s"):
-                    await open_stream(client, server.get_id(), ECHO, 0.2)
-            mux._write_frame = write_frame
-            assert mux.stream_backlog_semaphore.value == slots
+            with pytest.raises(ConnectionError, match="within 0.2s"):
+                await open_stream(client, server.get_id(), ECHO, 0.2)
+            assert server.get_id() not in client.get_connected_peers()
+
+            # A fresh connection has every slot.
+            await client.connect(info)
+            mux = client.get_network().connections[server.get_id()][0].muxed_conn
+            slots = mux.stream_backlog_semaphore.value
             with trio.fail_after(5):
                 stream = await open_stream(client, server.get_id(), ECHO, 5)
                 await stream.close()
@@ -267,19 +274,10 @@ def test_open_stream_ends_at_its_timeout():
     trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
 
 
-def test_the_stream_slot_workaround_retires_with_libp2p_0_8():
-    """When the pin moves past 0.7, delete the Yamux.open_stream patch and
-    this flag in host.py, and the backlog test above."""
-    import importlib.metadata
-
-    major, minor = (int(p) for p in importlib.metadata.version("libp2p").split(".")[:2])
-    assert LIBP2P_LEAKS_STREAM_SLOTS == ((major, minor) < (0, 8))
-
-
 def test_wss_is_dialed_with_certificate_verification():
-    """py-libp2p 0.7 dials wss with verification off unless given a TLS
-    client context; the host gives it the system roots, so an edge's
-    certificate is checked as go-libp2p and js-libp2p check it."""
+    """py-libp2p dials wss with verification off unless given a TLS client
+    context (libp2p/py-libp2p#1550); the host gives it the system roots, so
+    an edge's certificate is checked as go-libp2p and js-libp2p check it."""
     host, _ = create_mesh_host(Identity.generate())
     transports = host.get_network().transport_manager.get_transports()  # type: ignore[attr-defined]
     ws = next(t for t in transports if isinstance(t, WebsocketTransport))
@@ -289,28 +287,23 @@ def test_wss_is_dialed_with_certificate_verification():
     assert context.check_hostname
 
 
-def test_the_host_runs_without_a_resource_manager_and_a_background_dialer():
-    """py-libp2p 0.7 leaks a ResourceManager connection slot per connection
-    and per failed security upgrade; at 1000 the manager degrades to one
-    connection for good, and the host refuses every peer. And its
-    AutoConnector dials every peer in the peerstore every 30s while under
-    100 connections, which for a member is always. Neither runs here."""
+def test_the_host_runs_without_a_background_dialer():
+    """py-libp2p's AutoConnector dials every peer in the peerstore every 30s
+    while under 100 connections, which for a member is always. It does not
+    run here; the Swarm's own limits do."""
     host, _ = create_mesh_host(Identity.generate())
     swarm = host.get_network()
-    if LIBP2P_LEAKS_CONNECTION_SCOPES:
-        assert swarm._resource_manager is None  # noqa: SLF001 - py-libp2p offers no getter
     assert swarm.connection_config.low_watermark == 0
     assert swarm.connection_config.min_connections == 0
-    # The Swarm's own limits do not depend on the manager.
     assert swarm.connection_config.max_connections > 0
     assert swarm.connection_config.max_connections_per_peer > 0
 
 
 def test_a_connection_ends_with_no_slot_held():
     """Connections come and go for a member's whole life; each must leave
-    the host as it found it. While the manager is off there is no slot to
-    hold; once a libp2p without the leak brings it back, the slots it
-    counts must return to zero when the connections do."""
+    the host as it found it. py-libp2p 0.7 kept one ResourceManager
+    connection slot per connection and degraded to one connection at 1000;
+    the slots 0.8 counts must return to zero when the connections do."""
 
     async def main():
         server, server_listen = create_mesh_host(Identity.generate(), ["/ip4/127.0.0.1/tcp/0"])
@@ -325,18 +318,7 @@ def test_a_connection_ends_with_no_slot_held():
                     await trio.sleep(0.05)
             assert client.get_network().get_total_connections() == 0
             manager = client.get_network()._resource_manager  # noqa: SLF001 - py-libp2p offers no getter
-            if LIBP2P_LEAKS_CONNECTION_SCOPES:
-                assert manager is None
-            elif manager is not None:
-                assert manager._current_connections == 0  # noqa: SLF001
+            assert manager is not None
+            assert manager._current_connections == 0  # noqa: SLF001
 
     trio.run(main)
-
-
-def test_the_connection_scope_workaround_retires_with_libp2p_0_8():
-    """When the pin moves past 0.7, delete the set_resource_manager(None)
-    call and this flag in host.py, and check the leak is gone upstream."""
-    import importlib.metadata
-
-    major, minor = (int(p) for p in importlib.metadata.version("libp2p").split(".")[:2])
-    assert LIBP2P_LEAKS_CONNECTION_SCOPES == ((major, minor) < (0, 8))
