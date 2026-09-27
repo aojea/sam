@@ -490,7 +490,9 @@ func (s *Server) seedPolicyOnFirstBoot(ctx context.Context) error {
 	if err := controlplane.ValidatePolicyConfig(&seed); err != nil {
 		return fmt.Errorf("invalid seed mesh policy: %w", err)
 	}
-	if err := s.store.SaveMeshPolicy(ctx, seed.Roles, seed.Bindings); err != nil {
+	// The whole document, as POST /policies stores it: a seed file that names
+	// egress destinations must serve them too.
+	if err := s.store.SavePolicyDocument(ctx, seed.Roles, seed.Bindings, seed.Egress); err != nil {
 		return fmt.Errorf("failed to seed mesh policy: %w", err)
 	}
 	return nil

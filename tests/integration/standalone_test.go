@@ -32,6 +32,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // TestStandaloneNodeJoin pins the sam-one first-boot CUJ end to end: one
@@ -213,6 +214,63 @@ func TestStandaloneNoJoinToken(t *testing.T) {
 	}
 	if err := newStandaloneTestNode(t, ctx).EnrollBootstrap(ctx, srv.PublicURL(), devTok); err != nil {
 		t.Fatalf("device enrollment without a join token failed: %v", err)
+	}
+}
+
+// TestStandalonePolicyFileSeedsEgress pins that a first-boot --policy-file
+// is stored whole: the egress destinations it names are served, the same as
+// when the document arrives through POST /policies.
+func TestStandalonePolicyFileSeedsEgress(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	policyFile := filepath.Join(t.TempDir(), "policy.json")
+	seed := `{
+  "roles": [
+    {"name": "sam:role:node", "allowed_targets": ["*"], "allowed_labels": ["site=office"]},
+    {"name": "agent", "allowed_services": ["egress://api.github.com"], "allowed_targets": ["*"],
+     "http": [{"service": "egress://api.github.com", "methods": ["GET"], "paths": ["/repos/acme/*"]}]}
+  ],
+  "egress": [{"name": "api.github.com", "credential": "github-ro", "served_by": ["site=office"]}]
+}`
+	if err := os.WriteFile(policyFile, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := standalone.New(standalone.Options{BindAddress: "127.0.0.1:0", DataDir: t.TempDir(), PolicyFile: policyFile})
+	if err != nil {
+		t.Fatalf("failed to create standalone server: %v", err)
+	}
+	if err := srv.Start(ctx); err != nil {
+		t.Fatalf("failed to start standalone server: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+srv.Addr()+"/admin/policy", nil)
+	if err != nil {
+		t.Fatalf("GET /admin/policy request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+srv.AdminToken())
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatalf("GET /admin/policy: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("GET /admin/policy body: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /admin/policy = %s %s", resp.Status, body)
+	}
+	var stored api.PolicyConfig
+	if err := protojson.Unmarshal(body, &stored); err != nil {
+		t.Fatalf("GET /admin/policy body: %v\n%s", err, body)
+	}
+	if len(stored.Egress) != 1 || stored.Egress[0].GetName() != "api.github.com" || stored.Egress[0].GetCredential() != "github-ro" {
+		t.Fatalf("seeded egress = %v, want api.github.com with credential github-ro", stored.Egress)
+	}
+	if len(stored.Roles) != 2 {
+		t.Fatalf("seeded roles = %d, want 2", len(stored.Roles))
 	}
 }
 
