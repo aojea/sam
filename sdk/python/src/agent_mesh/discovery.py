@@ -172,7 +172,10 @@ async def _walk(host: IHost, req: kad.Message, seeds: Iterable[ID], take: Callab
             for peer_id in batch:
                 nursery.start_soon(ask, peer_id)
         # Every answer is taken: the providers each router knows add up.
-        if any([take(resp) for resp in answers]):
+        satisfied = False
+        for resp in answers:
+            satisfied = take(resp) or satisfied
+        if satisfied:
             return
 
         closer: dict[ID, PeerInfo] = {}
