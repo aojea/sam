@@ -125,35 +125,39 @@ async def github(session, method, path):
     say(f"← {resp.status}  {verdict or resp.text[:120]}")
 
 
+async def run(session, argv):
+    say(f"on the mesh as {session.peer_id}")
+    step = argv[0] if argv else "all"
+    if step == "models":
+        await models(session)
+    elif step == "ask":
+        await ask(session, " ".join(argv[1:]) or "In one sentence, in English: why should an agent never hold API credentials?")
+    elif step == "tool":
+        await tool(session)
+    elif step == "github":
+        await github(session, argv[1].upper(), argv[2])
+    elif step == "all":
+        await models(session)
+        await ask(session, "In one sentence, in English: why should an agent never hold API credentials?")
+        await tool(session)
+        await github(session, "GET", "/repos/google/sam/pulls?state=open&per_page=1")
+        await github(session, "POST", "/repos/google/sam/pulls")
+        await github(session, "GET", "/user")
+    else:
+        raise SystemExit(__doc__)
+
+
 async def main(argv):
+    joined = False
     try:
-        session_cm = mesh.join()
-        session = await session_cm.__aenter__()
+        async with mesh.join() as session:
+            joined = True
+            await run(session, argv)
     except RuntimeError as err:
+        if joined:
+            raise
         # Every router refused this identity: the admin cut it off.
         raise SystemExit(f"cut off from the mesh: {str(err).splitlines()[0].rstrip(':')}")
-    try:
-        say(f"on the mesh as {session.peer_id}")
-        step = argv[0] if argv else "all"
-        if step == "models":
-            await models(session)
-        elif step == "ask":
-            await ask(session, " ".join(argv[1:]) or "In one sentence, in English: why should an agent never hold API credentials?")
-        elif step == "tool":
-            await tool(session)
-        elif step == "github":
-            await github(session, argv[1].upper(), argv[2])
-        elif step == "all":
-            await models(session)
-            await ask(session, "In one sentence, in English: why should an agent never hold API credentials?")
-            await tool(session)
-            await github(session, "GET", "/repos/google/sam/pulls?state=open&per_page=1")
-            await github(session, "POST", "/repos/google/sam/pulls")
-            await github(session, "GET", "/user")
-        else:
-            raise SystemExit(__doc__)
-    finally:
-        await session_cm.__aexit__(None, None, None)
 
 
 trio.run(main, sys.argv[1:])

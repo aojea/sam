@@ -35,6 +35,8 @@ OUT=$HERE/out
 SESSION=samdemo
 COLS=${COLS:-190}
 ROWS=${ROWS:-54}
+# Playback speed of the rendered video; the subtitles are scaled to match.
+SPEED=${SPEED:-1.25}
 CAPTION_FILE=/tmp/samdemo-caption.txt
 SRT=$OUT/demo.srt
 GITHUB_TOKEN_FILE=${GITHUB_TOKEN_FILE:-$HOME/.config/sam-demo/github-ro}
@@ -130,8 +132,8 @@ caption() {
   caption_prev_at=$now
 }
 
-srt_time() { # seconds since REC_START -> HH:MM:SS,mmm
-  python3 -c 'import sys; t=float(sys.argv[1])-float(sys.argv[2]); t=max(t,0); h=int(t//3600); m=int(t%3600//60); s=t%60; print(f"{h:02d}:{m:02d}:{int(s):02d},{int((s-int(s))*1000):03d}")' "$1" "$REC_START"
+srt_time() { # seconds since REC_START, at playback speed -> HH:MM:SS,mmm
+  python3 -c 'import sys; t=(float(sys.argv[1])-float(sys.argv[2]))/float(sys.argv[3]); t=max(t,0); h=int(t//3600); m=int(t%3600//60); s=t%60; print(f"{h:02d}:{m:02d}:{int(s):02d},{int((s-int(s))*1000):03d}")' "$1" "$REC_START" "$SPEED"
 }
 
 srt_entry() {
@@ -216,14 +218,14 @@ sleep 2
 REC_START=$(date +%s.%N)
 
 caption "An agent decides at run time which API it calls, and with what. You cannot review that in a pull request. Security wants it sandboxed; the developer wants the model, the tools and the internal API it needs."
-pause 7
-caption "The usual bridge is a VPN into the office: slow to develop against, and it turns the sandbox into a door with credentials inside."
 pause 6
+caption "The usual bridge is a VPN into the office: slow to develop against, and it turns the sandbox into a door with credentials inside."
+pause 5
 
 # 1. Two machines
 caption "Left: the office. Right: a developer sandbox somewhere else, here a GitHub codespace. It has no route into the office."
 expect "$SANDBOX" "curl -m 3 http://office-llm.corp.internal:11434/v1/models" 'Could not resolve host|Connection timed out' 10
-pause 3
+pause 2
 
 # 2. The mesh and the policy
 caption "The admin starts a mesh: a control plane, a router and a console, on a public https URL, with the policy in policy.json. No standing join token."
@@ -236,70 +238,70 @@ for i in $(seq 1 30); do
   sleep 2
   if (( i == 30 )); then echo "the tunnel at $URL never answered; abort this take" >&2; exit 1; fi
 done
-pause 3
+pause 2
 
 caption "One token per member, minted for its role. The office node gets sam:role:node and the label site=office; the agent gets the role agent."
 type_in "$ADMIN" "export URL=$URL"
 expect "$ADMIN" "make tokens URL=\$URL" 'tokens in' 30
 # The developer receives the token out of band; here, over ssh.
 gh codespace ssh -c "$CODESPACE" -- 'cat > ~/sandbox/agent-token; chmod 600 ~/sandbox/agent-token' < "$DEMO_DIR/agent-token" 2>/dev/null
-pause 2
+pause 1
 
 caption "The policy: the agent may call the model, the MCP server and api.github.com by name, and api.github.com only with GET under /repos/google/sam/. The destination is served by nodes labelled site=office."
 type_in "$ADMIN" "jq -c '.roles[1].allowed_services, .roles[1].http[0], .egress[0]' policy.json"
-pause 8
+pause 6
 
 caption "The office node fronts a model and an MCP server on loopback. api.github.com is assigned to it by the policy; its read-only token is a file on this machine, read by the node, never by an agent."
 type_in "$NODE" "export URL=$URL"
 expect "$NODE" "make pep URL=\$URL 2>&1 | python3 audit.py" 'SAM Node Online' 60
-pause 4
+pause 3
 
 # 3. The developer's program joins
 caption "The agent is an ordinary Python program with the SDK. The admin handed the developer the single-use token out of band. It enrolls once and gets an identity: no sidecar, no proxy variables, no VPN."
 type_in "$SANDBOX" "export SAM_CONTROL_PLANE_URL=$URL SAM_BOOTSTRAP_TOKEN_PATH=~/sandbox/agent-token"
 expect "$SANDBOX" "python agent.py models" '← 200  gemma3' 90
 PEER=$(grab "$SANDBOX" 'on the mesh as 12D3KooW[A-Za-z0-9]+' | awk '{print $NF}')
-pause 3
+pause 2
 
 # 4. A model, a tool
 caption "A chat completion runs on the office workstation. The answer is different every take; that is the point."
 expect "$SANDBOX" "python agent.py ask" '← 200  ' 90
-pause 5
+pause 3
 caption "A tool call reaches the MCP server in the office. On the left, every decision is one line in the node's log."
 expect "$SANDBOX" "python agent.py tool" 'sum of 2 and 3' 60
-pause 4
+pause 2
 
 # 5. External API
 caption "An external API. GitHub answers 200: the node presented the office's token. The request the sandbox sent had none."
 expect "$SANDBOX" "python agent.py github GET '/repos/google/sam/pulls?state=open&per_page=1'" '← 200  #' 60
-pause 4
+pause 3
 caption "The agent may try anything. POST is outside the grant; /user is outside the grant. The network answers 403 before GitHub hears of it."
 expect "$SANDBOX" "python agent.py github POST /repos/google/sam/pulls" 'http_request_denied' 60
 expect "$SANDBOX" "python agent.py github GET /user" 'http_request_denied' 60
 wait_for "$NODE" 'DENY.*GET /user' 30
-pause 5
+pause 3
 
 # 6. Revoke
 caption "The admin takes api.github.com off the mesh: one policy change. The node withdraws it within seconds."
 expect "$ADMIN" "make revoke URL=\$URL" 'success' 30
 wait_for "$NODE" 'Withdrawn egress://api.github.com' 60
-pause 2
+pause 1
 caption "The same request finds no service. Nothing to revoke in the sandbox: it never had anything."
 expect "$SANDBOX" "python agent.py github GET '/repos/google/sam/pulls?state=open&per_page=1'" '← 404' 60
-pause 4
+pause 3
 
 # 7. Ban
 caption "And when the admin decides this agent is done: the identity is banned, and no router admits it again."
 expect "$ADMIN" "make ban URL=\$URL PEER=$PEER" 'banned' 30
 wait_for "$NODE" 'BANNED' 30
 expect "$SANDBOX" "python agent.py github GET /user" 'cut off from the mesh' 90
-pause 4
+pause 3
 
 # 8. Close
 caption "The developer used their own sandbox and wrote a plain program. The admin wrote one policy document and read one log. The credential never left the office."
-pause 8
+pause 6
 caption "sam-mesh.dev"
-pause 4
+pause 3
 
 # Ends the recording: the attached client exits with the session.
 END=$(date +%s.%N)
@@ -319,7 +321,7 @@ kept = [lines[0]] + [l for l in lines[1:] if json.loads(l)[0] <= cutoff]
 open(path, "w").write("\n".join(kept) + "\n")
 EOF
 
-agg --cols "$COLS" --rows "$ROWS" --font-size 14 --theme monokai --idle-time-limit 30 --last-frame-duration 3 "$OUT/demo.cast" "$OUT/demo.gif"
+agg --cols "$COLS" --rows "$ROWS" --font-size 14 --theme monokai --idle-time-limit 30 --speed "$SPEED" --last-frame-duration 3 "$OUT/demo.cast" "$OUT/demo.gif"
 ffmpeg -y -loglevel error -i "$OUT/demo.gif" -movflags faststart -pix_fmt yuv420p \
   -vf 'scale=trunc(iw/2)*2:trunc(ih/2)*2' "$OUT/demo.mp4"
 echo "recorded: $OUT/demo.cast $OUT/demo.gif $OUT/demo.mp4 $SRT"

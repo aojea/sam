@@ -8,31 +8,38 @@ import json
 import os
 import re
 import sys
+from contextlib import nullcontext
 
 AUDIT = re.compile(r"Audit Traceability\s+(\{.*\})\s*$")
 KEEP = re.compile(r"\[Egress\] (Serving|Withdrawn|Assignments)|peer banned|SAM Node Online|PeerID:")
-# AUDIT_RAW=<file> keeps the unfiltered log next to the filtered view.
-raw = open(os.environ["AUDIT_RAW"], "a") if os.environ.get("AUDIT_RAW") else None
 
-for raw_line in sys.stdin:
-    if raw:
-        raw.write(raw_line)
-        raw.flush()
-    line = raw_line.rstrip("\n")
+
+def verdict(line):
     m = AUDIT.search(line)
     if m:
         try:
             d = json.loads(m.group(1))
         except json.JSONDecodeError:
-            continue
-        verdict = d.get("decision", "?").upper()
+            return None
         who = f"{d.get('role') or '-'} {d.get('peer_id', '')[:12]}…"
         what = " ".join(x for x in (d.get("method"), d.get("path")) if x) or d.get("protocol", "")
-        print(f"{verdict:<5} {who:<22} {what:<40} {d.get('target', '')}", flush=True)
-    elif "peer banned" in line:
+        return f"{d.get('decision', '?').upper():<5} {who:<22} {what:<40} {d.get('target', '')}"
+    if "peer banned" in line:
         peer = re.search(r'"peer":\s*"([^"]+)"', line)
-        print(f"BANNED {peer.group(1) if peer else ''}: the control plane cut this member off", flush=True)
-    elif KEEP.search(line):
+        return f"BANNED {peer.group(1) if peer else ''}: the control plane cut this member off"
+    if KEEP.search(line):
         # Drop the timestamp and logger columns; keep the message.
-        msg = line.split("\t")[-1] if "\t" in line else line
-        print(msg.strip(), flush=True)
+        return (line.split("\t")[-1] if "\t" in line else line).strip()
+    return None
+
+
+# AUDIT_RAW=<file> keeps the unfiltered log next to the filtered view.
+raw_path = os.environ.get("AUDIT_RAW")
+with (open(raw_path, "a") if raw_path else nullcontext()) as raw:
+    for raw_line in sys.stdin:
+        if raw:
+            raw.write(raw_line)
+            raw.flush()
+        out = verdict(raw_line.rstrip("\n"))
+        if out:
+            print(out, flush=True)
