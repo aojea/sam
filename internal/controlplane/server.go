@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	mathrand "math/rand/v2"
 	"net"
 	"net/http"
 	"slices"
@@ -53,6 +54,22 @@ import (
 )
 
 var logger = golog.Logger("sam-control-plane")
+
+// routerAddresses is the router list a member receives: every active router's
+// addresses, the routers in a fresh random order per response and each
+// router's addresses together. A member reserves its relay slot on the first
+// router that admits it, so the order decides which router carries it; one
+// order for everyone would put every member on the same router. Reaching a
+// peer does not depend on the order: a caller tries every router it joined
+// through and looks the peer up in the routers' DHT otherwise.
+func routerAddresses(routers []storage.RouterLease) []string {
+	mathrand.Shuffle(len(routers), func(i, j int) { routers[i], routers[j] = routers[j], routers[i] })
+	var addrs []string
+	for _, r := range routers {
+		addrs = append(addrs, r.Addresses...)
+	}
+	return addrs
+}
 
 const (
 	EnrollRateLimit        = 10
@@ -473,11 +490,7 @@ func (s *Server) HandleInfo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-
-	var routerAddrs []string
-	for _, r := range activeRouters {
-		routerAddrs = append(routerAddrs, r.Addresses...)
-	}
+	routerAddrs := routerAddresses(activeRouters)
 
 	// The ban set is published here, rather than only as a MeshEvent, because
 	// the event is broadcast once and gossip has no replay: a node or router
@@ -722,11 +735,7 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-
-	var routerAddrs []string
-	for _, r := range activeRouters {
-		routerAddrs = append(routerAddrs, r.Addresses...)
-	}
+	routerAddrs := routerAddresses(activeRouters)
 
 	resp := &api.EnrollResponse{
 		BiscuitToken:          biscuitData,
@@ -2604,11 +2613,7 @@ func (s *Server) buildApprovedBootstrapEnrollResponse(ctx context.Context, biscu
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve active routers: %w", err)
 	}
-
-	var routerAddrs []string
-	for _, r := range activeRouters {
-		routerAddrs = append(routerAddrs, r.Addresses...)
-	}
+	routerAddrs := routerAddresses(activeRouters)
 
 	expiration := time.Now().Add(s.config.BiscuitTTL)
 	if resolvedAt != nil {

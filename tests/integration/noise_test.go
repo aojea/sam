@@ -17,6 +17,7 @@ package integration_test
 import (
 	"context"
 	"crypto/ed25519"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -69,11 +70,33 @@ func TestNoiseOnlyPeer(t *testing.T) {
 	}
 
 	nodeID := mesh.samNode.peerID
-	relayed := multiaddr.StringCast(mesh.routerAddr + "/p2p-circuit/p2p/" + nodeID.String())
-	// A relayed connection reports no security protocol in its ConnState;
-	// that this peer, which has Noise alone, gets one at all is the check.
-	if err := h.Connect(network.WithAllowLimitedConn(ctx, "test"), peer.AddrInfo{ID: nodeID, Addrs: []multiaddr.Multiaddr{relayed}}); err != nil {
-		t.Fatalf("noise-only peer could not reach the node through the router: %v", err)
+	// The node reserved on a router of its choosing; a relayed connection
+	// reports no security protocol in its ConnState, so that this peer, which
+	// has Noise alone, gets one at all is the check. The peer must have passed
+	// the handshake with the router it dials through.
+	var relayErrs []string
+	connected := false
+	for _, routerAddr := range mesh.routerAddrs {
+		via, err := peer.AddrInfoFromString(routerAddr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if via.ID != router.ID {
+			if err := h.Connect(ctx, *via); err != nil {
+				t.Fatalf("noise-only peer could not connect to router %s: %v", routerAddr, err)
+			}
+			authHandshake(t, ctx, h, via.ID, biscuit)
+		}
+		relayed := multiaddr.StringCast(routerAddr + "/p2p-circuit/p2p/" + nodeID.String())
+		if err := h.Connect(network.WithAllowLimitedConn(ctx, "test"), peer.AddrInfo{ID: nodeID, Addrs: []multiaddr.Multiaddr{relayed}}); err != nil {
+			relayErrs = append(relayErrs, fmt.Sprintf("%s: %v", routerAddr, err))
+			continue
+		}
+		connected = true
+		break
+	}
+	if !connected {
+		t.Fatalf("noise-only peer could not reach the node through any router:\n  %s", strings.Join(relayErrs, "\n  "))
 	}
 	nodeBiscuit := authHandshake(t, ctx, h, nodeID, biscuit)
 	if err := identity.VerifyBiscuitRole(nodeBiscuit, mesh.cpPriv.Public().(ed25519.PublicKey), api.RoleNode, 5*time.Second); err != nil {
@@ -87,7 +110,7 @@ func TestNoiseOnlyPeer(t *testing.T) {
 	}
 
 	// The TLS peer of the other tests is unchanged: TLS is offered first.
-	tlsPeer := newAdmittedGoPeer(t, ctx, mesh.cpPriv, mesh.routerAddr)
+	tlsPeer := newAdmittedGoPeer(t, ctx, mesh.cpPriv, mesh.routerAddrs)
 	if got := securityOf(tlsPeer, router.ID); !strings.HasPrefix(got, "/tls/") {
 		t.Fatalf("TLS peer's connection to the router is %q, want /tls/...", got)
 	}

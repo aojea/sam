@@ -68,8 +68,9 @@ type sdkMesh struct {
 	cpPub      ed25519.PublicKey
 	routerAddr string
 	routerPeer string
-	// routerAddrs lists every router, in the order the control plane hands them
-	// out (by peer ID); routerAddr is the first, where members reserve.
+	// routerAddrs lists every router; routerAddr is one of them, for tests
+	// that need a router. The control plane hands them out in a random order
+	// per response, so members spread across them.
 	routerAddrs []string
 	samNode     *backgroundNode
 	nodeAPI     string
@@ -192,12 +193,11 @@ egress:
 
 	// Two routers, as the testnets run several: a member authenticates with
 	// every one and reserves a relay slot on the first the control plane
-	// lists, so a caller finds a peer's reservation where it looks first.
+	// lists for it, a different one from member to member.
 	routerA, _ := startRouter(t, t.TempDir(), cpPort, mintToken, "router-a")
 	routerB, _ := startRouter(t, t.TempDir(), cpPort, mintToken, "router-b")
 	routerAddrs := []string{routerA, routerB}
-	sort.Slice(routerAddrs, func(i, j int) bool { return extractPeerID(routerAddrs[i]) < extractPeerID(routerAddrs[j]) })
-	routerAddr := routerAddrs[0]
+	routerAddr := routerA
 
 	cpPriv, cpPub, err := store.GetCurrentKey(context.Background())
 	if err != nil {
@@ -376,7 +376,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 		waitForPeerOnRouter(t, cpPort, adminToken, m.report.PeerID, 5*time.Second)
 	}
 
-	goPeer := newAdmittedGoPeer(t, ctx, cpPriv, routerAddr)
+	goPeer := newAdmittedGoPeer(t, ctx, cpPriv, mesh.routerAddrs)
 
 	for _, m := range members {
 		m := m
@@ -443,7 +443,10 @@ func TestNativeSDKsMesh(t *testing.T) {
 			if len(providers) != 1 {
 				t.Fatalf("%s discovered %+v for %s, want only the node", m.name, providers, serviceName)
 			}
-			nodeRelayAddr := routerAddr + "/p2p-circuit/p2p/" + samNode.peerID.String()
+			// By peer ID: the node reserved on a router of its choosing, and
+			// the member finds the relayed path through whichever of the
+			// routers it joined through relays for the node.
+			nodeRelayAddr := samNode.peerID.String()
 			if tools := m.tools(t, nodeRelayAddr, "mcp://"+serviceName); !contains(tools, "add") {
 				t.Fatalf("%s listed %v on mcp://%s, want add", m.name, tools, serviceName)
 			}
@@ -479,7 +482,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 		}
 		for _, tc := range sdkMeshLabelRequirements {
 			t.Run(tc.name, func(t *testing.T) {
-				nodeRelayAddr := routerAddr + "/p2p-circuit/p2p/" + samNode.peerID.String()
+				nodeRelayAddr := samNode.peerID.String()
 				for _, m := range members {
 					res := m.toolsRequiring(t, nodeRelayAddr, "mcp://"+serviceName, tc.required)
 					if res.OK != tc.allowed {
@@ -500,7 +503,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 	for _, m := range members {
 		m.accept(t, "agent")
 	}
-	guest := newGuestGoPeer(t, ctx, cpPriv, routerAddr)
+	guest := newGuestGoPeer(t, ctx, cpPriv, mesh.routerAddrs)
 	for _, m := range members {
 		m := m
 		t.Run(m.name+"-accepts", func(t *testing.T) {
@@ -599,7 +602,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 	t.Run("ban-and-rotation", func(t *testing.T) {
 		// An enrolled peer the control plane can ban: a node record, admitted
 		// by every member over the router.
-		outcast := newAdmittedGoPeer(t, ctx, cpPriv, routerAddr)
+		outcast := newAdmittedGoPeer(t, ctx, cpPriv, mesh.routerAddrs)
 		outcastBiscuit := goHostBiscuit(t, cpPriv, outcast.ID())
 		outcastPub, err := crypto.MarshalPublicKey(outcast.Peerstore().PubKey(outcast.ID()))
 		if err != nil {
@@ -813,12 +816,9 @@ func routerIDs(report sdkJoinReport) []string {
 
 func startSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, adminToken string, routerAddrs []string) *sdkMember {
 	t.Helper()
-	routerAddr, routerPeer := routerAddrs[0], extractPeerID(routerAddrs[0])
 	m := launchSDKMember(t, name, cmd, root, baseURL, adminToken, "SAM_SDK_LISTEN_ADDRS=/ip4/127.0.0.1/tcp/0")
-	// Every router the control plane named admitted the member, in the
-	// control plane's order: a peer reserves on the first, and a caller that
-	// knew only its own first router could not reach a peer whose list
-	// started elsewhere.
+	// Every router the control plane named admitted the member, in whatever
+	// order it was handed them; it reserved on the first of its own list.
 	var admitted []string
 	for _, r := range m.report.Routers {
 		admitted = append(admitted, r.PeerID)
@@ -830,15 +830,18 @@ func startSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, adm
 	for _, a := range routerAddrs {
 		want = append(want, extractPeerID(a))
 	}
+	sort.Strings(admitted)
+	sort.Strings(want)
 	if !reflect.DeepEqual(admitted, want) {
 		t.Fatalf("%s report routers %v, want every router the control plane listed %v", name, admitted, want)
 	}
 	if len(m.report.RelayAddresses) == 0 {
 		t.Fatalf("%s: no relay address, the router did not grant a reservation", name)
 	}
+	first := m.report.Routers[0]
 	for _, a := range m.report.RelayAddresses {
-		if !strings.HasPrefix(a, routerAddr) || !strings.HasSuffix(a, "/p2p-circuit/p2p/"+m.report.PeerID) {
-			t.Fatalf("%s relay address %s is not <router>/p2p-circuit/p2p/<self> for the first router %s (%s)", name, a, routerPeer, routerAddr)
+		if !strings.HasPrefix(a, first.Addr) || !strings.HasSuffix(a, "/p2p-circuit/p2p/"+m.report.PeerID) {
+			t.Fatalf("%s relay address %s is not <router>/p2p-circuit/p2p/<self> for its first router %s (%s)", name, a, first.PeerID, first.Addr)
 		}
 	}
 	return m
@@ -1222,8 +1225,8 @@ func (m *sdkMember) readLine(t *testing.T, timeout time.Duration) []byte {
 }
 
 // newAdmittedGoPeer is a libp2p host configured like sam-node's, connected
-// to the router and past its auth handshake, so the router relays for it.
-func newAdmittedGoPeer(t *testing.T, ctx context.Context, cpPriv ed25519.PrivateKey, routerAddr string) host.Host {
+// to every router and past their auth handshakes, so each relays for it.
+func newAdmittedGoPeer(t *testing.T, ctx context.Context, cpPriv ed25519.PrivateKey, routerAddrs []string) host.Host {
 	t.Helper()
 	h, err := libp2p.New(
 		libp2p.NoListenAddrs,
@@ -1234,18 +1237,21 @@ func newAdmittedGoPeer(t *testing.T, ctx context.Context, cpPriv ed25519.Private
 		t.Fatalf("failed to create go peer: %v", err)
 	}
 	t.Cleanup(func() { _ = h.Close() })
-	info, err := peer.AddrInfoFromString(routerAddr)
-	if err != nil {
-		t.Fatalf("router address %s: %v", routerAddr, err)
-	}
-	connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	if err := h.Connect(connectCtx, *info); err != nil {
-		t.Fatalf("go peer could not connect to the router: %v", err)
-	}
-	routerBiscuit := authHandshake(t, ctx, h, info.ID, goHostBiscuit(t, cpPriv, h.ID()))
-	if err := identity.VerifyBiscuitRole(routerBiscuit, cpPriv.Public().(ed25519.PublicKey), api.RoleRouter, 5*time.Second); err != nil {
-		t.Fatalf("router credential lacks the router role: %v", err)
+	for _, routerAddr := range routerAddrs {
+		info, err := peer.AddrInfoFromString(routerAddr)
+		if err != nil {
+			t.Fatalf("router address %s: %v", routerAddr, err)
+		}
+		connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err = h.Connect(connectCtx, *info)
+		cancel()
+		if err != nil {
+			t.Fatalf("go peer could not connect to router %s: %v", routerAddr, err)
+		}
+		routerBiscuit := authHandshake(t, ctx, h, info.ID, goHostBiscuit(t, cpPriv, h.ID()))
+		if err := identity.VerifyBiscuitRole(routerBiscuit, cpPriv.Public().(ed25519.PublicKey), api.RoleRouter, 5*time.Second); err != nil {
+			t.Fatalf("router credential lacks the router role: %v", err)
+		}
 	}
 	return h
 }
@@ -1270,11 +1276,11 @@ func guestHostBiscuit(t *testing.T, cpPriv ed25519.PrivateKey, id peer.ID) []byt
 	return b
 }
 
-// newGuestGoPeer is a Go peer admitted by the router with a node-role token;
+// newGuestGoPeer is a Go peer admitted by the routers with a node-role token;
 // what it presents to providers is chosen per request.
-func newGuestGoPeer(t *testing.T, ctx context.Context, cpPriv ed25519.PrivateKey, routerAddr string) host.Host {
+func newGuestGoPeer(t *testing.T, ctx context.Context, cpPriv ed25519.PrivateKey, routerAddrs []string) host.Host {
 	t.Helper()
-	return newAdmittedGoPeer(t, ctx, cpPriv, routerAddr)
+	return newAdmittedGoPeer(t, ctx, cpPriv, routerAddrs)
 }
 
 // tryMCPStream opens /sam/mcp/1.0.0 to target through addr and reports

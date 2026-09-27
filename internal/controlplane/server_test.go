@@ -564,6 +564,43 @@ func TestNodeAndRouterRegistrationFlow(t *testing.T) {
 // so anything the render drops is silently deleted from the mesh policy on the
 // next save. protojson is generated, which is the point: a hand-written renderer
 // is what lost custom_datalog before.
+// Members reserve on the first router they are handed, so every router has
+// to come first for some of them, and a router's addresses have to stay
+// together so "the first router" is one router.
+func TestRouterAddressesSpreadMembersAcrossRouters(t *testing.T) {
+	routers := func() []storage.RouterLease {
+		return []storage.RouterLease{
+			{PeerID: "a", Addresses: []string{"/ip4/10.0.0.1/tcp/4501/p2p/a", "/ip4/10.0.0.1/udp/4501/quic-v1/p2p/a"}},
+			{PeerID: "b", Addresses: []string{"/ip4/10.0.0.2/tcp/4501/p2p/b", "/ip4/10.0.0.2/udp/4501/quic-v1/p2p/b"}},
+			{PeerID: "c", Addresses: []string{"/ip4/10.0.0.3/tcp/4501/p2p/c"}},
+		}
+	}
+	routerOf := func(addr string) string { return addr[strings.LastIndex(addr, "/")+1:] }
+	first := map[string]int{}
+	for i := 0; i < 300; i++ {
+		addrs := routerAddresses(routers())
+		if len(addrs) != 5 {
+			t.Fatalf("got %d addresses, want every router's 5", len(addrs))
+		}
+		first[routerOf(addrs[0])]++
+		// Once a router's run of addresses ends, that router is not seen again.
+		seen := map[string]bool{}
+		for j, addr := range addrs {
+			id := routerOf(addr)
+			if seen[id] && routerOf(addrs[j-1]) != id {
+				t.Fatalf("router %s's addresses are split in %v", id, addrs)
+			}
+			seen[id] = true
+		}
+	}
+	// (2/3)^300 that a router never comes first by chance.
+	for _, id := range []string{"a", "b", "c"} {
+		if first[id] == 0 {
+			t.Errorf("router %s never came first in 300 responses: %v", id, first)
+		}
+	}
+}
+
 func TestMarshalPolicyJSONRoundTrip(t *testing.T) {
 	roles := []*api.PolicyRole{
 		{

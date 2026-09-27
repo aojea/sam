@@ -976,9 +976,9 @@ func (s *SQLStore) UpsertRouterLease(ctx context.Context, lease *RouterLease) er
 	return err
 }
 
-// GetActiveRouters implements Store. The order is by peer ID, so every
-// member handed the list picks the same first router to reserve a relay on
-// and a caller finds a peer's reservation where it looks first.
+// GetActiveRouters implements Store. The order is by peer ID, so the store
+// reads the same to every replica and caller; the control plane shuffles the
+// list it hands members (routerAddresses) so they spread across the routers.
 func (s *SQLStore) GetActiveRouters(ctx context.Context) ([]RouterLease, error) {
 	query := s.rebind(`SELECT peer_id, multiaddresses, last_lease_renewal, expires_at, connected_peers, dht_size FROM routers WHERE expires_at > ? ORDER BY peer_id`)
 	rows, err := s.db.QueryContext(ctx, query, time.Now().UnixMilli())

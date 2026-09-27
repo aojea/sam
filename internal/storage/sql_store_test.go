@@ -483,8 +483,8 @@ func TestRouterLeaseOps(t *testing.T) {
 	}
 
 	// More routers come back in one order, by peer ID, whatever the order
-	// they leased in: members reserve on the first and callers try them in
-	// turn, so both sides must see the same list.
+	// they leased in: the store reads the same to every replica, and what a
+	// member is handed is shuffled from this by the control plane.
 	for _, id := range []string{"12D3KooWZzzLastRouter", "12D3KooWAaaFirstRouter"} {
 		if err := store.UpsertRouterLease(ctx, &RouterLease{
 			PeerID:      id,
