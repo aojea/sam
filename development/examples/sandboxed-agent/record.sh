@@ -37,13 +37,19 @@ COLS=${COLS:-190}
 ROWS=${ROWS:-54}
 # Playback speed of the rendered video; the subtitles are scaled to match.
 SPEED=${SPEED:-1.25}
+# Longest silence kept, in seconds of the take: a join or a tunnel coming up
+# is cut to this, typing and typed captions are untouched.
+IDLE_MAX=${IDLE_MAX:-1.5}
+# Caption typing rate, characters per second; sets the reading time.
+CAPTION_CPS=${CAPTION_CPS:-24}
 CAPTION_FILE=/tmp/samdemo-caption.txt
+CAPTIONS=$OUT/captions.tsv
 SRT=$OUT/demo.srt
 GITHUB_TOKEN_FILE=${GITHUB_TOKEN_FILE:-$HOME/.config/sam-demo/github-ro}
 DEMO_DIR=${DEMO_DIR:-$HOME/sam-demo}
 
 mkdir -p "$OUT"
-rm -f "$SRT"
+rm -f "$SRT" "$CAPTIONS"
 : > "$CAPTION_FILE"
 
 # --- helpers ---------------------------------------------------------------
@@ -116,34 +122,12 @@ expect() {
   return 1
 }
 
-REC_START=
-caption_n=0
-caption_prev_at=
-caption_prev=
-# caption <text>: shows text in the caption pane and records it for the srt.
+# caption <text>: types text into the caption pane, waits until it is fully
+# shown, and records it for the subtitles.
 caption() {
-  local now
-  now=$(date +%s.%N)
-  if [[ -n "$REC_START" && -n "$caption_prev" ]]; then
-    srt_entry "$caption_prev_at" "$now" "$caption_prev"
-  fi
+  printf '%s\t%s\n' "$(date +%s.%N)" "$1" >> "$CAPTIONS"
   printf '%s\n' "$1" > "$CAPTION_FILE"
-  caption_prev=$1
-  caption_prev_at=$now
-}
-
-srt_time() { # seconds since REC_START, at playback speed -> HH:MM:SS,mmm
-  python3 -c 'import sys; t=(float(sys.argv[1])-float(sys.argv[2]))/float(sys.argv[3]); t=max(t,0); h=int(t//3600); m=int(t%3600//60); s=t%60; print(f"{h:02d}:{m:02d}:{int(s):02d},{int((s-int(s))*1000):03d}")' "$1" "$REC_START" "$SPEED"
-}
-
-srt_entry() {
-  caption_n=$((caption_n + 1))
-  {
-    echo "$caption_n"
-    echo "$(srt_time "$1") --> $(srt_time "$2")"
-    echo "$3"
-    echo
-  } >> "$SRT"
+  sleep "$(python3 -c 'import sys; print(len(sys.argv[1]) / float(sys.argv[2]) + 0.6)' "$1" "$CAPTION_CPS")"
 }
 
 pause() { sleep "${1:-2}"; }
@@ -172,10 +156,10 @@ tmux select-pane -t "$NODE" -T 'office · node (what it serves, every decision)'
 tmux select-pane -t "$SANDBOX" -T 'developer sandbox · a codespace, no VPN'
 tmux select-pane -t "$CAPTION" -T ''
 
-# The caption pane reprints its file whenever it changes.
+# The caption pane types its file out whenever it changes, at CAPTION_CPS.
 cat > /tmp/samdemo-caption.py <<'EOF'
-import os, sys, textwrap, time
-path, cols = sys.argv[1], int(sys.argv[2])
+import sys, textwrap, time
+path, cols, cps = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
 last = None
 while True:
     try:
@@ -183,14 +167,19 @@ while True:
     except FileNotFoundError:
         text = ""
     if text != last:
+        last = text
         sys.stdout.write("\033[2J\033[H")
         for line in textwrap.wrap(text, cols - 4)[:3]:
-            sys.stdout.write("  \033[1m" + line + "\033[0m\n")
+            sys.stdout.write("  \033[1m")
+            for ch in line:
+                sys.stdout.write(ch)
+                sys.stdout.flush()
+                time.sleep(1 / cps)
+            sys.stdout.write("\033[0m\n")
         sys.stdout.flush()
-        last = text
-    time.sleep(0.2)
+    time.sleep(0.1)
 EOF
-tmux send-keys -t "$CAPTION" "python3 /tmp/samdemo-caption.py $CAPTION_FILE $COLS" Enter
+tmux send-keys -t "$CAPTION" "python3 /tmp/samdemo-caption.py $CAPTION_FILE $COLS $CAPTION_CPS" Enter
 
 # Quiet prompts. The admin token comes from the environment so the banner
 # names its source instead of showing it.
@@ -215,12 +204,11 @@ fi
 tmux new-session -d -s "${SESSION}-rec" -x "$COLS" -y "$ROWS" \
   "asciinema rec -q --overwrite --cols $COLS --rows $ROWS -c 'tmux attach -t $SESSION' '$OUT/demo.cast'"
 sleep 2
-REC_START=$(date +%s.%N)
 
 caption "An agent decides at run time which API it calls, and with what. You cannot review that in a pull request. Security wants it sandboxed; the developer wants the model, the tools and the internal API it needs."
-pause 6
+pause 1
 caption "The usual bridge is a VPN into the office: slow to develop against, and it turns the sandbox into a door with credentials inside."
-pause 5
+pause 1
 
 # 1. Two machines
 caption "Left: the office. Right: a developer sandbox somewhere else, here a GitHub codespace. It has no route into the office."
@@ -247,78 +235,113 @@ expect "$ADMIN" "make tokens URL=\$URL" 'tokens in' 30
 gh codespace ssh -c "$CODESPACE" -- 'cat > ~/sandbox/agent-token; chmod 600 ~/sandbox/agent-token' < "$DEMO_DIR/agent-token" 2>/dev/null
 pause 1
 
-caption "The policy: the agent may call the model, the MCP server and api.github.com by name, and api.github.com only with GET under /repos/google/sam/. The destination is served by nodes labelled site=office."
 type_in "$ADMIN" "jq -c '.roles[1].allowed_services, .roles[1].http[0], .egress[0]' policy.json"
-pause 6
+caption "The policy: the agent may call the model, the MCP server and api.github.com by name, and api.github.com only with GET under /repos/google/sam/. The destination is served by nodes labelled site=office."
+pause 1
 
 caption "The office node fronts a model and an MCP server on loopback. api.github.com is assigned to it by the policy; its read-only token is a file on this machine, read by the node, never by an agent."
 type_in "$NODE" "export URL=$URL"
 expect "$NODE" "make pep URL=\$URL 2>&1 | python3 audit.py" 'SAM Node Online' 60
-pause 3
+pause 2
 
 # 3. The developer's program joins
 caption "The agent is an ordinary Python program with the SDK. The admin handed the developer the single-use token out of band. It enrolls once and gets an identity: no sidecar, no proxy variables, no VPN."
 type_in "$SANDBOX" "export SAM_CONTROL_PLANE_URL=$URL SAM_BOOTSTRAP_TOKEN_PATH=~/sandbox/agent-token"
 expect "$SANDBOX" "python agent.py models" '← 200  gemma3' 90
 PEER=$(grab "$SANDBOX" 'on the mesh as 12D3KooW[A-Za-z0-9]+' | awk '{print $NF}')
-pause 2
+pause 1
 
 # 4. A model, a tool
-caption "A chat completion runs on the office workstation. The answer is different every take; that is the point."
 expect "$SANDBOX" "python agent.py ask" '← 200  ' 90
-pause 3
-caption "A tool call reaches the MCP server in the office. On the left, every decision is one line in the node's log."
+caption "A chat completion runs on the office workstation. The answer is different every take; that is the point."
 expect "$SANDBOX" "python agent.py tool" 'sum of 2 and 3' 60
-pause 2
+caption "A tool call reaches the MCP server in the office. On the left, every decision is one line in the node's log."
+pause 1
 
 # 5. External API
-caption "An external API. GitHub answers 200: the node presented the office's token. The request the sandbox sent had none."
 expect "$SANDBOX" "python agent.py github GET '/repos/google/sam/pulls?state=open&per_page=1'" '← 200  #' 60
-pause 3
-caption "The agent may try anything. POST is outside the grant; /user is outside the grant. The network answers 403 before GitHub hears of it."
+caption "An external API. GitHub answers 200: the node presented the office's token. The request the sandbox sent had none."
 expect "$SANDBOX" "python agent.py github POST /repos/google/sam/pulls" 'http_request_denied' 60
 expect "$SANDBOX" "python agent.py github GET /user" 'http_request_denied' 60
 wait_for "$NODE" 'DENY.*GET /user' 30
-pause 3
+caption "The agent may try anything. POST is outside the grant; /user is outside the grant. The network answers 403 before GitHub hears of it."
+pause 1
 
 # 6. Revoke
 caption "The admin takes api.github.com off the mesh: one policy change. The node withdraws it within seconds."
 expect "$ADMIN" "make revoke URL=\$URL" 'success' 30
 wait_for "$NODE" 'Withdrawn egress://api.github.com' 60
-pause 1
-caption "The same request finds no service. Nothing to revoke in the sandbox: it never had anything."
 expect "$SANDBOX" "python agent.py github GET '/repos/google/sam/pulls?state=open&per_page=1'" '← 404' 60
-pause 3
+caption "The same request finds no service. Nothing to revoke in the sandbox: it never had anything."
+pause 1
 
 # 7. Ban
 caption "And when the admin decides this agent is done: the identity is banned, and no router admits it again."
 expect "$ADMIN" "make ban URL=\$URL PEER=$PEER" 'banned' 30
 wait_for "$NODE" 'BANNED' 30
 expect "$SANDBOX" "python agent.py github GET /user" 'cut off from the mesh' 90
-pause 3
+pause 2
 
 # 8. Close
 caption "The developer used their own sandbox and wrote a plain program. The admin wrote one policy document and read one log. The credential never left the office."
-pause 6
+pause 1
 caption "sam-mesh.dev"
 pause 3
 
 # Ends the recording: the attached client exits with the session.
 END=$(date +%s.%N)
-srt_entry "$caption_prev_at" "$END" "$caption_prev"
 tmux kill-session -t "$SESSION"
 for _ in $(seq 1 30); do tmux has-session -t "${SESSION}-rec" 2>/dev/null || break; sleep 1; done
 
 # --- render -------------------------------------------------------------------
 
-# The teardown clears the screen; the recording ends on the closing caption.
-python3 - "$OUT/demo.cast" "$END" <<'EOF'
-import json, sys
-path, end = sys.argv[1], float(sys.argv[2])
-lines = open(path).read().splitlines()
-cutoff = end - json.loads(lines[0])["timestamp"] - 0.5
-kept = [lines[0]] + [l for l in lines[1:] if json.loads(l)[0] <= cutoff]
-open(path, "w").write("\n".join(kept) + "\n")
+# Cut the teardown, clamp every silence to IDLE_MAX, and write the subtitles
+# on the clamped timeline at playback speed.
+python3 - "$OUT/demo.cast" "$CAPTIONS" "$SRT" "$END" "$IDLE_MAX" "$SPEED" <<'EOF'
+import bisect, json, sys
+cast, captions, srt, end, idle_max, speed = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4]), float(sys.argv[5]), float(sys.argv[6])
+lines = open(cast).read().splitlines()
+header = json.loads(lines[0])
+events = [json.loads(l) for l in lines[1:]]
+caps = [(float(w), text) for w, text in (l.split("\t", 1) for l in open(captions).read().splitlines())]
+# The cast clock starts a little after the header's whole-second timestamp.
+# The first caption is typed right after the only long silence at the start
+# (the attach redraw, then the driver's sleep), which anchors the two clocks.
+first_typing = next((e[0] for prev, e in zip([[0.0]] + events, events) if e[0] - prev[0] > 1.0 and e[0] < 10), 1.5)
+t0 = caps[0][0] - first_typing
+events = [e for e in events if e[0] <= end - t0 - 0.5]
+
+knots_old, knots_new = [], []
+prev_old = prev_new = 0.0
+for e in events:
+    prev_new += min(e[0] - prev_old, idle_max)
+    prev_old = e[0]
+    knots_old.append(prev_old)
+    knots_new.append(prev_new)
+    e[0] = round(prev_new, 6)
+
+def remap(t):
+    i = bisect.bisect_right(knots_old, t) - 1
+    if i < 0:
+        return 0.0
+    return knots_new[i] + min(t - knots_old[i], idle_max)
+
+def stamp(t):
+    t = max(t, 0) / speed
+    h, m, s = int(t // 3600), int(t % 3600 // 60), t % 60
+    return f"{h:02d}:{m:02d}:{int(s):02d},{int((s - int(s)) * 1000):03d}"
+
+caps = [(w - t0, text) for w, text in caps]
+last = (events[-1][0] if events else 0.0) + idle_max
+with open(srt, "w") as out:
+    for i, (t, text) in enumerate(caps):
+        stop = remap(caps[i + 1][0]) if i + 1 < len(caps) else last
+        out.write(f"{i + 1}\n{stamp(remap(t))} --> {stamp(stop)}\n{text}\n\n")
+with open(cast, "w") as out:
+    out.write(json.dumps(header) + "\n")
+    for e in events:
+        out.write(json.dumps(e) + "\n")
+print(f"take {knots_old[-1]:.0f}s, cut to {last:.0f}s, plays in {last / speed:.0f}s")
 EOF
 
 agg --cols "$COLS" --rows "$ROWS" --font-size 14 --theme monokai --idle-time-limit 30 --speed "$SPEED" --last-frame-duration 3 "$OUT/demo.cast" "$OUT/demo.gif"

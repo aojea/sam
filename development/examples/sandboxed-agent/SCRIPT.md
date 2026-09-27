@@ -172,6 +172,14 @@ python agent.py github GET /user
 CODESPACE=<name> GITHUB_TOKEN_FILE=~/github-ro ./record.sh   # tmux, asciinema, then agg and ffmpeg
 ```
 
+The captions are typed into their pane at reading speed (`CAPTION_CPS`,
+24 characters per second), and the driver moves on when a caption is fully
+shown, so the narration paces the take. Afterwards every silence in the
+cast longer than `IDLE_MAX` (1.5 s) is cut to that length: a join, a
+tunnel coming up, a timeout. Typing is untouched. The video is rendered at
+`SPEED` (1.25) and the subtitles are remapped through both, so they stay
+in sync.
+
 Outputs `demo.cast`, `demo.gif`, `demo.mp4` and `demo.srt` (the narration
 with timestamps, for a voice-over or subtitles) in `out/`, which git
 ignores. The published copy is `site/static/demo-sandboxed-agent.mp4`.
