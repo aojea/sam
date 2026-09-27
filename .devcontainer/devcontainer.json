@@ -1,0 +1,22 @@
+{
+  "name": "SAM (develop)",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {},
+    "ghcr.io/devcontainers/features/python:1": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "onCreateCommand": "make build",
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": { "label": "SAM mesh (sam-one)", "protocol": "http" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["golang.go"]
+    },
+    "codespaces": {
+      "openFiles": ["site/content/docs/guides/codespaces.md"]
+    }
+  }
+}

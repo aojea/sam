@@ -45,6 +45,14 @@ make docker-build # container images tagged :local
 make proto        # regenerate api/sam.pb.go after editing sam.proto
 ```
 
+The repository has a dev container (`.devcontainer/devcontainer.json`) with
+Go, Node, Python and Docker, and `make build` runs when it is created. Open
+it in a [GitHub codespace](https://codespaces.new/google/sam?quickstart=1)
+or with the VS Code Dev Containers extension to build and test with nothing
+installed locally. `make testnet` inside a codespace starts `sam-one` on the
+codespace's public URL, so you can point an SDK program or a phone at your
+branch; the [Codespaces guide](../guides/codespaces/) has the steps.
+
 Node and router control-plane requests identify themselves as
 `sam-node/<version>` and `sam-router/<version>`, including the router inside
 `sam-one`. These headers contain the software component and build version.

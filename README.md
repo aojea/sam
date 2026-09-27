@@ -37,6 +37,16 @@ no uptime promise; the [quick start](https://sam-mesh.dev/docs/getting-started/q
 walks through it, and [your own mesh](https://sam-mesh.dev/docs/getting-started/your-own-mesh/)
 runs a control plane on your laptop in one command.
 
+To run a control plane of your own without installing anything, open a
+GitHub codespace with the released binaries and run `make testnet`. It
+starts on a public `https` URL that your laptop and phone can enroll into,
+on your GitHub account's free quota:
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/google/sam?quickstart=1&devcontainer_path=.devcontainer%2Ftestnet%2Fdevcontainer.json)
+
+The [Codespaces guide](https://sam-mesh.dev/docs/guides/codespaces/) has the
+steps, what persists and what stops.
+
 ## What is in a mesh
 
 | Program | Role |
@@ -56,6 +66,12 @@ runs a control plane on your laptop in one command.
 - [Reference](https://sam-mesh.dev/docs/reference/): every flag, configuration key, HTTP route and policy field.
 - [Preview](https://sam-mesh.dev/docs/preview/): sandboxed agents and the mobile app, which work but are still settling.
 - [Contributing](https://sam-mesh.dev/docs/contributing/): building, testing and the local kind environment.
+
+The repository has a dev container with the Go, Node and Python toolchains
+and Docker, so you can build and test in a codespace or in VS Code without
+installing anything:
+
+[![Develop in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/google/sam?quickstart=1)
 
 ## Status
 

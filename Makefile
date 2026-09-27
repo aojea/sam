@@ -152,6 +152,17 @@ kind-local-node:
 kind-e2e-mesh: build
 	./development/kind/test-mesh-e2e.sh
 
+# A mesh of your own on port 8080. In a GitHub codespace the port is
+# published on the codespace's https URL; anywhere else this is a local
+# sam-one. Uses ./bin/sam-one when built, else sam-one on PATH. State lives
+# in ./.sam-one (ignored by git; in a codespace it survives rebuilds). Extra
+# flags pass through: make testnet ARGS="--issuer https://accounts.google.com".
+SAM_ONE_BIN ?= $(if $(wildcard $(OUT_DIR)/sam-one),$(OUT_DIR)/sam-one,sam-one)
+SAM_ONE_DATA_DIR ?= $(REPO_ROOT)/.sam-one
+.PHONY: testnet
+testnet:
+	$(SAM_ONE_BIN) --data-dir "$(SAM_ONE_DATA_DIR)" --port 8080 $(if $(CODESPACE_NAME),--tunnel codespaces) $(ARGS)
+
 test:
 	CGO_ENABLED=1 go test -v -race -count 1 $(if $(WHAT),-run $(WHAT)) ./...
 	CGO_ENABLED=1 go -C cmd/nano-init test -race -count 1 $(if $(WHAT),-run $(WHAT)) ./...

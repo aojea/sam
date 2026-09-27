@@ -35,6 +35,24 @@ updates:
     cooldown:
       default-days: 7
 
+  # Dev container features, and the digest-pinned base images of the two
+  # dev container Dockerfiles.
+  - package-ecosystem: "devcontainers"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: "docker"
+    directories:
+      - "/.devcontainer"
+      - "/.devcontainer/testnet"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+
   - package-ecosystem: "npm"
     directories:
       - "/tests/ui"

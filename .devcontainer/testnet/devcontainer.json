@@ -1,0 +1,16 @@
+{
+  "name": "SAM testnet (stable release)",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": { "SAM_CHANNEL": "stable" }
+  },
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": { "label": "SAM mesh (sam-one)", "protocol": "http" }
+  },
+  "customizations": {
+    "codespaces": {
+      "openFiles": ["site/content/docs/guides/codespaces.md"]
+    }
+  }
+}

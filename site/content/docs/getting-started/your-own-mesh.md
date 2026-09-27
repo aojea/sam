@@ -31,6 +31,7 @@ for nodes to connect to it.
 | **Across machines, VMs, or phones** *(Instant HTTPS tunnel)* | `sam-one --data-dir ~/sam-one --tunnel cloudflare --tunnel-install` | Public `https://<name>.trycloudflare.com` URL + terminal QR code |
 | **Same machine only** *(Local development)* | `sam-one --data-dir ~/sam-one` | Local `http://127.0.0.1:<port>` URL |
 | **Custom domain behind NAT/firewall** | `sam-one --data-dir ~/sam-one --tunnel cloudflare --tunnel-token-path ~/token --external-url https://mesh.example.com` | Permanent `https://mesh.example.com` URL (no inbound firewall ports) |
+| **A GitHub codespace, nothing installed** | Open the repository in a codespace and run `make testnet` ([Codespaces](../../guides/codespaces/)) | Public `https://<codespace>-8080.app.github.dev` URL once you make the port public |
 | **Always-on Cloud Deployment** *(Cloud Run, SkyPilot)* | See [Cloud Run](../../guides/cloud-run/) (`gcloud run deploy`) or [SkyPilot](../../guides/skypilot/) (`sky launch`) | `https://<svc>.a.run.app` or `https://mesh.example.com` |
 
 For example, starting `sam-one` locally:

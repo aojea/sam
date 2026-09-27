@@ -34,6 +34,8 @@ go.work.sum
 #
 bin/
 dist/
+# State of `make testnet` (database, router key, tokens)
+.sam-one/
 # Stray binaries from `go build ./cmd/<name>/` in the repo root
 /sam-node
 /sam-box
