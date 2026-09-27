@@ -481,6 +481,31 @@ func TestRouterLeaseOps(t *testing.T) {
 	if len(routers) != 1 {
 		t.Fatalf("expected 1 router, got %d", len(routers))
 	}
+
+	// More routers come back in one order, by peer ID, whatever the order
+	// they leased in: members reserve on the first and callers try them in
+	// turn, so both sides must see the same list.
+	for _, id := range []string{"12D3KooWZzzLastRouter", "12D3KooWAaaFirstRouter"} {
+		if err := store.UpsertRouterLease(ctx, &RouterLease{
+			PeerID:      id,
+			Addresses:   []string{"/ip4/127.0.0.1/tcp/5003/p2p/" + id},
+			LastRenewal: time.Now(),
+			ExpiresAt:   time.Now().Add(10 * time.Second),
+		}); err != nil {
+			t.Fatalf("failed to upsert router lease %s: %v", id, err)
+		}
+	}
+	routers, err = store.GetActiveRouters(ctx)
+	if err != nil {
+		t.Fatalf("failed to get active routers: %v", err)
+	}
+	var got []string
+	for _, r := range routers {
+		got = append(got, r.PeerID)
+	}
+	if want := []string{"12D3KooWAaaFirstRouter", peerID, "12D3KooWZzzLastRouter"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("active routers %v, want them ordered by peer ID %v", got, want)
+	}
 }
 
 func TestPolicyOps(t *testing.T) {
