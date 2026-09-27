@@ -32,7 +32,7 @@ from libp2p.stream_muxer.yamux.yamux import FLAG_SYN, YAMUX_HEADER_FORMAT
 from libp2p.transport.websocket.transport import WebsocketTransport
 from multiaddr.resolvers import DNSResolver
 
-from agent_mesh.host import DIAL_TIMEOUT, create_mesh_host, dial, dial_addrs, open_stream, peer_info
+from agent_mesh.host import DIAL_TIMEOUT, HANGUP_GRACE, create_mesh_host, dial, dial_addrs, open_stream, peer_info
 from agent_mesh.identity import Identity
 
 ROUTER = "12D3KooWG1pA6goegCncqwbZLSr8pnjUZ6JMAAe6SmnHTgUNCk88"
@@ -276,7 +276,7 @@ def test_open_stream_ends_at_its_timeout():
 def test_hanging_up_on_a_stalled_connection_is_bounded_too():
     """Closing the connection writes a GO_AWAY on the very connection whose
     SYN stalled; on a blackholed peer that write parks as well. The caller
-    gets its ConnectionError within a second timeout, not never."""
+    gets its ConnectionError a moment after its timeout, not never."""
 
     class Host:
         async def new_stream(self, peer_id, protocols):
@@ -289,7 +289,7 @@ def test_hanging_up_on_a_stalled_connection_is_bounded_too():
         started = trio.current_time()
         with pytest.raises(ConnectionError, match="within 10s"):
             await open_stream(Host(), ID.from_base58(ROUTER), ECHO, 10)
-        assert trio.current_time() - started == pytest.approx(20)
+        assert trio.current_time() - started == pytest.approx(10 + HANGUP_GRACE)
 
     trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
 

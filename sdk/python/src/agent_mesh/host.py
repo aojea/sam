@@ -130,6 +130,9 @@ def _dial_websockets_by_name(transport: WebsocketTransport) -> None:
 # a closer peer to every lookup.
 DIAL_TIMEOUT = 15.0
 
+# How long open_stream waits for the close of a connection it gave up on.
+HANGUP_GRACE = 1.0
+
 
 async def dial(host: IHost, info: PeerInfo) -> None:
     """host.connect, bounded by DIAL_TIMEOUT."""
@@ -153,7 +156,7 @@ async def open_stream(host: IHost, peer_id: ID, protocol: TProtocol, timeout: fl
     except trio.TooSlowError:
         # Closing writes a GO_AWAY on the very connection that stalled; give
         # it a moment, then let the peer time the socket out on its own.
-        with trio.CancelScope(shield=True), trio.move_on_after(timeout):
+        with trio.CancelScope(shield=True), trio.move_on_after(min(timeout, HANGUP_GRACE)):
             try:
                 await host.disconnect(peer_id)
             except Exception:  # noqa: BLE001 - already gone
