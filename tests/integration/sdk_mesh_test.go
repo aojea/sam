@@ -83,9 +83,9 @@ type sdkMesh struct {
 }
 
 // sdkMeshLabels is what every provider in the mesh attests, the node and the
-// SDK members alike: the inputs of the "any-of requirement matches one key"
-// case of internal/node/labels_gate_test.go, so the caller-side check can be
-// run against a real credential from every implementation.
+// SDK members alike: the inputs of the "one pair of two wrong fails" case of
+// internal/node/labels_gate_test.go, so the caller-side check can be run
+// against a real credential from every implementation.
 var sdkMeshLabels = map[string]string{"region": "na-us", "team": "platform"}
 
 // The egress destination the sam-node serves, assigned to it by label, and
@@ -96,17 +96,17 @@ const (
 )
 
 // sdkMeshLabelRequirements are the caller requirements the matrix runs against
-// sdkMeshLabels: one pair of two matches, so a requirement is met by any of its
-// pairs (api.LabelCheck joins them with `or`); none of the pairs matches, so
-// it is refused; one pair that matches; the coarser value of a finer claim, so
-// there is no hierarchy.
+// sdkMeshLabels: both pairs attested, so a requirement of several pairs is
+// met; one pair of two wrong, so it is refused (api.LabelCheck joins them with
+// `,`); one pair that matches; the coarser value of a finer claim, so there is
+// no hierarchy.
 var sdkMeshLabelRequirements = []struct {
 	name     string
 	required map[string]string
 	allowed  bool
 }{
-	{"any-of requirement matches one key", map[string]string{"region": "eu", "team": "platform"}, true},
-	{"disjoint labels fail", map[string]string{"region": "eu", "team": "sre"}, false},
+	{"every pair attested", map[string]string{"region": "na-us", "team": "platform"}, true},
+	{"one pair of two wrong fails", map[string]string{"region": "eu", "team": "platform"}, false},
 	{"exact match", map[string]string{"team": "platform"}, true},
 	{"no built-in hierarchy", map[string]string{"region": "na"}, false},
 }
@@ -468,12 +468,12 @@ func TestNativeSDKsMesh(t *testing.T) {
 	}
 
 	// The caller-side label requirement means the same thing in every
-	// implementation: a requirement of several pairs is met by any one of
-	// them, none of them is a refusal, and a value is matched whole. The node
-	// and every SDK member attest the same labels, so the matrix below runs
-	// each requirement from each caller against a credential each provider
-	// minted: SDK -> node over /sam/mcp/1.0.0, and node -> SDK through the
-	// egress proxy's X-Sam-Required-Labels, which runs checkPeerLabels.
+	// implementation: a requirement of several pairs is met only when every
+	// one of them is attested, and a value is matched whole. The node and
+	// every SDK member attest the same labels, so the matrix below runs each
+	// requirement from each caller against a credential each provider minted:
+	// SDK -> node over /sam/mcp/1.0.0, and node -> SDK through the egress
+	// proxy's X-Sam-Required-Labels, which runs checkPeerLabels.
 	t.Run("required-labels", func(t *testing.T) {
 		for _, m := range members {
 			if got := m.auth(t, samNode.p2pAddr).Labels; got["region"] != sdkMeshLabels["region"] || got["team"] != sdkMeshLabels["team"] {

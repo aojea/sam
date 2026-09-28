@@ -88,7 +88,7 @@ export class StreamTransport implements Transport {
 }
 
 export interface MCPSessionOptions {
-  /** Labels the provider's credential must carry, e.g. { region: "eu" }. */
+  /** Labels the provider's credential must all carry, e.g. { region: "eu", compliance: "gdpr" }. */
   requiredLabels?: Record<string, string>;
   /** The agent this call is made for; attribution beside the token, as in sam-node. */
   agent?: string;
@@ -104,42 +104,17 @@ export interface MCPSession {
 }
 
 /**
- * The provider's credential lacks what the caller requires (any one pair) or
- * what the session's egress floor requires (every pair), as checkPeerLabels refuses.
+ * The provider's credential lacks a label the caller requires or a label of
+ * the session's egress floor, as checkPeerLabels refuses.
  */
 export class LabelsNotSatisfiedError extends Error {
-  constructor(peerId: string, required: string[], what = "carries none of the required labels") {
+  constructor(peerId: string, required: string[], what: string) {
     super(`peer ${peerId} ${what}: ${required.join(", ")}`);
     this.name = "LabelsNotSatisfiedError";
   }
 }
 
-/**
- * A caller's requirement is satisfied by any one pair, as sam-node's
- * api.LabelCheck (`check if label(k1, v1) or label(k2, v2)`): several pairs
- * mean "any of these will do". The egress floor (requireEgressLabels) is the
- * conjunction.
- */
-export function requireLabels(provider: VerifiedBiscuit, required: Record<string, string> | undefined): void {
-  if (!required) {
-    return;
-  }
-  const pairs = Object.entries(required);
-  if (pairs.length === 0 || pairs.some(([k, v]) => provider.labels[k] === v)) {
-    return;
-  }
-  throw new LabelsNotSatisfiedError(
-    provider.peerId,
-    pairs.map(([k, v]) => `${k}=${v}`),
-  );
-}
-
-/**
- * The egress floor is met only by every one of its pairs, as sam-node's
- * api.LabelFloorCheck (`check if label(k1, v1), label(k2, v2)`) for
- * egress.require_labels: a floor takes no alternatives. Empty is no floor.
- */
-export function requireEgressLabels(provider: VerifiedBiscuit, required: Record<string, string> | undefined): void {
+function requireEveryPair(provider: VerifiedBiscuit, required: Record<string, string> | undefined, what: string): void {
   if (!required) {
     return;
   }
@@ -150,8 +125,27 @@ export function requireEgressLabels(provider: VerifiedBiscuit, required: Record<
   throw new LabelsNotSatisfiedError(
     provider.peerId,
     pairs.map(([k, v]) => `${k}=${v}`),
-    "does not attest the egress floor",
+    what,
   );
+}
+
+/**
+ * A requirement is satisfied only when the provider attests every pair, as
+ * sam-node's api.LabelCheck (`check if label(k1, v1), label(k2, v2)`), the
+ * same rule as the egress floor. A map holds one value per key, so listing
+ * several pairs narrows the acceptable providers. Empty is no requirement.
+ */
+export function requireLabels(provider: VerifiedBiscuit, required: Record<string, string> | undefined): void {
+  requireEveryPair(provider, required, "does not attest every required label");
+}
+
+/**
+ * The session's egress floor, sam-node's egress.require_labels: the same
+ * rule as requireLabels, refused with a message that names the floor. Empty
+ * is no floor.
+ */
+export function requireEgressLabels(provider: VerifiedBiscuit, required: Record<string, string> | undefined): void {
+  requireEveryPair(provider, required, "does not attest the egress floor");
 }
 
 /**

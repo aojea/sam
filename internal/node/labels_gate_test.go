@@ -74,7 +74,9 @@ func TestCheckPeerLabels(t *testing.T) {
 		expectErr bool
 	}{
 		{"exact match", mint(cpPriv, providerPeer, map[string]string{"region": "us-east-1"}), map[string]string{"region": "us-east-1"}, false},
-		{"any-of requirement matches one key", mint(cpPriv, providerPeer, map[string]string{"region": "na-us", "team": "platform"}), map[string]string{"region": "eu", "team": "platform"}, false},
+		{"every pair of two attested", mint(cpPriv, providerPeer, map[string]string{"region": "na-us", "team": "platform"}), map[string]string{"region": "na-us", "team": "platform"}, false},
+		{"one pair of two wrong fails", mint(cpPriv, providerPeer, map[string]string{"region": "na-us", "team": "platform"}), map[string]string{"region": "eu", "team": "platform"}, true},
+		{"one pair of two missing fails", mint(cpPriv, providerPeer, map[string]string{"region": "na-us"}), map[string]string{"region": "na-us", "team": "platform"}, true},
 		{"no built-in hierarchy: coarser requirement fails a finer claim", mint(cpPriv, providerPeer, map[string]string{"region": "us-east-1"}), map[string]string{"region": "us"}, true},
 		{"disjoint labels fail", mint(cpPriv, providerPeer, map[string]string{"region": "na-us"}), map[string]string{"region": "eu"}, true},
 		{"unattested token fails closed", mint(cpPriv, providerPeer, nil), map[string]string{"region": "eu"}, true},

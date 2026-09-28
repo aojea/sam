@@ -216,19 +216,20 @@ Labels are used in three places:
   on the node's `/v1` inference endpoints or on a proxied A2A request, or
   passes `required_labels` to `call_remote_tool`. Before it sends any request
   data, the calling node fetches the provider's credential through the
-  mutual handshake, verifies it, and confirms that the label facts are
-  present. A provider that cannot show them is skipped.
+  mutual handshake, verifies it, and confirms that every label named is
+  attested in it. A provider that cannot show them all is skipped.
 - **An operator drawing a boundary** sets `egress.require_labels` in the
   node configuration. Every provider this node talks to must attest all of
   those labels, whether or not the caller asked for any. The caller can add
   further requirements but cannot remove the operator's.
 
-The header and the operator floor have different matching rules, and the
-difference follows from their purpose. The header is any-of: the caller is
-choosing among acceptable providers. The floor is all-of: the operator is
-drawing a line. Labels seen in discovery results are only used to rank
-candidates. The only labels that authorize anything are the signed ones in a
-credential.
+The header and the operator floor follow the same matching rule: a map of
+`key=value` pairs, one value per key, and the provider must attest every
+pair. Listing more pairs narrows the set of acceptable providers, as it does
+in a Kubernetes label selector or a Prometheus matcher. A list of pairs does
+not express alternatives for one key. Labels seen in discovery results are
+only used to rank candidates. The only labels that authorize anything are
+the signed ones in a credential.
 
 ## Agents acting through a node
 

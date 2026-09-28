@@ -169,24 +169,29 @@ test("required labels are checked on the provider's credential", async () => {
   assert.throws(() => requireLabels({ peerId: "p", expiration: new Date(), verifyingKey: cpKey, roles: [], labels: {} }, { team: "x" }), /team=x/);
 });
 
-test("a requirement of several labels is met by any one of them, as sam-node's checkPeerLabels", () => {
+test("a requirement of several labels is met only by every one of them, as sam-node's checkPeerLabels", () => {
   // The cases of internal/node/labels_gate_test.go, run through the SDK's predicate.
   const attesting = (labels: Record<string, string>) => ({ peerId: "p", expiration: new Date(), verifyingKey: cpKey, roles: [], labels });
   // exact match
   requireLabels(attesting({ region: "us-east-1" }), { region: "us-east-1" });
-  // any-of requirement matches one key
-  requireLabels(attesting({ region: "na-us", team: "platform" }), { region: "eu", team: "platform" });
+  // every pair of two attested
+  requireLabels(attesting({ region: "na-us", team: "platform" }), { region: "na-us", team: "platform" });
+  // one pair of two wrong fails, naming the whole requirement
+  assert.throws(() => requireLabels(attesting({ region: "na-us", team: "platform" }), { region: "eu", team: "platform" }), /does not attest every required label: region=eu, team=platform/);
+  // one pair of two missing fails
+  assert.throws(() => requireLabels(attesting({ region: "na-us" }), { region: "na-us", team: "platform" }), LabelsNotSatisfiedError);
   // no built-in hierarchy: coarser requirement fails a finer claim
   assert.throws(() => requireLabels(attesting({ region: "us-east-1" }), { region: "us" }), LabelsNotSatisfiedError);
   // disjoint labels fail
   assert.throws(() => requireLabels(attesting({ region: "na-us" }), { region: "eu" }), LabelsNotSatisfiedError);
-  // unattested token fails closed, naming every pair the caller asked for
-  assert.throws(() => requireLabels(attesting({}), { region: "eu", team: "platform" }), /region=eu, team=platform/);
+  // unattested token fails closed
+  assert.throws(() => requireLabels(attesting({}), { region: "eu", team: "platform" }), LabelsNotSatisfiedError);
   // an empty requirement is no requirement
   requireLabels(attesting({}), {});
+  requireLabels(attesting({}), undefined);
 });
 
-test("the egress floor is met only by every one of its pairs, as sam-node's api.LabelFloorCheck", () => {
+test("the egress floor is met only by every one of its pairs, as sam-node's api.LabelCheck", () => {
   const attesting = (labels: Record<string, string>) => ({ peerId: "p", expiration: new Date(), verifyingKey: cpKey, roles: [], labels });
   requireEgressLabels(attesting({ region: "eu", team: "platform" }), { region: "eu" });
   requireEgressLabels(attesting({ region: "eu", team: "platform" }), { region: "eu", team: "platform" });

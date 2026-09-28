@@ -116,9 +116,9 @@ path.
 
 A caller can restrict which providers are acceptable with
 `X-Sam-Required-Labels: key=value[,key=value]`. The node then verifies the
-provider's credential and confirms that the labels are attested in it before
-forwarding. The header is removed before the request leaves the node. An
-operator can set a floor that every provider must meet with
+provider's credential and confirms that every listed label is attested in it
+before forwarding. The header is removed before the request leaves the node.
+An operator can set a floor that every provider must meet with
 `egress.require_labels` in the node configuration.
 
 ## Mesh events

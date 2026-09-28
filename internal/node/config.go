@@ -98,7 +98,7 @@ func CompleteNodeConfig(config api.NodeConfig) (*NodeConfigComplete, error) {
 		if err := api.ValidateLabels(config.Egress.RequireLabels); err != nil {
 			return nil, fmt.Errorf("invalid egress.require_labels: %w", err)
 		}
-		if _, err := api.LabelFloorCheck(config.Egress.RequireLabels); err != nil {
+		if _, err := api.LabelCheck(config.Egress.RequireLabels); err != nil {
 			return nil, fmt.Errorf("invalid egress.require_labels: %w", err)
 		}
 		complete.EgressRequireLabels = config.Egress.RequireLabels

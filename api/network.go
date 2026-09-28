@@ -181,8 +181,8 @@ const (
 	HeaderSamNoTrailingSlash = "X-Sam-No-Trailing-Slash"
 
 	// HeaderSamRequiredLabels constrains an inference request on the sidecar's
-	// OpenAI-compatible endpoints (/v1/*) to providers attested with any of a
-	// comma-separated list of "key=value" label requirements (see
+	// OpenAI-compatible endpoints (/v1/*) to providers attested with every
+	// pair of a comma-separated list of "key=value" label requirements (see
 	// api/labels.go and LabelCheck); invalid entries are rejected with HTTP
 	// 400. It can only narrow what mesh policy allows, never widen it. Absent
 	// means any provider permitted by policy.

@@ -137,8 +137,8 @@ func (n *SamNode) egressFloor() map[string]string {
 }
 
 // VerifyPeerLabels ensures the peer holds control-plane-attested labels
-// satisfying the caller's requirement (any one pair) and the operator's egress
-// floor (every pair). Positive verdicts are cached.
+// satisfying every pair of the caller's requirement and every pair of the
+// operator's egress floor. Positive verdicts are cached.
 //
 // The gate runs whenever either exists. A caller that requires nothing is
 // still held to the floor — the whole point of a floor is that the party being
@@ -198,10 +198,9 @@ func (n *SamNode) checkPeerLabels(providerBiscuit []byte, peerID peer.ID, requir
 	if err != nil {
 		return fmt.Errorf("provider %s authorizer instantiation failed: %w", peerID, err)
 	}
-	// Two checks, not one merged set. The authorizer ANDs them, so the peer
-	// has to satisfy both independently; merging them into a single
-	// disjunction would let the caller's pairs stand in for the floor's and
-	// widen exactly what the floor exists to bound.
+	// Two checks, not one merged set: the floor is the operator's and no
+	// caller input reaches it. Both are conjunctions, and the authorizer ANDs
+	// them, so the peer has to attest every pair of each.
 	if len(required) > 0 {
 		check, err := api.LabelCheck(required)
 		if err != nil {
@@ -210,7 +209,7 @@ func (n *SamNode) checkPeerLabels(providerBiscuit []byte, peerID peer.ID, requir
 		authorizer.AddCheck(check)
 	}
 	if len(floor) > 0 {
-		check, err := api.LabelFloorCheck(floor)
+		check, err := api.LabelCheck(floor)
 		if err != nil {
 			return err
 		}
@@ -219,9 +218,9 @@ func (n *SamNode) checkPeerLabels(providerBiscuit []byte, peerID peer.ID, requir
 	authorizer.AddPolicy(api.AllowIfTruePolicy)
 	if err := authorizer.Authorize(); err != nil {
 		if len(floor) > 0 {
-			return fmt.Errorf("provider %s does not attest the caller requirement %v and the egress floor %v: %w", peerID, required, floor, err)
+			return fmt.Errorf("provider %s does not attest every label of the caller requirement %v and the egress floor %v: %w", peerID, required, floor, err)
 		}
-		return fmt.Errorf("provider %s has no attested label matching %v: %w", peerID, required, err)
+		return fmt.Errorf("provider %s does not attest every label of %v: %w", peerID, required, err)
 	}
 	return nil
 }

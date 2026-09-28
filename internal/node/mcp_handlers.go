@@ -164,7 +164,7 @@ type CallRemoteToolParams struct {
 	PeerID         string         `json:"peer_id" jsonschema:"The Peer ID of the target agent"`
 	ToolName       string         `json:"tool_name" jsonschema:"The name of the server to call"`
 	Arguments      map[string]any `json:"arguments,omitempty" jsonschema:"Server arguments as a JSON object whose keys match the target server's input_schema. Call describe_remote_tool first to learn the schema."`
-	RequiredLabels string         `json:"required_labels,omitempty" jsonschema:"Comma-separated key=value pairs (e.g. 'region=us-east-1,team=platform'). Fails closed: the call is rejected unless the peer attests any one of them. Empty means no requirement."`
+	RequiredLabels string         `json:"required_labels,omitempty" jsonschema:"Comma-separated key=value pairs (e.g. 'region=us-east-1,team=platform'). Fails closed: the call is rejected unless the peer attests every one of them. Empty means no requirement."`
 }
 
 // handleCallRemoteTool implements the call_remote_tool tool.

@@ -47,33 +47,32 @@ MCP_CLIENT_INFO = mcp_types.Implementation(name="agent-mesh-sdk", version="0.1.0
 
 
 class LabelsNotSatisfiedError(Exception):
-    """The provider's credential lacks what the caller requires (any one pair)
-    or what the session's egress floor requires (every pair), as
-    checkPeerLabels refuses."""
+    """The provider's credential lacks a label the caller requires or a label
+    of the session's egress floor, as checkPeerLabels refuses."""
 
-    def __init__(self, peer_id: str, required: Sequence[str], what: str = "carries none of the required labels"):
+    def __init__(self, peer_id: str, required: Sequence[str], what: str):
         super().__init__(f"peer {peer_id} {what}: {', '.join(required)}")
 
 
+def _require_every_pair(provider: VerifiedBiscuit, required: Optional[Mapping[str, str]], what: str) -> None:
+    if not required or all(provider.labels.get(k) == v for k, v in required.items()):
+        return
+    raise LabelsNotSatisfiedError(provider.peer_id, [f"{k}={v}" for k, v in required.items()], what)
+
+
 def require_labels(provider: VerifiedBiscuit, required: Optional[Mapping[str, str]]) -> None:
-    """A caller's requirement is satisfied by any one pair, as sam-node's
-    api.LabelCheck (`check if label(k1, v1) or label(k2, v2)`): several pairs
-    mean "any of these will do". The egress floor (require_egress_labels) is the
-    conjunction."""
-    if not required:
-        return
-    if any(provider.labels.get(k) == v for k, v in required.items()):
-        return
-    raise LabelsNotSatisfiedError(provider.peer_id, [f"{k}={v}" for k, v in required.items()])
+    """A requirement is satisfied only when the provider attests every pair, as
+    sam-node's api.LabelCheck (`check if label(k1, v1), label(k2, v2)`), the
+    same rule as the egress floor. A map holds one value per key, so listing
+    several pairs narrows the acceptable providers. Empty is no requirement."""
+    _require_every_pair(provider, required, "does not attest every required label")
 
 
 def require_egress_labels(provider: VerifiedBiscuit, required: Optional[Mapping[str, str]]) -> None:
-    """The egress floor is met only by every one of its pairs, as sam-node's
-    api.LabelFloorCheck (`check if label(k1, v1), label(k2, v2)`) for
-    egress.require_labels: a floor takes no alternatives. Empty is no floor."""
-    if not required or all(provider.labels.get(k) == v for k, v in required.items()):
-        return
-    raise LabelsNotSatisfiedError(provider.peer_id, [f"{k}={v}" for k, v in required.items()], "does not attest the egress floor")
+    """The session's egress floor, sam-node's egress.require_labels: the same
+    rule as require_labels, refused with a message that names the floor. Empty
+    is no floor."""
+    _require_every_pair(provider, required, "does not attest the egress floor")
 
 
 @dataclass

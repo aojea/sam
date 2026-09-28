@@ -120,7 +120,7 @@ type sendAgentTaskParams struct {
 	Data           map[string]any `json:"data,omitempty" jsonschema:"Structured JSON payload sent to the agent as an A2A DataPart"`
 	FilePath       string         `json:"file_path,omitempty" jsonschema:"Local file to attach; sent to the agent as bytes, max 5 MB"`
 	FileName       string         `json:"file_name,omitempty" jsonschema:"Name shown to the agent for the attached file (default: the file's base name)"`
-	RequiredLabels string         `json:"required_labels,omitempty" jsonschema:"Comma-separated key=value labels the provider must have attested (e.g. region=eu-west-1); the local node refuses fail-closed before any data leaves it"`
+	RequiredLabels string         `json:"required_labels,omitempty" jsonschema:"Comma-separated key=value labels the provider must all have attested (e.g. region=eu-west-1,compliance=gdpr); the local node refuses fail-closed before any data leaves it"`
 	ContextID      string         `json:"context_id,omitempty" jsonschema:"Continue an existing conversation context"`
 	TaskID         string         `json:"task_id,omitempty" jsonschema:"Reply into an existing task, e.g. one in state input-required"`
 }

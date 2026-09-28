@@ -108,7 +108,7 @@ Returns `description`, `input_schema` and `output_schema`.
 | `peer_id` | Required. |
 | `tool_name` | Required, namespaced. |
 | `arguments` | Object matching the tool's `input_schema`. |
-| `required_labels` | `key=value[,key=value]`. The call is refused unless the peer's credential attests at least one of them. |
+| `required_labels` | `key=value[,key=value]`. The call is refused unless the peer's credential attests every one of them. |
 
 Returns the tool's result content. A policy denial comes back as a tool
 error that the caller can read, not as a transport failure.
@@ -146,7 +146,7 @@ Two headers modify a proxied request:
 
 | Header | Effect |
 |---|---|
-| `X-Sam-Required-Labels: k=v[,k=v]` | Verify that the peer attests at least one of the pairs before forwarding. Otherwise `403`. Removed before forwarding. Also honoured on `/v1/*`. |
+| `X-Sam-Required-Labels: k=v[,k=v]` | Forward only to a peer whose credential attests every listed pair. Otherwise `403`. Removed before forwarding. Also honoured on `/v1/*`. |
 | `X-Sam-Agent: <agent-id>` | Name the agent for which this request is made. Only meaningful when sent by a `sam-box`. See the [preview](../../preview/sandboxed-agents/). |
 
 ### Talking MCP through the proxy

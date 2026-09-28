@@ -77,11 +77,10 @@ type Egress struct {
 	// whatever the caller supplied, and a caller that supplies nothing is
 	// unconstrained.
 	//
-	// Every pair must hold (AND), unlike a caller's requirement, where any one
-	// pair is enough (see LabelCheck vs LabelFloorCheck). A map gives one value
-	// per key, so a floor cannot express alternatives — that is the point: a
-	// floor with alternatives would let the weakest of them stand in for the
-	// rest.
+	// Every pair must hold, as for a caller's requirement (see LabelCheck). A
+	// map gives one value per key, so a floor cannot express alternatives —
+	// that is the point: a floor with alternatives would let the weakest of
+	// them stand in for the rest.
 	//
 	// A floor naming a label no peer attests reaches nothing, which is a
 	// usable egress kill switch.

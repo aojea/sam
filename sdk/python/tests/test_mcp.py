@@ -193,9 +193,10 @@ def test_tools_over_the_mesh_stream():
                 with pytest.raises(LabelsNotSatisfiedError):
                     async with open_mcp_session(caller, pid, frame(caller_biscuit, "mcp://calc"), [CP_KEY], required_labels={"region": "us"}):
                         pass
-                # Several pairs are met by any one of them; the provider attests region=eu only.
-                async with open_mcp_session(caller, pid, frame(caller_biscuit, "mcp://calc"), [CP_KEY], required_labels={"region": "eu", "team": "platform"}):
-                    pass
+                # Several pairs must all be attested; the provider attests region=eu only.
+                with pytest.raises(LabelsNotSatisfiedError):
+                    async with open_mcp_session(caller, pid, frame(caller_biscuit, "mcp://calc"), [CP_KEY], required_labels={"region": "eu", "team": "platform"}):
+                        pass
 
                 # The egress floor is met only by every one of its pairs, beside the caller's requirement.
                 async with open_mcp_session(caller, pid, frame(caller_biscuit, "mcp://calc"), [CP_KEY], egress_require_labels={"region": "eu"}):
@@ -243,9 +244,9 @@ def test_tools_over_the_mesh_stream():
     trio.run(with_timeout)
 
 
-def test_a_requirement_of_several_labels_is_met_by_any_one_of_them():
+def test_a_requirement_of_several_labels_is_met_only_by_every_one_of_them():
     """The cases of internal/node/labels_gate_test.go, run through the SDK's
-    predicate: a caller naming several pairs means any of these will do, as
+    predicate: a caller naming several pairs requires all of them, as
     sam-node's checkPeerLabels and api.LabelCheck read it."""
     from datetime import datetime, timezone
 
@@ -254,16 +255,22 @@ def test_a_requirement_of_several_labels_is_met_by_any_one_of_them():
 
     # exact match
     require_labels(attesting({"region": "us-east-1"}), {"region": "us-east-1"})
-    # any-of requirement matches one key
-    require_labels(attesting({"region": "na-us", "team": "platform"}), {"region": "eu", "team": "platform"})
+    # every pair of two attested
+    require_labels(attesting({"region": "na-us", "team": "platform"}), {"region": "na-us", "team": "platform"})
+    # one pair of two wrong fails, naming the whole requirement
+    with pytest.raises(LabelsNotSatisfiedError, match="does not attest every required label: region=eu, team=platform"):
+        require_labels(attesting({"region": "na-us", "team": "platform"}), {"region": "eu", "team": "platform"})
+    # one pair of two missing fails
+    with pytest.raises(LabelsNotSatisfiedError):
+        require_labels(attesting({"region": "na-us"}), {"region": "na-us", "team": "platform"})
     # no built-in hierarchy: coarser requirement fails a finer claim
     with pytest.raises(LabelsNotSatisfiedError):
         require_labels(attesting({"region": "us-east-1"}), {"region": "us"})
     # disjoint labels fail
     with pytest.raises(LabelsNotSatisfiedError):
         require_labels(attesting({"region": "na-us"}), {"region": "eu"})
-    # unattested token fails closed, naming every pair the caller asked for
-    with pytest.raises(LabelsNotSatisfiedError, match="region=eu, team=platform"):
+    # unattested token fails closed
+    with pytest.raises(LabelsNotSatisfiedError):
         require_labels(attesting({}), {"region": "eu", "team": "platform"})
     # an empty requirement is no requirement
     require_labels(attesting({}), {})
@@ -271,8 +278,8 @@ def test_a_requirement_of_several_labels_is_met_by_any_one_of_them():
 
 
 def test_the_egress_floor_is_met_only_by_every_one_of_its_pairs():
-    """sam-node's api.LabelFloorCheck for egress.require_labels, run through
-    the SDK's predicate: a floor takes no alternatives."""
+    """sam-node's api.LabelCheck for egress.require_labels, run through the
+    SDK's predicate: a floor takes no alternatives."""
     from datetime import datetime, timezone
 
     def attesting(labels: dict) -> VerifiedBiscuit:

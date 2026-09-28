@@ -196,8 +196,9 @@ labels:
 Labels are attested at enrollment, so the role the node enrolls with must
 permit them (`allowed_labels: ["region=*", "team=platform"]`, or `["*"]`).
 Enrollment is refused if a label is not allowed by the role. Once attested,
-callers can require the labels (`X-Sam-Required-Labels: region=eu-west-1`),
-and the node can require labels from its callers:
+callers can require the labels (`X-Sam-Required-Labels: region=eu-west-1`;
+several pairs must all be attested), and the node can require labels from
+its callers:
 
 ```yaml
 attenuation:

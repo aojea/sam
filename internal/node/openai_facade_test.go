@@ -425,6 +425,25 @@ func TestRankProviders(t *testing.T) {
 		}
 	})
 
+	t.Run("several pairs must all hold", func(t *testing.T) {
+		f := newTestFacade()
+		f.localLabels = func() map[string]string { return map[string]string{"region": "eu-de"} }
+		required := map[string]string{"region": "eu-de", "team": "platform"}
+		// A remote silent on one pair is not ruled out here: gossip is
+		// partial and the gate decides on attested facts. One that states a
+		// different value is. A local has no gate, so it must declare all of it.
+		silent := modelProvider{peerID: "peerSilent", service: "srv", labels: map[string]string{"region": "eu-de"}}
+		conflicting := modelProvider{peerID: "peerSRE", service: "srv", labels: map[string]string{"region": "eu-de", "team": "sre"}}
+		got := f.rankProviders([]modelProvider{silent, conflicting, local}, required)
+		if len(got) != 1 || got[0].peerID != "peerSilent" {
+			t.Fatalf("unexpected ranking under a two-pair requirement: %+v", got)
+		}
+		f.localLabels = func() map[string]string { return map[string]string{"region": "eu-de", "team": "platform"} }
+		if got := f.rankProviders([]modelProvider{local}, required); len(got) != 1 {
+			t.Fatalf("local declaring every pair should survive: %+v", got)
+		}
+	})
+
 	t.Run("revoked peers are excluded", func(t *testing.T) {
 		f := newTestFacade()
 		f.isRevoked = func(peerID string) bool { return peerID == "peerUS" }

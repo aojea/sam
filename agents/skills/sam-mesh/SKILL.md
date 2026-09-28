@@ -218,10 +218,10 @@ The node exposes them through an OpenAI-compatible facade on its own address:
 - `GET /v1/models` lists the models reachable across the mesh.
 - `POST /v1/chat/completions` routes to a provider of the requested `model`,
   preferring a local one, and fails over between providers.
-- Add `X-Sam-Required-Labels: key=value` (comma-separated, any-of) to accept
-  only providers whose labels the control plane attested, for example
-  `region=eu`. Enforcement is fail-closed: unattested providers are rejected
-  before any request data leaves the node.
+- Add `X-Sam-Required-Labels: key=value` (comma-separated; every pair must
+  be attested) to accept only providers whose labels the control plane
+  attested, for example `region=eu`. Enforcement is fail-closed: unattested
+  providers are rejected before any request data leaves the node.
 
 To pin one specific provider instead of letting the facade choose, call
 `discover_remote_services` with `{"type":"inference"}` and send the request to

@@ -737,47 +737,22 @@ func LabelFacts(labels map[string]string) []biscuit.Fact {
 }
 
 // LabelCheck compiles a required label set (canonical, pre-validated with
-// ValidateLabels) into a single fail-closed check satisfied when the token
-// carries any of them: `check if label("region", "us-east-1") or
-// label("team", "platform")`.
+// ValidateLabels) into a single fail-closed check satisfied only when the
+// token carries *every* pair: `check if label("jurisdiction", "eu"),
+// label("compliance", "gdpr")`.
+//
+// The same rule serves a caller's requirement (X-Sam-Required-Labels, an
+// SDK's required labels) and an operator's egress floor (Egress.RequireLabels).
+// A map gives one value per key, so neither can spell an alternative, and
+// listing several pairs narrows the set of acceptable peers, as it does in
+// every label selector a reader is likely to know. A disjunction would let
+// a peer attesting the most permissive pair stand in for the rest, and a
+// caller who read the list as a conjunction would send data to a peer that
+// lacks a property they required, with no error to tell them.
+//
+// A requirement and a floor are combined by adding one check each to the
+// authorizer, which ANDs them; neither needs to know about the other.
 func LabelCheck(required map[string]string) (biscuit.Check, error) {
-	if len(required) == 0 {
-		return biscuit.Check{}, fmt.Errorf("no required labels")
-	}
-	keys := make([]string, 0, len(required))
-	for k := range required {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	clauses := make([]string, 0, len(required))
-	for _, k := range keys {
-		if err := ValidateLabelKey(k); err != nil {
-			return biscuit.Check{}, err
-		}
-		v := required[k]
-		if err := ValidateLabelValue(v); err != nil {
-			return biscuit.Check{}, err
-		}
-		clauses = append(clauses, fmt.Sprintf("%s(%q, %q)", FactLabel, k, v))
-	}
-	return parser.FromStringCheck("check if " + strings.Join(clauses, " or "))
-}
-
-// LabelFloorCheck compiles an operator's egress floor (see Egress.RequireLabels)
-// into a single fail-closed check satisfied only when the token carries *every*
-// pair: `check if label("jurisdiction", "eu"), label("compliance", "gdpr")`.
-//
-// The conjunction is the whole difference from LabelCheck, which is a
-// disjunction because a caller naming several labels means "any of these will
-// do". A floor cannot mean that: a peer attesting only the most permissive of
-// several alternatives would satisfy the floor while sitting outside the
-// boundary the operator drew. So a floor takes a map — one value per key, no
-// way to spell an alternative — and requires all of it.
-//
-// Both are ordinary Biscuit checks, so a caller's requirement and a floor are
-// combined by adding each to the authorizer and letting it AND them; neither
-// needs to know about the other.
-func LabelFloorCheck(required map[string]string) (biscuit.Check, error) {
 	if len(required) == 0 {
 		return biscuit.Check{}, fmt.Errorf("no required labels")
 	}
@@ -800,13 +775,13 @@ func LabelFloorCheck(required map[string]string) (biscuit.Check, error) {
 	return parser.FromStringCheck("check if " + strings.Join(clauses, ", "))
 }
 
-// LabelsSatisfyFloor reports whether claimed satisfies every pair of the floor.
-// It is the non-attested counterpart of LabelFloorCheck, for the one provider
-// class that has no Biscuit to check: a service local to this node, whose
-// labels are its own configuration and so are complete. An empty floor is
-// satisfied by anything, so callers may pass one unconditionally.
-func LabelsSatisfyFloor(floor, claimed map[string]string) bool {
-	for k, v := range floor {
+// LabelsSatisfy reports whether claimed carries every pair of required. It is
+// the non-attested counterpart of LabelCheck, for the one provider class that
+// has no Biscuit to check: a service local to this node, whose labels are its
+// own configuration and so are complete. An empty requirement is satisfied by
+// anything, so callers may pass one unconditionally.
+func LabelsSatisfy(required, claimed map[string]string) bool {
+	for k, v := range required {
 		if claimed[k] != v {
 			return false
 		}
@@ -814,17 +789,17 @@ func LabelsSatisfyFloor(floor, claimed map[string]string) bool {
 	return true
 }
 
-// LabelsContradictFloor reports whether claimed states a *different* value for
-// some key the floor requires.
+// LabelsContradict reports whether claimed states a *different* value for
+// some key required names.
 //
 // Absence is not contradiction, which is the whole distinction from
-// LabelsSatisfyFloor. Gossiped claims are a discovery hint and may carry only
-// part of what a peer attests, so a peer silent on one pair of the floor may
-// still satisfy all of it in its Biscuit. Only a conflicting value is grounds
-// to skip such a peer before the gate has seen its attested facts; treating
-// silence as failure would drop providers that are inside the boundary.
-func LabelsContradictFloor(floor, claimed map[string]string) bool {
-	for k, v := range floor {
+// LabelsSatisfy. Gossiped claims are a discovery hint and may carry only part
+// of what a peer attests, so a peer silent on one pair may still satisfy all
+// of them in its Biscuit. Only a conflicting value is grounds to skip such a
+// peer before the gate has seen its attested facts; treating silence as
+// failure would drop providers that are inside the boundary.
+func LabelsContradict(required, claimed map[string]string) bool {
+	for k, v := range required {
 		if got, stated := claimed[k]; stated && got != v {
 			return true
 		}

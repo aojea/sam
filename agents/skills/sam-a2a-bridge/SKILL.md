@@ -73,8 +73,9 @@ input schema) and `file_path` attachments appropriately.
     under the download directory.
 - **Data residency**: when the task involves data that must stay in a region or
   jurisdiction, set `required_labels` (comma-separated `key=value`, e.g.
-  `region=eu-west-1`). The local node then refuses fail-closed before any data
-  leaves it unless the peer's control-plane-attested labels match. Never drop
+  `region=eu-west-1`; several pairs must all be attested). The local node then
+  refuses fail-closed before any data leaves it unless the peer's
+  control-plane-attested labels match. Never drop
   or weaken `required_labels` to make a refused call succeed without the
   user's explicit approval — the refusal is the feature.
 

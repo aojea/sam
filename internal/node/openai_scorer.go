@@ -48,15 +48,21 @@ func (f *openAIFacade) floor() map[string]string {
 	return f.egressFloor()
 }
 
-// labelsAllowed reports whether a provider's claimed labels satisfy any
-// required key=value pair (exact match).
-func labelsAllowed(required, claimed map[string]string) bool {
-	for k, v := range required {
-		if claimed[k] == v {
-			return true
-		}
+// outsideLabels reports whether a provider's claimed labels rule it out
+// under required, the same way for a caller's requirement and for the
+// operator's floor. A local is settled here for good: its labels are its own
+// configuration, it has no Biscuit, and it never reaches the gate, so every
+// pair must hold. A remote is only skipped on a claim that conflicts: gossip
+// may carry part of what a peer attests, so silence on a pair is not failure,
+// and the gate resolves it on attested facts.
+func outsideLabels(required, claimed map[string]string, local bool) bool {
+	if len(required) == 0 {
+		return false
 	}
-	return false
+	if local {
+		return !api.LabelsSatisfy(required, claimed)
+	}
+	return api.LabelsContradict(required, claimed)
 }
 
 // rankProviders applies hard constraints then orders the survivors: eligible
@@ -74,41 +80,20 @@ func (f *openAIFacade) rankProviders(providers []modelProvider, requiredLabels m
 			// still know the peer's claims.
 			labels = f.peerLabels(p.peerID)
 		}
-		// Labels are routing hints: a remote whose own claims mismatch the
-		// requirement is dropped early, but an unlabeled remote proceeds to
-		// the label gate, the authoritative fail-closed check on the
-		// provider's biscuit-attested labels (see labels_gate.go). Locals
+		// Labels are routing hints: a remote whose own claims contradict the
+		// caller's requirement is dropped early, but an unlabeled remote
+		// proceeds to the label gate, the authoritative fail-closed check on
+		// the provider's biscuit-attested labels (see labels_gate.go). Locals
 		// have no gate, so their declared labels stay fail-closed here.
-		if len(requiredLabels) > 0 {
-			knownMismatch := len(labels) > 0 && !labelsAllowed(requiredLabels, labels)
-			if knownMismatch || (p.peerID == "" && !labelsAllowed(requiredLabels, labels)) {
-				recordFacadeRejection(reasonLabelMismatch)
-				continue
-			}
+		if outsideLabels(requiredLabels, labels, p.peerID == "") {
+			recordFacadeRejection(reasonLabelMismatch)
+			continue
 		}
-		// The operator's egress floor, which the caller cannot waive. Every
-		// pair must hold, so this is not labelsAllowed. A remote is dropped
-		// here only on a claim that already contradicts the floor; the gate
-		// still decides on attested facts. A local is decided here for good,
-		// because it has no biscuit to attest anything.
-		if floor := f.floor(); len(floor) > 0 {
-			// A local is settled here: its labels are its own configuration,
-			// it has no Biscuit, and it never reaches the gate, so the floor
-			// must hold in full.
-			//
-			// A remote is only skipped on a claim that conflicts. Gossip may
-			// carry part of what a peer attests, so silence on a pair of the
-			// floor is not failure — the gate resolves it on attested facts.
-			var outside bool
-			if p.peerID == "" {
-				outside = !api.LabelsSatisfyFloor(floor, labels)
-			} else {
-				outside = api.LabelsContradictFloor(floor, labels)
-			}
-			if outside {
-				recordFacadeRejection(reasonEgressFloorMismatch)
-				continue
-			}
+		// The operator's egress floor, which the caller cannot waive; the same
+		// rule, accounted separately.
+		if outsideLabels(f.floor(), labels, p.peerID == "") {
+			recordFacadeRejection(reasonEgressFloorMismatch)
+			continue
 		}
 		if p.peerID == "" {
 			locals = append(locals, p)

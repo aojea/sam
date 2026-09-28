@@ -146,10 +146,11 @@ syntax and the same errors.
 | `require_labels` | A map of `key: value`. Every remote provider that this node sends a request to must have all of these labels attested in its credential, whether or not the caller asked for labels. Same syntax rules as `labels`. |
 
 This is the operator's floor. A caller's `X-Sam-Required-Labels` header is
-checked separately. It can add requirements but cannot remove or relax the
-floor. A floor that names a label which no provider carries makes the node
-unable to reach any provider, which can serve as an egress kill switch. Omit
-the block for no floor.
+checked separately, with the same rule: every pair it names must be attested.
+It can add requirements but cannot remove or relax the floor. A floor that
+names a label which no provider carries makes the node unable to reach any
+provider, which can serve as an egress kill switch. Omit the block for no
+floor.
 
 ## Kubernetes
 

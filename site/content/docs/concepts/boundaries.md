@@ -62,7 +62,7 @@ a boundary:
 - **A caller refuses providers outside the boundary.** With
   `X-Sam-Required-Labels` on a request, the calling node verifies the
   provider's credential before it sends anything. A provider that cannot
-  show the label is skipped.
+  show every label named is skipped.
 - **An operator sets a floor for a whole node.** `egress.require_labels` in
   the node configuration applies to every outbound request from that node.
   Callers cannot lower it.

@@ -573,12 +573,6 @@ func TestLabelFactsAndCheck(t *testing.T) {
 	if facts := LabelFacts(nil); facts != nil {
 		t.Errorf("LabelFacts(nil) = %v, want nil", facts)
 	}
-	if _, err := LabelCheck(nil); err == nil {
-		t.Error("LabelCheck(nil): expected error, got nil")
-	}
-	if _, err := LabelCheck(map[string]string{"region": "bad,value"}); err == nil {
-		t.Error("LabelCheck(invalid value): expected error, got nil")
-	}
 
 	tests := []struct {
 		name        string
@@ -587,8 +581,9 @@ func TestLabelFactsAndCheck(t *testing.T) {
 		expectAllow bool
 	}{
 		{"exact match", map[string]string{"region": "us-east-1"}, map[string]string{"region": "us-east-1"}, true},
-		{"any-of requirement", map[string]string{"region": "us-east-1"}, map[string]string{"region": "eu", "team": "us-east-1"}, false},
-		{"any-of requirement matches one key", map[string]string{"region": "us-east-1", "team": "platform"}, map[string]string{"region": "eu", "team": "platform"}, true},
+		{"every pair present", map[string]string{"region": "us-east-1", "team": "platform", "tier": "gold"}, map[string]string{"region": "us-east-1", "team": "platform"}, true},
+		{"one pair of two missing", map[string]string{"region": "us-east-1"}, map[string]string{"region": "us-east-1", "team": "platform"}, false},
+		{"one pair of two wrong", map[string]string{"region": "us-east-1", "team": "platform"}, map[string]string{"region": "eu", "team": "platform"}, false},
 		{"case-sensitive value mismatch", map[string]string{"region": "us-east-1"}, map[string]string{"region": "US-EAST-1"}, false},
 		{"no built-in hierarchy: coarser requirement does not match a finer claim", map[string]string{"region": "us-east-1"}, map[string]string{"region": "us"}, false},
 		{"disjoint labels", map[string]string{"region": "us-east-1"}, map[string]string{"region": "eu-west-1"}, false},
@@ -629,48 +624,38 @@ func TestLabelFactsAndCheck(t *testing.T) {
 	}
 }
 
-// A caller's requirement is a disjunction ("any of these will do") and an
-// operator's egress floor is a conjunction ("all of these"). The difference is
-// the reason both exist, so it is pinned on the compiled shape rather than on
-// the rendered string: a disjunction becomes one query body per alternative, a
-// conjunction one body carrying every predicate.
-func TestLabelFloorCheckIsConjunctionUnlikeLabelCheck(t *testing.T) {
+// A requirement of several pairs is a conjunction, pinned on the compiled
+// shape rather than on the rendered string: one query body carrying every
+// predicate, not one body per pair.
+func TestLabelCheckIsConjunction(t *testing.T) {
 	both := map[string]string{"jurisdiction": "eu", "compliance": "gdpr"}
 
-	floor, err := LabelFloorCheck(both)
-	if err != nil {
-		t.Fatalf("LabelFloorCheck: %v", err)
-	}
-	if len(floor.Queries) != 1 {
-		t.Fatalf("a floor must compile to a single conjunctive body, got %d alternatives", len(floor.Queries))
-	}
-	if got := len(floor.Queries[0].Body); got != len(both) {
-		t.Errorf("the floor's body carries %d predicates, want all %d", got, len(both))
-	}
-
-	caller, err := LabelCheck(both)
+	check, err := LabelCheck(both)
 	if err != nil {
 		t.Fatalf("LabelCheck: %v", err)
 	}
-	if len(caller.Queries) != len(both) {
-		t.Errorf("a caller requirement must compile to one body per alternative, got %d", len(caller.Queries))
+	if len(check.Queries) != 1 {
+		t.Fatalf("a requirement must compile to a single conjunctive body, got %d alternatives", len(check.Queries))
+	}
+	if got := len(check.Queries[0].Body); got != len(both) {
+		t.Errorf("the body carries %d predicates, want all %d", got, len(both))
 	}
 }
 
-func TestLabelFloorCheckRejectsBadInput(t *testing.T) {
-	if _, err := LabelFloorCheck(nil); err == nil {
-		t.Error("LabelFloorCheck(nil): expected error, got nil")
+func TestLabelCheckRejectsBadInput(t *testing.T) {
+	if _, err := LabelCheck(nil); err == nil {
+		t.Error("LabelCheck(nil): expected error, got nil")
 	}
-	if _, err := LabelFloorCheck(map[string]string{"region": "bad,value"}); err == nil {
-		t.Error("LabelFloorCheck(invalid value): expected error, got nil")
+	if _, err := LabelCheck(map[string]string{"region": "bad,value"}); err == nil {
+		t.Error("LabelCheck(invalid value): expected error, got nil")
 	}
-	if _, err := LabelFloorCheck(map[string]string{"bad key!": "v"}); err == nil {
-		t.Error("LabelFloorCheck(invalid key): expected error, got nil")
+	if _, err := LabelCheck(map[string]string{"bad key!": "v"}); err == nil {
+		t.Error("LabelCheck(invalid key): expected error, got nil")
 	}
 }
 
-func TestLabelsSatisfyFloor(t *testing.T) {
-	floor := map[string]string{"jurisdiction": "eu", "compliance": "gdpr"}
+func TestLabelsSatisfy(t *testing.T) {
+	required := map[string]string{"jurisdiction": "eu", "compliance": "gdpr"}
 	tests := []struct {
 		name    string
 		claimed map[string]string
@@ -682,39 +667,39 @@ func TestLabelsSatisfyFloor(t *testing.T) {
 		{"nothing claimed", nil, false},
 	}
 	for _, tt := range tests {
-		if got := LabelsSatisfyFloor(floor, tt.claimed); got != tt.want {
-			t.Errorf("%s: LabelsSatisfyFloor = %v, want %v", tt.name, got, tt.want)
+		if got := LabelsSatisfy(required, tt.claimed); got != tt.want {
+			t.Errorf("%s: LabelsSatisfy = %v, want %v", tt.name, got, tt.want)
 		}
 	}
-	// An empty floor constrains nothing, so callers can pass it unconditionally.
-	if !LabelsSatisfyFloor(nil, nil) {
-		t.Error("an empty floor must be satisfied by anything")
+	// An empty requirement constrains nothing, so callers can pass it unconditionally.
+	if !LabelsSatisfy(nil, nil) {
+		t.Error("an empty requirement must be satisfied by anything")
 	}
 }
 
-// The two floor predicates differ on one case, and it is the case that
-// matters: a peer silent on a pair the floor requires. Gossip is partial, so
-// silence must not read as failure before the gate has seen attested facts.
-func TestLabelsContradictFloorTreatsSilenceAsUnknown(t *testing.T) {
-	floor := map[string]string{"jurisdiction": "eu", "compliance": "gdpr"}
+// The two predicates differ on one case, and it is the case that matters: a
+// peer silent on a pair the requirement names. Gossip is partial, so silence
+// must not read as failure before the gate has seen attested facts.
+func TestLabelsContradictTreatsSilenceAsUnknown(t *testing.T) {
+	required := map[string]string{"jurisdiction": "eu", "compliance": "gdpr"}
 
 	partial := map[string]string{"jurisdiction": "eu"}
-	if LabelsContradictFloor(floor, partial) {
-		t.Error("a claim silent on one pair does not contradict the floor")
+	if LabelsContradict(required, partial) {
+		t.Error("a claim silent on one pair does not contradict the requirement")
 	}
-	if LabelsSatisfyFloor(floor, partial) {
+	if LabelsSatisfy(required, partial) {
 		t.Error("but it does not satisfy it either")
 	}
 
 	conflicting := map[string]string{"jurisdiction": "us"}
-	if !LabelsContradictFloor(floor, conflicting) {
+	if !LabelsContradict(required, conflicting) {
 		t.Error("a different value for a required key is a contradiction")
 	}
 
-	if LabelsContradictFloor(floor, nil) {
+	if LabelsContradict(required, nil) {
 		t.Error("no claims at all cannot contradict anything")
 	}
-	if LabelsContradictFloor(floor, map[string]string{"jurisdiction": "eu", "compliance": "gdpr"}) {
+	if LabelsContradict(required, map[string]string{"jurisdiction": "eu", "compliance": "gdpr"}) {
 		t.Error("a fully satisfying claim must not read as a contradiction")
 	}
 }
