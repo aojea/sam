@@ -251,7 +251,7 @@ export class MeshSession {
    * tried in order, each dialed and authenticated again first, since the
    * router forgot the admission with the connection. Runs on
    * relayCheckIntervalMs; exposed so a caller can force it. Concurrent
-   * calls share one attempt.
+   * calls share one attempt. Upstream: libp2p/js-libp2p#3601.
    */
   keepRelay(): Promise<void> {
     this.#keepingRelay ??= this.#keepRelayOnce().finally(() => {

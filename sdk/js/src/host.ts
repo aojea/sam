@@ -105,6 +105,8 @@ export interface RelayListener {
  * restarts or trims the connection drops it, and js-libp2p does not ask a
  * configured relay again. Calling `listen` on the returned listener does,
  * without registering a second listener.
+ *
+ * Upstream: libp2p/js-libp2p#3645 (listen after start), #3601 (re-reserve).
  */
 export async function listenThroughRelay(node: Libp2p, relayAddr: Multiaddr): Promise<RelayListener> {
   const internals = node as unknown as { components: { transportManager: { listen(addrs: Multiaddr[]): Promise<void>; getListeners(): RelayListener[] } } };

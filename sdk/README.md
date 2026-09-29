@@ -92,14 +92,18 @@ pinned by a test:
 - js-libp2p reserves a relay slot when it starts listening on
   `<relay>/p2p-circuit`, and a router refuses that before the auth
   handshake. The JS SDK starts the listener after the handshake, through the
-  transport manager, which is not on the public `Libp2p` interface.
+  transport manager, which is not on the public `Libp2p` interface
+  ([libp2p/js-libp2p#3645](https://github.com/libp2p/js-libp2p/issues/3645)).
 - go-libp2p's relay grants a reservation for one hour and drops it when
   that passes, and with the connection it was made on; a member that still
   advertises the relayed address is then unreachable (`NO_RESERVATION`).
   js-libp2p's listener renews on its own, but only on a connection the
-  router still holds the admission of; the JS SDK runs the handshake again
-  on every new connection to a router and, when the relayed address is
-  gone, authenticates and reserves again within thirty seconds. The Python
+  router still holds the admission of, and does not reserve again on a
+  static relay after the connection dropped
+  ([libp2p/js-libp2p#3601](https://github.com/libp2p/js-libp2p/issues/3601));
+  the JS SDK runs the handshake again on every new connection to a router
+  and, when the relayed address is gone, authenticates and reserves again
+  within thirty seconds. The Python
   SDK renews two minutes before the expiry the router returned, and within
   thirty seconds of the connection to that router going, running the auth
   handshake again first.
