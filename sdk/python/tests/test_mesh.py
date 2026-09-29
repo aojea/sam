@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import base64
 import json
 import stat
+import threading
 import time
 import urllib.parse
 from datetime import datetime, timezone
@@ -42,11 +44,22 @@ CP_KEY = Identity.generate()
 
 
 class FakeControlPlane:
-    """Approves everything and hands out numbered biscuits."""
+    """Approves everything and hands out numbered biscuits. With strict_refresh
+    it redeems only the last biscuit it issued, as the real one does, and
+    refresh_delay is how long a /refresh takes."""
 
-    def __init__(self, keys_ok=True):
+    def __init__(self, keys_ok=True, strict_refresh=False, refresh_delay=0.0):
         self.issued = 0
         self.keys_ok = keys_ok
+        self.strict_refresh = strict_refresh
+        self.refresh_delay = refresh_delay
+        self.last_biscuit = b""
+        self._lock = threading.Lock()
+
+    def _issue(self, biscuit):
+        self.issued += 1
+        self.last_biscuit = biscuit
+        return biscuit
 
     def _signed_keys(self):
         ts = int(time.time() * 1000)
@@ -58,25 +71,28 @@ class FakeControlPlane:
         if (method, path) == ("POST", "/register"):
             # The biscuit names the JWT that was presented, so a test can see which.
             jwt = pb.EnrollRequest.FromString(body).jwt
-            self.issued += 1
             return 200, pb.EnrollResponse(
-                biscuit_token=f"biscuit-for-{jwt}".encode(),
+                biscuit_token=self._issue(f"biscuit-for-{jwt}".encode()),
                 control_plane_public_key=CP_KEY.public_key_raw,
                 router_addresses=["/dns4/router.example/tcp/4001/p2p/12D3KooWP8iKhDf3iCMo2H3butNVfdTUtYwYWYQ75jTGnynXPFMp"],
                 expire_time=_ts_s(int(time.time()) + 3600),
             ).SerializeToString()
         if (method, path) == ("POST", "/enroll"):
-            self.issued += 1
             return 200, pb.BootstrapEnrollResponse(
                 status=pb.ENROLLMENT_STATUS_APPROVED,
-                biscuit_token=f"biscuit-{self.issued}".encode(),
+                biscuit_token=self._issue(f"biscuit-{self.issued + 1}".encode()),
                 control_plane_public_key=CP_KEY.public_key_raw,
                 router_addresses=["/dns4/router.example/tcp/4001/p2p/12D3KooWP8iKhDf3iCMo2H3butNVfdTUtYwYWYQ75jTGnynXPFMp"],
                 expire_time=_ts_s(int(time.time()) + 3600),
             ).SerializeToString()
         if (method, path) == ("POST", "/refresh"):
-            self.issued += 1
-            return 200, pb.TokenRefreshResponse(biscuit_token=f"biscuit-{self.issued}".encode(), expire_time=_ts_s(int(time.time()) + 7200)).SerializeToString()
+            time.sleep(self.refresh_delay)
+            with self._lock:
+                presented = base64.b64decode(headers["Authorization"].removeprefix("Bearer "))
+                if self.strict_refresh and presented != self.last_biscuit:
+                    return 200, pb.TokenRefreshResponse(error_message="biscuit already redeemed").SerializeToString()
+                biscuit = self._issue(f"biscuit-{self.issued + 1}".encode())
+            return 200, pb.TokenRefreshResponse(biscuit_token=biscuit, expire_time=_ts_s(int(time.time()) + 7200)).SerializeToString()
         if (method, path) == ("GET", "/keys"):
             return (200, self._signed_keys().SerializeToString()) if self.keys_ok else (500, b"boom")
         return 404, f"no route for {method} {path}".encode()
@@ -151,6 +167,34 @@ def test_enroll_without_state_dir_keeps_enrollment_key_when_keys_fails():
     mesh.save()
     mesh.refresh()
     assert mesh.credential.biscuit == b"biscuit-2"
+
+
+def test_concurrent_refreshes_run_one_after_the_other(tmp_path):
+    """A session refreshes the credential from one worker thread and pulls
+    from the control plane, which may refresh too, from another. The control
+    plane redeems only the last biscuit it issued and both write the same
+    state files, so two refreshes at once leave the loser with a spent
+    biscuit, or renaming a temp file the winner already renamed."""
+    cp = FakeControlPlane(strict_refresh=True, refresh_delay=0.05)
+    state = tmp_path / "state"
+    mesh = AgentMesh.enroll("http://127.0.0.1:1", bootstrap_token="sbt_secret", state_dir=state, transport=cp.transport)
+    errors = []
+
+    def refresh():
+        try:
+            mesh.refresh()
+        except Exception as err:  # noqa: BLE001 - collected for the assertion
+            errors.append(err)
+
+    threads = [threading.Thread(target=refresh) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert mesh.credential.biscuit == b"biscuit-9"
+    assert json.loads((state / "credential.json").read_text())["biscuit"] == base64.b64encode(b"biscuit-9").decode()
+    assert AgentMesh.load(state, transport=cp.transport).credential.biscuit == b"biscuit-9"
 
 
 def test_enroll_refuses_ambiguous_credentials():

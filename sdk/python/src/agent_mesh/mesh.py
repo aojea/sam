@@ -57,6 +57,10 @@ class AgentMesh:
         self.control_plane = control_plane
         self._credential = credential
         self._state_dir = state_dir
+        # refresh() and sync_control_plane() run in worker threads of the
+        # session's loops; the control plane redeems only the last biscuit it
+        # issued, and both write the same state files.
+        self._lock = threading.RLock()
 
     @property
     def peer_id(self) -> str:
@@ -173,29 +177,31 @@ class AgentMesh:
         """Trades the current biscuit for a fresh one and persists it. The control
         plane redeems only the last biscuit it issued, so a lost refresh result
         means re-enrolling; persisting before returning keeps that rare."""
-        result = self.control_plane.refresh(self.identity, self._credential.biscuit)
-        control_plane_keys = self._credential.control_plane_keys
-        try:
-            control_plane_keys = self.control_plane.keys(control_plane_keys)
-        except Exception:  # noqa: BLE001 - a failed /keys sync must not cost the new biscuit
-            pass
-        self._credential = replace(
-            self._credential,
-            biscuit=result.biscuit,
-            expiration=result.expiration,
-            control_plane_keys=control_plane_keys,
-            issued_under_keys=list(control_plane_keys),
-        )
-        self.save()
-        return self._credential
+        with self._lock:
+            result = self.control_plane.refresh(self.identity, self._credential.biscuit)
+            control_plane_keys = self._credential.control_plane_keys
+            try:
+                control_plane_keys = self.control_plane.keys(control_plane_keys)
+            except Exception:  # noqa: BLE001 - a failed /keys sync must not cost the new biscuit
+                pass
+            self._credential = replace(
+                self._credential,
+                biscuit=result.biscuit,
+                expiration=result.expiration,
+                control_plane_keys=control_plane_keys,
+                issued_under_keys=list(control_plane_keys),
+            )
+            self.save()
+            return self._credential
 
     def add_trusted_key(self, key: bytes) -> bool:
         """Adopts a signing key announced by a KEY_ROTATION event, so peers whose
         credentials the new key signs verify before the next pull confirms it."""
-        if any(bytes(k) == bytes(key) for k in self._credential.control_plane_keys):
-            return False
-        self._credential = replace(self._credential, control_plane_keys=[*self._credential.control_plane_keys, bytes(key)])
-        return True
+        with self._lock:
+            if any(bytes(k) == bytes(key) for k in self._credential.control_plane_keys):
+                return False
+            self._credential = replace(self._credential, control_plane_keys=[*self._credential.control_plane_keys, bytes(key)])
+            return True
 
     def sync_control_plane(self) -> ControlPlaneSync:
         """The member's pull from the control plane, as sam-node's SyncControlPlane:
@@ -205,6 +211,10 @@ class AgentMesh:
         addresses and the ban set. Each part is attempted even when another
         fails; the errors are reported together. Gossip events only bring this
         forward; they are never the only way state arrives."""
+        with self._lock:
+            return self._sync_control_plane()
+
+    def _sync_control_plane(self) -> ControlPlaneSync:
         errors: list[str] = []
         keys_changed = False
         refreshed = False
@@ -255,9 +265,10 @@ class AgentMesh:
         """Writes identity and credential to the state directory, if one is configured."""
         if self._state_dir is None:
             return
-        self._state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        _write_atomic(self._state_dir / _IDENTITY_FILE, self.identity.to_libp2p_private_key())
-        _write_atomic(self._state_dir / _CREDENTIAL_FILE, self._credential.to_json().encode())
+        with self._lock:
+            self._state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            _write_atomic(self._state_dir / _IDENTITY_FILE, self.identity.to_libp2p_private_key())
+            _write_atomic(self._state_dir / _CREDENTIAL_FILE, self._credential.to_json().encode())
 
 
 def _load_identity(state: Optional[Path]) -> Optional[Identity]:
