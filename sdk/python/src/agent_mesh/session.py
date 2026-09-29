@@ -204,7 +204,10 @@ class MeshSession:
         router the control plane lists that this member has not joined
         through; a relay opens a circuit only for a source it authenticated,
         so each such router is admitted first. Which router each side joined
-        through does not decide whether they can talk."""
+        through does not decide whether they can talk. The routers of each
+        step are dialed at once: a relay whose destination is gone answers
+        only after its own timeout, and a peer a rollout replaced must cost
+        the caller one such wait, not one per router."""
         if isinstance(peer, multiaddr.Multiaddr) or (isinstance(peer, str) and peer.startswith("/")):
             return await self._connect_addr(multiaddr.Multiaddr(str(peer)))
         if isinstance(peer, str):
@@ -230,20 +233,32 @@ class MeshSession:
                 return target
             except Exception as err:  # noqa: BLE001 - the relayed path is tried next
                 failures.append(f"direct {[str(a) for a in direct]}: {err}")
-        for r in self.routers:
-            try:
-                await self._connect_addr(multiaddr.Multiaddr(f"{r.addr}/p2p-circuit{suffix}"))
-                return target
-            except Exception as err:  # noqa: BLE001 - the next router is tried
-                failures.append(f"via router {r.peer_id}: {err}")
+        if await self._connect_through(target, [multiaddr.Multiaddr(f"{r.addr}/p2p-circuit{suffix}") for r in self.routers], failures):
+            return target
         for more in (self._routed_addresses, self._unjoined_router_addresses):
-            for ma in await more(target):
-                try:
-                    await self._connect_addr(ma)
-                    return target
-                except Exception as err:  # noqa: BLE001 - the next address is tried
-                    failures.append(f"{ma}: {err}")
+            if await self._connect_through(target, await more(target), failures):
+                return target
         raise ConnectionError(f"cannot reach {target}:\n  " + "\n  ".join(failures))
+
+    async def _connect_through(self, target: ID, addrs: list[multiaddr.Multiaddr], failures: list[str]) -> bool:
+        """Dials the addresses at once; the first that reaches target ends the
+        others, and each that failed adds its reason to failures."""
+        reached = False
+
+        async def attempt(ma: multiaddr.Multiaddr, nursery: trio.Nursery) -> None:
+            nonlocal reached
+            try:
+                await self._connect_addr(ma)
+            except Exception as err:  # noqa: BLE001 - the other attempts go on
+                failures.append(f"{ma}: {err}")
+                return
+            reached = True
+            nursery.cancel_scope.cancel()
+
+        async with trio.open_nursery() as nursery:
+            for ma in addrs:
+                nursery.start_soon(attempt, ma, nursery)
+        return reached or target in self.host.get_connected_peers()
 
     async def _unjoined_router_addresses(self, target: ID) -> list[multiaddr.Multiaddr]:
         """The relayed paths to a peer through the routers the control plane
@@ -269,9 +284,11 @@ class MeshSession:
 
     async def _routed_addresses(self, target: ID) -> list[multiaddr.Multiaddr]:
         """The addresses the routers' DHT knows for a peer, relayed ones
-        through routers this member has admitted by then: a relay opens a
-        circuit only for a source it authenticated, so a router met this way
-        is dialed and passed the handshake first, and joins the admitted set."""
+        through routers this member has not dialed for it yet: a relay that
+        is an admitted router was tried by connect() already, and a relay
+        opens a circuit only for a source it authenticated, so a router met
+        this way is dialed and passed the handshake first, and joins the
+        admitted set."""
         out: list[multiaddr.Multiaddr] = []
         seeds = [ID.from_base58(r.peer_id) for r in self.routers]
         for ma in await find_peer(self.host, target, seeds):
@@ -284,14 +301,13 @@ class MeshSession:
                 relay = info_from_p2p_addr(relay_addr).peer_id
             except Exception:  # noqa: BLE001 - a circuit address naming no relay is useless
                 continue
-            if str(relay) in self.banned:
+            if str(relay) in self.banned or any(r.peer_id == str(relay) for r in self.routers):
                 continue
-            if not any(r.peer_id == str(relay) for r in self.routers):
-                try:
-                    await self._admit_router(relay_addr)
-                except Exception as err:  # noqa: BLE001 - a relay that is not a router of this mesh is not used
-                    logger.debug("router %s named by the DHT did not admit us: %s", relay, err)
-                    continue
+            try:
+                await self._admit_router(relay_addr)
+            except Exception as err:  # noqa: BLE001 - a relay that is not a router of this mesh is not used
+                logger.debug("router %s named by the DHT did not admit us: %s", relay, err)
+                continue
             out.append(multiaddr.Multiaddr(f"{relay_addr}/p2p-circuit/p2p/{target}"))
         return out
 

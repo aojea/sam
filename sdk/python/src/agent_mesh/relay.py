@@ -36,7 +36,7 @@ from libp2p.peer.id import ID
 from libp2p.utils.varint import encode_varint_prefixed, read_varint_prefixed_bytes
 
 from ._proto import circuit_pb2 as circuit
-from .host import open_stream
+from .host import DIAL_TIMEOUT, HANGUP_GRACE, open_stream
 from .identity import canonical_peer_id
 
 logger = logging.getLogger("agent_mesh")
@@ -82,7 +82,11 @@ async def reserve_relay(host: IHost, relay_peer_id: ID) -> circuit.Reservation:
 
 async def dial_through_relay(host: IHost, relay_peer_id: ID, target: ID) -> INetConn:
     """Opens a connection to `target` through a relay we are connected to, and
-    registers it with the host so streams can be opened on it."""
+    registers it with the host so streams can be opened on it. The relay's
+    answer and the handshake with the target that follows are each bounded:
+    py-libp2p's own limits on that upgrade add up to about a minute when the
+    relay accepted the circuit and the far end never speaks, and a relayed
+    dial is held to DIAL_TIMEOUT as a direct one is."""
     stream = await open_stream(host, relay_peer_id, HOP_PROTOCOL, RELAY_MESSAGE_TIMEOUT)
     try:
         with trio.fail_after(RELAY_MESSAGE_TIMEOUT):
@@ -99,7 +103,20 @@ async def dial_through_relay(host: IHost, relay_peer_id: ID, target: ID) -> INet
     # From here the stream is the wire; the usual TLS + yamux upgrade runs on it.
     circuit_addr = multiaddr.Multiaddr(f"/p2p/{relay_peer_id}/p2p-circuit/p2p/{target}")
     raw = RawConnection(stream=stream, initiator=True, connection_type=ConnectionType.RELAYED, addresses=[circuit_addr])
-    return await host.upgrade_outbound_connection(raw, target)
+    try:
+        with trio.fail_after(DIAL_TIMEOUT):
+            return await host.upgrade_outbound_connection(raw, target)
+    except BaseException as err:
+        # A circuit given up on, timed out, failed or cancelled for another
+        # path that won, is reset so the relay drops it too.
+        with trio.CancelScope(shield=True), trio.move_on_after(HANGUP_GRACE):
+            try:
+                await stream.reset()
+            except Exception:  # noqa: BLE001 - already gone
+                pass
+        if isinstance(err, trio.TooSlowError):
+            raise ConnectionError(f"no secure connection to {target} through relay {relay_peer_id} within {DIAL_TIMEOUT:g}s") from None
+        raise
 
 
 def stop_stream_handler(host: IHost) -> Callable[[INetStream], object]:

@@ -35,6 +35,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,6 +49,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	circuitpb "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/pb"
+	circuitproto "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/proto"
+	circuitutil "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/util"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
@@ -528,6 +532,36 @@ func TestNativeSDKsMesh(t *testing.T) {
 		}
 	})
 
+	// A relay that accepted the circuit while nobody speaks on the far end,
+	// as a caller sees one whose destination never completes its handshake.
+	// The dial ends at the SDK's dial timeout with an error and the circuit
+	// is let go, in every SDK. Every member dials at once, so this costs the
+	// test one timeout, not one per SDK.
+	t.Run("stalled-relay", func(t *testing.T) {
+		relayAddr, released := startStalledRelay(t)
+		stranger := "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB"
+		for _, m := range members {
+			m.write(t, map[string]string{"cmd": "auth", "addr": relayAddr + "/p2p-circuit/p2p/" + stranger})
+		}
+		for _, m := range members {
+			var res sdkAuthResult
+			if line := m.readLine(t, 20*time.Second); json.Unmarshal(line, &res) != nil {
+				t.Fatalf("%s member: auth answered %q", m.name, line)
+			}
+			if res.OK {
+				t.Fatalf("%s reached a peer through a relay that delivered nothing", m.name)
+			}
+			t.Logf("%s gave up on the stalled circuit: %s", m.name, res.Error)
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for released.Load() < int32(len(members)) && time.Now().Before(deadline) {
+			time.Sleep(100 * time.Millisecond)
+		}
+		if got := released.Load(); got != int32(len(members)) {
+			t.Fatalf("%d of %d stalled circuits were let go; the rest are leaked on the relay", got, len(members))
+		}
+	})
+
 	// Every SDK member is an agent: it accepts A2A requests for a2a://agent,
 	// answered in the runner's process, reachable by peer ID through the
 	// router. It publishes nothing; the policy rules it evaluates are the
@@ -934,11 +968,17 @@ func launchSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, ad
 
 func (m *sdkMember) send(t *testing.T, command map[string]string) []byte {
 	t.Helper()
+	m.write(t, command)
+	return m.readLine(t, 20*time.Second)
+}
+
+// write sends a command without waiting for its answer; readLine collects it.
+func (m *sdkMember) write(t *testing.T, command map[string]string) {
+	t.Helper()
 	line, _ := json.Marshal(command)
 	if _, err := m.stdin.Write(append(line, '\n')); err != nil {
 		t.Fatalf("%s member: write command: %v", m.name, err)
 	}
-	return m.readLine(t, 20*time.Second)
 }
 
 // authRaw asks the member to connect to addr and run the auth handshake.
@@ -1482,6 +1522,38 @@ func refuseForgedFrame(t *testing.T, ctx context.Context, h host.Host, target pe
 	if msg, err := msgio.NewVarintReaderSize(s, 64*1024).ReadMsg(); err == nil {
 		t.Fatalf("%s answered a forged frame with %d bytes", target, len(msg))
 	}
+}
+
+// startStalledRelay is a circuit relay that answers every CONNECT with OK and
+// forwards nothing: what a caller sees when the relay's destination accepted
+// the circuit but never completes its side of the handshake. It speaks no
+// other protocol, so no member admits it as a router; a caller reaches it
+// only by an explicit /p2p-circuit address. Returns its address and the
+// count of circuits the callers let go of, by resetting or closing them.
+func startStalledRelay(t *testing.T) (string, *atomic.Int32) {
+	t.Helper()
+	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatalf("failed to create the stalled relay: %v", err)
+	}
+	t.Cleanup(func() { _ = h.Close() })
+	released := new(atomic.Int32)
+	h.SetStreamHandler(circuitproto.ProtoIDv2Hop, func(s network.Stream) {
+		defer func() { _ = s.Close() }()
+		var msg circuitpb.HopMessage
+		if err := circuitutil.NewDelimitedReader(s, 4096).ReadMsg(&msg); err != nil || msg.GetType() != circuitpb.HopMessage_CONNECT {
+			return
+		}
+		ok := circuitpb.HopMessage{Type: circuitpb.HopMessage_STATUS.Enum(), Status: circuitpb.Status_OK.Enum()}
+		if err := circuitutil.NewDelimitedWriter(s).WriteMsg(&ok); err != nil {
+			return
+		}
+		// The caller's handshake bytes arrive and nothing answers them; the
+		// read ends when the caller resets or closes the circuit.
+		_, _ = io.Copy(io.Discard, s)
+		released.Add(1)
+	})
+	return h.Addrs()[0].String() + "/p2p/" + h.ID().String(), released
 }
 
 // pickDirectAddr is the member's loopback TCP address with its peer ID.

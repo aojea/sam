@@ -29,6 +29,7 @@ import trio.testing
 from libp2p import new_host
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.custom_types import TProtocol
+from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.security.tls.transport import PROTOCOL_ID as TLS_PROTOCOL_ID
 from libp2p.security.tls.transport import TLSTransport
@@ -48,7 +49,7 @@ from agent_mesh.libp2p_http import HTTP_PROTOCOL, A2AEndpoint, HTTPResponse, Pro
 from agent_mesh.mcp_client import LabelsNotSatisfiedError
 from agent_mesh.mesh import AgentMesh
 from agent_mesh.relay import HOP_PROTOCOL as RELAY_HOP_PROTOCOL
-from agent_mesh.session import MeshSession
+from agent_mesh.session import AdmittedRouter, MeshSession
 from google.protobuf.timestamp_pb2 import Timestamp
 
 
@@ -341,6 +342,78 @@ def test_a_router_nobody_answers_costs_join_one_dial_timeout(monkeypatch):
         assert [r.peer_id[-6:] for r in routers] == ["UNCk88", "AFkdZm"]
         assert [r.reservation is not None for r in routers] == [True, False]
         assert [p[-6:] for p in reserved] == ["UNCk88"]
+
+    trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
+
+
+def test_connect_dials_the_routers_at_once():
+    """A relay whose destination a rollout replaced answers a CONNECT only
+    after its own timeout. The routers are dialed at once, so a dead peer
+    costs the caller one such wait, not one per router, and the first
+    circuit that opens ends the other attempts."""
+    router_ids = [
+        "12D3KooWG1pA6goegCncqwbZLSr8pnjUZ6JMAAe6SmnHTgUNCk88",
+        "12D3KooWGvdRCJLYATauVWfsieF2j3a2wXZoEQJUS2MsvRdDtgLM",
+        "12D3KooWBTdQ3QQZztZFaxQSTzJx5ZSbpgM8zfs43VYzBXAFkdZm",
+    ]
+    target = "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB"
+    routers = [AdmittedRouter(peer_id=p, addr=multiaddr.Multiaddr(f"/ip4/10.0.0.{i}/tcp/4501/p2p/{p}"), credential=None) for i, p in enumerate(router_ids, 1)]  # type: ignore[arg-type]
+
+    class Host:
+        def get_connected_peers(self):
+            return []
+
+    session = MeshSession(mesh=None, host=Host(), routers=routers)  # type: ignore[arg-type]
+    dialed: list[str] = []
+    ended: list[str] = []
+
+    def relay_of(ma) -> str:
+        return str(ma).split("/p2p/")[1].split("/")[0][-6:]
+
+    async def nothing(_target):
+        return []
+
+    session._routed_addresses = nothing  # type: ignore[method-assign]
+    session._unjoined_router_addresses = nothing  # type: ignore[method-assign]
+
+    async def main():
+        # Every relay waits on a destination that is gone.
+        async def all_wait(ma):
+            dialed.append(relay_of(ma))
+            try:
+                await trio.sleep(10)
+            finally:
+                ended.append(relay_of(ma))
+            raise RuntimeError("CONNECTION_FAILED")
+
+        session._connect_addr = all_wait  # type: ignore[method-assign]
+        started = trio.current_time()
+        with pytest.raises(ConnectionError) as err:
+            await session.connect(target)
+        assert trio.current_time() - started == pytest.approx(10)
+        assert sorted(dialed) == sorted(p[-6:] for p in router_ids)
+        assert str(err.value).count("CONNECTION_FAILED") == 3
+
+        # One relays for the peer; its circuit ends the others' waits.
+        dialed.clear()
+        ended.clear()
+
+        async def one_opens(ma):
+            dialed.append(relay_of(ma))
+            if relay_of(ma) == router_ids[1][-6:]:
+                await trio.sleep(1)
+                return ID.from_base58(target)
+            try:
+                await trio.sleep(10)
+            finally:
+                ended.append(relay_of(ma))
+            raise RuntimeError("CONNECTION_FAILED")
+
+        session._connect_addr = one_opens  # type: ignore[method-assign]
+        started = trio.current_time()
+        assert await session.connect(target) == ID.from_base58(target)
+        assert trio.current_time() - started == pytest.approx(1)
+        assert sorted(ended) == sorted(p[-6:] for p in (router_ids[0], router_ids[2]))
 
     trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
 
