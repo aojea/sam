@@ -597,6 +597,9 @@ jobs:
             --metadata=startup-script='#!/bin/bash
           set -euo pipefail
           EXTERNAL_IP=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip)
+          # COS drops inbound traffic on the host by default; the VPC rule alone does not open the port.
+          iptables -w -I INPUT -p tcp --dport 4501 -j ACCEPT
+          iptables -w -I INPUT -p udp --dport 4501 -j ACCEPT
           docker run -d \
             --name sam-router \
             --network host \
