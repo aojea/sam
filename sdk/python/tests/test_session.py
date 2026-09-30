@@ -43,6 +43,7 @@ from agent_mesh.auth import AUTH_PROTOCOL, auth_stream_handler, authenticate_wit
 from agent_mesh.authorizer import ProviderAuthorizerOptions
 from agent_mesh.biscuit import ROLE_ROUTER, BiscuitVerificationError
 from agent_mesh.controlplane import ROLE_NODE
+from agent_mesh.discovery import DiscoveredProvider
 from agent_mesh.httpx_transport import MeshTransport
 from agent_mesh.identity import Identity
 from agent_mesh.libp2p_http import HTTP_PROTOCOL, A2AEndpoint, HTTPResponse, ProviderOptions, http_ingress_handler
@@ -371,10 +372,10 @@ def test_connect_dials_the_routers_at_once():
         return str(ma).split("/p2p/")[1].split("/")[0][-6:]
 
     async def nothing(_target):
-        return []
+        return [], []
 
     session._routed_addresses = nothing  # type: ignore[method-assign]
-    session._unjoined_router_addresses = nothing  # type: ignore[method-assign]
+    session._unjoined_routers = lambda _target: []  # type: ignore[method-assign]
 
     async def main():
         # Every relay waits on a destination that is gone.
@@ -414,6 +415,83 @@ def test_connect_dials_the_routers_at_once():
         assert await session.connect(target) == ID.from_base58(target)
         assert trio.current_time() - started == pytest.approx(1)
         assert sorted(ended) == sorted(p[-6:] for p in (router_ids[0], router_ids[2]))
+
+    trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
+
+
+def test_a_replaced_peer_costs_connect_one_dial_timeout_per_step(monkeypatch):
+    """A provider record can name a pod a rollout replaced: its address
+    answers nothing, the admitted routers refuse the circuit at once, the DHT
+    names the same address again, and the control plane lists routers this
+    member has not joined through, one of them dark. The address and the
+    routers are dialed at once, the DHT's copy of the address is not dialed
+    again, and the routers not joined through are admitted at once: two
+    dial timeouts in all, one per step."""
+    from agent_mesh import session as session_module
+    from agent_mesh.host import DIAL_TIMEOUT
+
+    admitted_id = "12D3KooWG1pA6goegCncqwbZLSr8pnjUZ6JMAAe6SmnHTgUNCk88"
+    unjoined = {
+        "12D3KooWGvdRCJLYATauVWfsieF2j3a2wXZoEQJUS2MsvRdDtgLM": "/ip4/10.0.0.2/tcp/4501",
+        "12D3KooWBTdQ3QQZztZFaxQSTzJx5ZSbpgM8zfs43VYzBXAFkdZm": "/ip4/203.0.113.7/tcp/4501",
+    }
+    target = "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB"
+    dead = "/ip4/10.84.4.137/tcp/5002"
+
+    class Host:
+        def get_connected_peers(self):
+            return []
+
+    class Credential:
+        router_addresses = [f"/ip4/10.0.0.1/tcp/4501/p2p/{admitted_id}"] + [f"{a}/p2p/{p}" for p, a in unjoined.items()]
+
+    class Mesh:
+        credential = Credential()
+
+    session = MeshSession(
+        mesh=Mesh(),  # type: ignore[arg-type]
+        host=Host(),  # type: ignore[arg-type]
+        routers=[AdmittedRouter(peer_id=admitted_id, addr=multiaddr.Multiaddr(f"/ip4/10.0.0.1/tcp/4501/p2p/{admitted_id}"), credential=None)],  # type: ignore[arg-type]
+    )
+    dials: list[list[str]] = []
+    admissions: list[tuple[str, float]] = []
+    circuits: list[str] = []
+
+    async def dial_nobody_answers(host, info):
+        dials.append([str(a) for a in info.addrs])
+        await trio.sleep(DIAL_TIMEOUT)
+        raise ConnectionError(f"no connection to {info.peer_id} within {DIAL_TIMEOUT:g}s")
+
+    async def refused(ma):
+        circuits.append(str(ma))
+        raise RuntimeError("relay refused to connect: PERMISSION_DENIED")
+
+    async def dht_names_the_same_address(_target):
+        return [multiaddr.Multiaddr(dead)], []
+
+    async def admit_nobody_answers(addr):
+        admissions.append((str(addr), trio.current_time()))
+        await trio.sleep(DIAL_TIMEOUT)
+        raise ConnectionError(f"no connection to {addr} within {DIAL_TIMEOUT:g}s")
+
+    monkeypatch.setattr(session_module, "dial", dial_nobody_answers)
+    session._connect_addr = refused  # type: ignore[method-assign]
+    session._routed_addresses = dht_names_the_same_address  # type: ignore[method-assign]
+    session._admit_router = admit_nobody_answers  # type: ignore[method-assign]
+
+    async def main():
+        started = trio.current_time()
+        provider = DiscoveredProvider(peer_id=target, addrs=[f"{dead}/p2p/{target}", f"/ip4/10.84.4.137/udp/5001/quic-v1/p2p/{target}"])
+        with pytest.raises(ConnectionError) as err:
+            await session.connect(provider)
+        assert trio.current_time() - started == pytest.approx(2 * DIAL_TIMEOUT)
+        # The dead address once, with the admitted router's circuit alongside.
+        assert dials == [[dead]]
+        assert circuits == [f"/ip4/10.0.0.1/tcp/4501/p2p/{admitted_id}/p2p-circuit/p2p/{target}"]
+        # Both routers not joined through, admitted at the same instant.
+        assert sorted(a for a, _ in admissions) == sorted(f"{a}/p2p/{p}" for p, a in unjoined.items())
+        assert len({t for _, t in admissions}) == 1
+        assert str(err.value).count("within 15s") == 3
 
     trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
 

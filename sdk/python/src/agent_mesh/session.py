@@ -20,7 +20,7 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, AsyncIterator, Mapping, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Mapping, Optional, Sequence, Union
 
 import multiaddr
 import trio
@@ -199,15 +199,16 @@ class MeshSession:
 
     async def connect(self, peer: Peer) -> ID:
         """Connects to a peer, see `Peer`, and returns its peer ID. A banned
-        peer is refused. A peer named by ID that no admitted router relays for
-        is looked up in the routers' DHT, and failing that tried through every
-        router the control plane lists that this member has not joined
-        through; a relay opens a circuit only for a source it authenticated,
-        so each such router is admitted first. Which router each side joined
-        through does not decide whether they can talk. The routers of each
-        step are dialed at once: a relay whose destination is gone answers
-        only after its own timeout, and a peer a rollout replaced must cost
-        the caller one such wait, not one per router."""
+        peer is refused. The peer's own addresses and the relayed path through
+        every admitted router are dialed at once. A peer none of them reaches
+        is looked up in the routers' DHT and tried through every router the
+        control plane lists that this member has not joined through, again at
+        once; a relay opens a circuit only for a source it authenticated, so
+        each such router is admitted on the way. Which router each side joined
+        through does not decide whether they can talk. A peer a rollout
+        replaced is still in the routers' tables for a while; its dead
+        address answers nothing, and costs the caller one dial timeout per
+        step, not one per address or per router."""
         if isinstance(peer, multiaddr.Multiaddr) or (isinstance(peer, str) and peer.startswith("/")):
             return await self._connect_addr(multiaddr.Multiaddr(str(peer)))
         if isinstance(peer, str):
@@ -227,44 +228,57 @@ class MeshSession:
                 direct.extend(multiaddr.Multiaddr(str(m).removesuffix(suffix)) for m in await dial_addrs(a))
             except Exception as err:  # noqa: BLE001 - an address this host cannot use; the others are tried
                 failures.append(f"{a}: {err}")
-        if direct:
-            try:
-                await dial(self.host, PeerInfo(target, direct))
-                return target
-            except Exception as err:  # noqa: BLE001 - the relayed path is tried next
-                failures.append(f"direct {[str(a) for a in direct]}: {err}")
-        if await self._connect_through(target, [multiaddr.Multiaddr(f"{r.addr}/p2p-circuit{suffix}") for r in self.routers], failures):
+        circuits = [multiaddr.Multiaddr(f"{r.addr}/p2p-circuit{suffix}") for r in self.routers]
+        if await self._connect_through(target, direct, circuits, [], failures):
             return target
-        for more in (self._routed_addresses, self._unjoined_router_addresses):
-            if await self._connect_through(target, await more(target), failures):
-                return target
+        tried = {str(a) for a in direct}
+        routed, relays = await self._routed_addresses(target)
+        routed = [a for a in routed if str(a) not in tried]
+        for addr in self._unjoined_routers(target):
+            if not any(str(r) == str(addr) for r in relays):
+                relays.append(addr)
+        if await self._connect_through(target, routed, [], relays, failures):
+            return target
         raise ConnectionError(f"cannot reach {target}:\n  " + "\n  ".join(failures))
 
-    async def _connect_through(self, target: ID, addrs: list[multiaddr.Multiaddr], failures: list[str]) -> bool:
-        """Dials the addresses at once; the first that reaches target ends the
-        others, and each that failed adds its reason to failures."""
+    async def _connect_through(
+        self, target: ID, direct: list[multiaddr.Multiaddr], circuits: list[multiaddr.Multiaddr], relays: list[multiaddr.Multiaddr], failures: list[str]
+    ) -> bool:
+        """Dials target every way given at once: its direct addresses as one
+        dial, each circuit, and each relay after admitting it. The first that
+        reaches target ends the others, and each that failed adds its reason
+        to failures."""
         reached = False
+        suffix = f"/p2p/{target}"
 
-        async def attempt(ma: multiaddr.Multiaddr, nursery: trio.Nursery) -> None:
+        async def attempt(what: str, go: Callable[[], Awaitable[object]], nursery: trio.Nursery) -> None:
             nonlocal reached
             try:
-                await self._connect_addr(ma)
+                await go()
             except Exception as err:  # noqa: BLE001 - the other attempts go on
-                failures.append(f"{ma}: {err}")
+                failures.append(f"{what}: {err}")
                 return
             reached = True
             nursery.cancel_scope.cancel()
 
+        async def through_relay(addr: multiaddr.Multiaddr) -> None:
+            admitted = await self._admit_router(addr)
+            await self._connect_addr(multiaddr.Multiaddr(f"{admitted.addr}/p2p-circuit{suffix}"))
+
         async with trio.open_nursery() as nursery:
-            for ma in addrs:
-                nursery.start_soon(attempt, ma, nursery)
+            if direct:
+                nursery.start_soon(attempt, f"direct {[str(a) for a in direct]}", lambda: dial(self.host, PeerInfo(target, direct)), nursery)
+            for ma in circuits:
+                nursery.start_soon(attempt, str(ma), lambda ma=ma: self._connect_addr(ma), nursery)
+            for addr in relays:
+                nursery.start_soon(attempt, f"{addr}/p2p-circuit{suffix}", lambda addr=addr: through_relay(addr), nursery)
         return reached or target in self.host.get_connected_peers()
 
-    async def _unjoined_router_addresses(self, target: ID) -> list[multiaddr.Multiaddr]:
-        """The relayed paths to a peer through the routers the control plane
-        lists that this member has not joined through, each admitted first.
-        The list is the one the credential carries, refreshed by every
-        control plane pull, so a router that came up after join is tried too."""
+    def _unjoined_routers(self, target: ID) -> list[multiaddr.Multiaddr]:
+        """The routers the control plane lists that this member has not joined
+        through. The list is the one the credential carries, refreshed by
+        every control plane pull, so a router that came up after join is
+        among them."""
         out: list[multiaddr.Multiaddr] = []
         for text in self.mesh.credential.router_addresses:
             try:
@@ -274,42 +288,35 @@ class MeshSession:
                 continue
             if router == target or str(router) in self.banned or any(r.peer_id == str(router) for r in self.routers):
                 continue
-            try:
-                admitted = await self._admit_router(addr)
-            except Exception as err:  # noqa: BLE001 - a router that does not admit us is not a path
-                logger.debug("router %s did not admit us: %s", router, err)
-                continue
-            out.append(multiaddr.Multiaddr(f"{admitted.addr}/p2p-circuit/p2p/{target}"))
+            out.append(addr)
         return out
 
-    async def _routed_addresses(self, target: ID) -> list[multiaddr.Multiaddr]:
-        """The addresses the routers' DHT knows for a peer, relayed ones
-        through routers this member has not dialed for it yet: a relay that
-        is an admitted router was tried by connect() already, and a relay
-        opens a circuit only for a source it authenticated, so a router met
-        this way is dialed and passed the handshake first, and joins the
-        admitted set."""
-        out: list[multiaddr.Multiaddr] = []
+    async def _routed_addresses(self, target: ID) -> tuple[list[multiaddr.Multiaddr], list[multiaddr.Multiaddr]]:
+        """What the routers' DHT knows for a peer: its direct addresses this
+        host can dial, without the peer suffix, and the relays it reserved on
+        that are not admitted routers of this member; those the caller tried
+        already."""
+        direct: list[multiaddr.Multiaddr] = []
+        relays: list[multiaddr.Multiaddr] = []
         seeds = [ID.from_base58(r.peer_id) for r in self.routers]
+        suffix = f"/p2p/{target}"
         for ma in await find_peer(self.host, target, seeds):
             text = str(ma)
             if "/p2p-circuit" not in text:
-                out.append(ma if text.endswith(f"/p2p/{target}") else multiaddr.Multiaddr(f"{text}/p2p/{target}"))
+                try:
+                    direct.extend(multiaddr.Multiaddr(str(m).removesuffix(suffix)) for m in await dial_addrs(ma))
+                except Exception:  # noqa: BLE001 - an address this host cannot use
+                    pass
                 continue
             relay_addr = multiaddr.Multiaddr(text[: text.index("/p2p-circuit")])
             try:
                 relay = info_from_p2p_addr(relay_addr).peer_id
             except Exception:  # noqa: BLE001 - a circuit address naming no relay is useless
                 continue
-            if str(relay) in self.banned or any(r.peer_id == str(relay) for r in self.routers):
+            if str(relay) in self.banned or any(r.peer_id == str(relay) for r in self.routers) or any(str(r) == str(relay_addr) for r in relays):
                 continue
-            try:
-                await self._admit_router(relay_addr)
-            except Exception as err:  # noqa: BLE001 - a relay that is not a router of this mesh is not used
-                logger.debug("router %s named by the DHT did not admit us: %s", relay, err)
-                continue
-            out.append(multiaddr.Multiaddr(f"{relay_addr}/p2p-circuit/p2p/{target}"))
-        return out
+            relays.append(relay_addr)
+        return direct, relays
 
     async def _admit_router(self, addr: multiaddr.Multiaddr) -> AdmittedRouter:
         """Dials a router, runs the handshake and, its role verified, adds it
