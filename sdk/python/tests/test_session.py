@@ -90,7 +90,9 @@ POLICY_RULES = [
 
 
 def fake_control_plane(router_addresses):
-    """Approves every enrollment with a biscuit bound to the requesting peer."""
+    """Approves every enrollment with a biscuit bound to the requesting peer.
+    /info lists router_addresses as they are at the time of the request, so
+    a test that changes the list has the member pull the change."""
 
     def transport(method, url, headers, body):
         path = urllib.parse.urlsplit(url).path
@@ -106,6 +108,8 @@ def fake_control_plane(router_addresses):
         if (method, path) == ("GET", "/keys"):
             # Unsigned: the client keeps the enrollment key when /keys cannot be verified.
             return 200, pb.KeysResponse(public_keys=[CP_KEY], sign_time=_ts_ms(int(time.time() * 1000))).SerializeToString()
+        if (method, path) == ("GET", "/info"):
+            return 200, pb.ControlPlaneInfoResponse(router_addresses=list(router_addresses)).SerializeToString()
         return 404, f"no route for {method} {path}".encode()
 
     return transport
@@ -588,6 +592,49 @@ def test_a_router_that_came_back_on_another_address_is_reserved_on_again(monkeyp
                 assert before_events.count(reserve) == 1, "dialed the old pod's address again"
                 assert after_events == [("auth", mesh.peer_id), reserve]
                 assert member in after.get_connected_peers()
+                assert session.relay_addresses == [f"{after_addr}/p2p-circuit/p2p/{mesh.peer_id}"]
+            nursery.cancel_scope.cancel()
+
+    trio.run(with_timeout, 60, main)
+
+
+def test_a_router_the_control_plane_lists_elsewhere_is_reserved_on_there():
+    """A mesh that hands out literal addresses (sam-one, a kind cluster) has
+    no name to re-resolve: a router that came back on another address is
+    known only through the control plane's list, refreshed by every pull.
+    The reservation loop dials the router at the address that list names
+    now and keeps it as the router's address, so the circuits connect()
+    opens through it go to the right place too."""
+
+    async def wait_for(predicate):
+        while not predicate():
+            await trio.sleep(0.1)
+
+    async def main():
+        async with trio.open_nursery() as nursery:
+            identity = Identity.generate()
+            before_events, after_events = [], []
+            before, before_addr = await start_router(nursery, events=before_events, identity=identity)
+            after, after_addr = await start_router(nursery, events=after_events, identity=identity)
+            listed = [before_addr]
+
+            mesh = AgentMesh.enroll("http://127.0.0.1:1", bootstrap_token="sbt", transport=fake_control_plane(listed))
+            async with mesh.join(refresh_lead=0, refresh_retry=0.5, reservation_check_interval=0.5) as session:
+                member = session.host.get_id()
+                assert [str(r.addr) for r in session.routers] == [before_addr]
+
+                # The control plane lists the router where it is now; the member pulls that.
+                listed[:] = [after_addr]
+                await session.sync()
+                assert list(mesh.credential.router_addresses) == [after_addr]
+                await before.disconnect(member)
+                await wait_for(lambda: member not in before.get_connected_peers())
+
+                reserve = ("reserve", mesh.peer_id)
+                await wait_for(lambda: before_events.count(reserve) + after_events.count(reserve) >= 2)
+                assert before_events.count(reserve) == 1, "dialed the address admitted at join again"
+                assert after_events == [("auth", mesh.peer_id), reserve]
+                assert [str(r.addr) for r in session.routers] == [after_addr]
                 assert session.relay_addresses == [f"{after_addr}/p2p-circuit/p2p/{mesh.peer_id}"]
             nursery.cancel_scope.cancel()
 

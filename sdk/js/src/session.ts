@@ -249,9 +249,13 @@ export class MeshSession {
    * at join: a router that restarted or trimmed the connection dropped it
    * and with it the relayed address peers reach this member on. Routers are
    * tried in order, each dialed and authenticated again first, since the
-   * router forgot the admission with the connection. Runs on
-   * relayCheckIntervalMs; exposed so a caller can force it. Concurrent
-   * calls share one attempt. Upstream: libp2p/js-libp2p#3601.
+   * router forgot the admission with the connection. A router rescheduled
+   * keeps its key and comes back on another address; the list the control
+   * plane hands out, refreshed by every pull, names the current one, so the
+   * router is dialed at what that list says and keeps the address the
+   * connection was made on. Runs on relayCheckIntervalMs; exposed so a
+   * caller can force it. Concurrent calls share one attempt. Upstream:
+   * libp2p/js-libp2p#3601.
    */
   keepRelay(): Promise<void> {
     this.#keepingRelay ??= this.#keepRelayOnce().finally(() => {
@@ -265,11 +269,14 @@ export class MeshSession {
       return;
     }
     const failures: string[] = [];
-    for (const r of this.routers) {
+    for (const [i, r] of this.routers.entries()) {
+      const listed = this.mesh.credential.routerAddresses.map((a) => multiaddr(a)).filter((ma) => targetPeerOf(ma) === r.peerId);
       try {
-        const conn = await this.node.dial(r.addr);
+        const conn = await this.node.dial(listed.length > 0 ? listed : r.addr);
         await authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys);
-        await this.#relayListener.listen(r.addr.encapsulate("/p2p-circuit"));
+        const addr = connectedAddress(conn, r.peerId);
+        this.routers[i] = { ...r, addr };
+        await this.#relayListener.listen(addr.encapsulate("/p2p-circuit"));
         return;
       } catch (err) {
         failures.push(`${r.peerId}: ${err instanceof Error ? err.message : String(err)}`);

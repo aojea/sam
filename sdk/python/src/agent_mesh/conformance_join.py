@@ -179,6 +179,11 @@ async def main() -> None:
     # is the floor every provider this member calls must attest.
     labels = _labels_from_env("SAM_SDK_LABELS")
     egress_require_labels = _labels_from_env("SAM_SDK_EGRESS_REQUIRE_LABELS")
+    # SAM_SDK_RELAY_CHECK_SECONDS shortens how often the relay reservation is
+    # checked and how soon a failed renewal is retried, so a test that moves
+    # a router sees the member follow it within its budget.
+    relay_check = os.environ.get("SAM_SDK_RELAY_CHECK_SECONDS")
+    relay_options = {"reservation_check_interval": float(relay_check), "refresh_retry": float(relay_check)} if relay_check else {}
 
     mesh = AgentMesh.enroll(
         control_plane_url,
@@ -194,7 +199,12 @@ async def main() -> None:
     only = {p for p in os.environ.get("SAM_SDK_ROUTERS", "").split(",") if p}
     router_addresses = [a for a in mesh.credential.router_addresses if any(a.endswith(f"/p2p/{p}") for p in only)] if only else None
     async with mesh.join(
-        listen_addrs=listen, router_addresses=router_addresses, control_plane_sync_interval=0, control_plane_sync_jitter=0, egress_require_labels=egress_require_labels or None
+        listen_addrs=listen,
+        router_addresses=router_addresses,
+        control_plane_sync_interval=0,
+        control_plane_sync_jitter=0,
+        egress_require_labels=egress_require_labels or None,
+        **relay_options,
     ) as session:
         _emit(
             {

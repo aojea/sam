@@ -196,6 +196,11 @@ async function main(): Promise<void> {
   // is the floor every provider this member calls must attest.
   const labels = labelsFromEnv("SAM_SDK_LABELS");
   const egressRequireLabels = labelsFromEnv("SAM_SDK_EGRESS_REQUIRE_LABELS");
+  // SAM_SDK_RELAY_CHECK_SECONDS shortens how often the relay reservation is
+  // checked, so a test that moves a router sees the member follow it within
+  // its budget.
+  const relayCheck = process.env.SAM_SDK_RELAY_CHECK_SECONDS;
+  const relayOptions = relayCheck !== undefined && relayCheck !== "" ? { relayCheckIntervalMs: Number(relayCheck) * 1000 } : {};
 
   const mesh = await AgentMesh.enroll({
     controlPlaneUrl,
@@ -214,6 +219,7 @@ async function main(): Promise<void> {
     listenAddrs,
     ...(routerAddresses !== undefined ? { routerAddresses } : {}),
     ...(Object.keys(egressRequireLabels).length > 0 ? { egressRequireLabels } : {}),
+    ...relayOptions,
     signal: AbortSignal.timeout(20_000),
     controlPlaneSyncIntervalMs: 0,
     controlPlaneSyncJitterMs: 0,

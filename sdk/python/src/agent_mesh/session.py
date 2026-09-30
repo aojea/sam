@@ -743,11 +743,19 @@ async def _authenticate_router(host: IHost, mesh: "AgentMesh", peer_id: ID) -> V
 
 
 async def _reserve_again(host: IHost, mesh: "AgentMesh", router: AdmittedRouter) -> AdmittedRouter:
+    """Reserves on a router again, dialed and authenticated first when its
+    connection is gone. A router rescheduled keeps its key and comes back on
+    another address; the list the control plane hands out, refreshed by
+    every pull, names the current one, so the router is dialed at what that
+    list says and keeps that as its address. The address admitted at join
+    serves only when the list no longer names the router."""
     peer_id = ID.from_base58(router.peer_id)
     credential = router.credential
+    addr = router.addr
     try:
         if peer_id not in host.get_connected_peers():
-            await dial(host, await peer_info(router.addr))
+            addr, info = await _current_router_info(mesh, router)
+            await dial(host, info)
             credential = await _authenticate_router(host, mesh, peer_id)
         reservation = await reserve_relay(host, peer_id)
     except Exception:
@@ -758,4 +766,32 @@ async def _reserve_again(host: IHost, mesh: "AgentMesh", router: AdmittedRouter)
         except Exception:  # noqa: BLE001 - already gone
             pass
         raise
-    return replace(router, credential=credential, reservation=reservation)
+    return replace(router, addr=addr, credential=credential, reservation=reservation)
+
+
+async def _current_router_info(mesh: "AgentMesh", router: AdmittedRouter) -> tuple[multiaddr.Multiaddr, PeerInfo]:
+    """The router's addresses as the credential lists them now, resolved to
+    what this host can dial, and the first of them this host can use as the
+    address to keep; the admitted address when the list has none for the
+    router."""
+    listed: list[multiaddr.Multiaddr] = []
+    for text in mesh.credential.router_addresses:
+        try:
+            ma = multiaddr.Multiaddr(text)
+            if str(info_from_p2p_addr(ma).peer_id) == router.peer_id:
+                listed.append(ma)
+        except Exception:  # noqa: BLE001 - not a router address
+            continue
+    kept: Optional[multiaddr.Multiaddr] = None
+    dialable: list[multiaddr.Multiaddr] = []
+    failures: list[str] = []
+    for ma in listed or [router.addr]:
+        try:
+            dialable.extend(await dial_addrs(ma))
+        except Exception as err:  # noqa: BLE001 - an address this host cannot use; the others are tried
+            failures.append(f"{ma}: {err}")
+            continue
+        kept = kept or ma
+    if kept is None:
+        raise RuntimeError("no address to dial router at:\n  " + "\n  ".join(failures))
+    return kept, PeerInfo(ID.from_base58(router.peer_id), dialable)

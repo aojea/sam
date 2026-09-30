@@ -33,7 +33,7 @@ import { after, before, test } from "node:test";
 import { AUTH_HANDLER_OPTIONS, AUTH_PROTOCOL, AuthRejectedError, authenticateWithPeer, authStreamHandler } from "./auth.ts";
 import { BiscuitVerificationError, ROLE_ROUTER, loadBiscuit, verifyPeerBiscuit } from "./biscuit.ts";
 import { ROLE_NODE } from "./controlplane.ts";
-import { BootstrapEnrollRequestSchema, BootstrapEnrollResponseSchema, EnrollmentStatus, KeysResponseSchema, AuthFrameSchema } from "./gen/sam_pb.ts";
+import { BootstrapEnrollRequestSchema, BootstrapEnrollResponseSchema, ControlPlaneInfoResponseSchema, EnrollmentStatus, KeysResponseSchema, AuthFrameSchema } from "./gen/sam_pb.ts";
 import { Identity } from "./identity.ts";
 import { HTTP_HANDLER_OPTIONS, HTTP_PROTOCOL, a2aEndpoint, httpIngressHandler } from "./libp2p-http.ts";
 import { LabelsNotSatisfiedError } from "./mcp.ts";
@@ -73,7 +73,11 @@ function proto(bytes: Uint8Array): Response {
   return new Response(Buffer.from(bytes), { status: 200, headers: { "Content-Type": "application/x-protobuf" } });
 }
 
-/** Approves every enrollment with a biscuit bound to the requesting peer. */
+/**
+ * Approves every enrollment with a biscuit bound to the requesting peer.
+ * /info lists routerAddresses as they are at the time of the request, so a
+ * test that changes the array has the member pull the change.
+ */
 function fakeControlPlane(routerAddresses: string[]): typeof fetch {
   return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const req = new Request(input, init);
@@ -96,6 +100,9 @@ function fakeControlPlane(routerAddresses: string[]): typeof fetch {
     if (req.method === "GET" && path === "/keys") {
       // Unsigned: the client keeps the enrollment key when /keys cannot be verified.
       return proto(toBinary(KeysResponseSchema, create(KeysResponseSchema, { publicKeys: [cpKey], signTime: timestampFromMs(Date.now()) })));
+    }
+    if (req.method === "GET" && path === "/info") {
+      return proto(toBinary(ControlPlaneInfoResponseSchema, create(ControlPlaneInfoResponseSchema, { routerAddresses: [...routerAddresses] })));
     }
     return new Response(`no route for ${req.method} ${path}`, { status: 404 });
   }) as typeof fetch;
@@ -267,6 +274,62 @@ test("a dropped router connection is authenticated and reserved again", async ()
     }
   } finally {
     await strict.stop();
+  }
+});
+
+test("a router the control plane lists elsewhere is reserved on there", async () => {
+  // A router rescheduled keeps its key and comes back on another address. In
+  // a mesh that hands out literal addresses there is no name to re-resolve:
+  // the router is known only through the control plane's list, refreshed by
+  // every pull. The member must dial the address that list names now, not
+  // the one it was admitted on, and keep it for the circuits it opens.
+  const identity = Identity.generate();
+  const handshakes: { before: string[]; after: string[] } = { before: [], after: [] };
+  const startRouter = async (name: "before" | "after") => {
+    const node = await createLibp2p({
+      privateKey: privateKeyFromProtobuf(identity.toLibp2pPrivateKey()),
+      addresses: { listen: ["/ip4/127.0.0.1/tcp/0"] },
+      transports: [tcp()],
+      connectionEncrypters: [tls()],
+      streamMuxers: [yamux()],
+      services: { identify: identify(), relay: circuitRelayServer() },
+    });
+    const biscuit = mint(identity.peerId, ROLE_ROUTER);
+    await node.handle(AUTH_PROTOCOL, authStreamHandler({ ownBiscuit: () => biscuit, trustedKeys: () => [cpKey], onAuthenticated: (p) => handshakes[name].push(p) }));
+    return { node, addr: (node.getMultiaddrs()[0] as ReturnType<typeof multiaddr>).toString() };
+  };
+  const before = await startRouter("before");
+  const after = await startRouter("after");
+  try {
+    const listed = [before.addr];
+    const mesh = await AgentMesh.enroll({ controlPlaneUrl: "http://127.0.0.1:1", bootstrapToken: "sbt", fetch: fakeControlPlane(listed) });
+    const session = await mesh.join({ refreshLeadMs: 0, relayCheckIntervalMs: 200 });
+    try {
+      assert.deepEqual(session.routers.map((r) => r.addr.toString()), [before.addr]);
+      assert.deepEqual(handshakes, { before: [mesh.peerId], after: [] });
+
+      // The control plane lists the router where it is now; the member pulls that. Then the old pod goes.
+      listed.splice(0, listed.length, after.addr);
+      await session.sync();
+      assert.deepEqual(mesh.credential.routerAddresses, [after.addr]);
+      await before.node.stop();
+
+      const deadline = Date.now() + 10_000;
+      while (!session.relayAddresses.some((ma) => ma.toString().startsWith(after.addr)) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      assert.deepEqual(session.relayAddresses.map(String), [`${after.addr}/p2p-circuit/p2p/${mesh.peerId}`]);
+      // On the connection's open and ahead of the reservation, as after any drop; both the member.
+      assert.ok(handshakes.after.length >= 1 && handshakes.after.every((p) => p === mesh.peerId), `handshakes ${handshakes.after.join(",")}`);
+      assert.deepEqual(session.routers.map((r) => r.addr.toString()), [after.addr]);
+      const target = "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB";
+      assert.deepEqual(session.dialTargets(target).addrs.map(String), [`${after.addr}/p2p-circuit/p2p/${target}`]);
+    } finally {
+      await session.close();
+    }
+  } finally {
+    await after.node.stop();
+    await Promise.resolve(before.node.stop()).catch(() => {});
   }
 });
 
