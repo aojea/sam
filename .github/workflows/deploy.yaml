@@ -411,6 +411,10 @@ jobs:
           VAR_GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           VAR_CLUSTER_REGION: ${{ vars.CLUSTER_REGION }}
           VAR_CLUSTER_NAME: ${{ vars.CLUSTER_NAME }}
+          # Bananas deploys several times a day and every deploy replaces the
+          # canary pods; with the library's 48h a caller meets their dead
+          # provider records for two days. Hub keeps the default.
+          VAR_DHT_PROVIDER_ADDR_TTL: ${{ vars.ENV_NAME == 'bananas' && '1h' || '0s' }}
         run: |
           print_rollout_diagnostics() {
             local namespace="$1"
@@ -443,9 +447,10 @@ jobs:
           export GCP_PROJECT_ID="${VAR_GCP_PROJECT_ID}"
           export CLUSTER_REGION="${VAR_CLUSTER_REGION}"
           export CLUSTER_NAME="${VAR_CLUSTER_NAME}"
+          export DHT_PROVIDER_ADDR_TTL="${VAR_DHT_PROVIDER_ADDR_TTL}"
 
           envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/sam-control-plane-template.yaml | kubectl apply -f -
-          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/sam-router-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG} ${DHT_PROVIDER_ADDR_TTL}' < .github/k8s/sam-router-template.yaml | kubectl apply -f -
           envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/sam-console-template.yaml | kubectl apply -f -
           envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID}' < .github/k8s/dns-sync-cronjob-template.yaml | kubectl apply -f -
           # Managed Prometheus ships with GKE; a cluster without it should not block the mesh rollout.
@@ -536,6 +541,7 @@ jobs:
           VAR_IMAGE_TAG: ${{ env.IMAGE_TAG }}
           VAR_GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           VAR_CLUSTER_REGION: ${{ vars.CLUSTER_REGION }}
+          VAR_DHT_PROVIDER_ADDR_TTL: ${{ vars.ENV_NAME == 'bananas' && '1h' || '0s' }}
         run: |
           export ENV_NAME="${VAR_ENV_NAME}"
           export NAMESPACE="sam-${ENV_NAME}"
@@ -543,6 +549,7 @@ jobs:
           export GCP_PROJECT_ID="${VAR_GCP_PROJECT_ID}"
           export CLUSTER_REGION="${VAR_CLUSTER_REGION}"
           export ZONE="${CLUSTER_REGION}-a"
+          export DHT_PROVIDER_ADDR_TTL="${VAR_DHT_PROVIDER_ADDR_TTL}"
 
           echo "Retrieving Admin Token to generate Bootstrap Token..."
           ADMIN_TOKEN=$(kubectl get secret sam-control-plane-secret-${ENV_NAME} -n ${NAMESPACE} -o jsonpath='{.data.admin-token}' | base64 -d)
@@ -610,7 +617,8 @@ jobs:
             --listen=/ip4/0.0.0.0/tcp/4501 \
             --listen=/ip4/0.0.0.0/udp/4501/quic-v1 \
             --external-addr=/ip4/${EXTERNAL_IP}/tcp/4501 \
-            --external-addr=/ip4/${EXTERNAL_IP}/udp/4501/quic-v1'
+            --external-addr=/ip4/${EXTERNAL_IP}/udp/4501/quic-v1 \
+            --dht-provider-addr-ttl='"${DHT_PROVIDER_ADDR_TTL}"''
 
       - name: Deploy SAM Box Canary
         env:
