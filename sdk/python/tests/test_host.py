@@ -18,6 +18,7 @@ address through its TXT records and keep the transports this host has
 stream must do: come back after the 256th one on a connection (py-libp2p
 0.7 leaks its yamux backlog slots), or fail at a deadline."""
 
+import socket
 import ssl
 import struct
 
@@ -28,6 +29,7 @@ import trio.testing
 from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
+from libp2p.peer.peerstore import PeerStore
 from libp2p.stream_muxer.yamux.yamux import FLAG_SYN, YAMUX_HEADER_FORMAT
 from libp2p.transport.websocket.transport import WebsocketTransport
 from multiaddr.resolvers import DNSResolver
@@ -171,6 +173,12 @@ def test_a_dial_nobody_answers_ends_at_the_timeout():
     unanswered. The dial ends at DIAL_TIMEOUT, not at the kernel's."""
 
     class Host:
+        def get_peerstore(self):
+            return PeerStore()
+
+        def get_network(self):
+            return None
+
         async def connect(self, info):
             await trio.sleep_forever()
 
@@ -181,6 +189,34 @@ def test_a_dial_nobody_answers_ends_at_the_timeout():
         assert trio.current_time() - started == pytest.approx(DIAL_TIMEOUT)
 
     trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
+
+
+def test_a_peer_that_came_back_on_another_address_is_dialed_there():
+    """A router pod rescheduled keeps its key and gets a new IP; the member
+    re-resolves its name and dials again. py-libp2p dials one address per
+    transport, the first its peerstore holds, and host.connect appends: on
+    its own it would dial the old address on every retry, for as long as the
+    pod is gone. Its negative cache, keyed by peer, would then refuse the new
+    address for a minute after the old one failed."""
+
+    async def main():
+        server, server_listen = create_mesh_host(Identity.generate(), ["/ip4/127.0.0.1/tcp/0"])
+        client, _ = create_mesh_host(Identity.generate())
+        # Where the peer was: a port nobody listens on now.
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            stale = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{s.getsockname()[1]}")
+        async with server.run(listen_addrs=server_listen), client.run(listen_addrs=[]):
+            peer = server.get_id()
+            # The peerstore holds the old address, and the swarm a failed dial to it.
+            with trio.fail_after(10), pytest.raises(Exception, match="no addresses established"):
+                await client.connect(PeerInfo(peer, [stale]))
+            with trio.fail_after(10):
+                await dial(client, await peer_info(server.get_addrs()[0]))
+            assert peer in client.get_connected_peers()
+            assert stale not in client.get_peerstore().addrs(peer)
+
+    trio.run(main)
 
 
 ECHO = TProtocol("/test/echo/1.0.0")

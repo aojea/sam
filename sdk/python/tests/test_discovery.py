@@ -22,6 +22,7 @@ import trio
 import trio.testing
 from libp2p.kad_dht.pb import kademlia_pb2 as kad
 from libp2p.peer.id import ID
+from libp2p.peer.peerstore import PeerStore
 from libp2p.utils.varint import encode_varint_prefixed, read_varint_prefixed_bytes
 
 from agent_mesh.discovery import DHT_PROTOCOL, _QUERY_TIMEOUT, find_peer, find_providers
@@ -79,9 +80,16 @@ class _Host:
         self._answers = answers
         self.connected = set(answers)
         self.dials = []
+        self.peerstore = PeerStore()
 
     def get_id(self):
         return SELF
+
+    def get_peerstore(self):
+        return self.peerstore
+
+    def get_network(self):
+        return None
 
     def get_connected_peers(self):
         return list(self.connected)

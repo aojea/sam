@@ -34,6 +34,7 @@ from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.custom_types import TProtocol
 from libp2p.network.config import ConnectionConfig
+from libp2p.network.swarm import Swarm
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
 from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
@@ -135,7 +136,19 @@ HANGUP_GRACE = 1.0
 
 
 async def dial(host: IHost, info: PeerInfo) -> None:
-    """host.connect, bounded by DIAL_TIMEOUT."""
+    """host.connect at the addresses given, bounded by DIAL_TIMEOUT. What the
+    host remembers of the peer is dropped first. py-libp2p dials one address
+    per transport, the first its peerstore holds, and host.connect only
+    appends to that list: a router or provider that came back on another
+    address, a pod rescheduled with the same key, would be dialed at the old
+    one on every retry, whatever the caller had just resolved. The swarm's
+    negative cache is keyed by peer, not by address, and would refuse the new
+    address for a minute after the old one failed, so the peer is taken out
+    of it as well."""
+    host.get_peerstore().clear_addrs(info.peer_id)
+    network = host.get_network()
+    if isinstance(network, Swarm):
+        network.unblock_peer(info.peer_id)
     try:
         with trio.fail_after(DIAL_TIMEOUT):
             await host.connect(info)

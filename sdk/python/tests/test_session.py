@@ -31,6 +31,7 @@ from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import info_from_p2p_addr
+from libp2p.peer.peerstore import PeerStore
 from libp2p.security.tls.transport import PROTOCOL_ID as TLS_PROTOCOL_ID
 from libp2p.security.tls.transport import TLSTransport
 from libp2p.stream_muxer.yamux.yamux import PROTOCOL_ID as YAMUX_PROTOCOL_ID
@@ -145,9 +146,9 @@ def hop_handler(relay_addr: str, grants, ttl: int = 3600, events=None):
     return handle
 
 
-async def start_router(nursery, role=ROLE_ROUTER, trusted=(CP_KEY,), grants=True, ttl=3600, events=None):
+async def start_router(nursery, role=ROLE_ROUTER, trusted=(CP_KEY,), grants=True, ttl=3600, events=None, identity=None):
     """events, when given, records ("auth", peer) per handshake and ("reserve", peer) per RESERVE."""
-    identity = Identity.generate()
+    identity = identity or Identity.generate()
     router = libp2p_host(identity)
     router_biscuit = mint(identity.peer_id, role)
 
@@ -322,6 +323,12 @@ def test_a_router_nobody_answers_costs_join_one_dial_timeout(monkeypatch):
     reserved = []
 
     class Host:
+        def get_peerstore(self):
+            return PeerStore()
+
+        def get_network(self):
+            return None
+
         async def connect(self, info):
             if str(info.addrs[0]).startswith("/ip4/203.0.113.7/"):
                 await trio.sleep_forever()
@@ -520,6 +527,68 @@ def test_a_dropped_router_connection_is_reserved_again_before_the_ttl():
                 assert events[2:] == [("auth", mesh.peer_id), ("reserve", mesh.peer_id)]
                 assert member in router.get_connected_peers()
                 assert session.relay_addresses == [f"{addr}/p2p-circuit/p2p/{mesh.peer_id}"]
+            nursery.cancel_scope.cancel()
+
+    trio.run(with_timeout, 60, main)
+
+
+def test_a_router_that_came_back_on_another_address_is_reserved_on_again(monkeypatch):
+    """A router pod rescheduled keeps its key and gets a new IP; the name the
+    control plane hands out resolves to it. The member's connection went with
+    the old pod; the reservation loop dials the router by name again and must
+    land on the new address, not on the one the peerstore remembers from the
+    old pod, and advertise the relayed address the new pod lists."""
+    from multiaddr.resolvers import DNSResolver
+
+    class TXT:
+        def __init__(self, strings):
+            self.strings = strings
+
+        def __iter__(self):
+            for s in self.strings:
+                yield type("TXT", (), {"strings": [s.encode()]})()
+
+        def __len__(self):
+            return len(self.strings)
+
+    records: dict[str, list[str]] = {}
+
+    class FakeDNS:
+        async def resolve(self, name, rdtype):
+            return TXT(records.get(str(name).rstrip("."), []))
+
+    monkeypatch.setattr(DNSResolver, "__init__", lambda self: setattr(self, "_resolver", FakeDNS()))
+
+    async def wait_for(predicate):
+        while not predicate():
+            await trio.sleep(0.1)
+
+    async def main():
+        async with trio.open_nursery() as nursery:
+            identity = Identity.generate()
+            before_events, after_events = [], []
+            before, before_addr = await start_router(nursery, events=before_events, identity=identity)
+            after, after_addr = await start_router(nursery, events=after_events, identity=identity)
+            name = f"/dnsaddr/router.test/p2p/{identity.peer_id}"
+            records["_dnsaddr.router.test"] = [f"dnsaddr={before_addr}"]
+
+            mesh = AgentMesh.enroll("http://127.0.0.1:1", bootstrap_token="sbt", transport=fake_control_plane([name]))
+            async with mesh.join(refresh_lead=0, refresh_retry=0.5, reservation_check_interval=0.5) as session:
+                member = session.host.get_id()
+                assert before_events == [("auth", mesh.peer_id), ("reserve", mesh.peer_id)]
+                assert session.relay_addresses == [f"{before_addr}/p2p-circuit/p2p/{mesh.peer_id}"]
+
+                # The pod goes: its connection with it, and the name now resolves to the new one.
+                records["_dnsaddr.router.test"] = [f"dnsaddr={after_addr}"]
+                await before.disconnect(member)
+                await wait_for(lambda: member not in before.get_connected_peers())
+
+                reserve = ("reserve", mesh.peer_id)
+                await wait_for(lambda: before_events.count(reserve) + after_events.count(reserve) >= 2)
+                assert before_events.count(reserve) == 1, "dialed the old pod's address again"
+                assert after_events == [("auth", mesh.peer_id), reserve]
+                assert member in after.get_connected_peers()
+                assert session.relay_addresses == [f"{after_addr}/p2p-circuit/p2p/{mesh.peer_id}"]
             nursery.cancel_scope.cancel()
 
     trio.run(with_timeout, 60, main)
