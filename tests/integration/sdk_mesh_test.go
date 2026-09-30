@@ -871,6 +871,85 @@ func TestNativeSDKsAcrossRouters(t *testing.T) {
 	}
 }
 
+// A router rescheduled keeps its key and comes back on another address. A
+// member that reserved on it advertises a dead relayed address until it
+// reserves again, and it must do so at the router's new address: here a
+// literal one, as sam-one hands out, so there is no name to re-resolve and
+// only the control plane's list, which the member pulls, names it.
+func TestNativeSDKsFollowAMovedRouter(t *testing.T) {
+	mesh := startSDKMesh(t)
+	keys := t.TempDir()
+	routerAddr, stop := startRouter(t, keys, mesh.cpPort, mesh.mintToken, "router-c")
+	router := extractPeerID(routerAddr)
+
+	var members []*sdkMember
+	for _, launcher := range sdkMemberLaunchers {
+		cmd, skip := launcher.cmd(mesh.root)
+		if skip != "" {
+			t.Logf("%s SDK skipped: %s", launcher.name, skip)
+			continue
+		}
+		m := launchSDKMember(t, launcher.name, cmd, mesh.root, mesh.baseURL, mesh.adminToken, "SAM_SDK_ROUTERS="+router, "SAM_SDK_RELAY_CHECK_SECONDS=0.5")
+		if got := routerIDs(m.report); !reflect.DeepEqual(got, []string{router}) {
+			t.Fatalf("%s joined through %v, want %s only", m.name, got, router)
+		}
+		for _, a := range m.report.RelayAddresses {
+			if !strings.HasPrefix(a, routerAddr) {
+				t.Fatalf("%s reserved on %s, want %s", m.name, a, routerAddr)
+			}
+		}
+		m.accept(t, "agent")
+		members = append(members, m)
+	}
+	if len(members) == 0 {
+		t.Skip("no SDK toolchain available; see sdk/README.md")
+	}
+
+	// The same key on another port; the router's lease replaces its address.
+	stop()
+	movedAddr, _ := startRouter(t, keys, mesh.cpPort, mesh.mintToken, "router-c")
+	if extractPeerID(movedAddr) != router || movedAddr == routerAddr {
+		t.Fatalf("router came back as %s, want %s on another port", movedAddr, routerAddr)
+	}
+
+	for _, m := range members {
+		if got := m.sync(t).RouterAddresses; !contains(got, movedAddr) || contains(got, routerAddr) {
+			t.Fatalf("%s pulled routers %v, want %s and not %s", m.name, got, movedAddr, routerAddr)
+		}
+		deadline := time.Now().Add(15 * time.Second)
+		for {
+			relayed := m.relayAddresses(t)
+			if len(relayed) > 0 && strings.HasPrefix(relayed[0], movedAddr) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s still advertises %v, want the router at %s", m.name, relayed, movedAddr)
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+
+	// A peer that knows the router where it is now reaches each member there.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	goPeer := newAdmittedGoPeer(t, ctx, mesh.cpPriv, []string{movedAddr})
+	for _, m := range members {
+		sdkPeer, err := peer.Decode(m.report.PeerID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := goPeer.Connect(ctx, peer.AddrInfo{ID: sdkPeer, Addrs: []multiaddr.Multiaddr{multiaddr.StringCast(m.relayAddresses(t)[0])}}); err != nil {
+			t.Fatalf("go peer could not reach %s through the moved router: %v", m.name, err)
+		}
+		if status, body := libp2pHTTPGet(t, ctx, goPeer, sdkPeer, goHostBiscuit(t, mesh.cpPriv, goPeer.ID()), "/a2a/agent/card"); status != 200 || !strings.Contains(body, goPeer.ID().String()) {
+			t.Fatalf("%s answered %d %s through the moved router", m.name, status, body)
+		}
+	}
+	for _, m := range members {
+		m.quit(t)
+	}
+}
+
 // routerIDs lists the routers a join report says admitted the member.
 func routerIDs(report sdkJoinReport) []string {
 	var ids []string
@@ -1242,18 +1321,30 @@ func (m *sdkMember) http(t *testing.T, addr, service, path string) sdkHTTPResult
 // routers asks the member which routers admitted it so far.
 func (m *sdkMember) routers(t *testing.T) []string {
 	t.Helper()
-	var res struct {
-		OK      bool     `json:"ok"`
-		Error   string   `json:"error"`
-		Routers []string `json:"routers"`
-	}
+	return m.routersAnswer(t).Routers
+}
+
+// relayAddresses are the `.../p2p-circuit/p2p/<member>` addresses the member
+// holds a reservation for right now.
+func (m *sdkMember) relayAddresses(t *testing.T) []string {
+	t.Helper()
+	return m.routersAnswer(t).RelayAddresses
+}
+
+func (m *sdkMember) routersAnswer(t *testing.T) (res struct {
+	OK             bool     `json:"ok"`
+	Error          string   `json:"error"`
+	Routers        []string `json:"routers"`
+	RelayAddresses []string `json:"relay_addresses"`
+}) {
+	t.Helper()
 	if line := m.send(t, map[string]string{"cmd": "routers"}); json.Unmarshal(line, &res) != nil {
 		t.Fatalf("%s member: routers answered %q", m.name, line)
 	}
 	if !res.OK {
 		t.Fatalf("%s member: routers: %s", m.name, res.Error)
 	}
-	return res.Routers
+	return res
 }
 
 func (m *sdkMember) quit(t *testing.T) {
