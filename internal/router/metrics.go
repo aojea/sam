@@ -79,6 +79,7 @@ func init() {
 type routerStateCollector struct {
 	r *Router
 
+	infoDesc          *prometheus.Desc
 	readyDesc         *prometheus.Desc
 	authenticatedDesc *prometheus.Desc
 	connectedDesc     *prometheus.Desc
@@ -90,6 +91,10 @@ type routerStateCollector struct {
 func newRouterStateCollector(r *Router) *routerStateCollector {
 	return &routerStateCollector{
 		r: r,
+		infoDesc: prometheus.NewDesc(
+			"sam_router_info",
+			"The router's mesh identity; always 1",
+			[]string{"peer_id"}, nil),
 		readyDesc: prometheus.NewDesc(
 			"sam_router_ready",
 			"1 once the router is enrolled and its libp2p host is online",
@@ -119,7 +124,7 @@ func newRouterStateCollector(r *Router) *routerStateCollector {
 
 func (c *routerStateCollector) Describe(ch chan<- *prometheus.Desc) {
 	for _, d := range []*prometheus.Desc{
-		c.readyDesc, c.authenticatedDesc, c.connectedDesc, c.bannedDesc, c.dhtDesc, c.biscuitExpiryDesc,
+		c.infoDesc, c.readyDesc, c.authenticatedDesc, c.connectedDesc, c.bannedDesc, c.dhtDesc, c.biscuitExpiryDesc,
 	} {
 		ch <- d
 	}
@@ -134,6 +139,7 @@ func (c *routerStateCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 	ch <- prometheus.MustNewConstMetric(c.readyDesc, prometheus.GaugeValue, 1)
+	ch <- prometheus.MustNewConstMetric(c.infoDesc, prometheus.GaugeValue, 1, r.Host.ID().String())
 	ch <- prometheus.MustNewConstMetric(c.authenticatedDesc, prometheus.GaugeValue, float64(syncMapLen(&r.authenticatedPeers)))
 	ch <- prometheus.MustNewConstMetric(c.connectedDesc, prometheus.GaugeValue, float64(len(r.Host.Network().Peers())))
 	ch <- prometheus.MustNewConstMetric(c.bannedDesc, prometheus.GaugeValue, float64(syncMapLen(&r.bannedPeers)))

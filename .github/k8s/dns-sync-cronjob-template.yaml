@@ -15,7 +15,7 @@ rules:
   resources: ["nodes"]
   verbs: ["get", "list", "watch"]
 - apiGroups: [""]
-  resources: ["pods", "pods/log"]
+  resources: ["pods", "pods/proxy"]
   verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -51,21 +51,32 @@ spec:
             - -c
             - |
               set -e
-              # Extract IPs and PeerIDs of pods running sam-router
+              # Publish every running router as bootstrap.<env> (A records)
+              # and _dnsaddr.bootstrap.<env> (one TXT per listen address,
+              # naming the router's peer ID). The peer ID is read from the
+              # router's cluster-internal metrics endpoint through the API
+              # server proxy, so it does not depend on log retention.
               echo "Finding sam-router pods in ${NAMESPACE}..."
               PODS=$(kubectl get pods -n ${NAMESPACE} -l app=sam-router-${ENV_NAME} -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{" "}{.spec.nodeName}{"\n"}{end}')
               
               declare -a IP_ARRAY=()
               declare -a TXT_ARRAY=()
+              # Set when a router's peer ID could not be read; the TXT set is
+              # then left as it is, since rewriting it from a partial view
+              # would drop routers that are still serving.
+              TXT_INCOMPLETE=""
               
               while read -r pod node; do
                 if [ -z "$pod" ]; then continue; fi
                 echo "Checking pod: $pod on node: $node"
                 IP_LIST=$(kubectl get node $node -o jsonpath='{.status.addresses[?(@.type=="ExternalIP")].address}')
-                POD_IP=$(kubectl get pod $pod -n ${NAMESPACE} -o jsonpath='{.status.podIP}')
 
-                # Get the PeerID by extracting it from the router pod logs
-                PEER_ID=$(kubectl logs $pod -n ${NAMESPACE} | grep -o 'PeerID: [a-zA-Z0-9]*' | head -n 1 | cut -d' ' -f2 || true)
+                PEER_ID=$(kubectl get --raw "/api/v1/namespaces/${NAMESPACE}/pods/${pod}:9090/proxy/metrics" 2>/dev/null \
+                  | sed -n 's/^sam_router_info{peer_id="\([A-Za-z0-9]*\)"} 1$/\1/p' | head -n 1 || true)
+                if [ -z "$PEER_ID" ]; then
+                  echo "No peer ID from $pod yet; leaving the TXT record set unchanged this run."
+                  TXT_INCOMPLETE=1
+                fi
 
                 if [ -n "$IP_LIST" ]; then
                   echo "Found IP $IP_LIST "
@@ -94,6 +105,10 @@ spec:
               OLD_TXT=$(gcloud dns record-sets list --zone=${ENV_NAME} --project=${GCP_PROJECT_ID} --name="_dnsaddr.bootstrap.${ENV_NAME}.sam-mesh.dev." --type=TXT --format="value(rrdatas)" 2>/dev/null || true)
               OLD_TXT_CLEAN=$(echo $OLD_TXT | tr ';' '\n' | sort -u | tr '\n' ' ' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 
+              if [ -n "$TXT_INCOMPLETE" ]; then
+                UNIQUE_TXT="$OLD_TXT_CLEAN"
+              fi
+
               if [ "$UNIQUE_IPS" == "$OLD_IPS_CLEAN" ] && [ "$UNIQUE_TXT" == "$OLD_TXT_CLEAN" ]; then
                 echo "DNS records are already up to date. No changes needed."
                 exit 0
@@ -114,7 +129,7 @@ spec:
               gcloud dns record-sets transaction add --zone=${ENV_NAME} --project=${GCP_PROJECT_ID} --name="bootstrap.${ENV_NAME}.sam-mesh.dev." --type=A --ttl=300 $UNIQUE_IPS || true
 
               # Remove old TXT records if they exist
-              if [ -n "$OLD_TXT" ]; then
+              if [ -n "$OLD_TXT" ] && [ -z "$TXT_INCOMPLETE" ]; then
                 # OLD_TXT could have spaces inside quotes. gcloud transaction remove needs each whole quoted string as separate arg
                 # Let's just remove using the raw semicolon-delimited values by translating ';' to spaces, but careful with inner quotes!
                 # Since TXT records are quoted, tr ';' ' ' works fine as long as there are no semicolons inside the DNSADDR.
@@ -123,7 +138,7 @@ spec:
               fi
 
               # Add new TXT records
-              if [ -n "$UNIQUE_TXT" ]; then
+              if [ -n "$UNIQUE_TXT" ] && [ -z "$TXT_INCOMPLETE" ]; then
                 # we just pass $UNIQUE_TXT as arguments (it's already quoted words separated by space)
                 eval "gcloud dns record-sets transaction add --zone=${ENV_NAME} --project=${GCP_PROJECT_ID} --name=\"_dnsaddr.bootstrap.${ENV_NAME}.sam-mesh.dev.\" --type=TXT --ttl=300 $UNIQUE_TXT || true"
               fi
