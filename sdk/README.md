@@ -50,7 +50,7 @@ Milestones 1 to 5 are implemented and tested in both languages:
 | The mesh as a transport for HTTP clients: `session.fetch()` for fetch-based clients, `MeshTransport` for httpx, so the official A2A SDK's client works unchanged | `fetch` | httpx |
 | Provider authorizer: the baseline Datalog and the mesh policy (`GET /policies`), evaluated as `sam-node` does | yes | yes |
 | A2A ingress for the agent: `/libp2p-http` for `a2a://<name>`, forwarded to an A2A server beside the process or answered in it; not announced anywhere | yes | yes |
-| Control plane pull on `sam-node`'s interval: `/keys` verified against the trusted set, credential refresh after a rotation, `/info` bans and router addresses | yes | yes |
+| Control plane pull before join and on `sam-node`'s interval: `/keys` verified against the trusted set, credential refresh after a rotation, `/info` bans and router addresses | yes | yes |
 | Gossip events from the control plane (`/sam/mesh/events/v1`, StrictSign): ban enforced at once, key rotation adopted, policy update pulls | yes | yes |
 | Banned peers refused: connections dropped and denied, handshakes and requests refused, dials refused | yes | yes |
 | Runs in a browser page: WebSocket and Noise to the router, state in IndexedDB, the agent answered by a fetch handler; `sdk/js/examples/browser` against `sam-one`, tested in Chromium | yes | — |

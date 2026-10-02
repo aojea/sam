@@ -638,6 +638,18 @@ async def join_mesh(
     credential lists; a peer behind another router is still reached, see
     MeshSession.connect. egress_require_labels is the floor every provider
     this member calls must attest, see MeshSession."""
+    # The pull sam-node makes before it starts: a member resuming from its
+    # state directory after a key rotation would otherwise verify the routers,
+    # which already hold credentials under the new key, against the keys it
+    # persisted, and the sync that would have brought the new key runs only
+    # once joined. Best effort; the stored credential serves when the control
+    # plane cannot be reached.
+    try:
+        result = await trio.to_thread.run_sync(mesh.sync_control_plane)
+        if result.errors:
+            logger.warning("control plane sync before join: %s", "; ".join(result.errors))
+    except Exception as err:  # noqa: BLE001 - joining goes on with what the credential holds
+        logger.warning("control plane sync before join failed: %s", err)
     router_addrs = [multiaddr.Multiaddr(a) for a in (mesh.credential.router_addresses if router_addresses is None else router_addresses)]
     if not router_addrs:
         raise RuntimeError("credential lists no router addresses; the control plane had no active router at enrollment" if router_addresses is None else "router_addresses names no router")

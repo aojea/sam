@@ -750,6 +750,17 @@ export class MeshSession {
 
 /** Implements AgentMesh.join(); lives here to keep mesh.ts free of libp2p. */
 export async function joinMesh(mesh: AgentMesh, options: JoinOptions = {}): Promise<MeshSession> {
+  // The pull sam-node makes before it starts: a member resuming from its
+  // state directory after a key rotation would otherwise verify the routers,
+  // which already hold credentials under the new key, against the keys it
+  // persisted, and the sync that would have brought the new key runs only
+  // once joined. Best effort; the stored credential serves when the control
+  // plane cannot be reached.
+  try {
+    await mesh.syncControlPlane();
+  } catch {
+    // Joining goes on with what the credential holds.
+  }
   const routerAddrs = (options.routerAddresses ?? mesh.credential.routerAddresses).map((a) => multiaddr(a));
   if (routerAddrs.length === 0) {
     throw new Error(options.routerAddresses === undefined ? "credential lists no router addresses; the control plane had no active router at enrollment" : "routerAddresses names no router");

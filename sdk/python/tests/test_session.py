@@ -66,18 +66,21 @@ def _ts_s(seconds: int) -> Timestamp:
     t.FromSeconds(int(seconds))
     return t
 
-CP = ba.KeyPair()
+# The control plane's signing key, as an Identity so a test can sign /keys
+# with it and as the biscuit key pair that mints credentials.
+CP_IDENTITY = Identity.generate()
+CP = ba.KeyPair.from_private_key(ba.PrivateKey.from_bytes(CP_IDENTITY.seed, ba.Algorithm.Ed25519))
 CP_KEY = CP.public_key.to_bytes()
 
 
-def mint(peer_id: str, role: str, expiration: str = "2035-01-01T00:00:00Z", labels: dict[str, str] | None = None) -> bytes:
+def mint(peer_id: str, role: str, expiration: str = "2035-01-01T00:00:00Z", labels: dict[str, str] | None = None, signer: ba.KeyPair = CP) -> bytes:
     code = "node({p}); client_peer_id({p}); expiration(" + expiration + "); role({r});"
     params = {"p": peer_id, "r": role}
     for i, (k, v) in enumerate((labels or {}).items()):
         code += f" label({{k{i}}}, {{v{i}}});"
         params[f"k{i}"] = k
         params[f"v{i}"] = v
-    return ba.BiscuitBuilder(code, params).build(CP.private_key).to_bytes()
+    return ba.BiscuitBuilder(code, params).build(signer.private_key).to_bytes()
 
 
 # What the control plane renders for a policy granting the node role every
@@ -150,11 +153,11 @@ def hop_handler(relay_addr: str, grants, ttl: int = 3600, events=None):
     return handle
 
 
-async def start_router(nursery, role=ROLE_ROUTER, trusted=(CP_KEY,), grants=True, ttl=3600, events=None, identity=None):
+async def start_router(nursery, role=ROLE_ROUTER, trusted=(CP_KEY,), grants=True, ttl=3600, events=None, identity=None, signer=CP):
     """events, when given, records ("auth", peer) per handshake and ("reserve", peer) per RESERVE."""
     identity = identity or Identity.generate()
     router = libp2p_host(identity)
-    router_biscuit = mint(identity.peer_id, role)
+    router_biscuit = mint(identity.peer_id, role, signer=signer)
 
     def on_authenticated(peer, _verified):
         if events is not None:
@@ -241,6 +244,54 @@ def test_join_authenticates_reserves_and_answers_peers():
                     ).SerializeToString()
                     with pytest.raises(Exception):
                         await authenticate_with_peer(peer, session.host.get_id(), forged_frame, [CP_KEY])
+            nursery.cancel_scope.cancel()
+
+    trio.run(with_timeout, 30, main)
+
+
+def test_a_resumed_member_adopts_a_rotated_key_before_admitting_routers(tmp_path):
+    """The control plane rotated its signing key while this member was not
+    running: the routers already hold credentials under the new key, and the
+    state directory holds only the key the member enrolled under. join pulls
+    /keys, signed by the retiring key too, before it authenticates a router."""
+    rotated_identity = Identity.generate()
+    rotated = ba.KeyPair.from_private_key(ba.PrivateKey.from_bytes(rotated_identity.seed, ba.Algorithm.Ed25519))
+    rotated_key = rotated_identity.public_key_raw
+
+    def control_plane_after_rotation():
+        def transport(method, url, headers, body):
+            path = urllib.parse.urlsplit(url).path
+            if (method, path) == ("GET", "/keys"):
+                ts = _ts_ms(int(time.time() * 1000))
+                payload = pb.KeysResponse(public_keys=[CP_KEY, rotated_key], sign_time=ts).SerializeToString(deterministic=True)
+                return 200, pb.KeysResponse(
+                    public_keys=[CP_KEY, rotated_key],
+                    sign_time=ts,
+                    signatures=[CP_IDENTITY.sign(payload), rotated_identity.sign(payload)],
+                ).SerializeToString()
+            if (method, path) == ("POST", "/refresh"):
+                peer_id = pb.TokenRefreshRequest.FromString(body).peer_id
+                return 200, pb.TokenRefreshResponse(
+                    biscuit_token=mint(peer_id, ROLE_NODE, signer=rotated), expire_time=_ts_s(int(time.time()) + 7200)
+                ).SerializeToString()
+            return 404, f"no route for {method} {path}".encode()
+
+        return transport
+
+    async def main():
+        async with trio.open_nursery() as nursery:
+            router, router_addr = await start_router(nursery, trusted=(CP_KEY, rotated_key), signer=rotated)
+            # Enrolled before the rotation: the credential on disk trusts one key.
+            before = AgentMesh.enroll("http://127.0.0.1:1", bootstrap_token="sbt", state_dir=tmp_path, transport=fake_control_plane([router_addr]))
+            assert [bytes(k) for k in before.credential.control_plane_keys] == [CP_KEY]
+
+            # Resumed after it, with the routers now under the new key.
+            resumed = AgentMesh.enroll("http://127.0.0.1:1", state_dir=tmp_path, transport=control_plane_after_rotation())
+            assert resumed.credential.biscuit == before.credential.biscuit
+            async with resumed.join(reserve=False) as session:
+                assert [r.peer_id for r in session.routers] == [str(router.get_id())]
+            assert {bytes(k) for k in resumed.credential.control_plane_keys} == {CP_KEY, rotated_key}
+            assert resumed.credential.biscuit != before.credential.biscuit
             nursery.cancel_scope.cancel()
 
     trio.run(with_timeout, 30, main)

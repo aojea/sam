@@ -29,11 +29,14 @@ import { tls } from "@libp2p/tls";
 import { multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p } from "libp2p";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { AUTH_HANDLER_OPTIONS, AUTH_PROTOCOL, AuthRejectedError, authenticateWithPeer, authStreamHandler } from "./auth.ts";
 import { BiscuitVerificationError, ROLE_ROUTER, loadBiscuit, verifyPeerBiscuit } from "./biscuit.ts";
 import { ROLE_NODE } from "./controlplane.ts";
-import { BootstrapEnrollRequestSchema, BootstrapEnrollResponseSchema, ControlPlaneInfoResponseSchema, EnrollmentStatus, KeysResponseSchema, AuthFrameSchema } from "./gen/sam_pb.ts";
+import { BootstrapEnrollRequestSchema, BootstrapEnrollResponseSchema, ControlPlaneInfoResponseSchema, EnrollmentStatus, KeysResponseSchema, AuthFrameSchema, TokenRefreshRequestSchema, TokenRefreshResponseSchema } from "./gen/sam_pb.ts";
 import { Identity } from "./identity.ts";
 import { HTTP_HANDLER_OPTIONS, HTTP_PROTOCOL, a2aEndpoint, httpIngressHandler } from "./libp2p-http.ts";
 import { LabelsNotSatisfiedError } from "./mcp.ts";
@@ -41,15 +44,24 @@ import { AgentMesh } from "./mesh.ts";
 import { MeshSession, type JoinOptions } from "./session.ts";
 
 type Wasm = Awaited<ReturnType<typeof loadBiscuit>>;
+type KeyPair = InstanceType<Wasm["KeyPair"]>;
 
 let wasm: Wasm;
-let cpKeyPair: InstanceType<Wasm["KeyPair"]>;
+// The control plane's signing key, as an Identity so a test can sign /keys
+// with it and as the biscuit key pair that mints credentials.
+const cpIdentity = Identity.generate();
+let cpKeyPair: KeyPair;
 let cpKey: Uint8Array;
 let router: Libp2p;
 let routerAddr: string;
 let routerBiscuit: Uint8Array;
 
-function mint(peerId: string, role: string, expiration = "2035-01-01T00:00:00Z", labels: Record<string, string> = {}): Uint8Array {
+/** The biscuit key pair of an Identity: the same Ed25519 key under both libraries. */
+function biscuitKeyPair(identity: Identity): KeyPair {
+  return wasm.KeyPair.fromPrivateKey(wasm.PrivateKey.fromBytes(identity.toLibp2pPrivateKey().subarray(4, 36), wasm.SignatureAlgorithm.Ed25519));
+}
+
+function mint(peerId: string, role: string, expiration = "2035-01-01T00:00:00Z", labels: Record<string, string> = {}, signer: KeyPair = cpKeyPair): Uint8Array {
   const b = wasm.Biscuit.builder();
   b.addFact(wasm.Fact.fromString(`node(${JSON.stringify(peerId)})`));
   b.addFact(wasm.Fact.fromString(`client_peer_id(${JSON.stringify(peerId)})`));
@@ -58,7 +70,7 @@ function mint(peerId: string, role: string, expiration = "2035-01-01T00:00:00Z",
   for (const [k, v] of Object.entries(labels)) {
     b.addFact(wasm.Fact.fromString(`label(${JSON.stringify(k)}, ${JSON.stringify(v)})`));
   }
-  return b.build(cpKeyPair.getPrivateKey()).toBytes();
+  return b.build(signer.getPrivateKey()).toBytes();
 }
 
 // What the control plane renders for a policy granting the node role every
@@ -110,8 +122,9 @@ function fakeControlPlane(routerAddresses: string[]): typeof fetch {
 
 before(async () => {
   wasm = await loadBiscuit();
-  cpKeyPair = new wasm.KeyPair(wasm.SignatureAlgorithm.Ed25519);
-  cpKey = new Uint8Array(Buffer.from(cpKeyPair.getPublicKey().toString().replace(/^ed25519\//, ""), "hex"));
+  cpKeyPair = biscuitKeyPair(cpIdentity);
+  cpKey = cpIdentity.publicKeyRaw;
+  assert.equal(Buffer.from(cpKey).toString("hex"), cpKeyPair.getPublicKey().toString().replace(/^ed25519\//, ""));
 
   router = await createLibp2p({
     addresses: { listen: ["/ip4/127.0.0.1/tcp/0"] },
@@ -372,6 +385,69 @@ test("a member on one router reaches a member on another", async () => {
     }
   } finally {
     await routerB.stop();
+  }
+});
+
+test("a resumed member adopts a rotated key before admitting routers", async () => {
+  // The control plane rotated its signing key while this member was not
+  // running: the routers already hold credentials under the new key, and
+  // the state directory holds only the key the member enrolled under. join
+  // pulls /keys, signed by the retiring key too, before it authenticates a
+  // router.
+  const rotatedIdentity = Identity.generate();
+  const rotated = biscuitKeyPair(rotatedIdentity);
+  const rotatedKey = rotatedIdentity.publicKeyRaw;
+  const controlPlaneAfterRotation: typeof fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const req = new Request(input, init);
+    const path = new URL(req.url).pathname;
+    if (req.method === "GET" && path === "/keys") {
+      const unsigned = create(KeysResponseSchema, { publicKeys: [cpKey, rotatedKey], signTime: timestampFromMs(Date.now()) });
+      const payload = toBinary(KeysResponseSchema, unsigned);
+      return proto(toBinary(KeysResponseSchema, create(KeysResponseSchema, { ...unsigned, signatures: [cpIdentity.sign(payload), rotatedIdentity.sign(payload)] })));
+    }
+    if (req.method === "POST" && path === "/refresh") {
+      const { peerId } = fromBinary(TokenRefreshRequestSchema, new Uint8Array(await req.arrayBuffer()));
+      return proto(toBinary(TokenRefreshResponseSchema, create(TokenRefreshResponseSchema, { biscuitToken: mint(peerId, ROLE_NODE, undefined, {}, rotated), expireTime: timestampFromMs(Date.now() + 7200_000) })));
+    }
+    return new Response(`no route for ${req.method} ${path}`, { status: 404 });
+  }) as typeof fetch;
+
+  const rotatedRouter = await createLibp2p({
+    addresses: { listen: ["/ip4/127.0.0.1/tcp/0"] },
+    transports: [tcp()],
+    connectionEncrypters: [tls()],
+    streamMuxers: [yamux()],
+    services: { identify: identify() },
+  });
+  const rotatedRouterBiscuit = mint(rotatedRouter.peerId.toString(), ROLE_ROUTER, undefined, {}, rotated);
+  await rotatedRouter.handle(AUTH_PROTOCOL, authStreamHandler({ ownBiscuit: () => rotatedRouterBiscuit, trustedKeys: () => [cpKey, rotatedKey] }));
+  const rotatedRouterAddr = (rotatedRouter.getMultiaddrs()[0] as ReturnType<typeof multiaddr>).toString();
+  const stateDir = await mkdtemp(join(tmpdir(), "sam-session-"));
+  try {
+    // Enrolled before the rotation: the credential on disk trusts one key.
+    const before = await AgentMesh.enroll({ controlPlaneUrl: "http://127.0.0.1:1", bootstrapToken: "sbt", stateDir, fetch: fakeControlPlane([rotatedRouterAddr]) });
+    assert.deepEqual(before.credential.controlPlaneKeys, [cpKey]);
+
+    // Resumed after it, with the routers now under the new key.
+    const resumed = await AgentMesh.enroll({ controlPlaneUrl: "http://127.0.0.1:1", stateDir, fetch: controlPlaneAfterRotation });
+    assert.deepEqual(resumed.credential.biscuit, before.credential.biscuit);
+    const session = await resumed.join({ reserveRelay: false, refreshLeadMs: 0 });
+    try {
+      assert.deepEqual(
+        session.routers.map((r) => r.peerId),
+        [rotatedRouter.peerId.toString()],
+      );
+      assert.deepEqual(
+        resumed.credential.controlPlaneKeys.map((k) => Buffer.from(k).toString("hex")).sort(),
+        [cpKey, rotatedKey].map((k) => Buffer.from(k).toString("hex")).sort(),
+      );
+      assert.notDeepEqual(resumed.credential.biscuit, before.credential.biscuit);
+    } finally {
+      await session.close();
+    }
+  } finally {
+    await rotatedRouter.stop();
+    await rm(stateDir, { recursive: true, force: true });
   }
 });
 
