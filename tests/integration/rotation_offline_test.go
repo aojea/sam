@@ -19,6 +19,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -47,18 +48,120 @@ import (
 func TestKeyRotationWhileMembersOffline(t *testing.T) {
 	mesh := startSDKMesh(t)
 	ctx := context.Background()
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	members := enrollMembersThenStop(t, mesh)
 
-	// The members, enrolled under the current key, then stopped. Each keeps
-	// its state directory; a token is read only to enroll, so the file can
-	// go once the member holds a credential.
-	type offlineSDKMember struct {
-		launcher sdkRunner
-		stateDir string
-		peerID   string
-		biscuit  string
+	newPub := rotateSigningKey(t, ctx, mesh, time.Hour)
+
+	// The Go node starts from its stored identity, with no token: it pulls
+	// from the control plane before it starts and comes up under the new key.
+	node := members.startNode(t, false)
+	members.assertNodeBackUnderKey(t, node, mesh, newPub)
+
+	// The SDK members start again from their state directories. The token
+	// path names no file: the member resumes or fails, it cannot enroll.
+	for _, s := range members.sdk {
+		m := s.start(t, mesh, " resumed", "SAM_BOOTSTRAP_TOKEN_PATH="+filepath.Join(t.TempDir(), "no-token"))
+		s.assertBackUnderKey(t, m, mesh, newPub, node)
+		if res := m.sync(t); !res.OK {
+			t.Fatalf("%s: pull after the resume failed: %s", m.name, res.Error)
+		}
+		m.quit(t)
 	}
-	var sdkMembers []offlineSDKMember
+	node.kill()
+}
+
+// TestKeyRotationPastGraceWhileMembersOffline is the same outage with a
+// longer absence: the member comes back after the key that signed its
+// credential has left the control plane's set. Nothing can verify or
+// refresh that credential, and the control plane's /keys answer is signed
+// by no key the member trusts, so it cannot adopt the new one either. A
+// member with a token at hand, as every canary has its projected service
+// account token, must enroll again with the identity it keeps, rather than
+// resume a dead credential and fail at every router until it expires. The
+// default grace period is shorter than a credential's lifetime, so this is
+// where any member off for a day lands.
+func TestKeyRotationPastGraceWhileMembersOffline(t *testing.T) {
+	mesh := startSDKMesh(t)
+	ctx := context.Background()
+	members := enrollMembersThenStop(t, mesh)
+
+	newPub := rotateSigningKey(t, ctx, mesh, time.Second)
+	waitForKeysRetired(t, mesh.cpPort, [][]byte{mesh.cpPub})
+
+	// The node comes back with a fresh platform token on disk.
+	if err := os.WriteFile(members.jwtPath, []byte(members.freshJWT()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	node := members.startNode(t, true)
+	members.assertNodeBackUnderKey(t, node, mesh, newPub)
+
+	// Each SDK member comes back with a fresh token available and enrolls
+	// again as the identity it persisted.
+	for _, s := range members.sdk {
+		m := s.start(t, mesh, " past grace")
+		s.assertBackUnderKey(t, m, mesh, newPub, node)
+		m.quit(t)
+	}
+	node.kill()
+}
+
+// offlineSDKMember is an SDK member that enrolled and stopped, keeping its
+// state directory.
+type offlineSDKMember struct {
+	launcher sdkRunner
+	stateDir string
+	peerID   string
+	biscuit  string
+}
+
+// start brings the member back from its state directory. launchSDKMember
+// writes a fresh bootstrap token; env is appended and wins.
+func (s *offlineSDKMember) start(t *testing.T, mesh *sdkMesh, suffix string, env ...string) *sdkMember {
+	t.Helper()
+	cmd, _ := s.launcher.cmd(mesh.root)
+	return launchSDKMember(t, s.launcher.name+suffix, cmd, mesh.root, mesh.baseURL, mesh.adminToken, append([]string{"SAM_SDK_STATE_DIR=" + s.stateDir}, env...)...)
+}
+
+// assertBackUnderKey checks the member came back as the identity it kept,
+// admitted by every router, holding a credential signed by pub alone, and
+// able to reach the node that came back too, across the mesh.
+func (s *offlineSDKMember) assertBackUnderKey(t *testing.T, m *sdkMember, mesh *sdkMesh, pub ed25519.PublicKey, node *backgroundNode) {
+	t.Helper()
+	if m.report.PeerID != s.peerID {
+		t.Fatalf("%s came back as %s, want the identity it persisted, %s", m.name, m.report.PeerID, s.peerID)
+	}
+	assertAdmittedByEveryRouter(t, m, mesh.routerAddrs)
+	if m.report.Biscuit == s.biscuit {
+		t.Fatalf("%s still holds the credential minted before the rotation", m.name)
+	}
+	assertSignedOnlyBy(t, m.name, m.report.Biscuit, m.report.PeerID, pub, mesh.cpPub)
+	if cred := m.auth(t, node.p2pAddr); cred.PeerID != node.peerID.String() {
+		t.Fatalf("%s verified the node as %+v after coming back", m.name, cred)
+	}
+}
+
+// offlineMembers is one member per SDK and a Go node, each enrolled under
+// the key current at the time and then stopped.
+type offlineMembers struct {
+	sdk []offlineSDKMember
+
+	nodeBin      string
+	nodeHome     string
+	nodeEnv      []string
+	nodeArgs     []string
+	jwtPath      string
+	freshJWT     func() string
+	socketClient *http.Client
+	nodePeer     peer.ID
+	nodeBefore   api.IdentityEvidenceResponse
+}
+
+func enrollMembersThenStop(t *testing.T, mesh *sdkMesh) *offlineMembers {
+	t.Helper()
+	members := &offlineMembers{nodeBin: buildBinary(t, "./cmd/sam-node")}
+
+	// A token is read only to enroll, so the file can go once the member
+	// holds a credential.
 	for _, launcher := range sdkMemberLaunchers {
 		cmd, skip := launcher.cmd(mesh.root)
 		if skip != "" {
@@ -67,105 +170,100 @@ func TestKeyRotationWhileMembersOffline(t *testing.T) {
 		}
 		stateDir := filepath.Join(t.TempDir(), "state")
 		m := launchSDKMember(t, launcher.name, cmd, mesh.root, mesh.baseURL, mesh.adminToken, "SAM_SDK_STATE_DIR="+stateDir)
-		sdkMembers = append(sdkMembers, offlineSDKMember{launcher: launcher, stateDir: stateDir, peerID: m.report.PeerID, biscuit: m.report.Biscuit})
+		members.sdk = append(members.sdk, offlineSDKMember{launcher: launcher, stateDir: stateDir, peerID: m.report.PeerID, biscuit: m.report.Biscuit})
 		m.quit(t)
 	}
 
-	// The Go node: enrolled through OIDC, its identity and mesh config in
-	// its data directory, its credential readable on the owner socket.
-	nodeHome := filepath.Join(t.TempDir(), "node")
-	if err := os.MkdirAll(nodeHome, 0o755); err != nil {
+	// The Go node: enrolled through a platform token on disk, its identity
+	// and mesh config in its data directory, its credential readable on the
+	// owner socket.
+	members.nodeHome = filepath.Join(t.TempDir(), "node")
+	if err := os.MkdirAll(members.nodeHome, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	nodeEnv := append(os.Environ(), "HOME="+nodeHome, "XDG_CONFIG_HOME="+filepath.Join(nodeHome, ".config"))
+	members.nodeEnv = append(os.Environ(), "HOME="+members.nodeHome, "XDG_CONFIG_HOME="+filepath.Join(members.nodeHome, ".config"))
 	socketDir, err := os.MkdirTemp("", "sam-rot-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
+	members.freshJWT = func() string {
+		return mesh.mintToken(map[string]interface{}{"sub": "mock-user", "roles": []string{api.RoleNode}})
+	}
+	members.jwtPath = filepath.Join(t.TempDir(), "jwt")
+	if err := os.WriteFile(members.jwtPath, []byte(members.freshJWT()), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	nodeSocket := filepath.Join(socketDir, "node.sock")
-	nodeArgs := []string{"run",
+	members.nodeArgs = []string{"run",
 		"--control-plane", mesh.baseURL,
 		"--allow-loopback",
 		"--api-token-path", tokenPath(t, "node-token"),
 		"--socket-path", nodeSocket,
 		"--log-level", "debug",
 	}
-	node := launchNode(t, nodeBin, nodeEnv, nodeHome,
-		append(nodeArgs, "--jwt", mesh.mintToken(map[string]interface{}{"sub": "mock-user", "roles": []string{api.RoleNode}}))...)
-	node.waitForAPI(t)
-	socketClient := identityEvidenceSocketClient(nodeSocket)
-	waitForIdentityEvidenceSocket(t, socketClient)
-	var nodeBefore api.IdentityEvidenceResponse
-	getIdentityEvidenceJSON(t, socketClient, "/sam/identity", &nodeBefore)
-	nodePeer, err := peer.Decode(nodeBefore.PeerId)
+	node := members.startNode(t, true)
+	members.socketClient = identityEvidenceSocketClient(nodeSocket)
+	waitForIdentityEvidenceSocket(t, members.socketClient)
+	getIdentityEvidenceJSON(t, members.socketClient, "/sam/identity", &members.nodeBefore)
+	members.nodePeer, err = peer.Decode(members.nodeBefore.PeerId)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := verifyBiscuitForApplication(nodeBefore.Biscuit, nodePeer, []ed25519.PublicKey{mesh.cpPub}); err != nil {
+	if _, err := verifyBiscuitForApplication(members.nodeBefore.Biscuit, members.nodePeer, []ed25519.PublicKey{mesh.cpPub}); err != nil {
 		t.Fatalf("node credential before the rotation does not verify under the current key: %v", err)
 	}
 	node.kill()
+	return members
+}
 
-	// The rotation, as the sam-control-plane binary makes it: a new current
-	// key, the old one retiring over a grace period, the event on the mesh.
-	// Every router refreshes its credential under the new key; a member
-	// that trusts only the old key can verify none of them any more.
+// startNode brings the node up from its data directory, with the platform
+// token on disk offered or not.
+func (o *offlineMembers) startNode(t *testing.T, withToken bool) *backgroundNode {
+	t.Helper()
+	args := o.nodeArgs
+	if withToken {
+		args = append(append([]string{}, args...), "--jwt-path", o.jwtPath)
+	}
+	node := launchNode(t, o.nodeBin, o.nodeEnv, o.nodeHome, args...)
+	node.waitForAPI(t)
+	return node
+}
+
+func (o *offlineMembers) assertNodeBackUnderKey(t *testing.T, node *backgroundNode, mesh *sdkMesh, pub ed25519.PublicKey) {
+	t.Helper()
+	waitForIdentityEvidenceSocket(t, o.socketClient)
+	var after api.IdentityEvidenceResponse
+	getIdentityEvidenceJSON(t, o.socketClient, "/sam/identity", &after)
+	if after.PeerId != o.nodeBefore.PeerId {
+		t.Fatalf("node came back as %s, want its stored identity %s", after.PeerId, o.nodeBefore.PeerId)
+	}
+	if _, err := verifyBiscuitForApplication(after.Biscuit, o.nodePeer, []ed25519.PublicKey{pub}); err != nil {
+		t.Fatalf("node credential after coming back does not verify under the new key: %v\n--- node.log ---\n%s", err, node.log())
+	}
+	if _, err := verifyBiscuitForApplication(after.Biscuit, o.nodePeer, []ed25519.PublicKey{mesh.cpPub}); err == nil {
+		t.Fatal("node credential after coming back still verifies under the retiring key: it was not refreshed")
+	}
+	waitForPeerOnRouter(t, mesh.cpPort, mesh.adminToken, o.nodeBefore.PeerId, 10*time.Second)
+}
+
+// rotateSigningKey rotates as the sam-control-plane binary does: a new
+// current key, the old one retiring over grace, the event on the mesh. It
+// returns once every router presents a credential under the new key.
+func rotateSigningKey(t *testing.T, ctx context.Context, mesh *sdkMesh, grace time.Duration) ed25519.PublicKey {
+	t.Helper()
 	newPub, newPriv, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := mesh.store.RotateKeys(ctx, newPriv, newPub, time.Hour); err != nil {
+	if err := mesh.store.RotateKeys(ctx, newPriv, newPub, grace); err != nil {
 		t.Fatalf("RotateKeys: %v", err)
 	}
 	if err := mesh.publisher.PublishEvent(ctx, api.MeshEvent_KEY_ROTATION, "", newPub); err != nil {
 		t.Fatalf("publish KEY_ROTATION: %v", err)
 	}
 	waitForRoutersUnderKey(t, ctx, mesh, newPub)
-
-	// The SDK members start again from their state directories. The token
-	// path names no file: the member resumes or fails, it cannot enroll.
-	for _, s := range sdkMembers {
-		cmd, _ := s.launcher.cmd(mesh.root)
-		m := launchSDKMember(t, s.launcher.name+" resumed", cmd, mesh.root, mesh.baseURL, mesh.adminToken,
-			"SAM_SDK_STATE_DIR="+s.stateDir,
-			"SAM_BOOTSTRAP_TOKEN_PATH="+filepath.Join(t.TempDir(), "no-token"))
-		if m.report.PeerID != s.peerID {
-			t.Fatalf("%s came back as %s, want the identity it persisted, %s", m.name, m.report.PeerID, s.peerID)
-		}
-		assertAdmittedByEveryRouter(t, m, mesh.routerAddrs)
-		if m.report.Biscuit == s.biscuit {
-			t.Fatalf("%s still holds the credential minted before the rotation", m.name)
-		}
-		assertSignedOnlyBy(t, m.name, m.report.Biscuit, m.report.PeerID, newPub, mesh.cpPub)
-		if res := m.sync(t); !res.OK {
-			t.Fatalf("%s: pull after the resume failed: %s", m.name, res.Error)
-		}
-		// The node across the mesh admits the resumed member too.
-		if cred := m.auth(t, mesh.samNode.p2pAddr); cred.PeerID != mesh.samNode.peerID.String() {
-			t.Fatalf("%s verified the node as %+v after the resume", m.name, cred)
-		}
-		m.quit(t)
-	}
-
-	// The Go node starts from its stored identity, with no token: it pulls
-	// from the control plane before it starts and comes up under the new key.
-	node = launchNode(t, nodeBin, nodeEnv, nodeHome, nodeArgs...)
-	node.waitForAPI(t)
-	waitForIdentityEvidenceSocket(t, socketClient)
-	var nodeAfter api.IdentityEvidenceResponse
-	getIdentityEvidenceJSON(t, socketClient, "/sam/identity", &nodeAfter)
-	if nodeAfter.PeerId != nodeBefore.PeerId {
-		t.Fatalf("node came back as %s, want its stored identity %s", nodeAfter.PeerId, nodeBefore.PeerId)
-	}
-	if _, err := verifyBiscuitForApplication(nodeAfter.Biscuit, nodePeer, []ed25519.PublicKey{newPub}); err != nil {
-		t.Fatalf("node credential after the resume does not verify under the new key: %v\n--- node.log ---\n%s", err, node.log())
-	}
-	if _, err := verifyBiscuitForApplication(nodeAfter.Biscuit, nodePeer, []ed25519.PublicKey{mesh.cpPub}); err == nil {
-		t.Fatal("node credential after the resume still verifies under the retiring key: it was not refreshed")
-	}
-	waitForPeerOnRouter(t, mesh.cpPort, mesh.adminToken, nodeBefore.PeerId, 10*time.Second)
-	node.kill()
+	return newPub
 }
 
 // waitForRoutersUnderKey returns once every router presents a credential

@@ -25,6 +25,7 @@ from .controlplane import (
     Enrollment,
     EnrollmentRejectedError,
     InsecureControlPlaneURLError,
+    KeysNotTrustedError,
     RefreshResult,
     validate_control_plane_url,
     verify_keys_response,
@@ -51,7 +52,7 @@ from .libp2p_http import (
     rewrite_agent_card,
 )
 from .mcp_client import LabelsNotSatisfiedError, ToolCallResult, ToolInfo, open_mcp_session, require_egress_labels, require_labels
-from .mesh import AgentMesh, ControlPlaneSync
+from .mesh import AgentMesh, ControlPlaneSync, CredentialRetiredError
 from .relay import dial_through_relay, reserve_relay
 from .session import AdmittedRouter, MeshSession, Peer
 from .sync import GOSSIP_EVENTS_TOPIC, BanSet, verify_mesh_event
@@ -73,6 +74,7 @@ __all__ = [
     "ControlPlaneClient",
     "ControlPlaneError",
     "ControlPlaneSync",
+    "CredentialRetiredError",
     "DEFAULT_A2A_NAME",
     "DHT_PROTOCOL",
     "DiscoveredProvider",
@@ -85,6 +87,7 @@ __all__ = [
     "HTTPResponse",
     "Identity",
     "InsecureControlPlaneURLError",
+    "KeysNotTrustedError",
     "LabelsNotSatisfiedError",
     "MCP_PROTOCOL",
     "MESH_PATH_PREFIX",
