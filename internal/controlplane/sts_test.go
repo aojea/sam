@@ -32,6 +32,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/biscuit-auth/biscuit-go/v2"
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/sam/api"
 	"github.com/google/sam/internal/identity"
@@ -663,5 +664,47 @@ func TestOAuth21AuthorizationCodePKCEAndTokenExchange(t *testing.T) {
 		MCPTool:  "get_forecast",
 	}, cpPubKey); err != nil {
 		t.Fatalf("expected sealed 2-hop OAuth Biscuit to authorize get_forecast, got: %v", err)
+	}
+
+	// Verify that a non-canonical (CIDv1 base32) peer ID in Biscuit claims is
+	// canonicalized before checking IsNodeBanned in authorizeBiscuitForEgress.
+	if err := store.SetNodeBanned(ctx, nodePeerID.String(), true); err != nil {
+		t.Fatalf("SetNodeBanned: %v", err)
+	}
+	cidV1Str := peer.ToCid(nodePeerID).String()
+	if cidV1Str == nodePeerID.String() {
+		t.Fatalf("expected CIDv1 string %q to differ from canonical base58 %q", cidV1Str, nodePeerID.String())
+	}
+	cpPriv, _, err := store.GetCurrentKey(ctx)
+	if err != nil {
+		t.Fatalf("GetCurrentKey: %v", err)
+	}
+	bBuilder := biscuit.NewBuilder(cpPriv)
+	_ = bBuilder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactExpiration,
+		IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(time.Hour))},
+	}})
+	_ = bBuilder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactActorNode,
+		IDs:  []biscuit.Term{biscuit.String(cidV1Str)},
+	}})
+	_ = bBuilder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactClientPeerID,
+		IDs:  []biscuit.Term{biscuit.String(cidV1Str)},
+	}})
+	_ = bBuilder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactUser,
+		IDs:  []biscuit.Term{biscuit.String("alice-sub")},
+	}})
+	nonCanonicalB, err := bBuilder.Build()
+	if err != nil {
+		t.Fatalf("bBuilder.Build: %v", err)
+	}
+	nonCanonicalBiscuit, err := nonCanonicalB.Serialize()
+	if err != nil {
+		t.Fatalf("nonCanonicalB.Serialize: %v", err)
+	}
+	if _, status, err := srv.authorizeBiscuitForEgress(ctx, nonCanonicalBiscuit, "bigquery.googleapis.com"); err == nil || status != http.StatusForbidden {
+		t.Fatalf("expected authorizeBiscuitForEgress to reject banned CIDv1 peer ID with 403, got status=%d err=%v", status, err)
 	}
 }

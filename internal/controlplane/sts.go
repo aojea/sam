@@ -803,16 +803,21 @@ func (s *Server) authorizeBiscuitForEgress(ctx context.Context, rawBiscuit []byt
 		return nil, http.StatusForbidden, err
 	}
 
-	for _, peerID := range []string{claims.NodePeerID, claims.ActorNodePeerID, claims.ClientPeerID} {
-		if peerID == "" {
+	for _, rawPeerID := range []string{claims.NodePeerID, claims.ActorNodePeerID, claims.ClientPeerID} {
+		if rawPeerID == "" {
 			continue
 		}
-		banned, err := s.store.IsNodeBanned(ctx, peerID)
+		pID, err := peer.Decode(rawPeerID)
+		if err != nil {
+			return nil, http.StatusForbidden, fmt.Errorf("invalid peer ID %q: %w", rawPeerID, err)
+		}
+		canonical := pID.String()
+		banned, err := s.store.IsNodeBanned(ctx, canonical)
 		if err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to check node ban: %w", err)
 		}
 		if banned {
-			return nil, http.StatusForbidden, fmt.Errorf("peer %s is banned", peerID)
+			return nil, http.StatusForbidden, fmt.Errorf("peer %s is banned", canonical)
 		}
 	}
 
@@ -829,7 +834,7 @@ func (s *Server) authorizeBiscuitForEgress(ctx context.Context, rawBiscuit []byt
 	authorizer.AddFact(biscuit.Fact{
 		Predicate: biscuit.Predicate{
 			Name: api.FactConnectionPeerID,
-			IDs:  []biscuit.Term{biscuit.String(claims.ClientPeerID)},
+			IDs:  []biscuit.Term{biscuit.String(clientPeer.String())},
 		},
 	})
 	authorizer.AddCheck(api.BaselineReplayCheck)

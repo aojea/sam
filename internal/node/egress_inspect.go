@@ -687,7 +687,11 @@ func (s *EgressService) inspectModelArmorRequest(ctx context.Context, cfg *api.M
 		return body, blocked, err
 	}
 	if replacement != "" && replacement != promptText {
-		body = bytes.ReplaceAll(body, []byte(promptText), []byte(replacement))
+		updated, err := replaceInspectableText(body, promptText, replacement)
+		if err != nil {
+			return body, false, err
+		}
+		body = updated
 	}
 	return body, false, nil
 }
@@ -705,7 +709,11 @@ func (s *EgressService) inspectModelArmorResponse(ctx context.Context, cfg *api.
 		return body, blocked, err
 	}
 	if replacement != "" && replacement != respText {
-		body = bytes.ReplaceAll(body, []byte(respText), []byte(replacement))
+		updated, err := replaceInspectableText(body, respText, replacement)
+		if err != nil {
+			return body, false, err
+		}
+		body = updated
 	}
 	return body, false, nil
 }
@@ -898,4 +906,78 @@ func extractInspectableText(body []byte) string {
 		}
 	}
 	return strings.TrimSpace(string(body))
+}
+
+func replaceInspectableText(body []byte, original, replacement string) ([]byte, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return bytes.ReplaceAll(body, []byte(original), []byte(replacement)), nil
+	}
+
+	// If messages[].content were joined by '\n' in extractInspectableText, split back
+	// when the replacement has the same number of lines; otherwise replace in-place.
+	if msgs, ok := doc["messages"].([]any); ok {
+		var contentMaps []map[string]any
+		for _, m := range msgs {
+			if mm, ok := m.(map[string]any); ok {
+				if c, ok := mm["content"].(string); ok && c != "" {
+					contentMaps = append(contentMaps, mm)
+				}
+			}
+		}
+		if len(contentMaps) == 1 {
+			contentMaps[0]["content"] = replacement
+			return json.Marshal(doc)
+		}
+		if len(contentMaps) > 1 {
+			parts := strings.Split(replacement, "\n")
+			if len(parts) == len(contentMaps) {
+				for i, mm := range contentMaps {
+					mm["content"] = parts[i]
+				}
+				return json.Marshal(doc)
+			}
+		}
+	}
+
+	updated, modified := replaceStringInJSONValue(doc, original, replacement)
+	if modified {
+		return json.Marshal(updated)
+	}
+	return bytes.ReplaceAll(body, []byte(original), []byte(replacement)), nil
+}
+
+func replaceStringInJSONValue(v any, original, replacement string) (any, bool) {
+	switch val := v.(type) {
+	case string:
+		if val == original {
+			return replacement, true
+		}
+		if strings.Contains(val, original) {
+			return strings.ReplaceAll(val, original, replacement), true
+		}
+		return val, false
+	case []any:
+		anyMod := false
+		for i, elem := range val {
+			next, mod := replaceStringInJSONValue(elem, original, replacement)
+			if mod {
+				val[i] = next
+				anyMod = true
+			}
+		}
+		return val, anyMod
+	case map[string]any:
+		anyMod := false
+		for k, elem := range val {
+			next, mod := replaceStringInJSONValue(elem, original, replacement)
+			if mod {
+				val[k] = next
+				anyMod = true
+			}
+		}
+		return val, anyMod
+	default:
+		return v, false
+	}
 }

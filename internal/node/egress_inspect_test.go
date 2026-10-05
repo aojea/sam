@@ -135,15 +135,16 @@ func TestModelArmorInspection(t *testing.T) {
 		t.Fatalf("blocked prompt must not invoke exchanger (%d) or upstream (%d)", exCalls.Load(), upstreamCalls.Load())
 	}
 
-	// 2. SDP de-identification rewrites prompt before forwarding to upstream with brokered token.
-	req2 := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"my ssn is 123-45-6789"}]}`))
+	// 2. SDP de-identification rewrites prompt before forwarding to upstream with brokered token,
+	// including when the prompt contains JSON-escaped newlines and quotes.
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"line 1\nmy ssn is \"123-45-6789\""}]}`))
 	rec2 := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("redacted prompt status = %d, want 200 (%s)", rec2.Code, rec2.Body.String())
 	}
 	if !strings.Contains(lastUpstreamBody, "my ssn is [REDACTED]") || strings.Contains(lastUpstreamBody, "123-45-6789") {
-		t.Fatalf("expected redacted upstream body, got %q", lastUpstreamBody)
+		t.Fatalf("expected redacted upstream body even with JSON escapes, got %q", lastUpstreamBody)
 	}
 	if lastUpstreamAuth != "Bearer brokered-cloud-token" {
 		t.Fatalf("expected brokered Authorization header, got %q", lastUpstreamAuth)
