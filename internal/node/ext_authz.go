@@ -150,66 +150,72 @@ func evaluateExtAuthz(ctx context.Context, node *SamNode, in extAuthzCheckInput)
 	}
 
 	target, reqPath := resolveExtAuthzTarget(node, in)
-	if target != "" {
-		var callerPeer peer.ID
-		var isLocal bool
-		if peerHdr := in.Headers[strings.ToLower(api.HeaderPeerID)]; peerHdr != "" {
-			if pid, pErr := peer.Decode(peerHdr); pErr == nil {
-				callerPeer = pid
-			}
+	if target == "" {
+		return extAuthzCheckResult{
+			Allowed:    false,
+			HTTPStatus: http.StatusForbidden,
+			Message:    "Forbidden: unable to resolve target service",
 		}
-		if callerPeer == "" && claims.ActorNodePeerID != "" {
-			if pid, pErr := peer.Decode(claims.ActorNodePeerID); pErr == nil {
-				callerPeer = pid
-			}
-		}
-		if callerPeer == "" && claims.NodePeerID != "" {
-			if pid, pErr := peer.Decode(claims.NodePeerID); pErr == nil {
-				callerPeer = pid
-			}
-		}
-		if callerPeer == "" {
-			if pid, pErr := node.localPeerID(); pErr == nil {
-				callerPeer = pid
-			}
-			isLocal = true
-		}
-		if localPID, pErr := node.localPeerID(); pErr == nil && callerPeer == localPID {
-			isLocal = true
-		}
+	}
 
-		method := in.Method
-		if method == "" {
-			method = http.MethodGet
+	var callerPeer peer.ID
+	var isLocal bool
+	if peerHdr := in.Headers[strings.ToLower(api.HeaderPeerID)]; peerHdr != "" {
+		if pid, pErr := peer.Decode(peerHdr); pErr == nil {
+			callerPeer = pid
 		}
-		if reqPath == "" {
-			reqPath = "/"
+	}
+	if callerPeer == "" && claims.ActorNodePeerID != "" {
+		if pid, pErr := peer.Decode(claims.ActorNodePeerID); pErr == nil {
+			callerPeer = pid
 		}
-		reqCtx := RequestContext{
-			PeerID:             callerPeer,
-			Protocol:           "ext_authz",
-			Target:             target,
-			MCPTool:            in.Headers[strings.ToLower(HeaderSamMCPTool)],
-			AllowMCPStreamInit: in.AllowMCPStreamInit,
-			HTTP:               &HTTPRequestFacts{Method: method, Path: reqPath},
-			Local:              isLocal,
+	}
+	if callerPeer == "" && claims.NodePeerID != "" {
+		if pid, pErr := peer.Decode(claims.NodePeerID); pErr == nil {
+			callerPeer = pid
 		}
-		if after, ok := strings.CutPrefix(target, api.EgressServicePrefix); ok {
-			reqCtx.Egress = &EgressFacts{Host: after, Port: 443}
-			if node.services != nil {
-				if svc, ok := node.services.GetTyped(api.ServiceType_SERVICE_TYPE_EGRESS, after); ok {
-					if ef := egressFactsFor(svc); ef != nil {
-						reqCtx.Egress = ef
-					}
+	}
+	if callerPeer == "" {
+		if pid, pErr := node.localPeerID(); pErr == nil {
+			callerPeer = pid
+		}
+		isLocal = true
+	}
+	if localPID, pErr := node.localPeerID(); pErr == nil && callerPeer == localPID {
+		isLocal = true
+	}
+
+	method := in.Method
+	if method == "" {
+		method = http.MethodGet
+	}
+	if reqPath == "" {
+		reqPath = "/"
+	}
+	reqCtx := RequestContext{
+		PeerID:             callerPeer,
+		Protocol:           "ext_authz",
+		Target:             target,
+		MCPTool:            in.Headers[strings.ToLower(HeaderSamMCPTool)],
+		AllowMCPStreamInit: in.AllowMCPStreamInit,
+		HTTP:               &HTTPRequestFacts{Method: method, Path: reqPath},
+		Local:              isLocal,
+	}
+	if after, ok := strings.CutPrefix(target, api.EgressServicePrefix); ok {
+		reqCtx.Egress = &EgressFacts{Host: after, Port: 443}
+		if node.services != nil {
+			if svc, ok := node.services.GetTyped(api.ServiceType_SERVICE_TYPE_EGRESS, after); ok {
+				if ef := egressFactsFor(svc); ef != nil {
+					reqCtx.Egress = ef
 				}
 			}
 		}
-		if err := node.VerifyBiscuitToken(rawBiscuit, reqCtx); err != nil {
-			return extAuthzCheckResult{
-				Allowed:    false,
-				HTTPStatus: http.StatusForbidden,
-				Message:    fmt.Sprintf("Forbidden: %v", err),
-			}
+	}
+	if err := node.VerifyBiscuitToken(rawBiscuit, reqCtx); err != nil {
+		return extAuthzCheckResult{
+			Allowed:    false,
+			HTTPStatus: http.StatusForbidden,
+			Message:    fmt.Sprintf("Forbidden: %v", err),
 		}
 	}
 
@@ -305,7 +311,17 @@ func resolveExtAuthzTarget(node *SamNode, in extAuthzCheckInput) (target, reqPat
 		path = path[:idx]
 	}
 	if explicit := strings.TrimSpace(in.Headers[strings.ToLower(api.HeaderSamTargetService)]); explicit != "" {
-		return explicit, path
+		scheme, name := api.ParseServiceTarget(explicit)
+		scheme = strings.ToLower(scheme)
+		if isExtAuthzServiceScheme(scheme) && name != "" {
+			if scheme == api.ServiceTypeStringEgress {
+				name = api.NormalizeMeshHost(name)
+			}
+			if name != "" {
+				return scheme + "://" + name, path
+			}
+		}
+		return "", path
 	}
 	trimmed := strings.TrimPrefix(path, "/sam/")
 	trimmed = strings.TrimPrefix(trimmed, "/")

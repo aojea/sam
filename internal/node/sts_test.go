@@ -467,6 +467,25 @@ func TestExtAuthzHTTPAndGRPC(t *testing.T) {
 		t.Fatalf("expected HTTP ext_authz 403 Forbidden for merge_pr, got %d", recDeny.Code)
 	}
 
+	// 2b. HTTP ext_authz deny when target service cannot be resolved (must not skip VerifyBiscuitToken).
+	reqNoTarget := httptest.NewRequest(http.MethodPost, "/ext_authz/unknown/route", nil)
+	reqNoTarget.Header.Set("Authorization", "Bearer "+narrowedB64)
+	recNoTarget := httptest.NewRecorder()
+	handleExtAuthzHTTP(h.node, recNoTarget, reqNoTarget)
+	if recNoTarget.Code != http.StatusForbidden {
+		t.Fatalf("expected HTTP ext_authz 403 Forbidden when target cannot be resolved, got %d: %s", recNoTarget.Code, recNoTarget.Body.String())
+	}
+
+	// 2c. HTTP ext_authz deny when X-Sam-Target-Service is malformed.
+	reqBadTarget := httptest.NewRequest(http.MethodPost, "/ext_authz", nil)
+	reqBadTarget.Header.Set("Authorization", "Bearer "+narrowedB64)
+	reqBadTarget.Header.Set(api.HeaderSamTargetService, "not-a-valid-scheme")
+	recBadTarget := httptest.NewRecorder()
+	handleExtAuthzHTTP(h.node, recBadTarget, reqBadTarget)
+	if recBadTarget.Code != http.StatusForbidden {
+		t.Fatalf("expected HTTP ext_authz 403 Forbidden for malformed X-Sam-Target-Service, got %d: %s", recBadTarget.Code, recBadTarget.Body.String())
+	}
+
 	// 3. gRPC ext_authz Check (/envoy.service.auth.v3.Authorization/Check)
 	grpcReqPayload := buildEnvoyCheckRequestPayload("POST", "/mcp/github", map[string]string{
 		"authorization":                   "Bearer " + narrowedB64,
