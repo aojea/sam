@@ -149,6 +149,24 @@ func TestTARNarrowsNeverSelects_OIDCScopes(t *testing.T) {
 	if !slices.Equal(resources, []string{"//bigquery.googleapis.com/projects/my-proj/datasets/sales_2026/tables/q1"}) {
 		t.Fatalf("expected intersected resources [../tables/q1], got %v", resources)
 	}
+
+	// 7. TAR with empty rules (fail-closed) or targeting a different service -> rejected by NarrowOIDCScopes.
+	emptyTAR := &api.TaskAuthorizationRule{Name: "tasks/empty-fail-closed"}
+	if _, err := NarrowOIDCScopes(policyScopes, "bigquery.googleapis.com", []*api.TaskAuthorizationRule{emptyTAR}); err == nil {
+		t.Fatal("expected NarrowOIDCScopes to reject TAR with empty rules list")
+	}
+	if _, err := NarrowOIDCScopes(nil, "bigquery.googleapis.com", []*api.TaskAuthorizationRule{emptyTAR}); err == nil {
+		t.Fatal("expected NarrowOIDCScopes(nil scopes) to reject TAR with empty rules list")
+	}
+	otherSvcTAR := &api.TaskAuthorizationRule{
+		Name: "tasks/storage-only",
+		Rules: []*api.TaskRule{{
+			AllowedServices: []string{"egress://storage.googleapis.com"},
+		}},
+	}
+	if _, err := NarrowOIDCScopes(policyScopes, "bigquery.googleapis.com", []*api.TaskAuthorizationRule{otherSvcTAR}); err == nil {
+		t.Fatal("expected NarrowOIDCScopes to reject TAR targeting a different service")
+	}
 }
 
 func TestTARNarrowsNeverSelects_AWSSessionPolicy(t *testing.T) {

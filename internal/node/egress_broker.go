@@ -555,10 +555,6 @@ func (e *PlatformIdentityExchanger) Exchange(ctx context.Context, _ string, rule
 //   - If a TAR specifies scope constraints that have an empty intersection with
 //     policyScopes, NarrowOIDCScopes returns an error so the exchange fails closed.
 func NarrowOIDCScopes(policyScopes []string, destName string, rules []*api.TaskAuthorizationRule) ([]string, error) {
-	if len(policyScopes) == 0 {
-		// Policy grants no OAuth scopes; a TAR can never select or add scopes.
-		return nil, nil
-	}
 	current := slices.Clone(policyScopes)
 	targetSvc := api.EgressServicePrefix + api.NormalizeMeshHost(strings.TrimPrefix(destName, api.EgressServicePrefix))
 
@@ -567,10 +563,12 @@ func NarrowOIDCScopes(policyScopes []string, destName string, rules []*api.TaskA
 			continue
 		}
 		var tarPerms []string
+		matchedRule := false
 		for _, r := range tar.GetRules() {
 			if !taskRuleMatchesService(r, targetSvc) {
 				continue
 			}
+			matchedRule = true
 			for _, p := range r.GetOperation().GetAllowedPermissions() {
 				p = strings.TrimSpace(p)
 				if p != "" {
@@ -578,7 +576,10 @@ func NarrowOIDCScopes(policyScopes []string, destName string, rules []*api.TaskA
 				}
 			}
 		}
-		if len(tarPerms) == 0 {
+		if !matchedRule {
+			return nil, fmt.Errorf("task authorization rule %q does not allow service %s", tar.GetName(), targetSvc)
+		}
+		if len(policyScopes) == 0 || len(tarPerms) == 0 {
 			continue
 		}
 		// Distinguish fine-grained cloud IAM permissions (e.g.
@@ -607,6 +608,10 @@ func NarrowOIDCScopes(policyScopes []string, destName string, rules []*api.TaskA
 			return nil, fmt.Errorf("task authorization rule %q narrows OAuth scopes to an empty intersection with policy scopes", tar.GetName())
 		}
 		current = next
+	}
+	if len(policyScopes) == 0 {
+		// Policy grants no OAuth scopes; a TAR can never select or add scopes.
+		return nil, nil
 	}
 	return current, nil
 }

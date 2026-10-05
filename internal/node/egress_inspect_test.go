@@ -450,9 +450,14 @@ func TestGatewayExtProcServer(t *testing.T) {
 	})
 	addr := startH2CServer(t, mux)
 
-	client, endpoint, err := buildExtProcHTTPClient(&api.ExtProc{Target: addr}, t.TempDir())
+	extProcCfg := &api.ExtProc{Target: addr}
+	client, endpoint, err := egressSvc.getExtProcHTTPClient(extProcCfg)
 	if err != nil {
-		t.Fatalf("buildExtProcHTTPClient: %v", err)
+		t.Fatalf("getExtProcHTTPClient: %v", err)
+	}
+	client2, _, err := egressSvc.getExtProcHTTPClient(extProcCfg)
+	if err != nil || client2 != client {
+		t.Fatalf("expected getExtProcHTTPClient to return cached *http.Client, got err=%v same=%v", err, client2 == client)
 	}
 
 	// 1. MCP tools/call with allowed tool "get_pr":

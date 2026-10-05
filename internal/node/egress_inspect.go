@@ -473,12 +473,45 @@ func initialExtProcMode(cfg *api.ExtProc) *extprocv3http.ProcessingMode {
 	return mode
 }
 
+func extProcClientCacheKey(cfg *api.ExtProc) string {
+	return strings.TrimSpace(cfg.GetTarget()) + "|" + strings.TrimSpace(cfg.GetCa()) + "|" + strings.TrimSpace(cfg.GetClientCertificate())
+}
+
+func (s *EgressService) initExtProcClients() {
+	for _, ins := range s.destination.GetInspection().GetInspectors() {
+		if ep := ins.GetExtProc(); ep != nil {
+			_, _, _ = s.getExtProcHTTPClient(ep)
+		}
+	}
+}
+
+func (s *EgressService) getExtProcHTTPClient(cfg *api.ExtProc) (*http.Client, string, error) {
+	key := extProcClientCacheKey(cfg)
+	s.extProcMu.Lock()
+	defer s.extProcMu.Unlock()
+	if s.extProcClients == nil {
+		s.extProcClients = make(map[string]extProcClientEntry)
+	}
+	if entry, ok := s.extProcClients[key]; ok {
+		return entry.client, entry.endpoint, nil
+	}
+	client, endpoint, err := buildExtProcHTTPClient(cfg, s.secretsDir)
+	if err != nil {
+		return nil, "", err
+	}
+	s.extProcClients[key] = extProcClientEntry{
+		client:   client,
+		endpoint: endpoint,
+	}
+	return client, endpoint, nil
+}
+
 func (s *EgressService) runExtProcRequestPhase(r *http.Request, cfg *api.ExtProc, reqBody []byte, callerCtx egressCallerContext) (*extProcClientStream, *extprocv3http.ProcessingMode, *extprocv3.ImmediateResponse, []byte, error) {
 	msgTimeout := defaultExtProcMessageTimeout
 	if cfg.GetMessageTimeout().IsValid() && cfg.GetMessageTimeout().AsDuration() > 0 {
 		msgTimeout = cfg.GetMessageTimeout().AsDuration()
 	}
-	client, endpoint, err := buildExtProcHTTPClient(cfg, s.secretsDir)
+	client, endpoint, err := s.getExtProcHTTPClient(cfg)
 	if err != nil {
 		return nil, nil, nil, reqBody, err
 	}

@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/sam/api"
@@ -52,6 +53,11 @@ func refuse(w http.ResponseWriter, status int, text, errorType string) {
 	http.Error(w, text, status)
 }
 
+type extProcClientEntry struct {
+	client   *http.Client
+	endpoint string
+}
+
 // EgressService serves egress://<name>: this node is the HTTP origin for one
 // destination outside the mesh. The destination, where to forward, and which
 // credential to present are the control plane's decision (an
@@ -68,6 +74,8 @@ type EgressService struct {
 	isStaticSecret    bool
 	modelArmorBaseURL string
 	modelArmorClient  *http.Client
+	extProcMu         sync.Mutex
+	extProcClients    map[string]extProcClientEntry
 	handler           http.Handler
 }
 
@@ -111,10 +119,12 @@ func newEgressServiceForNode(node *SamNode, d *api.EgressDestination, secretsDir
 			Name:        d.GetName(),
 			Description: "egress to " + target.Scheme + "://" + target.Host,
 		},
-		target:     target,
-		secretsDir: secretsDir,
+		target:         target,
+		secretsDir:     secretsDir,
+		extProcClients: make(map[string]extProcClientEntry),
 	}
 	s.initExchanger()
+	s.initExtProcClients()
 	return s, nil
 }
 
