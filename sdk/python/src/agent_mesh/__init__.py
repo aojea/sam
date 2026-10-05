@@ -52,7 +52,7 @@ from .libp2p_http import (
     rewrite_agent_card,
 )
 from .mcp_client import LabelsNotSatisfiedError, ToolCallResult, ToolInfo, open_mcp_session, require_egress_labels, require_labels
-from .mesh import AgentMesh, ControlPlaneSync, CredentialRetiredError
+from .mesh import AgentMesh, ControlPlaneSync, CredentialRetiredError, JwtSource
 from .relay import dial_through_relay, reserve_relay
 from .session import AdmittedRouter, MeshSession, Peer
 from .sync import GOSSIP_EVENTS_TOPIC, BanSet, verify_mesh_event
@@ -103,6 +103,7 @@ __all__ = [
     "HTTPResponse",
     "Identity",
     "InsecureControlPlaneURLError",
+    "JwtSource",
     "KeysNotTrustedError",
     "LabelsNotSatisfiedError",
     "MCP_PROTOCOL",

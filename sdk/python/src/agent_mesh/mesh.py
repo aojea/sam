@@ -19,7 +19,7 @@ import threading
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Callable, Mapping, Optional
 
 from ._proto import sam_pb2 as pb
 from .controlplane import ROLE_NODE, ControlPlaneClient, Enrollment, KeysNotTrustedError, Transport
@@ -30,6 +30,8 @@ _IDENTITY_FILE = "identity.key"
 _CREDENTIAL_FILE = "credential.json"
 # A saved credential with less validity left than this is not worth resuming; enroll again instead.
 _REUSE_MIN_TTL_SECONDS = 5 * 60
+
+JwtSource = Callable[[], str]
 
 
 class CredentialRetiredError(Exception):
@@ -82,11 +84,19 @@ class AgentMesh:
     minted for it, and the client that keeps that credential fresh. join()
     puts it on the mesh over libp2p."""
 
-    def __init__(self, identity: Identity, control_plane: ControlPlaneClient, credential: MeshCredential, state_dir: Optional[Path]):
+    def __init__(
+        self,
+        identity: Identity,
+        control_plane: ControlPlaneClient,
+        credential: MeshCredential,
+        state_dir: Optional[Path],
+        jwt_source: Optional[JwtSource] = None,
+    ):
         self.identity = identity
         self.control_plane = control_plane
         self._credential = credential
         self._state_dir = state_dir
+        self._jwt_source = jwt_source
         # refresh() and sync_control_plane() run in worker threads of the
         # session's loops; the control plane redeems only the last biscuit it
         # issued, and both write the same state files.
@@ -115,7 +125,7 @@ class AgentMesh:
         *,
         bootstrap_token: Optional[str] = None,
         bootstrap_token_path: Optional[str | os.PathLike[str]] = None,
-        jwt: Optional[str] = None,
+        jwt: Optional[str | JwtSource] = None,
         jwt_path: Optional[str | os.PathLike[str]] = None,
         state_dir: Optional[str | os.PathLike[str]] = None,
         identity: Optional[Identity] = None,
@@ -137,21 +147,22 @@ class AgentMesh:
         verified or refreshed, so the member enrolls again with the token
         given, or raises CredentialRetiredError without one. Otherwise exactly
         one of bootstrap_token, bootstrap_token_path, jwt or jwt_path must be
-        given; a token is better read from a file than passed as a value, and
-        jwt_path also takes a platform's workload identity token, such as a
-        Kubernetes projected service account token. Delete the state directory
-        to enroll afresh, for instance with other labels."""
+        given; a token is better read from a file or a callback than passed as
+        a value, and jwt_path or a callable jwt also supplies a fresh workload
+        identity token on every refresh. Delete the state directory to enroll
+        afresh, for instance with other labels."""
         state = Path(state_dir).expanduser() if state_dir is not None else None
         saved = _load_identity(state)
         identity = identity or saved or Identity.generate()
         control_plane = ControlPlaneClient(control_plane_url, allow_insecure=allow_insecure, transport=transport)
+        jwt_source = _resolve_jwt_source(jwt=jwt, jwt_path=jwt_path)
         given = sum(v is not None for v in (bootstrap_token, bootstrap_token_path, jwt, jwt_path))
         if state is not None and saved is not None and saved.peer_id == identity.peer_id:
             credential = _load_credential(state)
             if credential is not None and credential.control_plane_url.rstrip("/") == control_plane.url.rstrip("/") and credential.time_to_live_seconds() > _REUSE_MIN_TTL_SECONDS:
                 resumed = _resumable_credential(control_plane, credential)
                 if resumed is not None:
-                    mesh = cls(identity, control_plane, resumed, state)
+                    mesh = cls(identity, control_plane, resumed, state, jwt_source)
                     if resumed is not credential:
                         mesh.save()
                     return mesh
@@ -163,10 +174,8 @@ class AgentMesh:
 
         enrollment: Enrollment
         if jwt is not None or jwt_path is not None:
-            if jwt_path is not None:
-                jwt = Path(jwt_path).expanduser().read_text(encoding="utf-8").strip()
-            assert jwt is not None
-            enrollment = control_plane.register(identity, jwt, role=role, labels=labels)
+            token = jwt_source() if jwt_source is not None else str(jwt)
+            enrollment = control_plane.register(identity, token, role=role, labels=labels)
         else:
             if bootstrap_token_path is not None:
                 bootstrap_token = Path(bootstrap_token_path).expanduser().read_text().strip()
@@ -196,6 +205,7 @@ class AgentMesh:
                 router_addresses=list(enrollment.router_addresses),
             ),
             state,
+            jwt_source,
         )
         mesh.save()
         return mesh
@@ -206,6 +216,8 @@ class AgentMesh:
         state_dir: str | os.PathLike[str],
         *,
         identity: Optional[Identity] = None,
+        jwt: Optional[JwtSource] = None,
+        jwt_path: Optional[str | os.PathLike[str]] = None,
         allow_insecure: bool = False,
         transport: Optional[Transport] = None,
     ) -> "AgentMesh":
@@ -220,14 +232,22 @@ class AgentMesh:
         if credential is None:
             raise FileNotFoundError(f"no credential in {state}; enroll first")
         control_plane = ControlPlaneClient(credential.control_plane_url, allow_insecure=allow_insecure, transport=transport)
-        return cls(identity, control_plane, credential, state)
+        return cls(identity, control_plane, credential, state, _resolve_jwt_source(jwt=jwt, jwt_path=jwt_path))
 
     def refresh(self) -> MeshCredential:
         """Trades the current biscuit for a fresh one and persists it. The control
         plane redeems only the last biscuit it issued, so a lost refresh result
         means re-enrolling; persisting before returning keeps that rare."""
         with self._lock:
-            result = self.control_plane.refresh(self.identity, self._credential.biscuit)
+            fresh_jwt: Optional[str] = None
+            if self._jwt_source is not None:
+                try:
+                    token = self._jwt_source()
+                    if token:
+                        fresh_jwt = token
+                except Exception:  # noqa: BLE001 - fall back to session-only refresh if token source is unavailable
+                    pass
+            result = self.control_plane.refresh(self.identity, self._credential.biscuit, jwt=fresh_jwt)
             control_plane_keys = self._credential.control_plane_keys
             try:
                 control_plane_keys = self.control_plane.keys(control_plane_keys)
@@ -342,3 +362,18 @@ def _write_atomic(path: Path, data: bytes) -> None:
     with os.fdopen(fd, "wb") as f:
         f.write(data)
     os.replace(tmp, path)
+
+
+def _resolve_jwt_source(
+    *,
+    jwt: Optional[str | JwtSource],
+    jwt_path: Optional[str | os.PathLike[str]],
+) -> Optional[JwtSource]:
+    if jwt_path is not None:
+        path = Path(jwt_path).expanduser()
+        return lambda: path.read_text(encoding="utf-8").strip()
+    if callable(jwt):
+        fn = jwt
+        return lambda: fn().strip()
+    return None
+
