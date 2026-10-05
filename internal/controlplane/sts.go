@@ -383,8 +383,7 @@ func (s *Server) HandleRevocations(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !s.isAdmittedNodeRequest(r) {
-		http.Error(w, "Unauthorized: node credential required", http.StatusUnauthorized)
+	if s.admittedNodeWithChallenge(w, r, api.RevocationsChallenge) == nil {
 		return
 	}
 	ctx := r.Context()
@@ -425,7 +424,7 @@ func (s *Server) HandleTokenExchange(w http.ResponseWriter, r *http.Request) {
 	}
 	nodeRecord := s.admittedNode(r)
 	if nodeRecord == nil {
-		http.Error(w, "Unauthorized: node credential required", http.StatusUnauthorized)
+		writeChallengeError(w, "Unauthorized: node credential required")
 		return
 	}
 	if !s.allowNodeSTSRequest(nodeRecord.PeerID) {
@@ -460,7 +459,7 @@ func (s *Server) HandleTokenExchange(w http.ResponseWriter, r *http.Request) {
 	challengePayload := api.TokenExchangeChallenge(nodeRecord.PeerID, req.ChallengeUnixMs)
 	if err := verifyFreshChallenge(nodePubKey, challengePayload, req.ChallengeUnixMs, req.ChallengeSignature); err != nil {
 		logger.Warnw("Token exchange challenge verification failed", "peer_id", nodeRecord.PeerID, "error", err)
-		http.Error(w, "Invalid token exchange challenge: "+err.Error(), http.StatusUnauthorized)
+		writeChallengeError(w, "Invalid token exchange challenge: "+err.Error())
 		return
 	}
 
@@ -617,7 +616,7 @@ func (s *Server) HandleSTSToken(w http.ResponseWriter, r *http.Request) {
 	}
 	nodeRecord := s.admittedNode(r)
 	if nodeRecord == nil {
-		http.Error(w, "Unauthorized: node credential required", http.StatusUnauthorized)
+		writeChallengeError(w, "Unauthorized: node credential required")
 		return
 	}
 	if !s.allowNodeSTSRequest(nodeRecord.PeerID) {
@@ -661,7 +660,7 @@ func (s *Server) HandleSTSToken(w http.ResponseWriter, r *http.Request) {
 	challengePayload := api.STSTokenChallenge(nodeRecord.PeerID, req.ChallengeUnixMs)
 	if err := verifyFreshChallenge(nodePubKey, challengePayload, req.ChallengeUnixMs, req.ChallengeSignature); err != nil {
 		logger.Warnw("STS token challenge verification failed", "peer_id", nodeRecord.PeerID, "error", err)
-		http.Error(w, "Invalid STS token challenge: "+err.Error(), http.StatusUnauthorized)
+		writeChallengeError(w, "Invalid STS token challenge: "+err.Error())
 		return
 	}
 

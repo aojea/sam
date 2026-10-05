@@ -21,7 +21,16 @@ import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { timestampFromMs } from "@bufbuild/protobuf/wkt";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { enrollChallenge, enrollStatusChallenge, refreshChallenge, registerChallenge } from "./challenges.ts";
+import {
+  egressChallenge,
+  enrollChallenge,
+  enrollStatusChallenge,
+  nodesCatalogChallenge,
+  policiesChallenge,
+  refreshChallenge,
+  registerChallenge,
+  revocationsChallenge,
+} from "./challenges.ts";
 import {
   ControlPlaneClient,
   ControlPlaneError,
@@ -31,6 +40,7 @@ import {
   InsecureControlPlaneURLError,
   KEYS_RESPONSE_FRESHNESS_MS,
   ROLE_NODE,
+  STALE_CHALLENGE_TIMESTAMP_MESSAGE,
   validateControlPlaneURL,
   verifyKeysResponse,
 } from "./controlplane.ts";
@@ -41,6 +51,7 @@ import {
   EnrollResponseSchema,
   EnrollmentStatus,
   KeysResponseSchema,
+  PolicyConfigGetResponseSchema,
   TokenRefreshRequestSchema,
   TokenRefreshResponseSchema,
   type KeysResponse,
@@ -230,6 +241,93 @@ test("refresh presents the biscuit as a bearer and signs the refresh challenge",
   await assert.rejects(replayed.refresh({ identity: id, biscuit }), (err: unknown) => err instanceof ControlPlaneError && err.status === 401);
 });
 
+test("policyRules presents the biscuit and signs the policies challenge", async () => {
+  const id = Identity.generate();
+  const rules = ['granted_service("mcp", "echo") <- role("sam:role:node")'];
+  const client = new ControlPlaneClient({
+    url: "http://127.0.0.1:1",
+    fetch: fakeFetch({
+      "GET /policies": (req) => {
+        assert.equal(req.headers.get("authorization"), `Bearer ${Buffer.from(biscuit).toString("base64")}`);
+        const ts = Number(req.headers.get(HEADER_CHALLENGE_TIMESTAMP));
+        const sig = new Uint8Array(Buffer.from(req.headers.get(HEADER_CHALLENGE_SIGNATURE) ?? "", "base64url"));
+        assert.ok(verifyEd25519(id.publicKeyRaw, policiesChallenge(id.peerId, ts), sig));
+        return proto(toBinary(PolicyConfigGetResponseSchema, create(PolicyConfigGetResponseSchema, { datalogRules: rules })));
+      },
+    }),
+  });
+  assert.deepEqual(await client.policyRules(id, biscuit), rules);
+  assert.deepEqual(await client.policyRules({ identity: id, biscuit }), rules);
+
+  // Domain-separated challenge payloads match api/network.go.
+  const dec = new TextDecoder();
+  assert.equal(dec.decode(policiesChallenge("peer1", 42)), "sam:policies:peer1:42");
+  assert.equal(dec.decode(egressChallenge("peer1", 42)), "sam:egress:peer1:42");
+  assert.equal(dec.decode(revocationsChallenge("peer1", 42)), "sam:revocations:peer1:42");
+  assert.equal(dec.decode(nodesCatalogChallenge("peer1", 42)), "sam:nodes-catalog:peer1:42");
+});
+
+test("clock skew: +10 min client clock retries once using response Date header; other 401s are not retried", async () => {
+  const id = Identity.generate();
+  const serverNowSec = Math.floor(Date.now() / 1000);
+  const serverNowMs = serverNowSec * 1000;
+  const skewedClientNowMs = serverNowMs + 10 * 60 * 1000;
+  const dateHeader = new Date(serverNowMs).toUTCString();
+  const fresh = new TextEncoder().encode("fresher-biscuit");
+  const rules = ['granted_service("mcp", "echo") <- true'];
+
+  let refreshCalls = 0;
+  let policyCalls = 0;
+  const skewedClient = new ControlPlaneClient({
+    url: "http://127.0.0.1:1",
+    now: () => skewedClientNowMs,
+    fetch: fakeFetch({
+      "POST /refresh": (_req, body) => {
+        refreshCalls++;
+        const r = fromBinary(TokenRefreshRequestSchema, body);
+        const ts = Number(r.challengeUnixMs);
+        assert.ok(verifyEd25519(id.publicKeyRaw, refreshChallenge(id.peerId, ts), r.challengeSignature));
+        if (Math.abs(serverNowMs - ts) > 5 * 60 * 1000) {
+          return new Response(STALE_CHALLENGE_TIMESTAMP_MESSAGE, { status: 401, headers: { Date: dateHeader } });
+        }
+        return proto(toBinary(TokenRefreshResponseSchema, create(TokenRefreshResponseSchema, { biscuitToken: fresh, expireTime: timestampFromMs(99_000) })));
+      },
+      "GET /policies": (req) => {
+        policyCalls++;
+        const ts = Number(req.headers.get(HEADER_CHALLENGE_TIMESTAMP));
+        const sig = new Uint8Array(Buffer.from(req.headers.get(HEADER_CHALLENGE_SIGNATURE) ?? "", "base64url"));
+        assert.ok(verifyEd25519(id.publicKeyRaw, policiesChallenge(id.peerId, ts), sig));
+        if (Math.abs(serverNowMs - ts) > 5 * 60 * 1000) {
+          return new Response(STALE_CHALLENGE_TIMESTAMP_MESSAGE, { status: 401, headers: { Date: dateHeader } });
+        }
+        return proto(toBinary(PolicyConfigGetResponseSchema, create(PolicyConfigGetResponseSchema, { datalogRules: rules })));
+      },
+    }),
+  });
+
+  const refreshed = await skewedClient.refresh({ identity: id, biscuit });
+  assert.deepEqual(refreshed.biscuit, fresh);
+  assert.equal(refreshCalls, 2);
+
+  assert.deepEqual(await skewedClient.policyRules(id, biscuit), rules);
+  assert.equal(policyCalls, 2);
+
+  // Other 401s (even with a Date header) are not retried.
+  let nonStaleCalls = 0;
+  const nonStaleClient = new ControlPlaneClient({
+    url: "http://127.0.0.1:1",
+    now: () => skewedClientNowMs,
+    fetch: fakeFetch({
+      "GET /policies": () => {
+        nonStaleCalls++;
+        return new Response("invalid challenge signature", { status: 401, headers: { Date: dateHeader } });
+      },
+    }),
+  });
+  await assert.rejects(nonStaleClient.policyRules(id, biscuit), (err: unknown) => err instanceof ControlPlaneError && err.status === 401);
+  assert.equal(nonStaleCalls, 1);
+});
+
 test("verifyKeysResponse accepts a set vouched for by a trusted key and nothing else", () => {
   const retiring = Identity.generate();
   const resp = signedKeys([cpKey, retiring]);
@@ -269,3 +367,4 @@ test("an injected fetch is called unbound, as a browser's window.fetch requires"
   await client.keys([cpKey.publicKeyRaw]);
   assert.equal(receiver, undefined);
 });
+

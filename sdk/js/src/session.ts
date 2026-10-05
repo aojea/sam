@@ -685,7 +685,7 @@ export class MeshSession {
 
   /** Re-reads the mesh policy from the control plane. */
   async syncPolicy(): Promise<void> {
-    this.#policyRules = await this.mesh.controlPlane.policyRules(this.mesh.credential.biscuit);
+    this.#policyRules = await this.mesh.controlPlane.policyRules(this.mesh.identity, this.mesh.credential.biscuit);
   }
 
   /**

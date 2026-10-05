@@ -26,6 +26,7 @@ export {
   type ControlPlaneClientOptions,
   type Enrollment,
   type EnrollBootstrapParams,
+  type PolicyRulesParams,
   type RegisterParams,
   type RefreshParams,
   type RefreshResult,
@@ -41,7 +42,16 @@ export {
   withCredentialMethods,
   type MeshCredential,
 } from "./credential.ts";
-export { enrollChallenge, enrollStatusChallenge, refreshChallenge, registerChallenge } from "./challenges.ts";
+export {
+  egressChallenge,
+  enrollChallenge,
+  enrollStatusChallenge,
+  nodesCatalogChallenge,
+  policiesChallenge,
+  refreshChallenge,
+  registerChallenge,
+  revocationsChallenge,
+} from "./challenges.ts";
 export { MeshSession, type AdmittedRouter, type DiscoveredProvider, type JoinOptions, type Peer, type ToolCallResult } from "./session.ts";
 export {
   BiscuitVerificationError,

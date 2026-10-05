@@ -17,7 +17,16 @@
 from .auth import AUTH_PROTOCOL, MCP_PROTOCOL, AuthRejectedError, auth_stream_handler, authenticate_with_peer
 from .authorizer import BASELINE_DATALOG, AuthorizationError, AuthorizeRequest, ProviderAuthorizerOptions, authorize_caller
 from .biscuit import ROLE_ROUTER, BiscuitVerificationError, VerifiedBiscuit, attenuate_biscuit, require_role, seal_biscuit, verify_peer_biscuit
-from .challenges import enroll_challenge, enroll_status_challenge, refresh_challenge, register_challenge
+from .challenges import (
+    egress_challenge,
+    enroll_challenge,
+    enroll_status_challenge,
+    nodes_catalog_challenge,
+    policies_challenge,
+    refresh_challenge,
+    register_challenge,
+    revocations_challenge,
+)
 from .controlplane import (
     ROLE_NODE,
     ControlPlaneClient,
@@ -131,6 +140,7 @@ __all__ = [
     "decode_tar_block_payload",
     "dial_through_relay",
     "effective_tar_expiration",
+    "egress_challenge",
     "encode_auth_frame",
     "encode_tar_block_fact",
     "encode_tar_block_payload",
@@ -146,17 +156,20 @@ __all__ = [
     "match_task_rule",
     "mesh_http_target",
     "mesh_url",
+    "nodes_catalog_challenge",
     "open_http_request",
     "open_mcp_session",
     "parse_service_target",
     "parse_tar_block_source",
     "peer_id_from_public_key",
+    "policies_challenge",
     "refresh_challenge",
     "register_challenge",
     "require_egress_labels",
     "require_labels",
     "require_role",
     "reserve_relay",
+    "revocations_challenge",
     "seal_biscuit",
     "service_key",
     "rewrite_agent_card",
@@ -171,3 +184,4 @@ __all__ = [
     "verify_mesh_event",
     "verify_peer_biscuit",
 ]
+

@@ -15,15 +15,12 @@
 package controlplane
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/sam/api"
-	"github.com/google/sam/internal/identity"
 	"github.com/google/sam/internal/storage"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"google.golang.org/protobuf/proto"
@@ -128,57 +125,22 @@ func (s *Server) dropCatalogEntry(peerID string) {
 // participant or open a P2P connection to every enrolled node itself.
 //
 // The body is an api.NodeCatalogReport. The reporting peer is the one bound
-// in the presented Biscuit, so a node can only ever describe itself.
+// in the presented Biscuit, verified with a signed challenge in
+// HeaderChallengeTimestamp and HeaderChallengeSignature so a node can only
+// ever describe itself.
 //
 // This is a live-status cache, not authoritative state: a node that goes
 // offline without ever reporting an empty catalog just leaves its last
 // report in place until ReportedAt visibly goes stale or its enrollment
-// ends. It is admin-facing display data only and never feeds authorization,
-// which is also why a bare bearer Biscuit (no signed challenge, unlike
-// /refresh) is accepted here: a replayed token can only repaint a table.
+// ends.
 func (s *Server) HandleNodeCatalog(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	authHeader := r.Header.Get("Authorization")
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		http.Error(w, "Missing node Biscuit token in Authorization header", http.StatusUnauthorized)
-		return
-	}
-	biscuitBytes, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(authHeader, "Bearer "))
-	if err != nil {
-		http.Error(w, "Malformed base64 token", http.StatusBadRequest)
-		return
-	}
-
-	ctx := r.Context()
-	trustedKeys, err := s.store.GetAllValidPublicKeys(ctx)
-	if err != nil {
-		logger.Errorf("Failed to retrieve valid signing keys: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	peerID, err := identity.VerifyAndExtractPeerID(trustedKeys, biscuitBytes, s.config.BiscuitTimeout)
-	if err != nil {
-		logger.Warnw("Invalid biscuit presented to /nodes/catalog", "error", err)
-		http.Error(w, "Invalid biscuit: "+err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	nodeRecord, err := s.store.GetNode(ctx, peerID.String())
-	if err == storage.ErrNotFound || (err == nil && nodeRecord == nil) {
-		http.Error(w, "Node not enrolled", http.StatusUnauthorized)
-		return
-	} else if err != nil {
-		logger.Errorf("Failed to retrieve node record: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	if err := nodeRecord.CheckAdmission(time.Now()); err != nil {
-		http.Error(w, "Node not admitted: "+err.Error(), http.StatusUnauthorized)
+	nodeRecord := s.admittedNodeWithChallenge(w, r, api.NodesCatalogChallenge)
+	if nodeRecord == nil {
 		return
 	}
 
@@ -200,7 +162,7 @@ func (s *Server) HandleNodeCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.catalogMu.Lock()
-	s.catalog[peerID.String()] = nodeCatalogEntry{
+	s.catalog[nodeRecord.PeerID] = nodeCatalogEntry{
 		Services:   req.Services,
 		ReportedAt: time.Now(),
 	}

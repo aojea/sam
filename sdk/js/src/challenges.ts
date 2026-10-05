@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Proof-of-possession challenges on the control plane's enrollment surface.
+// Proof-of-possession challenges on the control plane's mesh surface.
 // Each payload names the peer and the endpoint, so a captured signature
 // verifies nowhere else. Mirrors api/network.go; ts is unix milliseconds.
 
@@ -44,3 +44,24 @@ export function registerChallenge(peerId: string, ts: number): Uint8Array {
 export function refreshChallenge(peerId: string, ts: number): Uint8Array {
   return challenge("refresh", peerId, ts);
 }
+
+/** Signed at GET /policies. */
+export function policiesChallenge(peerId: string, ts: number): Uint8Array {
+  return challenge("policies", peerId, ts);
+}
+
+/** Signed at GET /egress. */
+export function egressChallenge(peerId: string, ts: number): Uint8Array {
+  return challenge("egress", peerId, ts);
+}
+
+/** Signed at GET /revocations. */
+export function revocationsChallenge(peerId: string, ts: number): Uint8Array {
+  return challenge("revocations", peerId, ts);
+}
+
+/** Signed at POST /nodes/catalog. */
+export function nodesCatalogChallenge(peerId: string, ts: number): Uint8Array {
+  return challenge("nodes-catalog", peerId, ts);
+}
+

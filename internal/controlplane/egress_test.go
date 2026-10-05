@@ -20,6 +20,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -125,7 +126,12 @@ func TestEgressPolicyIsDistributedToServingNodes(t *testing.T) {
 
 	// Two nodes: one holds the pep role, one is a plain node labelled
 	// site=dc1. Each is selected by exactly one destination.
-	enroll := func(t *testing.T, role string, labels map[string]string) []byte {
+	type enrolledMeshNode struct {
+		token  []byte
+		priv   crypto.PrivKey
+		peerID string
+	}
+	enroll := func(t *testing.T, role string, labels map[string]string) enrolledMeshNode {
 		t.Helper()
 		token := createAdminBootstrapToken(t, baseURL, adminToken, role, 1)
 		priv, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
@@ -144,15 +150,28 @@ func TestEgressPolicyIsDistributedToServingNodes(t *testing.T) {
 		if out.Status != api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED {
 			t.Fatalf("enroll %s: status %v (%s)", role, out.Status, out.ErrorMessage)
 		}
-		return out.BiscuitToken
+		return enrolledMeshNode{token: out.BiscuitToken, priv: priv, peerID: pID.String()}
 	}
-	pepToken := enroll(t, "pep", nil)
-	dc1Token := enroll(t, api.RoleNode, map[string]string{"site": "dc1"})
+	pepNode := enroll(t, "pep", nil)
+	dc1Node := enroll(t, api.RoleNode, map[string]string{"site": "dc1"})
 
-	getMesh := func(t *testing.T, path string, token []byte, out proto.Message) {
+	getMesh := func(t *testing.T, path string, node enrolledMeshNode, out proto.Message) {
 		t.Helper()
 		req, _ := http.NewRequest(http.MethodGet, baseURL+path, nil)
-		req.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString(token))
+		req.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString(node.token))
+		ts := time.Now().UnixMilli()
+		var challenge []byte
+		if path == "/policies" {
+			challenge = api.PoliciesChallenge(node.peerID, ts)
+		} else {
+			challenge = api.EgressChallenge(node.peerID, ts)
+		}
+		sig, err := node.priv.Sign(challenge)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set(api.HeaderChallengeTimestamp, strconv.FormatInt(ts, 10))
+		req.Header.Set(api.HeaderChallengeSignature, base64.RawURLEncoding.EncodeToString(sig))
 		resp, err := client.Do(req)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)
@@ -168,7 +187,7 @@ func TestEgressPolicyIsDistributedToServingNodes(t *testing.T) {
 	}
 
 	var rules api.PolicyConfigGetResponse
-	getMesh(t, "/policies", pepToken, &rules)
+	getMesh(t, "/policies", pepNode, &rules)
 	for _, want := range []string{
 		`granted_service_exact("egress", "api.github.com") <- role("pep")`,
 		`granted_service_exact("egress", "mam.internal.example.com") <- label("site", "dc1")`,
@@ -192,14 +211,14 @@ func TestEgressPolicyIsDistributedToServingNodes(t *testing.T) {
 		return out
 	}
 	var pepEgress, dc1Egress api.EgressAssignmentsResponse
-	getMesh(t, "/egress", pepToken, &pepEgress)
+	getMesh(t, "/egress", pepNode, &pepEgress)
 	if got := names(&pepEgress); !slices.Equal(got, []string{"api.github.com"}) {
 		t.Errorf("pep node assigned %v, want [api.github.com]", got)
 	}
 	if pepEgress.Egress[0].Credential != "github-eu" {
 		t.Errorf("assignment lost its credential name: %v", pepEgress.Egress[0])
 	}
-	getMesh(t, "/egress", dc1Token, &dc1Egress)
+	getMesh(t, "/egress", dc1Node, &dc1Egress)
 	if got := names(&dc1Egress); !slices.Equal(got, []string{"mam.internal.example.com"}) {
 		t.Errorf("dc1 node assigned %v, want [mam.internal.example.com]", got)
 	}

@@ -77,7 +77,7 @@ func (n *SamNode) syncRevocations(ctx context.Context, controlPlaneURL string) e
 		return nil
 	}
 	fetchedAt := time.Now()
-	resp, err := controlPlaneClient(controlPlaneURL).FetchRevocations(ctx, token)
+	resp, err := n.controlPlane(controlPlaneURL).FetchRevocations(ctx, token)
 	if errors.Is(err, cpclient.ErrNotFound) {
 		return nil
 	}

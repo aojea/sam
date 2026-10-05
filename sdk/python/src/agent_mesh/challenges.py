@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Proof-of-possession challenges on the control plane's enrollment surface.
+"""Proof-of-possession challenges on the control plane's mesh surface.
 Each payload names the peer and the endpoint, so a captured signature
 verifies nowhere else. Mirrors api/network.go; ts is unix milliseconds."""
 
@@ -41,3 +41,24 @@ def register_challenge(peer_id: str, ts: int) -> bytes:
 def refresh_challenge(peer_id: str, ts: int) -> bytes:
     """Signed at POST /refresh."""
     return _challenge("refresh", peer_id, ts)
+
+
+def policies_challenge(peer_id: str, ts: int) -> bytes:
+    """Signed at GET /policies."""
+    return _challenge("policies", peer_id, ts)
+
+
+def egress_challenge(peer_id: str, ts: int) -> bytes:
+    """Signed at GET /egress."""
+    return _challenge("egress", peer_id, ts)
+
+
+def revocations_challenge(peer_id: str, ts: int) -> bytes:
+    """Signed at GET /revocations."""
+    return _challenge("revocations", peer_id, ts)
+
+
+def nodes_catalog_challenge(peer_id: str, ts: int) -> bytes:
+    """Signed at POST /nodes/catalog."""
+    return _challenge("nodes-catalog", peer_id, ts)
+

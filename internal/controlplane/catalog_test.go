@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -32,8 +33,9 @@ import (
 )
 
 // postCatalog POSTs a raw body to /nodes/catalog under the given
-// Authorization header value and returns the response status.
-func postCatalog(t *testing.T, cpURL, authHeader string, body []byte) int {
+// Authorization header value and optional node key (for signing the PoP
+// challenge) and returns the response status.
+func postCatalog(t *testing.T, cpURL, authHeader string, priv crypto.PrivKey, body []byte) int {
 	t.Helper()
 
 	req, err := http.NewRequest(http.MethodPost, cpURL+"/nodes/catalog", bytes.NewReader(body))
@@ -42,6 +44,19 @@ func postCatalog(t *testing.T, cpURL, authHeader string, body []byte) int {
 	}
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)
+	}
+	if priv != nil {
+		pID, err := peer.IDFromPrivateKey(priv)
+		if err != nil {
+			t.Fatalf("IDFromPrivateKey: %v", err)
+		}
+		ts := time.Now().UnixMilli()
+		sig, err := priv.Sign(api.NodesCatalogChallenge(pID.String(), ts))
+		if err != nil {
+			t.Fatalf("Sign: %v", err)
+		}
+		req.Header.Set(api.HeaderChallengeTimestamp, strconv.FormatInt(ts, 10))
+		req.Header.Set(api.HeaderChallengeSignature, base64.RawURLEncoding.EncodeToString(sig))
 	}
 	req.Header.Set("Content-Type", "application/x-protobuf")
 
@@ -113,7 +128,7 @@ func TestHandleNodeCatalog(t *testing.T) {
 		&api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "stvv-compliance-docs", Description: "doc lookup"},
 		&api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_INFERENCE, Name: "llama", Description: "local model"},
 	)
-	if got := postCatalog(t, cpURL, bearer(biscuitBytes), body); got != http.StatusNoContent {
+	if got := postCatalog(t, cpURL, bearer(biscuitBytes), priv, body); got != http.StatusNoContent {
 		t.Fatalf("HandleNodeCatalog: got status %d, want %d", got, http.StatusNoContent)
 	}
 
@@ -128,7 +143,7 @@ func TestHandleNodeCatalog(t *testing.T) {
 
 	// A second report replaces the first rather than accumulating.
 	body = catalogBody(t, &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_A2A, Name: "planner"})
-	if got := postCatalog(t, cpURL, bearer(biscuitBytes), body); got != http.StatusNoContent {
+	if got := postCatalog(t, cpURL, bearer(biscuitBytes), priv, body); got != http.StatusNoContent {
 		t.Fatalf("second report: got status %d, want %d", got, http.StatusNoContent)
 	}
 	entry = srv.catalogSnapshot()[nodePeer.String()]
@@ -148,7 +163,7 @@ func TestHandleNodeCatalog(t *testing.T) {
 	}
 
 	// An empty report is valid and clears the node's services.
-	if got := postCatalog(t, cpURL, bearer(biscuitBytes), catalogBody(t)); got != http.StatusNoContent {
+	if got := postCatalog(t, cpURL, bearer(biscuitBytes), priv, catalogBody(t)); got != http.StatusNoContent {
 		t.Fatalf("empty report: got status %d, want %d", got, http.StatusNoContent)
 	}
 	if view := adminNodeCatalog(t, cpURL, srv.config.AdminToken); len(view[nodePeer.String()].Services) != 0 {
@@ -166,7 +181,7 @@ func TestHandleNodeCatalog_Rejections(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	_, biscuitBytes := enrollRefreshTestNode(t, ctx, store)
+	priv, biscuitBytes := enrollRefreshTestNode(t, ctx, store)
 	cpPriv, _, err := store.GetCurrentKey(ctx)
 	if err != nil {
 		t.Fatalf("GetCurrentKey: %v", err)
@@ -204,21 +219,23 @@ func TestHandleNodeCatalog_Rejections(t *testing.T) {
 	tests := []struct {
 		name string
 		auth string
+		priv crypto.PrivKey
 		body []byte
 		want int
 	}{
 		{name: "missing authorization", auth: "", body: ok, want: http.StatusUnauthorized},
 		{name: "not a bearer token", auth: "Basic abc", body: ok, want: http.StatusUnauthorized},
-		{name: "malformed base64", auth: "Bearer %%%not-base64", body: ok, want: http.StatusBadRequest},
+		{name: "malformed base64", auth: "Bearer %%%not-base64", body: ok, want: http.StatusUnauthorized},
 		{name: "not a biscuit", auth: bearer([]byte("garbage")), body: ok, want: http.StatusUnauthorized},
-		{name: "forged signature", auth: bearer(forged), body: ok, want: http.StatusUnauthorized},
-		{name: "unenrolled peer", auth: bearer(unenrolled), body: ok, want: http.StatusUnauthorized},
-		{name: "invalid body", auth: bearer(biscuitBytes), body: []byte(`{"services":[]}`), want: http.StatusBadRequest},
-		{name: "too many services", auth: bearer(biscuitBytes), body: catalogBody(t, tooMany...), want: http.StatusBadRequest},
+		{name: "forged signature", auth: bearer(forged), priv: strangerPriv, body: ok, want: http.StatusUnauthorized},
+		{name: "unenrolled peer", auth: bearer(unenrolled), priv: strangerPriv, body: ok, want: http.StatusUnauthorized},
+		{name: "missing challenge", auth: bearer(biscuitBytes), body: ok, want: http.StatusUnauthorized},
+		{name: "invalid body", auth: bearer(biscuitBytes), priv: priv, body: []byte(`{"services":[]}`), want: http.StatusBadRequest},
+		{name: "too many services", auth: bearer(biscuitBytes), priv: priv, body: catalogBody(t, tooMany...), want: http.StatusBadRequest},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := postCatalog(t, cpURL, tc.auth, tc.body); got != tc.want {
+			if got := postCatalog(t, cpURL, tc.auth, tc.priv, tc.body); got != tc.want {
 				t.Fatalf("got status %d, want %d", got, tc.want)
 			}
 		})
@@ -257,7 +274,7 @@ func TestHandleNodeCatalog_Admission(t *testing.T) {
 		t.Fatalf("IDFromPrivateKey: %v", err)
 	}
 	body := catalogBody(t, &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "calc"})
-	if got := postCatalog(t, cpURL, bearer(biscuitBytes), body); got != http.StatusNoContent {
+	if got := postCatalog(t, cpURL, bearer(biscuitBytes), priv, body); got != http.StatusNoContent {
 		t.Fatalf("admitted node: got status %d, want %d", got, http.StatusNoContent)
 	}
 	if _, ok := adminNodeCatalog(t, cpURL, srv.config.AdminToken)[nodePeer.String()]; !ok {
@@ -273,7 +290,7 @@ func TestHandleNodeCatalog_Admission(t *testing.T) {
 	if err := store.EnrollNode(ctx, record); err != nil {
 		t.Fatalf("EnrollNode: %v", err)
 	}
-	if got := postCatalog(t, cpURL, bearer(biscuitBytes), body); got != http.StatusUnauthorized {
+	if got := postCatalog(t, cpURL, bearer(biscuitBytes), priv, body); got != http.StatusUnauthorized {
 		t.Fatalf("expired session: got status %d, want %d", got, http.StatusUnauthorized)
 	}
 	if view := adminNodeCatalog(t, cpURL, srv.config.AdminToken); len(view) != 0 {
@@ -288,7 +305,7 @@ func TestHandleNodeCatalog_Admission(t *testing.T) {
 	if err := srv.banNode(ctx, record); err != nil {
 		t.Fatalf("banNode: %v", err)
 	}
-	if got := postCatalog(t, cpURL, bearer(biscuitBytes), body); got != http.StatusUnauthorized {
+	if got := postCatalog(t, cpURL, bearer(biscuitBytes), priv, body); got != http.StatusUnauthorized {
 		t.Fatalf("banned node: got status %d, want %d", got, http.StatusUnauthorized)
 	}
 	if snap := srv.catalogSnapshot(); len(snap) != 0 {
@@ -333,7 +350,7 @@ func TestCatalogPeerIDCanonicalization(t *testing.T) {
 	}
 
 	body := catalogBody(t, &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "calc"})
-	if got := postCatalog(t, cpURL, bearer(biscuitBytes), body); got != http.StatusNoContent {
+	if got := postCatalog(t, cpURL, bearer(biscuitBytes), priv, body); got != http.StatusNoContent {
 		t.Fatalf("report: got status %d, want %d", got, http.StatusNoContent)
 	}
 

@@ -136,34 +136,20 @@ func RunSTS(ctx context.Context, opts STSOptions) (*STSReport, error) {
 	}
 
 	// Phase 1: Uncached Control Plane POST /token/exchange
-	cpClient := cpclient.New(env.cpURL, env.httpClient)
+	cpClient := cpclient.New(env.cpURL, env.httpClient).WithIdentity(env.nodePeerID.String(), env.nodePriv)
 	report.TokenExchangeUncached = runSTSPhase(ctx, opts.Concurrency, opts.Warmup, opts.Requests, &env.exchangeCalls, func(i int) error {
-		nowMs := time.Now().UnixMilli()
-		sig, err := env.nodePriv.Sign([]byte(api.TokenExchangeChallenge(env.nodePeerID.String(), nowMs)))
-		if err != nil {
-			return err
-		}
-		_, err = cpClient.ExchangeToken(ctx, env.nodeBiscuit, &api.TokenExchangeRequest{
-			SubjectToken:       baseJWT,
-			ChallengeUnixMs:    nowMs,
-			ChallengeSignature: sig,
+		_, err := cpClient.ExchangeToken(ctx, env.nodeBiscuit, &api.TokenExchangeRequest{
+			SubjectToken: baseJWT,
 		})
 		return err
 	})
 
 	// Phase 2: Uncached Control Plane POST /sts/token
 	report.STSTokenUncached = runSTSPhase(ctx, opts.Concurrency, opts.Warmup, opts.Requests, &env.stsCalls, func(i int) error {
-		nowMs := time.Now().UnixMilli()
-		sig, err := env.nodePriv.Sign([]byte(api.STSTokenChallenge(env.nodePeerID.String(), nowMs)))
-		if err != nil {
-			return err
-		}
-		_, err = cpClient.MintSTSToken(ctx, env.nodeBiscuit, &api.STSTokenRequest{
-			Biscuit:            taskBiscuit,
-			Destination:        "bigquery.googleapis.com",
-			Audience:           "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/sam/providers/cp",
-			ChallengeUnixMs:    nowMs,
-			ChallengeSignature: sig,
+		_, err := cpClient.MintSTSToken(ctx, env.nodeBiscuit, &api.STSTokenRequest{
+			Biscuit:     taskBiscuit,
+			Destination: "bigquery.googleapis.com",
+			Audience:    "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/sam/providers/cp",
 		})
 		return err
 	})

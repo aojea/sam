@@ -434,7 +434,7 @@ class MeshSession:
 
     async def sync_policy(self) -> None:
         """Re-reads the mesh policy from the control plane."""
-        self._policy_rules = await trio.to_thread.run_sync(self.mesh.control_plane.policy_rules, self.mesh.credential.biscuit)
+        self._policy_rules = await trio.to_thread.run_sync(self.mesh.control_plane.policy_rules, self.mesh.identity, self.mesh.credential.biscuit)
 
     async def sync(self) -> "ControlPlaneSync":
         """Pulls keys, bans and router addresses from the control plane now, and

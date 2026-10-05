@@ -18,12 +18,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -106,25 +104,6 @@ func (n *SamNode) enrollHTTP(ctx context.Context, controlPlaneURL, jwt string, p
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal public key: %w", err)
 	}
-	ts := time.Now().UnixMilli()
-	sig, err := privKey.Sign(api.RegisterChallenge(peerID.String(), ts))
-	if err != nil {
-		return nil, fmt.Errorf("failed to sign registration challenge: %w", err)
-	}
-
-	req := &api.EnrollRequest{
-		Jwt:                jwt,
-		PeerId:             peerID.String(),
-		PublicKey:          pubBytes,
-		RequestedRole:      n.config.RequiredRole,
-		Labels:             n.labels(),
-		ChallengeUnixMs:    ts,
-		ChallengeSignature: sig,
-	}
-	data, err := proto.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal enroll request: %v", err)
-	}
 
 	if !strings.HasPrefix(controlPlaneURL, "http://") && !strings.HasPrefix(controlPlaneURL, "https://") {
 		return nil, fmt.Errorf("control plane address must be an HTTP or HTTPS URL for enrollment: %s", controlPlaneURL)
@@ -132,14 +111,32 @@ func (n *SamNode) enrollHTTP(ctx context.Context, controlPlaneURL, jwt string, p
 	url := controlPlaneURL + "/register"
 	logger.Infof("Enrolling via HTTP at %s", url)
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %v", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/x-protobuf")
-
 	client := controlPlaneHTTPClient(30 * time.Second)
-	resp, err := client.Do(httpReq)
+	resp, err := cpclient.DoWithChallenge(client, time.Now, func(ts int64) (*http.Request, error) {
+		sig, err := privKey.Sign(api.RegisterChallenge(peerID.String(), ts))
+		if err != nil {
+			return nil, fmt.Errorf("failed to sign registration challenge: %w", err)
+		}
+		req := &api.EnrollRequest{
+			Jwt:                jwt,
+			PeerId:             peerID.String(),
+			PublicKey:          pubBytes,
+			RequestedRole:      n.config.RequiredRole,
+			Labels:             n.labels(),
+			ChallengeUnixMs:    ts,
+			ChallengeSignature: sig,
+		}
+		data, err := proto.Marshal(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal enroll request: %v", err)
+		}
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP request: %v", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/x-protobuf")
+		return httpReq, nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %v", err)
 	}
@@ -258,26 +255,6 @@ func (n *SamNode) EnrollBootstrap(ctx context.Context, controlPlaneURL string, b
 		return fmt.Errorf("failed to marshal public key: %w", err)
 	}
 
-	enrollTS := time.Now().UnixMilli()
-	enrollSig, err := n.config.PrivKey.Sign(api.EnrollChallenge(n.Host.ID().String(), enrollTS))
-	if err != nil {
-		return fmt.Errorf("failed to sign enrollment challenge: %w", err)
-	}
-
-	req := &api.BootstrapEnrollRequest{
-		BootstrapToken:     bootstrapToken,
-		PeerId:             n.Host.ID().String(),
-		PublicKey:          pubBytes,
-		RequestedRole:      n.config.RequiredRole,
-		Labels:             n.labels(),
-		ChallengeUnixMs:    enrollTS,
-		ChallengeSignature: enrollSig,
-	}
-	data, err := proto.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("failed to marshal bootstrap enroll request: %w", err)
-	}
-
 	if !strings.HasPrefix(controlPlaneURL, "http://") && !strings.HasPrefix(controlPlaneURL, "https://") {
 		return fmt.Errorf("control plane address must be an HTTP or HTTPS URL for enrollment: %s", controlPlaneURL)
 	}
@@ -285,13 +262,31 @@ func (n *SamNode) EnrollBootstrap(ctx context.Context, controlPlaneURL string, b
 	logger.Infof("Enrolling via Bootstrap token at %s", enrollURL)
 
 	client := controlPlaneHTTPClient(30 * time.Second)
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", enrollURL, bytes.NewReader(data))
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/x-protobuf")
-
-	resp, err := client.Do(httpReq)
+	resp, err := cpclient.DoWithChallenge(client, time.Now, func(enrollTS int64) (*http.Request, error) {
+		enrollSig, err := n.config.PrivKey.Sign(api.EnrollChallenge(n.Host.ID().String(), enrollTS))
+		if err != nil {
+			return nil, fmt.Errorf("failed to sign enrollment challenge: %w", err)
+		}
+		req := &api.BootstrapEnrollRequest{
+			BootstrapToken:     bootstrapToken,
+			PeerId:             n.Host.ID().String(),
+			PublicKey:          pubBytes,
+			RequestedRole:      n.config.RequiredRole,
+			Labels:             n.labels(),
+			ChallengeUnixMs:    enrollTS,
+			ChallengeSignature: enrollSig,
+		}
+		data, err := proto.Marshal(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal bootstrap enroll request: %w", err)
+		}
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", enrollURL, bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/x-protobuf")
+		return httpReq, nil
+	})
 	if err != nil {
 		return fmt.Errorf("HTTP request failed: %w", err)
 	}
@@ -339,19 +334,16 @@ func (n *SamNode) EnrollBootstrap(ctx context.Context, controlPlaneURL string, b
 			case <-ticker.C:
 				// Prove possession of the enrollment key on every poll; the
 				// control plane returns the biscuit only to the enrollee.
-				ts := time.Now().UnixMilli()
-				sig, err := n.config.PrivKey.Sign(api.EnrollStatusChallenge(n.Host.ID().String(), ts))
-				if err != nil {
-					return fmt.Errorf("failed to sign enrollment status challenge: %w", err)
-				}
-				hReq, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
-				if err != nil {
-					return fmt.Errorf("failed to create status request: %w", err)
-				}
-				hReq.Header.Set(api.HeaderChallengeTimestamp, strconv.FormatInt(ts, 10))
-				hReq.Header.Set(api.HeaderChallengeSignature, base64.RawURLEncoding.EncodeToString(sig))
-
-				hResp, err := client.Do(hReq)
+				hResp, err := cpclient.DoWithChallenge(client, time.Now, func(ts int64) (*http.Request, error) {
+					hReq, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
+					if err != nil {
+						return nil, fmt.Errorf("failed to create status request: %w", err)
+					}
+					if err := cpclient.SetChallengeHeaders(hReq, n.config.PrivKey, api.EnrollStatusChallenge(n.Host.ID().String(), ts), ts); err != nil {
+						return nil, fmt.Errorf("failed to sign enrollment status challenge: %w", err)
+					}
+					return hReq, nil
+				})
 				if err != nil {
 					logger.Warnf("Failed to check enrollment status: %v", err)
 					continue

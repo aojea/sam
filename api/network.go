@@ -133,6 +133,40 @@ func STSTokenChallenge(peerID string, ts int64) []byte {
 	return []byte("sam:sts-token:" + peerID + ":" + strconv.FormatInt(ts, 10))
 }
 
+// PoliciesChallenge is the payload an enrolled peer signs with its identity
+// key at GET /policies in the HeaderChallengeTimestamp and
+// HeaderChallengeSignature headers.
+func PoliciesChallenge(peerID string, ts int64) []byte {
+	return []byte("sam:policies:" + peerID + ":" + strconv.FormatInt(ts, 10))
+}
+
+// EgressChallenge is the payload an enrolled peer signs with its identity key
+// at GET /egress in the HeaderChallengeTimestamp and HeaderChallengeSignature
+// headers.
+func EgressChallenge(peerID string, ts int64) []byte {
+	return []byte("sam:egress:" + peerID + ":" + strconv.FormatInt(ts, 10))
+}
+
+// RevocationsChallenge is the payload an enrolled peer signs with its identity
+// key at GET /revocations in the HeaderChallengeTimestamp and
+// HeaderChallengeSignature headers.
+func RevocationsChallenge(peerID string, ts int64) []byte {
+	return []byte("sam:revocations:" + peerID + ":" + strconv.FormatInt(ts, 10))
+}
+
+// NodesCatalogChallenge is the payload an enrolled node signs with its
+// identity key at POST /nodes/catalog in the HeaderChallengeTimestamp and
+// HeaderChallengeSignature headers.
+func NodesCatalogChallenge(peerID string, ts int64) []byte {
+	return []byte("sam:nodes-catalog:" + peerID + ":" + strconv.FormatInt(ts, 10))
+}
+
+// ErrStaleChallengeTimestampMessage is the stable substring returned in a 401
+// response body when a signed challenge timestamp is outside the control
+// plane's freshness window. Clients match this message to recompute
+// challenge_unix_ms from the response's Date header and retry once.
+const ErrStaleChallengeTimestampMessage = "stale or invalid challenge timestamp"
+
 // ============================================================================
 // OAuth 2.1 & RFC 8693 Token Exchange Constants
 // ============================================================================
@@ -171,10 +205,11 @@ const (
 	HeaderSamBiscuit = "X-Sam-Biscuit"
 
 	// HeaderChallengeTimestamp and HeaderChallengeSignature carry the signed
-	// freshness challenge on GET /enroll/status: unix milliseconds and an
-	// unpadded base64url signature over EnrollStatusChallenge. Headers rather
-	// than query parameters, so the signature never lands in access logs,
-	// where it would be replayable for its freshness window.
+	// freshness challenge on GET /enroll/status, GET /policies, GET /egress,
+	// GET /revocations, and POST /nodes/catalog: unix milliseconds and an
+	// unpadded base64url signature over the endpoint's challenge payload.
+	// Headers rather than query parameters, so the signature never lands in
+	// access logs, where it would be replayable for its freshness window.
 	HeaderChallengeTimestamp = "X-Sam-Challenge-Ts"
 	HeaderChallengeSignature = "X-Sam-Challenge-Sig"
 

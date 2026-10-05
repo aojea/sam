@@ -351,8 +351,8 @@ as a standard OIDC issuer:
 | Surface | Mechanism | What it binds | Replay defense |
 | :--- | :--- | :--- | :--- |
 | **libp2p data path** (node-to-node, node-to-router) | Channel binding: Block 0 `client_peer_id` must equal the `connection_peer_id` authenticated by the libp2p Noise or TLS handshake. | The transport private key | None needed; the token is unusable on any other connection. |
-| **Control plane mesh protocol** (`/enroll`, `/enroll/status`, `/register`, `/refresh`, `/routers/lease`, `/token/exchange`, `/sts/token`) | Ed25519 signature over `sam:<endpoint>:<peer_id>:<challenge_unix_ms>`, carried in protobuf fields (`challenge_unix_ms`, `challenge_signature`) or `X-Sam-Challenge-Ts` / `X-Sam-Challenge-Sig` on `GET /enroll/status`. | Endpoint name, peer ID, timestamp | 5-minute freshness window (`challengeMaxAge`); `/refresh` additionally redeems only the last Biscuit issued to the peer. |
-| **Control plane read & report endpoints** (`/policies`, `/egress`, `/revocations`, `/nodes/catalog`) | Bearer Member Biscuit of an admitted node (`admittedNode`). | Enrolled node credential | Bounded by Biscuit TTL and ban/revocation list. |
+| **Control plane mesh protocol** (`/enroll`, `/enroll/status`, `/register`, `/refresh`, `/routers/lease`, `/token/exchange`, `/sts/token`) | Ed25519 signature over `sam:<endpoint>:<peer_id>:<challenge_unix_ms>`, carried in protobuf fields (`challenge_unix_ms`, `challenge_signature`) or `X-Sam-Challenge-Ts` / `X-Sam-Challenge-Sig` on `GET /enroll/status`. | Endpoint name, peer ID, timestamp | 5-minute freshness window (`challengeMaxAge`) with one-shot `Date`-header clock-skew recovery on `401`; `/refresh` additionally redeems only the last Biscuit issued to the peer. |
+| **Control plane read & report endpoints** (`GET /policies`, `GET /egress`, `GET /revocations`, `POST /nodes/catalog`) | Bearer Member Biscuit of an admitted node (`admittedNodeWithChallenge`) plus `X-Sam-Challenge-Ts` / `X-Sam-Challenge-Sig` signed over `sam:<endpoint>:<peer_id>:<ts>` (`policies`, `egress`, `revocations`, `nodes-catalog`), verified against the node's stored Ed25519 public key via `verifyFreshChallenge`. | Enrolled node credential, endpoint name, peer ID, timestamp | 5-minute freshness window (`challengeMaxAge`) with one-shot `Date`-header clock-skew recovery on `401`, bounded by Biscuit TTL and ban/revocation list. |
 | **OAuth 2.1 external client surface** (`/oauth/authorize`, `/oauth/token`, `/mcp` over HTTPS) | Authorization Code + PKCE (`S256`) on the code grant. The `client_peer_id` of the minted Biscuit is the calling node's when a node calls, otherwise the `actor_peer_id` form parameter or the control plane's own peer ID (`resolveDefaultActorPeer`). | A claimed peer ID (the Biscuit is a bearer token on the HTTPS `/mcp` hop unless sender-constrained with DPoP; see §5.2) | Single-use authorization codes with PKCE verifier check on the code exchange; none on the resulting bearer Biscuit. |
 
 ---
@@ -498,19 +498,23 @@ sequenceDiagram
 
 ### 5.1 Nonce and body-hash binding on control-plane HTTP requests
 
-`POST /enroll`, `GET /enroll/status`, `POST /register`, `POST /refresh`,
-`POST /token/exchange`, and `POST /sts/token` verify an Ed25519 signature over
-`sam:<endpoint>:<peer_id>:<challenge_unix_ms>` within a 5-minute clock window
-(`challengeMaxAge`), while `/policies`, `/egress`, `/revocations`, and
-`/nodes/catalog` authenticate the caller via its bearer Member Biscuit.
+Every authenticated mesh-protocol endpoint on the control plane (`POST /enroll`,
+`GET /enroll/status`, `POST /register`, `POST /refresh`, `POST /routers/lease`,
+`POST /token/exchange`, `POST /sts/token`, `GET /policies`, `GET /egress`,
+`GET /revocations`, and `POST /nodes/catalog`) verifies an Ed25519 signature
+over `sam:<endpoint>:<peer_id>:<challenge_unix_ms>` within a 5-minute clock
+window (`challengeMaxAge`). When a client's clock has drifted outside that
+window, the control plane answers `401` (`"stale or invalid challenge timestamp"`)
+with the standard HTTP `Date` header (`Access-Control-Expose-Headers: Date` on
+CORS surfaces), and clients in Go, TypeScript, and Python recompute
+`challenge_unix_ms` from `Date` and retry once.
 
-Because the signed text does not yet carry a server-tracked random nonce or
-request-body SHA-256 hash, TLS (`https://`) is mandatory for every remote
-control plane (`AllowInsecureControlPlane` is restricted to loopback or
-explicitly trusted networks). Extending the proof message with a random nonce,
-an optional server nonce for skewed clocks, and a request-body SHA-256 hash across
-all credentialed control-plane endpoints is a self-contained future hardening
-step.
+Because the signed text does not carry a server-tracked random nonce or a
+request-body SHA-256 hash, TLS end-to-end to the control plane (`https://`, with
+`AllowInsecureControlPlane` restricted to loopback or explicitly trusted
+networks) is the transport boundary, and replay within the 5-minute freshness
+window is accepted on that basis. `/refresh` additionally enforces single-use
+redemption of the last Biscuit issued to the peer.
 
 ### 5.2 Optional DPoP (RFC 9449) at the OAuth 2.1 border
 

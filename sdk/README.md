@@ -224,16 +224,22 @@ messages in `api/sam.proto`. Bodies are capped at 1 MiB on both sides.
 | `POST /register` | `EnrollRequest` | `EnrollResponse` | sign `sam:register:<peer_id>:<ts>` |
 | `POST /refresh` | `TokenRefreshRequest`, header `Authorization: Bearer <base64 biscuit>` | `TokenRefreshResponse` | sign `sam:refresh:<peer_id>:<ts>` |
 | `GET /keys` | — | `KeysResponse` | none; see below |
-| `GET /policies` | header `Authorization: Bearer <base64 biscuit>` | `PolicyConfigGetResponse{datalog_rules}` | none; the biscuit must belong to an admitted node |
-| `POST /nodes/catalog` | `NodeCatalogReport`, header `Authorization: Bearer <base64 biscuit>` | `204` | none; the reporting peer is read from the biscuit. `sam-node` reports what it publishes; an SDK member publishes nothing and does not call it |
+| `GET /policies` | headers `Authorization: Bearer <base64 biscuit>`, `X-Sam-Challenge-Ts`, `X-Sam-Challenge-Sig` | `PolicyConfigGetResponse{datalog_rules}` | sign `sam:policies:<peer_id>:<ts>` |
+| `GET /egress` | headers `Authorization: Bearer <base64 biscuit>`, `X-Sam-Challenge-Ts`, `X-Sam-Challenge-Sig` | `EgressAssignmentsResponse` | sign `sam:egress:<peer_id>:<ts>` (`sam-node` only) |
+| `GET /revocations` | headers `Authorization: Bearer <base64 biscuit>`, `X-Sam-Challenge-Ts`, `X-Sam-Challenge-Sig` | `RevocationsResponse` | sign `sam:revocations:<peer_id>:<ts>` (`sam-node` only) |
+| `POST /nodes/catalog` | `NodeCatalogReport`, headers `Authorization: Bearer <base64 biscuit>`, `X-Sam-Challenge-Ts`, `X-Sam-Challenge-Sig` | `204` | sign `sam:nodes-catalog:<peer_id>:<ts>`; `sam-node` reports what it publishes, while an SDK member publishes nothing and does not call it |
 
 - `<ts>` is the request's `challenge_unix_ms`, unix milliseconds, and must
-  be within 5 minutes of the control plane's clock (`challengeMaxAge`).
+  be within 5 minutes of the control plane's clock (`challengeMaxAge`). When
+  the control plane answers `401` with `"stale or invalid challenge timestamp"`,
+  a client reads the response's `Date` header (`Access-Control-Expose-Headers: Date`),
+  recomputes `<ts>` from it, and retries once; other `401`s are not retried.
 - The endpoints above answer a CORS preflight and mark their responses for
   any origin (`Access-Control-Allow-Origin: *`), so a page on another origin
   can call them. They authenticate by what the request carries, a token in
-  the body or a biscuit as a bearer, never by a cookie. The operator plane
-  (`/admin/*`, `/user/*`) and `/routers/lease` do not.
+  the body or a biscuit as a bearer plus the signed challenge, never by a
+  cookie. The operator plane (`/admin/*`, `/user/*`) and `/routers/lease` do
+  not.
   Challenges are defined in `api/network.go`. It is the one instant on the
   wire that is an `int64`: it is the number in the signed text. Every other
   instant (`expire_time`, `sign_time`, `event_time`, `announce_time`) is a

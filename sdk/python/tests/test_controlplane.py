@@ -18,6 +18,7 @@ and how it treats every answer. The real one is exercised by
 tests/integration/sdk_enroll_test.go."""
 
 import base64
+import email.utils
 import threading
 import time
 import urllib.parse
@@ -31,6 +32,7 @@ from agent_mesh.controlplane import (
     HEADER_CHALLENGE_TIMESTAMP,
     KEYS_RESPONSE_FRESHNESS_MS,
     ROLE_NODE,
+    STALE_CHALLENGE_TIMESTAMP_MESSAGE,
     ControlPlaneClient,
     ControlPlaneError,
     EnrollmentRejectedError,
@@ -58,7 +60,7 @@ BISCUIT = b"not-really-a-biscuit"
 
 
 def fake_transport(routes):
-    """routes: {"METHOD /path": handler(url_parts, headers, body) -> (status, bytes)}"""
+    """routes: {"METHOD /path": handler(url_parts, headers, body) -> (status, bytes[, resp_headers])}"""
 
     def send(method, url, headers, body):
         parts = urllib.parse.urlsplit(url)
@@ -214,6 +216,83 @@ def test_refresh_presents_bearer_biscuit_and_signs_refresh_challenge():
     assert excinfo.value.status == 401
 
 
+def test_policy_rules_presents_biscuit_and_signs_policies_challenge():
+    identity = Identity.generate()
+    rules = ['granted_service("mcp", "echo") <- role("sam:role:node")']
+
+    def policies(parts, headers, body):
+        assert headers["Authorization"] == "Bearer " + base64.b64encode(BISCUIT).decode()
+        ts = int(headers[HEADER_CHALLENGE_TIMESTAMP])
+        sig = base64.urlsafe_b64decode(headers[HEADER_CHALLENGE_SIGNATURE] + "==")
+        assert verify_ed25519(identity.public_key_raw, challenges.policies_challenge(identity.peer_id, ts), sig)
+        return 200, pb.PolicyConfigGetResponse(datalog_rules=rules).SerializeToString()
+
+    client = ControlPlaneClient("http://127.0.0.1:1", transport=fake_transport({"GET /policies": policies}))
+    assert client.policy_rules(identity, BISCUIT) == rules
+
+    assert challenges.policies_challenge("peer1", 42) == b"sam:policies:peer1:42"
+    assert challenges.egress_challenge("peer1", 42) == b"sam:egress:peer1:42"
+    assert challenges.revocations_challenge("peer1", 42) == b"sam:revocations:peer1:42"
+    assert challenges.nodes_catalog_challenge("peer1", 42) == b"sam:nodes-catalog:peer1:42"
+
+
+def test_clock_skew_retries_once_using_response_date_header_and_does_not_retry_other_401s():
+    identity = Identity.generate()
+    server_now_sec = int(time.time())
+    server_now_ms = server_now_sec * 1000
+    skewed_client_now_ms = server_now_ms + 10 * 60 * 1000
+    date_header = email.utils.formatdate(server_now_sec, usegmt=True)
+    rules = ['granted_service("mcp", "echo") <- true']
+
+    refresh_calls = []
+    policy_calls = []
+
+    def refresh(parts, headers, body):
+        refresh_calls.append(1)
+        r = pb.TokenRefreshRequest.FromString(body)
+        assert verify_ed25519(identity.public_key_raw, challenges.refresh_challenge(identity.peer_id, r.challenge_unix_ms), r.challenge_signature)
+        if abs(server_now_ms - r.challenge_unix_ms) > 5 * 60 * 1000:
+            return 401, STALE_CHALLENGE_TIMESTAMP_MESSAGE.encode(), {"Date": date_header}
+        return 200, pb.TokenRefreshResponse(biscuit_token=b"fresher-biscuit", expire_time=_ts_s(99)).SerializeToString()
+
+    def policies(parts, headers, body):
+        policy_calls.append(1)
+        ts = int(headers[HEADER_CHALLENGE_TIMESTAMP])
+        sig = base64.urlsafe_b64decode(headers[HEADER_CHALLENGE_SIGNATURE] + "==")
+        assert verify_ed25519(identity.public_key_raw, challenges.policies_challenge(identity.peer_id, ts), sig)
+        if abs(server_now_ms - ts) > 5 * 60 * 1000:
+            return 401, STALE_CHALLENGE_TIMESTAMP_MESSAGE.encode(), {"Date": date_header}
+        return 200, pb.PolicyConfigGetResponse(datalog_rules=rules).SerializeToString()
+
+    skewed_client = ControlPlaneClient(
+        "http://127.0.0.1:1",
+        transport=fake_transport({"POST /refresh": refresh, "GET /policies": policies}),
+        now_ms=lambda: skewed_client_now_ms,
+    )
+    refreshed = skewed_client.refresh(identity, BISCUIT)
+    assert refreshed.biscuit == b"fresher-biscuit"
+    assert len(refresh_calls) == 2
+
+    assert skewed_client.policy_rules(identity, BISCUIT) == rules
+    assert len(policy_calls) == 2
+
+    non_stale_calls = []
+
+    def bad_sig(parts, headers, body):
+        non_stale_calls.append(1)
+        return 401, b"invalid challenge signature", {"Date": date_header}
+
+    non_stale_client = ControlPlaneClient(
+        "http://127.0.0.1:1",
+        transport=fake_transport({"GET /policies": bad_sig}),
+        now_ms=lambda: skewed_client_now_ms,
+    )
+    with pytest.raises(ControlPlaneError) as excinfo:
+        non_stale_client.policy_rules(identity, BISCUIT)
+    assert excinfo.value.status == 401
+    assert len(non_stale_calls) == 1
+
+
 def test_verify_keys_response_accepts_only_a_set_vouched_for_by_a_trusted_key():
     retiring = Identity.generate()
     resp = signed_keys([CP_KEY, retiring])
@@ -244,3 +323,4 @@ def test_keys_fetches_and_verifies_against_the_enrollment_key():
     assert client.keys([CP_KEY.public_key_raw]) == [CP_KEY.public_key_raw]
     with pytest.raises(ValueError, match="not signed by any trusted"):
         client.keys([Identity.generate().public_key_raw])
+

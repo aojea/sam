@@ -177,7 +177,7 @@ func (n *SamNode) ExchangeSubjectJWT(ctx context.Context, subjectToken, subjectT
 		ChallengeUnixMs:    challengeMs,
 		ChallengeSignature: sig,
 	}
-	resp, err := controlPlaneClient(cpURL).ExchangeToken(ctx, nodeBiscuit, req)
+	resp, err := n.controlPlane(cpURL).ExchangeToken(ctx, nodeBiscuit, req)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +249,7 @@ func (n *SamNode) MintBorderJWT(ctx context.Context, callerBiscuit []byte, desti
 		ChallengeUnixMs:    challengeMs,
 		ChallengeSignature: sig,
 	}
-	resp, err := controlPlaneClient(cpURL).MintSTSToken(ctx, nodeBiscuit, req)
+	resp, err := n.controlPlane(cpURL).MintSTSToken(ctx, nodeBiscuit, req)
 	if err != nil {
 		return nil, err
 	}

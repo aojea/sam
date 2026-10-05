@@ -29,7 +29,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -499,27 +498,32 @@ func (r *Router) enroll(peerID peer.ID) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal public key: %w", err)
 	}
-	ts := time.Now().UnixMilli()
-	sig, err := r.privKey.Sign(api.RegisterChallenge(peerID.String(), ts))
-	if err != nil {
-		return fmt.Errorf("failed to sign registration challenge: %w", err)
-	}
-
-	req := &api.EnrollRequest{
-		Jwt:                r.config.OIDCToken,
-		PeerId:             peerID.String(),
-		PublicKey:          pubBytes,
-		RequestedRole:      r.config.RequiredRole,
-		ChallengeUnixMs:    ts,
-		ChallengeSignature: sig,
-	}
-	data, err := proto.Marshal(req)
-	if err != nil {
-		return err
-	}
 
 	client := r.controlPlaneClient(30 * time.Second)
-	resp, err := client.Post(r.config.ControlPlaneURL+"/register", "application/x-protobuf", bytes.NewReader(data))
+	resp, err := cpclient.DoWithChallenge(client, time.Now, func(ts int64) (*http.Request, error) {
+		sig, err := r.privKey.Sign(api.RegisterChallenge(peerID.String(), ts))
+		if err != nil {
+			return nil, fmt.Errorf("failed to sign registration challenge: %w", err)
+		}
+		req := &api.EnrollRequest{
+			Jwt:                r.config.OIDCToken,
+			PeerId:             peerID.String(),
+			PublicKey:          pubBytes,
+			RequestedRole:      r.config.RequiredRole,
+			ChallengeUnixMs:    ts,
+			ChallengeSignature: sig,
+		}
+		data, err := proto.Marshal(req)
+		if err != nil {
+			return nil, err
+		}
+		httpReq, err := http.NewRequestWithContext(r.ctx, http.MethodPost, r.config.ControlPlaneURL+"/register", bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		httpReq.Header.Set("Content-Type", "application/x-protobuf")
+		return httpReq, nil
+	})
 	if err != nil {
 		return err
 	}
@@ -559,27 +563,31 @@ func (r *Router) enrollBootstrap(peerID peer.ID) error {
 		return fmt.Errorf("failed to marshal router public key: %w", err)
 	}
 
-	enrollTS := time.Now().UnixMilli()
-	enrollSig, err := r.privKey.Sign(api.EnrollChallenge(peerID.String(), enrollTS))
-	if err != nil {
-		return fmt.Errorf("failed to sign enrollment challenge: %w", err)
-	}
-
-	req := &api.BootstrapEnrollRequest{
-		BootstrapToken:     r.config.BootstrapToken,
-		PeerId:             peerID.String(),
-		PublicKey:          pubBytes,
-		RequestedRole:      r.config.RequiredRole,
-		ChallengeUnixMs:    enrollTS,
-		ChallengeSignature: enrollSig,
-	}
-	data, err := proto.Marshal(req)
-	if err != nil {
-		return err
-	}
-
 	client := r.controlPlaneClient(30 * time.Second)
-	resp, err := client.Post(r.config.ControlPlaneURL+"/enroll", "application/x-protobuf", bytes.NewReader(data))
+	resp, err := cpclient.DoWithChallenge(client, time.Now, func(enrollTS int64) (*http.Request, error) {
+		enrollSig, err := r.privKey.Sign(api.EnrollChallenge(peerID.String(), enrollTS))
+		if err != nil {
+			return nil, fmt.Errorf("failed to sign enrollment challenge: %w", err)
+		}
+		req := &api.BootstrapEnrollRequest{
+			BootstrapToken:     r.config.BootstrapToken,
+			PeerId:             peerID.String(),
+			PublicKey:          pubBytes,
+			RequestedRole:      r.config.RequiredRole,
+			ChallengeUnixMs:    enrollTS,
+			ChallengeSignature: enrollSig,
+		}
+		data, err := proto.Marshal(req)
+		if err != nil {
+			return nil, err
+		}
+		httpReq, err := http.NewRequestWithContext(r.ctx, http.MethodPost, r.config.ControlPlaneURL+"/enroll", bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		httpReq.Header.Set("Content-Type", "application/x-protobuf")
+		return httpReq, nil
+	})
 	if err != nil {
 		return err
 	}
@@ -627,18 +635,16 @@ func (r *Router) enrollBootstrap(peerID peer.ID) error {
 			case <-ticker.C:
 				// Prove possession of the enrollment key on every poll; the
 				// control plane returns the biscuit only to the enrollee.
-				ts := time.Now().UnixMilli()
-				sig, err := r.privKey.Sign(api.EnrollStatusChallenge(peerID.String(), ts))
-				if err != nil {
-					return fmt.Errorf("failed to sign enrollment status challenge: %w", err)
-				}
-				req, err := http.NewRequestWithContext(r.ctx, http.MethodGet, statusURL, nil)
-				if err != nil {
-					return fmt.Errorf("failed to create status request: %w", err)
-				}
-				req.Header.Set(api.HeaderChallengeTimestamp, strconv.FormatInt(ts, 10))
-				req.Header.Set(api.HeaderChallengeSignature, base64.RawURLEncoding.EncodeToString(sig))
-				statusResp, err := client.Do(req)
+				statusResp, err := cpclient.DoWithChallenge(client, time.Now, func(ts int64) (*http.Request, error) {
+					req, err := http.NewRequestWithContext(r.ctx, http.MethodGet, statusURL, nil)
+					if err != nil {
+						return nil, fmt.Errorf("failed to create status request: %w", err)
+					}
+					if err := cpclient.SetChallengeHeaders(req, r.privKey, api.EnrollStatusChallenge(peerID.String(), ts), ts); err != nil {
+						return nil, fmt.Errorf("failed to sign enrollment status challenge: %w", err)
+					}
+					return req, nil
+				})
 				if err != nil {
 					logger.Warnf("failed to poll enrollment status: %v", err)
 					continue
@@ -796,7 +802,19 @@ func (r *Router) syncKeys() error {
 
 // controlPlane reads the pull endpoints of the control plane.
 func (r *Router) controlPlane(timeout time.Duration) *cpclient.Client {
-	return cpclient.New(r.config.ControlPlaneURL, r.controlPlaneClient(timeout))
+	c := cpclient.New(r.config.ControlPlaneURL, r.controlPlaneClient(timeout))
+	if r != nil && r.privKey != nil {
+		var pid peer.ID
+		if r.Host != nil && r.Host.ID() != "" {
+			pid = r.Host.ID()
+		} else {
+			pid, _ = peer.IDFromPrivateKey(r.privKey)
+		}
+		if pid != "" {
+			c.WithIdentity(pid.String(), r.privKey)
+		}
+	}
+	return c
 }
 
 // controlPlaneClient is the client for every request to the control plane;
@@ -984,26 +1002,32 @@ func (r *Router) renewLease() {
 
 		// The biscuit identifies us; the signature proves it is us (peers we
 		// authenticate hold a copy of the biscuit).
-		ts := time.Now().UnixMilli()
-		sig, err := r.privKey.Sign(api.RouterLeaseChallenge(r.Host.ID().String(), ts))
-		if err != nil {
-			logger.Errorf("Failed to sign lease challenge: %v", err)
-			return
-		}
-
-		req := &api.RouterLeaseRequest{
-			PeerId:             r.Host.ID().String(),
-			Addresses:          addrs,
-			Biscuit:            biscuit,
-			ConnectedPeers:     connectedPeers,
-			DhtSize:            dhtSize,
-			ChallengeUnixMs:    ts,
-			ChallengeSignature: sig,
-		}
-		data, _ := proto.Marshal(req)
-
 		client := r.controlPlaneClient(10 * time.Second)
-		resp, err := client.Post(r.config.ControlPlaneURL+"/routers/lease", "application/x-protobuf", bytes.NewReader(data))
+		resp, err := cpclient.DoWithChallenge(client, time.Now, func(ts int64) (*http.Request, error) {
+			sig, err := r.privKey.Sign(api.RouterLeaseChallenge(r.Host.ID().String(), ts))
+			if err != nil {
+				return nil, fmt.Errorf("failed to sign lease challenge: %w", err)
+			}
+			req := &api.RouterLeaseRequest{
+				PeerId:             r.Host.ID().String(),
+				Addresses:          addrs,
+				Biscuit:            biscuit,
+				ConnectedPeers:     connectedPeers,
+				DhtSize:            dhtSize,
+				ChallengeUnixMs:    ts,
+				ChallengeSignature: sig,
+			}
+			data, err := proto.Marshal(req)
+			if err != nil {
+				return nil, err
+			}
+			httpReq, err := http.NewRequestWithContext(r.ctx, http.MethodPost, r.config.ControlPlaneURL+"/routers/lease", bytes.NewReader(data))
+			if err != nil {
+				return nil, err
+			}
+			httpReq.Header.Set("Content-Type", "application/x-protobuf")
+			return httpReq, nil
+		})
 		if err != nil {
 			logger.Errorf("Failed to renew lease with control plane: %v", err)
 			leaseRenewalsTotal.WithLabelValues(leaseUnreachable).Inc()
@@ -1458,49 +1482,51 @@ func (r *Router) RefreshEnrollment(ctx context.Context) error {
 		return fmt.Errorf("router not enrolled (no biscuit)")
 	}
 
-	// 1. Sign the peer-bound refresh challenge
-	timestamp := time.Now().UnixMilli()
+	// 1. Derive peer ID from private key
 	peerID, err := peer.IDFromPrivateKey(r.privKey)
 	if err != nil {
 		return fmt.Errorf("failed to derive peer ID from private key: %w", err)
-	}
-	sig, err := r.privKey.Sign(api.RefreshChallenge(peerID.String(), timestamp))
-	if err != nil {
-		return fmt.Errorf("failed to generate signature: %w", err)
 	}
 
 	// 2. Construct request. peer_id lets the control plane find this
 	// router's record when the biscuit's signing key has been retired and
 	// the biscuit itself can no longer be verified (autonomous recovery,
 	// opt-in server-side); it is cross-checked against the biscuit otherwise.
-	req := &api.TokenRefreshRequest{
-		ChallengeSignature: sig,
-		ChallengeUnixMs:    timestamp,
-		PeerId:             peerID.String(),
-	}
+	var freshJWT string
 	if src := r.tokenSource(); src != nil {
 		if jwt, err := src.FetchToken(ctx); err == nil && jwt != "" {
-			req.Jwt = jwt
+			freshJWT = jwt
 		} else if err != nil {
 			logger.Warnf("Failed to fetch platform JWT for router refresh re-attestation, continuing with PoP-only refresh: %v", err)
 		}
 	}
-	reqData, err := proto.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("failed to marshal request: %w", err)
-	}
 
 	url := r.config.ControlPlaneURL + "/refresh"
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqData))
-	if err != nil {
-		return fmt.Errorf("failed to create http request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/x-protobuf")
 	b64Biscuit := base64.StdEncoding.EncodeToString(currentBiscuit)
-	httpReq.Header.Set("Authorization", "Bearer "+b64Biscuit)
-
 	client := r.controlPlaneClient(10 * time.Second)
-	resp, err := client.Do(httpReq)
+	resp, err := cpclient.DoWithChallenge(client, time.Now, func(timestamp int64) (*http.Request, error) {
+		sig, err := r.privKey.Sign(api.RefreshChallenge(peerID.String(), timestamp))
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate signature: %w", err)
+		}
+		req := &api.TokenRefreshRequest{
+			ChallengeSignature: sig,
+			ChallengeUnixMs:    timestamp,
+			PeerId:             peerID.String(),
+			Jwt:                freshJWT,
+		}
+		reqData, err := proto.Marshal(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request: %w", err)
+		}
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqData))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create http request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/x-protobuf")
+		httpReq.Header.Set("Authorization", "Bearer "+b64Biscuit)
+		return httpReq, nil
+	})
 	if err != nil {
 		return fmt.Errorf("http request failed: %w", err)
 	}

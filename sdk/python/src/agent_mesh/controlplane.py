@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import base64
+import email.utils
 import ipaddress
 import threading
 import time
@@ -25,7 +26,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Callable, Mapping, Optional, Sequence
+from typing import Callable, Mapping, Optional, Sequence, Union
 
 from google.protobuf.timestamp_pb2 import Timestamp
 from google.protobuf.unknown_fields import UnknownFieldSet
@@ -37,6 +38,7 @@ from .identity import PUBLIC_KEY_SIZE, Identity, verify_ed25519
 PROTOBUF_CONTENT_TYPE = "application/x-protobuf"
 HEADER_CHALLENGE_TIMESTAMP = "X-Sam-Challenge-Ts"
 HEADER_CHALLENGE_SIGNATURE = "X-Sam-Challenge-Sig"
+STALE_CHALLENGE_TIMESTAMP_MESSAGE = "stale or invalid challenge timestamp"
 
 # The role a plain mesh member enrolls with (api.RoleNode).
 ROLE_NODE = "sam:role:node"
@@ -46,8 +48,9 @@ KEYS_RESPONSE_FRESHNESS_MS = 5 * 60 * 1000
 
 _MAX_RESPONSE_BYTES = 1024 * 1024
 
-# (method, url, headers, body) -> (status, body). Injection point for tests.
-Transport = Callable[[str, str, Mapping[str, str], Optional[bytes]], "tuple[int, bytes]"]
+# (method, url, headers, body) -> (status, body[, response_headers]). Injection point for tests.
+TransportResult = Union[tuple[int, bytes], tuple[int, bytes, Mapping[str, str]]]
+Transport = Callable[[str, str, Mapping[str, str], Optional[bytes]], TransportResult]
 
 
 class ControlPlaneError(Exception):
@@ -152,15 +155,32 @@ def verify_keys_response(resp: pb.KeysResponse, trusted: Sequence[bytes], now_ms
 
 
 def _urllib_transport(timeout: float) -> Transport:
-    def send(method: str, url: str, headers: Mapping[str, str], body: Optional[bytes]) -> tuple[int, bytes]:
+    def send(method: str, url: str, headers: Mapping[str, str], body: Optional[bytes]) -> tuple[int, bytes, Mapping[str, str]]:
         req = urllib.request.Request(url, data=body, method=method, headers=dict(headers))
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - scheme validated by the client
-                return resp.status, resp.read(_MAX_RESPONSE_BYTES + 1)
+                return resp.status, resp.read(_MAX_RESPONSE_BYTES + 1), dict(resp.headers)
         except urllib.error.HTTPError as err:
-            return err.code, err.read(_MAX_RESPONSE_BYTES + 1)
+            resp_headers = dict(err.headers) if err.headers is not None else {}
+            return err.code, err.read(_MAX_RESPONSE_BYTES + 1), resp_headers
 
     return send
+
+
+def _parse_http_date_ms(headers: Mapping[str, str]) -> Optional[int]:
+    date_value: Optional[str] = None
+    for k, v in headers.items():
+        if k.lower() == "date":
+            date_value = v
+            break
+    if not date_value:
+        return None
+    try:
+        dt = email.utils.parsedate_to_datetime(date_value)
+    except (TypeError, ValueError):
+        return None
+    ms = int(dt.timestamp() * 1000)
+    return ms if ms > 0 else None
 
 
 class ControlPlaneClient:
@@ -171,9 +191,11 @@ class ControlPlaneClient:
         allow_insecure: bool = False,
         timeout: float = 30.0,
         transport: Optional[Transport] = None,
+        now_ms: Optional[Callable[[], int]] = None,
     ):
         self.url = validate_control_plane_url(url, allow_insecure)
         self._transport = transport or _urllib_transport(timeout)
+        self._now_ms = now_ms or _now_ms
 
     def info(self) -> pb.ControlPlaneInfoResponse:
         """GET /info: OIDC settings, router addresses and the ban list. Unauthenticated."""
@@ -197,17 +219,23 @@ class ControlPlaneClient:
         """POST /enroll with a bootstrap token, then GET /enroll/status until an
         operator approves the request if the mesh is not on auto-approve.
         `cancel` bounds that wait; set it to stop polling."""
-        ts = _now_ms()
-        req = pb.BootstrapEnrollRequest(
-            bootstrap_token=bootstrap_token,
-            peer_id=identity.peer_id,
-            public_key=identity.libp2p_public_key,
-            requested_role=role,
-            labels=dict(labels or {}),
-            challenge_unix_ms=ts,
-            challenge_signature=identity.sign(challenges.enroll_challenge(identity.peer_id, ts)),
+        raw = self._request_with_challenge(
+            "POST",
+            "/enroll",
+            lambda ts: (
+                pb.BootstrapEnrollRequest(
+                    bootstrap_token=bootstrap_token,
+                    peer_id=identity.peer_id,
+                    public_key=identity.libp2p_public_key,
+                    requested_role=role,
+                    labels=dict(labels or {}),
+                    challenge_unix_ms=ts,
+                    challenge_signature=identity.sign(challenges.enroll_challenge(identity.peer_id, ts)),
+                ).SerializeToString(),
+                None,
+            ),
         )
-        resp = pb.BootstrapEnrollResponse.FromString(self._request("POST", "/enroll", req.SerializeToString()))
+        resp = pb.BootstrapEnrollResponse.FromString(raw)
         while resp.status == pb.ENROLLMENT_STATUS_PENDING:
             wait = poll_interval if poll_interval is not None else max(1, resp.poll_interval_seconds)
             if cancel is not None:
@@ -219,15 +247,21 @@ class ControlPlaneClient:
         return _enrollment_from_bootstrap_response(resp)
 
     def _enroll_status(self, identity: Identity) -> pb.BootstrapEnrollResponse:
-        ts = _now_ms()
-        sig = identity.sign(challenges.enroll_status_challenge(identity.peer_id, ts))
-        body = self._request(
+        path = "/enroll/status?" + urllib.parse.urlencode({"peer_id": identity.peer_id})
+        body = self._request_with_challenge(
             "GET",
-            "/enroll/status?" + urllib.parse.urlencode({"peer_id": identity.peer_id}),
-            headers={
-                HEADER_CHALLENGE_TIMESTAMP: str(ts),
-                HEADER_CHALLENGE_SIGNATURE: base64.urlsafe_b64encode(sig).rstrip(b"=").decode(),
-            },
+            path,
+            lambda ts: (
+                None,
+                {
+                    HEADER_CHALLENGE_TIMESTAMP: str(ts),
+                    HEADER_CHALLENGE_SIGNATURE: base64.urlsafe_b64encode(
+                        identity.sign(challenges.enroll_status_challenge(identity.peer_id, ts))
+                    )
+                    .rstrip(b"=")
+                    .decode(),
+                },
+            ),
         )
         return pb.BootstrapEnrollResponse.FromString(body)
 
@@ -240,17 +274,23 @@ class ControlPlaneClient:
         labels: Optional[Mapping[str, str]] = None,
     ) -> Enrollment:
         """POST /register with an OIDC ID token."""
-        ts = _now_ms()
-        req = pb.EnrollRequest(
-            jwt=jwt,
-            peer_id=identity.peer_id,
-            public_key=identity.libp2p_public_key,
-            requested_role=role,
-            labels=dict(labels or {}),
-            challenge_unix_ms=ts,
-            challenge_signature=identity.sign(challenges.register_challenge(identity.peer_id, ts)),
+        raw = self._request_with_challenge(
+            "POST",
+            "/register",
+            lambda ts: (
+                pb.EnrollRequest(
+                    jwt=jwt,
+                    peer_id=identity.peer_id,
+                    public_key=identity.libp2p_public_key,
+                    requested_role=role,
+                    labels=dict(labels or {}),
+                    challenge_unix_ms=ts,
+                    challenge_signature=identity.sign(challenges.register_challenge(identity.peer_id, ts)),
+                ).SerializeToString(),
+                None,
+            ),
         )
-        resp = pb.EnrollResponse.FromString(self._request("POST", "/register", req.SerializeToString()))
+        resp = pb.EnrollResponse.FromString(raw)
         if resp.error_message:
             raise EnrollmentRejectedError(f"enrollment failed: {resp.error_message}")
         return _checked_enrollment(
@@ -263,18 +303,19 @@ class ControlPlaneClient:
     def refresh(self, identity: Identity, biscuit: bytes, *, jwt: Optional[str] = None) -> RefreshResult:
         """POST /refresh: trades the biscuit for a fresh one. The old one is
         spent by this call; callers must persist the result before using it."""
-        ts = _now_ms()
-        req = pb.TokenRefreshRequest(
-            challenge_unix_ms=ts,
-            challenge_signature=identity.sign(challenges.refresh_challenge(identity.peer_id, ts)),
-            peer_id=identity.peer_id,
-            jwt=jwt or "",
-        )
-        body = self._request(
+        auth_header = "Bearer " + base64.b64encode(biscuit).decode()
+        body = self._request_with_challenge(
             "POST",
             "/refresh",
-            req.SerializeToString(),
-            headers={"Authorization": "Bearer " + base64.b64encode(biscuit).decode()},
+            lambda ts: (
+                pb.TokenRefreshRequest(
+                    challenge_unix_ms=ts,
+                    challenge_signature=identity.sign(challenges.refresh_challenge(identity.peer_id, ts)),
+                    peer_id=identity.peer_id,
+                    jwt=jwt or "",
+                ).SerializeToString(),
+                {"Authorization": auth_header},
+            ),
         )
         resp = pb.TokenRefreshResponse.FromString(body)
         if resp.error_message:
@@ -285,23 +326,72 @@ class ControlPlaneClient:
             raise ValueError("refresh response carries no expire_time")
         return RefreshResult(biscuit=resp.biscuit_token, expiration=resp.expire_time.ToSeconds())
 
-    def policy_rules(self, biscuit: bytes) -> list[str]:
+    def policy_rules(self, identity: Identity, biscuit: bytes) -> list[str]:
         """GET /policies: the mesh policy as the Datalog rules a provider adds
         to its authorizer, one per entry, rendered by the control plane. The
         text is the contract; nothing here derives rules from roles and bindings."""
-        body = self._request("GET", "/policies", headers={"Authorization": "Bearer " + base64.b64encode(biscuit).decode()})
+        auth_header = "Bearer " + base64.b64encode(biscuit).decode()
+        body = self._request_with_challenge(
+            "GET",
+            "/policies",
+            lambda ts: (
+                None,
+                {
+                    "Authorization": auth_header,
+                    HEADER_CHALLENGE_TIMESTAMP: str(ts),
+                    HEADER_CHALLENGE_SIGNATURE: base64.urlsafe_b64encode(
+                        identity.sign(challenges.policies_challenge(identity.peer_id, ts))
+                    )
+                    .rstrip(b"=")
+                    .decode(),
+                },
+            ),
+        )
         resp = pb.PolicyConfigGetResponse.FromString(body)
         if len(UnknownFieldSet(resp)) > 0:
             raise ValueError("control plane predates datalog_rules in its policy response; upgrade the control plane")
         return list(resp.datalog_rules)
 
-    def _request(self, method: str, path: str, body: Optional[bytes] = None, headers: Optional[Mapping[str, str]] = None) -> bytes:
+    def _request_with_challenge(
+        self,
+        method: str,
+        path: str,
+        build: Callable[[int], tuple[Optional[bytes], Optional[Mapping[str, str]]]],
+    ) -> bytes:
+        first_body, first_headers = build(self._now_ms())
+        status, data, resp_headers = self._fetch_once(method, path, first_body, first_headers)
+        if 200 <= status < 300:
+            return data
+        text = data.decode("utf-8", "replace")
+        if status == 401 and STALE_CHALLENGE_TIMESTAMP_MESSAGE in text:
+            server_ms = _parse_http_date_ms(resp_headers)
+            if server_ms is not None:
+                retry_body, retry_headers = build(server_ms)
+                return self._request(method, path, retry_body, retry_headers)
+        raise ControlPlaneError(path, status, data)
+
+    def _fetch_once(
+        self,
+        method: str,
+        path: str,
+        body: Optional[bytes] = None,
+        headers: Optional[Mapping[str, str]] = None,
+    ) -> tuple[int, bytes, Mapping[str, str]]:
         all_headers = {"Accept": PROTOBUF_CONTENT_TYPE, **(headers or {})}
         if body is not None:
             all_headers["Content-Type"] = PROTOBUF_CONTENT_TYPE
-        status, data = self._transport(method, self.url + path, all_headers, body)
+        res = self._transport(method, self.url + path, all_headers, body)
+        if len(res) == 3:
+            status, data, resp_headers = res
+        else:
+            status, data = res
+            resp_headers = {}
         if len(data) > _MAX_RESPONSE_BYTES:
             raise ValueError(f"control plane {path}: response of {len(data)} bytes exceeds the {_MAX_RESPONSE_BYTES} byte limit")
+        return status, data, resp_headers
+
+    def _request(self, method: str, path: str, body: Optional[bytes] = None, headers: Optional[Mapping[str, str]] = None) -> bytes:
+        status, data, _ = self._fetch_once(method, path, body, headers)
         if not 200 <= status < 300:
             raise ControlPlaneError(path, status, data)
         return data

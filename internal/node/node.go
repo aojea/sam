@@ -1244,15 +1244,10 @@ func (n *SamNode) RefreshEnrollment(ctx context.Context) error {
 		return fmt.Errorf("corrupted private key: %w", err)
 	}
 
-	// 3. Sign the peer-bound refresh challenge
-	timestamp := time.Now().UnixMilli()
+	// 3. Derive peer ID from private key
 	peerID, err := peer.IDFromPrivateKey(privKey)
 	if err != nil {
 		return fmt.Errorf("failed to derive peer ID from private key: %w", err)
-	}
-	sig, err := privKey.Sign(api.RefreshChallenge(peerID.String(), timestamp))
-	if err != nil {
-		return fmt.Errorf("failed to generate signature: %w", err)
 	}
 
 	// 4. Construct request. peer_id lets the control plane find this node's
@@ -1267,16 +1262,6 @@ func (n *SamNode) RefreshEnrollment(ctx context.Context) error {
 			freshJWT = tok
 		}
 	}
-	req := &api.TokenRefreshRequest{
-		ChallengeSignature: sig,
-		ChallengeUnixMs:    timestamp,
-		PeerId:             peerID.String(),
-		Jwt:                freshJWT,
-	}
-	reqData, err := proto.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("failed to marshal request: %w", err)
-	}
 
 	controlPlaneURL, err := n.Store.LoadControlPlaneURL()
 	if err != nil {
@@ -1288,17 +1273,31 @@ func (n *SamNode) RefreshEnrollment(ctx context.Context) error {
 	}
 
 	url := controlPlaneURL + "/refresh"
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqData))
-	if err != nil {
-		return fmt.Errorf("failed to create http request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/x-protobuf")
-	// Set current biscuit in authorization header
 	b64Biscuit := base64.StdEncoding.EncodeToString(currentBiscuit)
-	httpReq.Header.Set("Authorization", "Bearer "+b64Biscuit)
-
 	client := controlPlaneHTTPClient(30 * time.Second)
-	resp, err := client.Do(httpReq)
+	resp, err := cpclient.DoWithChallenge(client, time.Now, func(timestamp int64) (*http.Request, error) {
+		sig, err := privKey.Sign(api.RefreshChallenge(peerID.String(), timestamp))
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate signature: %w", err)
+		}
+		req := &api.TokenRefreshRequest{
+			ChallengeSignature: sig,
+			ChallengeUnixMs:    timestamp,
+			PeerId:             peerID.String(),
+			Jwt:                freshJWT,
+		}
+		reqData, err := proto.Marshal(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request: %w", err)
+		}
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqData))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create http request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/x-protobuf")
+		httpReq.Header.Set("Authorization", "Bearer "+b64Biscuit)
+		return httpReq, nil
+	})
 	if err != nil {
 		return fmt.Errorf("http request failed: %w", err)
 	}
@@ -2451,7 +2450,7 @@ func (n *SamNode) syncMeshPolicy(ctx context.Context) error {
 		return fmt.Errorf("node has no identity token to fetch mesh policy")
 	}
 
-	policyResp, err := FetchMeshPolicy(ctx, controlPlaneURL, token)
+	policyResp, err := n.controlPlane(controlPlaneURL).FetchPolicy(ctx, token)
 	if err != nil {
 		return fmt.Errorf("failed to fetch mesh policy: %w", err)
 	}
@@ -2490,7 +2489,7 @@ func (n *SamNode) reportNodeCatalog(ctx context.Context) error {
 	}
 
 	services := n.ListLocalServices(api.ServiceType_SERVICE_TYPE_UNSPECIFIED)
-	if err := ReportNodeCatalog(ctx, controlPlaneURL, token, services); err != nil {
+	if err := n.controlPlane(controlPlaneURL).ReportCatalog(ctx, token, services); err != nil {
 		return fmt.Errorf("failed to report node catalog: %w", err)
 	}
 	return nil

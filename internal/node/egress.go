@@ -355,7 +355,7 @@ func (n *SamNode) syncEgressAssignments(ctx context.Context, controlPlaneURL str
 	if len(token) == 0 {
 		return errors.New("node has no identity token to fetch egress assignments")
 	}
-	resp, err := controlPlaneClient(controlPlaneURL).FetchEgress(ctx, token)
+	resp, err := n.controlPlane(controlPlaneURL).FetchEgress(ctx, token)
 	if errors.Is(err, cpclient.ErrNotFound) {
 		// A control plane predating egress destinations assigns none; the
 		// node keeps whatever it serves and does not report an error.

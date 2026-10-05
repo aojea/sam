@@ -17,7 +17,7 @@
 
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { timestampMs, type Timestamp } from "@bufbuild/protobuf/wkt";
-import { enrollChallenge, enrollStatusChallenge, refreshChallenge, registerChallenge } from "./challenges.ts";
+import { enrollChallenge, enrollStatusChallenge, policiesChallenge, refreshChallenge, registerChallenge } from "./challenges.ts";
 import {
   BootstrapEnrollRequestSchema,
   BootstrapEnrollResponseSchema,
@@ -40,6 +40,7 @@ import { verifyEd25519 } from "./identity.ts";
 export const PROTOBUF_CONTENT_TYPE = "application/x-protobuf";
 export const HEADER_CHALLENGE_TIMESTAMP = "X-Sam-Challenge-Ts";
 export const HEADER_CHALLENGE_SIGNATURE = "X-Sam-Challenge-Sig";
+export const STALE_CHALLENGE_TIMESTAMP_MESSAGE = "stale or invalid challenge timestamp";
 
 /** The role a plain mesh member enrolls with (api.RoleNode). */
 export const ROLE_NODE = "sam:role:node";
@@ -100,6 +101,8 @@ export interface ControlPlaneClientOptions {
   timeoutMs?: number;
   /** Injection point for tests. Defaults to the global fetch. */
   fetch?: typeof fetch;
+  /** Injection point for clock-skew tests; returns unix milliseconds. Defaults to Date.now. */
+  now?: () => number;
 }
 
 /** What an approved enrollment hands the caller. */
@@ -136,6 +139,11 @@ export interface RefreshParams {
   biscuit: Uint8Array;
   /** Optional fresh platform/OIDC JWT for continuous attestation on refresh. */
   jwt?: string | undefined;
+}
+
+export interface PolicyRulesParams {
+  identity: Identity;
+  biscuit: Uint8Array;
 }
 
 export interface RefreshResult {
@@ -237,6 +245,7 @@ export class ControlPlaneClient {
   readonly url: URL;
   readonly #fetch: typeof fetch;
   readonly #timeoutMs: number;
+  readonly #now: () => number;
 
   constructor(options: ControlPlaneClientOptions) {
     this.url = validateControlPlaneURL(options.url, options.allowInsecure ?? false);
@@ -244,6 +253,7 @@ export class ControlPlaneClient {
     const f = options.fetch ?? globalThis.fetch;
     this.#fetch = (input, init) => f(input, init);
     this.#timeoutMs = options.timeoutMs ?? 30_000;
+    this.#now = options.now ?? (() => Date.now());
   }
 
   /** GET /info: OIDC settings, router addresses and the ban list. Unauthenticated. */
@@ -268,17 +278,19 @@ export class ControlPlaneClient {
   async enrollBootstrap(params: EnrollBootstrapParams): Promise<Enrollment> {
     const { identity, signal } = params;
     const role = params.role ?? ROLE_NODE;
-    const ts = Date.now();
-    const req = create(BootstrapEnrollRequestSchema, {
-      bootstrapToken: params.bootstrapToken,
-      peerId: identity.peerId,
-      publicKey: identity.libp2pPublicKey,
-      requestedRole: role,
-      labels: params.labels ?? {},
-      challengeUnixMs: BigInt(ts),
-      challengeSignature: identity.sign(enrollChallenge(identity.peerId, ts)),
+    const raw = await this.#requestWithChallenge("POST", "/enroll", (ts) => {
+      const req = create(BootstrapEnrollRequestSchema, {
+        bootstrapToken: params.bootstrapToken,
+        peerId: identity.peerId,
+        publicKey: identity.libp2pPublicKey,
+        requestedRole: role,
+        labels: params.labels ?? {},
+        challengeUnixMs: BigInt(ts),
+        challengeSignature: identity.sign(enrollChallenge(identity.peerId, ts)),
+      });
+      return { body: toBinary(BootstrapEnrollRequestSchema, req) };
     });
-    let resp = fromBinary(BootstrapEnrollResponseSchema, await this.#request("POST", "/enroll", toBinary(BootstrapEnrollRequestSchema, req)));
+    let resp = fromBinary(BootstrapEnrollResponseSchema, raw);
 
     while (resp.status === EnrollmentStatus.PENDING) {
       const waitMs = params.pollIntervalMs ?? Math.max(1, resp.pollIntervalSeconds) * 1000;
@@ -289,29 +301,38 @@ export class ControlPlaneClient {
   }
 
   async #enrollStatus(identity: Identity): Promise<BootstrapEnrollResponse> {
-    const ts = Date.now();
-    const sig = identity.sign(enrollStatusChallenge(identity.peerId, ts));
-    const body = await this.#request("GET", `/enroll/status?peer_id=${encodeURIComponent(identity.peerId)}`, undefined, {
-      [HEADER_CHALLENGE_TIMESTAMP]: String(ts),
-      [HEADER_CHALLENGE_SIGNATURE]: toBase64Url(sig),
-    });
+    const body = await this.#requestWithChallenge(
+      "GET",
+      `/enroll/status?peer_id=${encodeURIComponent(identity.peerId)}`,
+      (ts) => {
+        const sig = identity.sign(enrollStatusChallenge(identity.peerId, ts));
+        return {
+          headers: {
+            [HEADER_CHALLENGE_TIMESTAMP]: String(ts),
+            [HEADER_CHALLENGE_SIGNATURE]: toBase64Url(sig),
+          },
+        };
+      },
+    );
     return fromBinary(BootstrapEnrollResponseSchema, body);
   }
 
   /** POST /register with an OIDC ID token. */
   async register(params: RegisterParams): Promise<Enrollment> {
     const { identity } = params;
-    const ts = Date.now();
-    const req = create(EnrollRequestSchema, {
-      jwt: params.jwt,
-      peerId: identity.peerId,
-      publicKey: identity.libp2pPublicKey,
-      requestedRole: params.role ?? ROLE_NODE,
-      labels: params.labels ?? {},
-      challengeUnixMs: BigInt(ts),
-      challengeSignature: identity.sign(registerChallenge(identity.peerId, ts)),
+    const raw = await this.#requestWithChallenge("POST", "/register", (ts) => {
+      const req = create(EnrollRequestSchema, {
+        jwt: params.jwt,
+        peerId: identity.peerId,
+        publicKey: identity.libp2pPublicKey,
+        requestedRole: params.role ?? ROLE_NODE,
+        labels: params.labels ?? {},
+        challengeUnixMs: BigInt(ts),
+        challengeSignature: identity.sign(registerChallenge(identity.peerId, ts)),
+      });
+      return { body: toBinary(EnrollRequestSchema, req) };
     });
-    const resp = fromBinary(EnrollResponseSchema, await this.#request("POST", "/register", toBinary(EnrollRequestSchema, req)));
+    const resp = fromBinary(EnrollResponseSchema, raw);
     if (resp.errorMessage) {
       throw new EnrollmentRejectedError(`enrollment failed: ${resp.errorMessage}`);
     }
@@ -328,15 +349,18 @@ export class ControlPlaneClient {
    */
   async refresh(params: RefreshParams): Promise<RefreshResult> {
     const { identity } = params;
-    const ts = Date.now();
-    const req = create(TokenRefreshRequestSchema, {
-      challengeUnixMs: BigInt(ts),
-      challengeSignature: identity.sign(refreshChallenge(identity.peerId, ts)),
-      peerId: identity.peerId,
-      ...(params.jwt ? { jwt: params.jwt } : {}),
-    });
-    const body = await this.#request("POST", "/refresh", toBinary(TokenRefreshRequestSchema, req), {
-      Authorization: `Bearer ${toBase64(params.biscuit)}`,
+    const authHeader = `Bearer ${toBase64(params.biscuit)}`;
+    const body = await this.#requestWithChallenge("POST", "/refresh", (ts) => {
+      const req = create(TokenRefreshRequestSchema, {
+        challengeUnixMs: BigInt(ts),
+        challengeSignature: identity.sign(refreshChallenge(identity.peerId, ts)),
+        peerId: identity.peerId,
+        ...(params.jwt ? { jwt: params.jwt } : {}),
+      });
+      return {
+        body: toBinary(TokenRefreshRequestSchema, req),
+        headers: { Authorization: authHeader },
+      };
     });
     const resp = fromBinary(TokenRefreshResponseSchema, body);
     if (resp.errorMessage) {
@@ -353,9 +377,21 @@ export class ControlPlaneClient {
    * its authorizer, one per entry, rendered by the control plane. The text
    * is the contract; nothing here derives rules from roles and bindings.
    */
-  async policyRules(biscuit: Uint8Array): Promise<string[]> {
-    const body = await this.#request("GET", "/policies", undefined, {
-      Authorization: `Bearer ${toBase64(biscuit)}`,
+  async policyRules(identity: Identity, biscuit: Uint8Array): Promise<string[]>;
+  async policyRules(params: PolicyRulesParams): Promise<string[]>;
+  async policyRules(identityOrParams: Identity | PolicyRulesParams, maybeBiscuit?: Uint8Array): Promise<string[]> {
+    const identity = "identity" in identityOrParams ? identityOrParams.identity : identityOrParams;
+    const biscuit = "identity" in identityOrParams ? identityOrParams.biscuit : (maybeBiscuit as Uint8Array);
+    const authHeader = `Bearer ${toBase64(biscuit)}`;
+    const body = await this.#requestWithChallenge("GET", "/policies", (ts) => {
+      const sig = identity.sign(policiesChallenge(identity.peerId, ts));
+      return {
+        headers: {
+          Authorization: authHeader,
+          [HEADER_CHALLENGE_TIMESTAMP]: String(ts),
+          [HEADER_CHALLENGE_SIGNATURE]: toBase64Url(sig),
+        },
+      };
     });
     const resp = fromBinary(PolicyConfigGetResponseSchema, body);
     if (resp.$unknown !== undefined && resp.$unknown.length > 0) {
@@ -364,7 +400,33 @@ export class ControlPlaneClient {
     return resp.datalogRules;
   }
 
-  async #request(method: "GET" | "POST", path: string, body?: Uint8Array, headers: Record<string, string> = {}): Promise<Uint8Array> {
+  async #requestWithChallenge(
+    method: "GET" | "POST",
+    path: string,
+    build: (ts: number) => { body?: Uint8Array; headers?: Record<string, string> },
+  ): Promise<Uint8Array> {
+    const first = build(this.#now());
+    const outcome = await this.#fetchOnce(method, path, first.body, first.headers);
+    if (outcome.ok) {
+      return outcome.buf;
+    }
+    const text = new TextDecoder().decode(outcome.buf);
+    if (outcome.status === 401 && text.includes(STALE_CHALLENGE_TIMESTAMP_MESSAGE) && outcome.dateHeader) {
+      const serverMs = Date.parse(outcome.dateHeader);
+      if (Number.isFinite(serverMs) && serverMs > 0) {
+        const retry = build(serverMs);
+        return this.#request(method, path, retry.body, retry.headers);
+      }
+    }
+    throw new ControlPlaneError(path, outcome.status, text);
+  }
+
+  async #fetchOnce(
+    method: "GET" | "POST",
+    path: string,
+    body?: Uint8Array,
+    headers: Record<string, string> = {},
+  ): Promise<{ ok: boolean; status: number; buf: Uint8Array; dateHeader: string | null }> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error(`control plane ${path}: timed out after ${this.#timeoutMs}ms`)), this.#timeoutMs);
     try {
@@ -382,13 +444,18 @@ export class ControlPlaneClient {
       if (buf.length > MAX_RESPONSE_BYTES) {
         throw new Error(`control plane ${path}: response of ${buf.length} bytes exceeds the ${MAX_RESPONSE_BYTES} byte limit`);
       }
-      if (!resp.ok) {
-        throw new ControlPlaneError(path, resp.status, new TextDecoder().decode(buf));
-      }
-      return buf;
+      return { ok: resp.ok, status: resp.status, buf, dateHeader: resp.headers.get("date") };
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  async #request(method: "GET" | "POST", path: string, body?: Uint8Array, headers: Record<string, string> = {}): Promise<Uint8Array> {
+    const outcome = await this.#fetchOnce(method, path, body, headers);
+    if (!outcome.ok) {
+      throw new ControlPlaneError(path, outcome.status, new TextDecoder().decode(outcome.buf));
+    }
+    return outcome.buf;
   }
 }
 

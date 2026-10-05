@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -452,6 +453,13 @@ func TestOIDCIssuerJWKSAndSTSToken(t *testing.T) {
 
 	httpRevList, _ := http.NewRequest(http.MethodGet, baseURL+"/revocations", nil)
 	httpRevList.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString(nodeBiscuit))
+	revTS := time.Now().UnixMilli()
+	revSig, err := nodePriv.Sign(api.RevocationsChallenge(nodePeerID.String(), revTS))
+	if err != nil {
+		t.Fatalf("sign RevocationsChallenge: %v", err)
+	}
+	httpRevList.Header.Set(api.HeaderChallengeTimestamp, strconv.FormatInt(revTS, 10))
+	httpRevList.Header.Set(api.HeaderChallengeSignature, base64.RawURLEncoding.EncodeToString(revSig))
 	revListResp, err := http.DefaultClient.Do(httpRevList)
 	if err != nil {
 		t.Fatalf("GET /revocations failed: %v", err)

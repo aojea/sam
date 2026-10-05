@@ -348,6 +348,7 @@ func noStore(h http.HandlerFunc) http.HandlerFunc {
 func meshSurface(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Expose-Headers", "Date")
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", strings.Join([]string{"Authorization", "Content-Type", api.HeaderChallengeTimestamp, api.HeaderChallengeSignature}, ", "))
@@ -718,7 +719,7 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := verifyFreshChallenge(enrolleeKey, api.RegisterChallenge(canonical, req.ChallengeUnixMs), req.ChallengeUnixMs, req.ChallengeSignature); err != nil {
 		logger.Warnw("Register challenge verification failed", "peer_id", canonical, "error", err)
-		http.Error(w, "Invalid registration challenge: "+err.Error(), http.StatusUnauthorized)
+		writeChallengeError(w, "Invalid registration challenge: "+err.Error())
 		return
 	}
 
@@ -964,7 +965,7 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		if recovering {
 			msg = "Invalid biscuit: " + verifyErr.Error()
 		}
-		http.Error(w, msg, http.StatusUnauthorized)
+		writeChallengeError(w, msg)
 	}
 
 	// Fetch node record
@@ -1314,7 +1315,7 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := verifyFreshChallenge(routerKey, api.RouterLeaseChallenge(canonical, req.ChallengeUnixMs), req.ChallengeUnixMs, req.ChallengeSignature); err != nil {
 		logger.Warnw("Router lease challenge verification failed", "peer_id", canonical, "error", err)
-		http.Error(w, "Invalid lease challenge: "+err.Error(), http.StatusUnauthorized)
+		writeChallengeError(w, "Invalid lease challenge: "+err.Error())
 		return
 	}
 
@@ -1371,10 +1372,9 @@ func (s *Server) HandlePolicies(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		// Mesh protocol: an admitted member fetches the policy with its biscuit
-		// and receives it as Datalog text only. Operators read the document at
-		// GET /admin/policy.
-		if !s.isAdmittedNodeRequest(r) {
-			http.Error(w, "Unauthorized: node credential required", http.StatusUnauthorized)
+		// and signed challenge and receives it as Datalog text only. Operators
+		// read the document at GET /admin/policy.
+		if s.admittedNodeWithChallenge(w, r, api.PoliciesChallenge) == nil {
 			return
 		}
 
@@ -1512,12 +1512,34 @@ func (s *Server) unservedEgress(ctx context.Context, policy *api.PolicyConfig) (
 	return unserved, nil
 }
 
-// isAdmittedNodeRequest reports whether the bearer credential is a biscuit of
-// an enrolled, admitted node. It never falls through to OIDC: running ID token
-// verification on a biscuit logs a failure and would auto-register whoever's
-// ID token lands here.
-func (s *Server) isAdmittedNodeRequest(r *http.Request) bool {
-	return s.admittedNode(r) != nil
+// admittedNodeWithChallenge returns the enrolled, admitted node whose biscuit
+// the request bears after verifying the signed freshness challenge in
+// HeaderChallengeTimestamp and HeaderChallengeSignature against the node's
+// stored public key. Every failure writes a uniform 401 Unauthorized.
+func (s *Server) admittedNodeWithChallenge(w http.ResponseWriter, r *http.Request, challengeFn func(peerID string, ts int64) []byte) *storage.EnrolledNode {
+	nodeRecord := s.admittedNode(r)
+	if nodeRecord == nil {
+		writeChallengeError(w, "Unauthorized: node credential required")
+		return nil
+	}
+	ts, tsErr := strconv.ParseInt(r.Header.Get(api.HeaderChallengeTimestamp), 10, 64)
+	sig, sigErr := base64.RawURLEncoding.DecodeString(r.Header.Get(api.HeaderChallengeSignature))
+	if tsErr != nil || sigErr != nil || len(sig) == 0 {
+		writeChallengeError(w, "Missing or invalid challenge headers: signed challenge required")
+		return nil
+	}
+	pubKey, err := crypto.UnmarshalPublicKey(nodeRecord.PublicKey)
+	if err != nil {
+		logger.Errorf("Corrupted public key stored for node %s: %v", nodeRecord.PeerID, err)
+		writeChallengeError(w, "Unauthorized")
+		return nil
+	}
+	if err := verifyFreshChallenge(pubKey, challengeFn(nodeRecord.PeerID, ts), ts, sig); err != nil {
+		logger.Warnw("Node challenge verification failed", "path", r.URL.Path, "peer_id", nodeRecord.PeerID, "error", err)
+		writeChallengeError(w, "Challenge verification failed: "+err.Error())
+		return nil
+	}
+	return nodeRecord
 }
 
 // admittedNode returns the enrolled, admitted node whose biscuit the request
@@ -1548,16 +1570,14 @@ func (s *Server) admittedNode(r *http.Request) *storage.EnrolledNode {
 
 // HandleEgress HTTP GET `/egress`: the egress destinations the requesting
 // node serves, selected by its roles and labels (see EgressDestination).
-// Mesh protocol, biscuit-authenticated, binary protobuf. A separate endpoint
-// from /policies so a node predating it keeps syncing rules unchanged.
+// Mesh protocol, biscuit-authenticated with signed challenge, binary protobuf.
 func (s *Server) HandleEgress(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	nodeRecord := s.admittedNode(r)
+	nodeRecord := s.admittedNodeWithChallenge(w, r, api.EgressChallenge)
 	if nodeRecord == nil {
-		http.Error(w, "Unauthorized: node credential required", http.StatusUnauthorized)
 		return
 	}
 	_, bindings, err := s.store.GetMeshPolicy(r.Context())
@@ -1809,6 +1829,10 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := verifyFreshChallenge(enrolleeKey, api.EnrollChallenge(canonical, req.ChallengeUnixMs), req.ChallengeUnixMs, req.ChallengeSignature); err != nil {
 		logger.Warnw("Enroll challenge verification failed", "peer_id", canonical, "error", err)
+		if errors.Is(err, errStaleChallengeTimestamp) {
+			writeChallengeError(w, "Invalid enrollment challenge: "+err.Error())
+			return
+		}
 		s.writeEnrollError(w, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, "Invalid enrollment challenge: "+err.Error())
 		return
 	}
@@ -1976,28 +2000,43 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 }
 
 // challengeMaxAge bounds the freshness window of every signed timestamp
-// challenge on the enrollment surface (/enroll, /enroll/status, /refresh).
+// challenge on the control plane's credentialed endpoints.
 const challengeMaxAge = 5 * time.Minute
 
-// verifyFreshChallenge checks a signed timestamp challenge: ts must be within
-// challengeMaxAge of now and sig must verify over payload with pub. The
-// payload (built by api.EnrollChallenge, api.EnrollStatusChallenge or
-// api.RefreshChallenge) binds the peer and the endpoint, so a signature
-// captured from one request verifies nowhere else.
-func verifyFreshChallenge(pub crypto.PubKey, payload []byte, ts int64, sig []byte) error {
+var errStaleChallengeTimestamp = errors.New(api.ErrStaleChallengeTimestampMessage)
+
+func verifyChallengeTimestamp(ts int64) error {
 	if ts <= 0 {
 		return errors.New("missing or invalid challenge timestamp")
 	}
 	challengeTime := time.UnixMilli(ts)
 	now := time.Now()
 	if now.Sub(challengeTime) > challengeMaxAge || challengeTime.Sub(now) > challengeMaxAge {
-		return errors.New("stale or invalid challenge timestamp")
+		return errStaleChallengeTimestamp
+	}
+	return nil
+}
+
+// verifyFreshChallenge checks a signed timestamp challenge: ts must be within
+// challengeMaxAge of now and sig must verify over payload with pub. The
+// payload binds the peer and the endpoint, so a signature captured from one
+// request verifies nowhere else.
+func verifyFreshChallenge(pub crypto.PubKey, payload []byte, ts int64, sig []byte) error {
+	if err := verifyChallengeTimestamp(ts); err != nil {
+		return err
 	}
 	ok, err := pub.Verify(payload, sig)
 	if err != nil || !ok {
 		return errors.New("challenge signature verification failed")
 	}
 	return nil
+}
+
+func writeChallengeError(w http.ResponseWriter, msg string) {
+	if w.Header().Get("Date") == "" {
+		w.Header().Set("Date", time.Now().UTC().Format(http.TimeFormat))
+	}
+	http.Error(w, msg, http.StatusUnauthorized)
 }
 
 // HandleEnrollStatus HTTP GET `/enroll/status`
@@ -2029,13 +2068,17 @@ func (s *Server) HandleEnrollStatus(w http.ResponseWriter, r *http.Request) {
 	ts, tsErr := strconv.ParseInt(r.Header.Get(api.HeaderChallengeTimestamp), 10, 64)
 	sig, sigErr := base64.RawURLEncoding.DecodeString(r.Header.Get(api.HeaderChallengeSignature))
 	if tsErr != nil || sigErr != nil || len(sig) == 0 {
-		http.Error(w, "Missing or invalid challenge headers: signed challenge required", http.StatusUnauthorized)
+		writeChallengeError(w, "Missing or invalid challenge headers: signed challenge required")
+		return
+	}
+	if err := verifyChallengeTimestamp(ts); err != nil {
+		writeChallengeError(w, "Challenge verification failed: "+err.Error())
 		return
 	}
 
 	pID, err := peer.Decode(peerID)
 	if err != nil {
-		http.Error(w, "Unauthorized, Invalid Peer ID", http.StatusUnauthorized)
+		writeChallengeError(w, "Unauthorized, Invalid Peer ID")
 		return
 	}
 	canonical := pID.String()
@@ -2043,7 +2086,7 @@ func (s *Server) HandleEnrollStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	enrollReq, err := s.store.GetEnrollmentRequest(ctx, canonical)
 	if err == storage.ErrNotFound {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeChallengeError(w, "Unauthorized")
 		return
 	} else if err != nil {
 		logger.Errorf("Failed to retrieve enrollment status: %v", err)
@@ -2054,12 +2097,12 @@ func (s *Server) HandleEnrollStatus(w http.ResponseWriter, r *http.Request) {
 	pubKey, err := crypto.UnmarshalPublicKey(enrollReq.PublicKey)
 	if err != nil {
 		logger.Errorf("Corrupted public key stored for enrollment %s: %v", canonical, err)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeChallengeError(w, "Unauthorized")
 		return
 	}
 	if err := verifyFreshChallenge(pubKey, api.EnrollStatusChallenge(canonical, ts), ts, sig); err != nil {
 		logger.Warnw("Enroll status challenge verification failed", "peer_id", canonical, "error", err)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeChallengeError(w, "Unauthorized")
 		return
 	}
 

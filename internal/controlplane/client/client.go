@@ -27,9 +27,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/google/sam/api"
@@ -67,6 +69,54 @@ func ReadBody(r io.Reader) ([]byte, error) {
 	return body, nil
 }
 
+// SetChallengeHeaders signs payload with priv and sets HeaderChallengeTimestamp
+// and HeaderChallengeSignature on req.
+func SetChallengeHeaders(req *http.Request, priv crypto.PrivKey, payload []byte, ts int64) error {
+	sig, err := priv.Sign(payload)
+	if err != nil {
+		return fmt.Errorf("failed to sign challenge: %w", err)
+	}
+	req.Header.Set(api.HeaderChallengeTimestamp, strconv.FormatInt(ts, 10))
+	req.Header.Set(api.HeaderChallengeSignature, base64.RawURLEncoding.EncodeToString(sig))
+	return nil
+}
+
+// DoWithChallenge executes a request built with the local clock's millisecond
+// timestamp. If the control plane answers 401 with
+// api.ErrStaleChallengeTimestampMessage and a valid HTTP Date header, it
+// recomputes the timestamp from Date and retries once. No other 401 is retried.
+func DoWithChallenge(httpClient *http.Client, now func() time.Time, build func(ts int64) (*http.Request, error)) (*http.Response, error) {
+	if now == nil {
+		now = time.Now
+	}
+	req, err := build(now().UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		return resp, nil
+	}
+	body, readErr := ReadBody(resp.Body)
+	_ = resp.Body.Close()
+	if readErr == nil && strings.Contains(string(body), api.ErrStaleChallengeTimestampMessage) {
+		if dateHdr := resp.Header.Get("Date"); dateHdr != "" {
+			if serverTime, parseErr := http.ParseTime(dateHdr); parseErr == nil {
+				retryReq, buildErr := build(serverTime.UnixMilli())
+				if buildErr != nil {
+					return nil, buildErr
+				}
+				return httpClient.Do(retryReq)
+			}
+		}
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	return resp, nil
+}
+
 // transport applies api.ValidateControlPlaneTransport to every request,
 // redirects included, so a plaintext hop is refused wherever the URL came
 // from. allowInsecure is read per request: the node learns the operator's
@@ -98,6 +148,9 @@ func NewHTTPClient(timeout time.Duration, allowInsecure func() bool, component s
 type Client struct {
 	baseURL string
 	http    *http.Client
+	peerID  string
+	priv    crypto.PrivKey
+	now     func() time.Time
 }
 
 // New normalizes baseURL, https:// when no scheme is given and no trailing
@@ -107,14 +160,30 @@ func New(baseURL string, httpClient *http.Client) *Client {
 	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
 		baseURL = "https://" + baseURL
 	}
-	return &Client{baseURL: strings.TrimSuffix(baseURL, "/"), http: httpClient}
+	return &Client{baseURL: strings.TrimSuffix(baseURL, "/"), http: httpClient, now: time.Now}
+}
+
+// WithIdentity configures the peer ID and private key used to sign
+// proof-of-possession challenges on authenticated requests.
+func (c *Client) WithIdentity(peerID string, priv crypto.PrivKey) *Client {
+	c.peerID = peerID
+	c.priv = priv
+	return c
+}
+
+// WithClock overrides the clock used for challenge timestamps.
+func (c *Client) WithClock(now func() time.Time) *Client {
+	if now != nil {
+		c.now = now
+	}
+	return c
 }
 
 // FetchInfo is GET /info: the router addresses, the ban set and the OIDC
 // details a node needs to enroll.
 func (c *Client) FetchInfo(ctx context.Context) (*api.ControlPlaneInfoResponse, error) {
 	var info api.ControlPlaneInfoResponse
-	if err := c.get(ctx, "/info", nil, &info); err != nil {
+	if err := c.get(ctx, "/info", nil, nil, &info); err != nil {
 		return nil, err
 	}
 	return &info, nil
@@ -126,7 +195,7 @@ func (c *Client) FetchInfo(ctx context.Context) (*api.ControlPlaneInfoResponse, 
 // control plane, not become it.
 func (c *Client) FetchKeys(ctx context.Context, trusted []ed25519.PublicKey) ([]ed25519.PublicKey, error) {
 	var resp api.KeysResponse
-	if err := c.get(ctx, "/keys", nil, &resp); err != nil {
+	if err := c.get(ctx, "/keys", nil, nil, &resp); err != nil {
 		return nil, err
 	}
 	keys, err := api.VerifyKeysResponse(&resp, trusted, time.Now())
@@ -136,34 +205,73 @@ func (c *Client) FetchKeys(ctx context.Context, trusted []ed25519.PublicKey) ([]
 	return keys, nil
 }
 
-// FetchPolicy is GET /policies, authenticated with the caller's biscuit: the
-// mesh policy as the Datalog rules a member adds to its authorizer.
+// FetchPolicy is GET /policies, authenticated with the caller's biscuit and
+// signed challenge: the mesh policy as the Datalog rules a member adds to its
+// authorizer.
 func (c *Client) FetchPolicy(ctx context.Context, biscuit []byte) (*api.PolicyConfigGetResponse, error) {
 	var policy api.PolicyConfigGetResponse
-	if err := c.get(ctx, "/policies", biscuit, &policy); err != nil {
+	if err := c.get(ctx, "/policies", biscuit, api.PoliciesChallenge, &policy); err != nil {
 		return nil, err
 	}
 	return &policy, nil
 }
 
-// FetchEgress is GET /egress, authenticated with the caller's biscuit: the
-// egress destinations the control plane assigned to this node.
+// FetchEgress is GET /egress, authenticated with the caller's biscuit and
+// signed challenge: the egress destinations the control plane assigned to this
+// node.
 func (c *Client) FetchEgress(ctx context.Context, biscuit []byte) (*api.EgressAssignmentsResponse, error) {
 	var egress api.EgressAssignmentsResponse
-	if err := c.get(ctx, "/egress", biscuit, &egress); err != nil {
+	if err := c.get(ctx, "/egress", biscuit, api.EgressChallenge, &egress); err != nil {
 		return nil, err
 	}
 	return &egress, nil
 }
 
-// FetchRevocations is GET /revocations, authenticated with the caller's biscuit:
-// the revoked Biscuit IDs and banned peer IDs currently tracked by the control plane.
+// FetchRevocations is GET /revocations, authenticated with the caller's
+// biscuit and signed challenge: the revoked Biscuit IDs and banned peer IDs
+// currently tracked by the control plane.
 func (c *Client) FetchRevocations(ctx context.Context, biscuit []byte) (*api.RevocationsResponse, error) {
 	var revocations api.RevocationsResponse
-	if err := c.get(ctx, "/revocations", biscuit, &revocations); err != nil {
+	if err := c.get(ctx, "/revocations", biscuit, api.RevocationsChallenge, &revocations); err != nil {
 		return nil, err
 	}
 	return &revocations, nil
+}
+
+// ReportCatalog is POST /nodes/catalog, authenticated with the calling node's
+// biscuit and signed challenge: reports the services currently registered on
+// the node.
+func (c *Client) ReportCatalog(ctx context.Context, biscuit []byte, services []*api.ServiceInfo) error {
+	payload, err := proto.Marshal(&api.NodeCatalogReport{Services: services})
+	if err != nil {
+		return fmt.Errorf("failed to encode catalog report: %w", err)
+	}
+	resp, err := DoWithChallenge(c.http, c.now, func(ts int64) (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/nodes/catalog", bytes.NewReader(payload))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/x-protobuf")
+		if len(biscuit) > 0 {
+			req.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString(biscuit))
+		}
+		if c.priv != nil && c.peerID != "" {
+			if err := SetChallengeHeaders(req, c.priv, api.NodesCatalogChallenge(c.peerID, ts), ts); err != nil {
+				return nil, err
+			}
+		}
+		return req, nil
+	})
+	if err != nil {
+		return fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := ReadBody(resp.Body)
+		return fmt.Errorf("control plane returned status %s: %s", resp.Status, string(body))
+	}
+	return nil
 }
 
 // ExchangeToken is POST /token/exchange, authenticated with the calling node's
@@ -171,7 +279,20 @@ func (c *Client) FetchRevocations(ctx context.Context, biscuit []byte) (*api.Rev
 // Delegated Session Biscuit bound to the calling node.
 func (c *Client) ExchangeToken(ctx context.Context, biscuit []byte, req *api.TokenExchangeRequest) (*api.TokenExchangeResponse, error) {
 	var resp api.TokenExchangeResponse
-	if err := c.post(ctx, "/token/exchange", biscuit, req, &resp); err != nil {
+	err := c.postWithChallenge(ctx, "/token/exchange", biscuit, func(ts int64) (proto.Message, error) {
+		if c.priv == nil || c.peerID == "" {
+			return req, nil
+		}
+		sig, err := c.priv.Sign(api.TokenExchangeChallenge(c.peerID, ts))
+		if err != nil {
+			return nil, fmt.Errorf("failed to sign token exchange challenge: %w", err)
+		}
+		cloned := proto.Clone(req).(*api.TokenExchangeRequest)
+		cloned.ChallengeUnixMs = ts
+		cloned.ChallengeSignature = sig
+		return cloned, nil
+	}, &resp)
+	if err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -182,21 +303,41 @@ func (c *Client) ExchangeToken(ctx context.Context, biscuit []byte, req *api.Tok
 // short-lived ES256 JWT for cloud STS federation.
 func (c *Client) MintSTSToken(ctx context.Context, biscuit []byte, req *api.STSTokenRequest) (*api.STSTokenResponse, error) {
 	var resp api.STSTokenResponse
-	if err := c.post(ctx, "/sts/token", biscuit, req, &resp); err != nil {
+	err := c.postWithChallenge(ctx, "/sts/token", biscuit, func(ts int64) (proto.Message, error) {
+		if c.priv == nil || c.peerID == "" {
+			return req, nil
+		}
+		sig, err := c.priv.Sign(api.STSTokenChallenge(c.peerID, ts))
+		if err != nil {
+			return nil, fmt.Errorf("failed to sign STS token challenge: %w", err)
+		}
+		cloned := proto.Clone(req).(*api.STSTokenRequest)
+		cloned.ChallengeUnixMs = ts
+		cloned.ChallengeSignature = sig
+		return cloned, nil
+	}, &resp)
+	if err != nil {
 		return nil, err
 	}
 	return &resp, nil
 }
 
-func (c *Client) get(ctx context.Context, path string, biscuit []byte, msg proto.Message) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	if len(biscuit) > 0 {
-		req.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString(biscuit))
-	}
-	resp, err := c.http.Do(req)
+func (c *Client) get(ctx context.Context, path string, biscuit []byte, challengeFn func(peerID string, ts int64) []byte, msg proto.Message) error {
+	resp, err := DoWithChallenge(c.http, c.now, func(ts int64) (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		}
+		if len(biscuit) > 0 {
+			req.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString(biscuit))
+		}
+		if challengeFn != nil && c.priv != nil && c.peerID != "" {
+			if err := SetChallengeHeaders(req, c.priv, challengeFn(c.peerID, ts), ts); err != nil {
+				return nil, err
+			}
+		}
+		return req, nil
+	})
 	if err != nil {
 		return fmt.Errorf("HTTP request failed: %w", err)
 	}
@@ -218,20 +359,26 @@ func (c *Client) get(ctx context.Context, path string, biscuit []byte, msg proto
 	return nil
 }
 
-func (c *Client) post(ctx context.Context, path string, biscuit []byte, reqMsg, respMsg proto.Message) error {
-	payload, err := proto.Marshal(reqMsg)
-	if err != nil {
-		return fmt.Errorf("failed to marshal %s request: %w", path, err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(payload))
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-protobuf")
-	if len(biscuit) > 0 {
-		req.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString(biscuit))
-	}
-	resp, err := c.http.Do(req)
+func (c *Client) postWithChallenge(ctx context.Context, path string, biscuit []byte, buildMsg func(ts int64) (proto.Message, error), respMsg proto.Message) error {
+	resp, err := DoWithChallenge(c.http, c.now, func(ts int64) (*http.Request, error) {
+		reqMsg, err := buildMsg(ts)
+		if err != nil {
+			return nil, err
+		}
+		payload, err := proto.Marshal(reqMsg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal %s request: %w", path, err)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(payload))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/x-protobuf")
+		if len(biscuit) > 0 {
+			req.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString(biscuit))
+		}
+		return req, nil
+	})
 	if err != nil {
 		return fmt.Errorf("HTTP request failed: %w", err)
 	}

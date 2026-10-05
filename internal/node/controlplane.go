@@ -18,16 +18,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"encoding/base64"
-	"fmt"
-	"io"
-	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/sam/api"
 	cpclient "github.com/google/sam/internal/controlplane/client"
-	"google.golang.org/protobuf/proto"
+	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // maxControlPlaneBodyBytes caps every response body read from the control
@@ -41,6 +37,33 @@ const maxControlPlaneBodyBytes = cpclient.MaxBodyBytes
 // node's transport policy.
 func controlPlaneClient(controlPlaneURL string) *cpclient.Client {
 	return cpclient.New(controlPlaneURL, controlPlaneHTTPClient(10*time.Second))
+}
+
+// controlPlane returns a control plane client configured with this node's
+// peer ID and private key so authenticated requests carry a signed challenge.
+func (n *SamNode) controlPlane(controlPlaneURL string) *cpclient.Client {
+	c := controlPlaneClient(controlPlaneURL)
+	if n == nil {
+		return c
+	}
+	priv := n.config.PrivKey
+	if priv == nil && n.Store != nil {
+		if kb, err := n.Store.LoadKey(); err == nil && len(kb) > 0 {
+			priv, _ = crypto.UnmarshalPrivateKey(kb)
+		} else {
+			priv = GetOrGenerateKey(n.Store)
+		}
+	}
+	if priv != nil {
+		pid, err := n.localPeerID()
+		if err != nil || pid == "" {
+			pid, _ = peer.IDFromPrivateKey(priv)
+		}
+		if pid != "" {
+			c.WithIdentity(pid.String(), priv)
+		}
+	}
+	return c
 }
 
 // FetchControlPlaneInfo retrieves the latest configuration from the control plane's /info endpoint.
@@ -83,44 +106,10 @@ func publicKeysOf(keys []TrustedKey) []ed25519.PublicKey {
 	return out
 }
 
-// FetchMeshPolicy retrieves the latest mesh policy from the control plane's /policies endpoint using a biscuit token.
-func FetchMeshPolicy(ctx context.Context, controlPlaneURL string, biscuitToken []byte) (*api.PolicyConfigGetResponse, error) {
-	return controlPlaneClient(controlPlaneURL).FetchPolicy(ctx, biscuitToken)
-}
-
 // ReportNodeCatalog self-reports this node's locally registered services to
 // the control plane's /nodes/catalog endpoint, so an admin can see mesh-wide
 // service topology (see catalog.go's HandleNodeCatalog for why this exists
 // instead of the control plane discovering it via DHT/P2P itself).
 func ReportNodeCatalog(ctx context.Context, controlPlaneURL string, biscuitToken []byte, services []*api.ServiceInfo) error {
-	if !strings.HasPrefix(controlPlaneURL, "http://") && !strings.HasPrefix(controlPlaneURL, "https://") {
-		controlPlaneURL = "https://" + controlPlaneURL
-	}
-	controlPlaneURL = strings.TrimSuffix(controlPlaneURL, "/")
-
-	payload, err := proto.Marshal(&api.NodeCatalogReport{Services: services})
-	if err != nil {
-		return fmt.Errorf("failed to encode catalog report: %w", err)
-	}
-
-	urlStr := controlPlaneURL + "/nodes/catalog"
-	req, err := http.NewRequestWithContext(ctx, "POST", urlStr, bytes.NewReader(payload))
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-protobuf")
-	req.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString(biscuitToken))
-
-	client := controlPlaneHTTPClient(10 * time.Second)
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("HTTP request failed: %w", err)
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode != http.StatusNoContent {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("control plane returned status %s: %s", resp.Status, string(body))
-	}
-	return nil
+	return controlPlaneClient(controlPlaneURL).ReportCatalog(ctx, biscuitToken, services)
 }
