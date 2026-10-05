@@ -22,6 +22,9 @@ setup() {
 }
 
 teardown() {
+  if [[ -n "${ENVOY_CONTAINER:-}" ]]; then
+    docker rm -f "$ENVOY_CONTAINER" >/dev/null 2>&1 || true
+  fi
   for pid in "${BACKEND_PID:-}" "${NODE_A_PID:-}" "${NODE_B_PID:-}" "${SAM_ONE_PID:-}"; do
     [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
   done
@@ -92,13 +95,13 @@ start_node() {
     --data-dir "$TEST_TMPDIR/node-$name" \
     --bind-addr= \
     --allow-loopback \
-    --listen "/ip4/127.0.0.1/tcp/0" "$@" > "$TEST_TMPDIR/node-$name.log" 2>&1 &
+    --listen "/ip4/127.0.0.1/tcp/0" "$@" > "$TEST_TMPDIR/node-$name.log" 2>&1 3>&- &
   eval "NODE_${name^^}_PID=$!"
 }
 
 @test "sam-one boots, nodes join over the single port, and the dataplane carries a service call" {
   "$SAM_ONE_BINARY" --bind-address 127.0.0.1 --port 0 \
-    --data-dir "$SAM_ONE_DATA" > "$TEST_TMPDIR/sam-one.log" 2>&1 &
+    --data-dir "$SAM_ONE_DATA" > "$TEST_TMPDIR/sam-one.log" 2>&1 3>&- &
   SAM_ONE_PID=$!
 
   # The random port is published in the banner, like the generated tokens.
@@ -118,13 +121,14 @@ start_node() {
   JOIN_TOKEN="$(cat "$SAM_ONE_DATA/join-token")"
   [[ "$JOIN_TOKEN" == sam_tok_* ]]
 
-  # An OpenAI-compatible backend on node A's host, declared as an inference
-  # service in node A's configuration, as in docs/getting-started/your-own-mesh.
-  # Services only exist by declaration at startup, there is no runtime
-  # registration endpoint. The same server is also declared as `mcp`: the
-  # type is a contract the node verifies, so that one must never be advertised.
+  # An OpenAI-compatible and MCP backend on node A's host, declared in node A's
+  # configuration, as in docs/getting-started/your-own-mesh. Services only exist
+  # by declaration at startup, there is no runtime registration endpoint. The
+  # root URL (/) is also declared as `mcp` (not-an-mcp-server): the type is a
+  # contract the node verifies, so that one must never be advertised, while
+  # /mcp speaks MCP JSON-RPC and is advertised as mcp://github.
   python3 -u "$BATS_TEST_DIRNAME/fixtures/fake_openai.py" \
-    > "$TEST_TMPDIR/backend.log" 2>&1 &
+    > "$TEST_TMPDIR/backend.log" 2>&1 3>&- &
   BACKEND_PID=$!
   wait_for_log "$TEST_TMPDIR/backend.log" "listening on port"
   backend_port="$(grep -oE 'port [0-9]+' "$TEST_TMPDIR/backend.log" | grep -oE '[0-9]+')"
@@ -137,17 +141,29 @@ services:
     description: "e2e inference backend"
     target_url: "http://127.0.0.1:${backend_port}"
   - type: mcp
+    name: github
+    description: "e2e mcp backend"
+    target_url: "http://127.0.0.1:${backend_port}/mcp"
+  - type: mcp
     name: not-an-mcp-server
     description: "a plain HTTP server mislabelled as mcp"
     target_url: "http://127.0.0.1:${backend_port}"
 EOF
 
   start_node a --config "$TEST_TMPDIR/node-a-services.yaml"
-  start_node b
+  # Start node B with a local TCP sidecar listener (127.0.0.1:0) in addition to
+  # its Unix socket so a real Envoy proxy can dial node B over h2c and forward
+  # authorized traffic through node B into the mesh.
+  start_node b --bind-addr "127.0.0.1:0"
   wait_for_node a
   wait_for_node b
+  wait_for_log "$TEST_TMPDIR/node-b.log" "Starting MCP server on TCP address"
+  node_b_tcp_port="$(grep -oE 'Starting MCP server on TCP address 127\.0\.0\.1:[0-9]+' "$TEST_TMPDIR/node-b.log" | grep -oE '[0-9]+$')"
+  [[ -n "$node_b_tcp_port" ]]
+
   peer_a="$(node_peer_id a)"
-  [[ -n "$peer_a" ]]
+  peer_b="$(node_peer_id b)"
+  [[ -n "$peer_a" && -n "$peer_b" ]]
 
   sock_a="$TEST_TMPDIR/node-a/sam.sock"
   sock_b="$TEST_TMPDIR/node-b/sam.sock"
@@ -201,6 +217,161 @@ EOF
     -d '{"model":"e2e-model","messages":[{"role":"user","content":"should fail"}]}')"
   [[ "$http_code" -ne 200 ]]
 
+  # Real Envoy proxy CUJ: when Docker is available, place Envoy in front of node B
+  # with both ext_authz and ext_proc configured over gRPC h2c, and drive real
+  # inference (/v1/chat/completions) and MCP (/sam/<peer_a>/mcp/github) calls
+  # through Envoy -> Node B -> sam-one Router -> Node A -> Backend.
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    envoy_port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+
+    cat > "$TEST_TMPDIR/envoy.yaml" <<EOF
+static_resources:
+  listeners:
+    - name: listener_0
+      address:
+        socket_address:
+          address: 127.0.0.1
+          port_value: ${envoy_port}
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: ingress_http
+                route_config:
+                  name: local_route
+                  virtual_hosts:
+                    - name: local_service
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: sam_node_b_sidecar
+                http_filters:
+                  - name: envoy.filters.http.ext_authz
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                      transport_api_version: V3
+                      grpc_service:
+                        envoy_grpc:
+                          cluster_name: sam_node_b_h2c
+                        timeout: 5s
+                  - name: envoy.filters.http.ext_proc
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
+                      grpc_service:
+                        envoy_grpc:
+                          cluster_name: sam_node_b_h2c
+                        timeout: 5s
+                      allow_mode_override: true
+                      message_timeout: 5s
+                      processing_mode:
+                        request_header_mode: SEND
+                        response_header_mode: SKIP
+                        request_body_mode: NONE
+                        response_body_mode: NONE
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+    - name: sam_node_b_h2c
+      type: STATIC
+      connect_timeout: 2s
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      load_assignment:
+        cluster_name: sam_node_b_h2c
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 127.0.0.1
+                      port_value: ${node_b_tcp_port}
+    - name: sam_node_b_sidecar
+      type: STATIC
+      connect_timeout: 2s
+      load_assignment:
+        cluster_name: sam_node_b_sidecar
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 127.0.0.1
+                      port_value: ${node_b_tcp_port}
+EOF
+
+    chmod 0644 "$TEST_TMPDIR/envoy.yaml"
+    ENVOY_CONTAINER="sam-e2e-envoy-$$"
+    docker run -d --name "$ENVOY_CONTAINER" \
+      --network host \
+      -v "$TEST_TMPDIR/envoy.yaml:/etc/envoy/envoy.yaml:ro" \
+      envoyproxy/envoy:v1.32-latest \
+      -c /etc/envoy/envoy.yaml --log-level warning >/dev/null 3>&-
+
+    envoy_ready=0
+    for _ in $(seq 1 50); do
+      code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${envoy_port}/sam/${peer_a}/mcp/github" -X POST || true)"
+      if [[ "$code" == "401" ]]; then
+        envoy_ready=1
+        break
+      fi
+      sleep 0.2
+    done
+    if [[ "$envoy_ready" -ne 1 ]]; then
+      docker logs "$ENVOY_CONTAINER" >&2 || true
+      cat "$TEST_TMPDIR/node-b.log" >&2 || true
+      return 1
+    fi
+
+    # 1. OpenAI inference completion through Envoy -> Node B -> Router -> Node A -> fake_openai.py
+    run curl -sS -i "http://127.0.0.1:${envoy_port}/v1/chat/completions" \
+      -H "Authorization: Bearer $task_biscuit" \
+      -H "X-Sam-Target-Service: inference://laptop-llm" \
+      -H 'Content-Type: application/json' \
+      -d '{"model":"e2e-model","messages":[{"role":"user","content":"hi through envoy"}]}'
+    if [[ "$status" -ne 0 || "$output" != *"hello from the mesh"* ]]; then
+      echo "Envoy /v1/chat/completions failed ($status): $output" >&2
+      docker logs "$ENVOY_CONTAINER" >&2 || true
+      tail -n 50 "$TEST_TMPDIR/node-b.log" >&2 || true
+      return 1
+    fi
+
+    # 2. Mint a Task Biscuit narrowed to mcp://github and tool:get_pr.
+    mcp_task_biscuit="$(curl -sf --unix-socket "$sock_b" "http://localhost/oauth/token" \
+      -d 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+      -d 'resource=mcp://github' \
+      -d 'scope=tool:get_pr' |
+      python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])')"
+    [[ -n "$mcp_task_biscuit" ]]
+
+    # 2a. Allowed MCP tools/call ("get_pr") traverses Envoy (ext_authz + ext_proc body buffering) ->
+    #     Node B (/sam/<peer_a>/mcp/github) -> Router -> Node A -> MCP backend!
+    run curl -sS -i "http://127.0.0.1:${envoy_port}/sam/${peer_a}/mcp/github" \
+      -H "Authorization: Bearer $mcp_task_biscuit" \
+      -H "Content-Type: application/json" \
+      -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pr"}}'
+    if [[ "$status" -ne 0 || "$output" != *"tool=get_pr peer=${peer_b}"* ]]; then
+      echo "Envoy MCP tools/call failed ($status): $output" >&2
+      docker logs "$ENVOY_CONTAINER" >&2 || true
+      tail -n 50 "$TEST_TMPDIR/node-b.log" >&2 || true
+      tail -n 50 "$TEST_TMPDIR/node-a.log" >&2 || true
+      return 1
+    fi
+
+    # 2b. Disallowed MCP tools/call ("delete_repo") is blocked at Envoy by ext_proc body inspection with 403 Forbidden.
+    deny_code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${envoy_port}/sam/${peer_a}/mcp/github" \
+      -H "Authorization: Bearer $mcp_task_biscuit" \
+      -H "Content-Type: application/json" \
+      -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"delete_repo"}}')"
+    [[ "$deny_code" -eq 403 ]]
+  fi
+
   # Revoking the task Biscuit via RFC 7009 POST /oauth/revoke immediately blocks
   # reuse of that task Biscuit without revoking node B's standing identity.
   run curl -sf --unix-socket "$sock_b" "http://localhost/oauth/revoke" \
@@ -213,6 +384,15 @@ EOF
     -H 'Content-Type: application/json' \
     -d '{"model":"e2e-model","messages":[{"role":"user","content":"revoked task"}]}')"
   [[ "$revoked_code" -eq 403 ]]
+
+  if [[ -n "${envoy_port:-}" ]]; then
+    envoy_revoked_code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${envoy_port}/v1/chat/completions" \
+      -H "Authorization: Bearer $task_biscuit" \
+      -H "X-Sam-Target-Service: inference://laptop-llm" \
+      -H 'Content-Type: application/json' \
+      -d '{"model":"e2e-model","messages":[{"role":"user","content":"revoked task via envoy"}]}')"
+    [[ "$envoy_revoked_code" -eq 403 ]]
+  fi
 
   # The plain HTTP server never shows up as an MCP provider: node A had
   # registered every configured service before its API came up, so its
@@ -235,3 +415,4 @@ EOF
   join_row="$(echo "$output" | grep "sam-one join token")"
   [[ "$join_row" == *" 2/"* ]]
 }
+

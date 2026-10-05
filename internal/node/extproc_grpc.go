@@ -15,6 +15,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -38,7 +39,6 @@ import (
 	extprocv3 "github.com/google/sam/third_party/envoy/envoy/service/ext_proc/v3"
 	typev3 "github.com/google/sam/third_party/envoy/envoy/type/v3"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // ExtProcMethodPath is the gRPC HTTP/2 path for Envoy ExternalProcessor.Process.
@@ -344,18 +344,21 @@ func handleGatewayExtProc(node *SamNode, w http.ResponseWriter, r *http.Request)
 					},
 				}
 			} else {
-				resp = evaluateGatewayExtProcDecision(r.Context(), node, capturedMethod, capturedPath, capturedHost, capturedHeaders, false)
+				resp = evaluateGatewayExtProcDecision(r.Context(), node, capturedMethod, capturedPath, capturedHost, capturedHeaders, false, false)
 			}
 
 		case *extprocv3.ProcessingRequest_RequestBody:
+			var allowStreamInit bool
 			if len(phase.RequestBody.GetBody()) > 0 && capturedHeaders != nil {
-				if tool := extractJSONRPCMCPTool(phase.RequestBody.GetBody()); tool != "" {
+				tool, allowInit := inspectJSONRPCMCPBody(phase.RequestBody.GetBody())
+				if tool != "" {
 					capturedHeaders[strings.ToLower(HeaderSamMCPTool)] = tool
 				}
+				allowStreamInit = allowInit
 			}
 			if pendingCheck {
 				pendingCheck = false
-				resp = evaluateGatewayExtProcDecision(r.Context(), node, capturedMethod, capturedPath, capturedHost, capturedHeaders, true)
+				resp = evaluateGatewayExtProcDecision(r.Context(), node, capturedMethod, capturedPath, capturedHost, capturedHeaders, true, allowStreamInit)
 			} else {
 				resp = &extprocv3.ProcessingResponse{
 					Response: &extprocv3.ProcessingResponse_RequestBody{
@@ -420,12 +423,13 @@ func handleGatewayExtProc(node *SamNode, w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Grpc-Message", "")
 }
 
-func evaluateGatewayExtProcDecision(ctx context.Context, node *SamNode, method, path, host string, headers map[string]string, isBodyPhase bool) *extprocv3.ProcessingResponse {
+func evaluateGatewayExtProcDecision(ctx context.Context, node *SamNode, method, path, host string, headers map[string]string, isBodyPhase, allowMCPStreamInit bool) *extprocv3.ProcessingResponse {
 	res := evaluateExtAuthz(ctx, node, extAuthzCheckInput{
-		Method:  method,
-		Path:    path,
-		Host:    host,
-		Headers: headers,
+		Method:             method,
+		Path:               path,
+		Host:               host,
+		Headers:            headers,
+		AllowMCPStreamInit: allowMCPStreamInit,
 	})
 	if !res.Allowed {
 		status := typev3.StatusCode_Forbidden
@@ -447,17 +451,23 @@ func evaluateGatewayExtProcDecision(ctx context.Context, node *SamNode, method, 
 	for k, v := range res.ResponseHeaders {
 		setHeaders = append(setHeaders, &corev3.HeaderValueOption{
 			Header: &corev3.HeaderValue{
-				Key:   k,
-				Value: v,
+				Key:      k,
+				RawValue: []byte(v),
 			},
-			Append:       wrapperspb.Bool(false),
 			AppendAction: corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD,
 		})
+	}
+	var removeHeaders []string
+	if _, hasUpstreamAuth := res.ResponseHeaders["Authorization"]; !hasUpstreamAuth {
+		if headers["authorization"] != "" {
+			removeHeaders = append(removeHeaders, "authorization")
+		}
 	}
 	common := &extprocv3.CommonResponse{
 		Status: extprocv3.CommonResponse_CONTINUE,
 		HeaderMutation: &extprocv3.HeaderMutation{
-			SetHeaders: setHeaders,
+			SetHeaders:    setHeaders,
+			RemoveHeaders: removeHeaders,
 		},
 	}
 	if isBodyPhase {
@@ -474,7 +484,7 @@ func evaluateGatewayExtProcDecision(ctx context.Context, node *SamNode, method, 
 	}
 }
 
-func extractJSONRPCMCPTool(body []byte) string {
+func inspectJSONRPCMCPBody(body []byte) (mcpTool string, allowStreamInit bool) {
 	var rpc struct {
 		Method string `json:"method"`
 		Params struct {
@@ -482,14 +492,37 @@ func extractJSONRPCMCPTool(body []byte) string {
 		} `json:"params"`
 	}
 	if err := json.Unmarshal(body, &rpc); err != nil {
-		return ""
+		return "", false
 	}
-	if rpc.Method == "tools/call" && strings.TrimSpace(rpc.Params.Name) != "" {
+	switch rpc.Method {
+	case "initialize", "ping", "tools/list":
+		return "", true
+	case "tools/call":
 		rawTool := strings.TrimSpace(rpc.Params.Name)
-		if _, stripped, err := api.SplitToolName(rawTool); err == nil {
-			return stripped
+		if rawTool == "" {
+			return "", false
 		}
-		return rawTool
+		if _, stripped, err := api.SplitToolName(rawTool); err == nil {
+			return stripped, false
+		}
+		return rawTool, false
+	default:
+		return "", false
 	}
-	return ""
+}
+
+func inspectMCPHTTPRequestBody(r *http.Request) (string, bool, error) {
+	if r == nil || r.Body == nil || !strings.EqualFold(r.Method, http.MethodPost) {
+		return "", false, nil
+	}
+	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, maxGRPCFrameBytes+1))
+	if err != nil {
+		return "", false, err
+	}
+	if int64(len(bodyBytes)) > maxGRPCFrameBytes {
+		return "", false, fmt.Errorf("MCP request body exceeds maximum inspection size (%d bytes)", maxGRPCFrameBytes)
+	}
+	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	tool, allowInit := inspectJSONRPCMCPBody(bodyBytes)
+	return tool, allowInit, nil
 }

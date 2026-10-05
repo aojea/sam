@@ -2,7 +2,7 @@
 # A minimal OpenAI-compatible backend for e2e tests: one model, one canned
 # completion. Standard library only, so it runs wherever python3 does.
 import json
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MODEL = "e2e-model"
 
@@ -36,6 +36,51 @@ class Handler(BaseHTTPRequestHandler):
                 "usage": {"prompt_tokens": 1, "completion_tokens": 4, "total_tokens": 5},
             })
             return
+        if self.path == "/mcp" or self.path.startswith("/mcp/"):
+            method = req.get("method", "")
+            req_id = req.get("id", 1)
+            if method == "initialize":
+                self._json(200, {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {"tools": {}},
+                        "serverInfo": {"name": "github", "version": "1.0"},
+                    },
+                })
+                return
+            if method == "notifications/initialized":
+                self.send_response(202)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if method == "tools/list":
+                self._json(200, {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "tools": [
+                            {"name": "get_pr", "description": "Get pull request"},
+                            {"name": "delete_repo", "description": "Delete repository"},
+                        ]
+                    },
+                })
+                return
+            if method == "tools/call":
+                peer_id = self.headers.get("X-Peer-Id", "")
+                tool_name = (req.get("params") or {}).get("name", "")
+                self._json(200, {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "content": [{
+                            "type": "text",
+                            "text": f"tool={tool_name} peer={peer_id}",
+                        }]
+                    },
+                })
+                return
         self._json(404, {"error": {"message": "unknown model", "code": "model_not_found"}})
 
     def log_message(self, *args):
@@ -43,6 +88,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    server = HTTPServer(("127.0.0.1", 0), Handler)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     print(f"listening on port {server.server_address[1]}", flush=True)
     server.serve_forever()
+

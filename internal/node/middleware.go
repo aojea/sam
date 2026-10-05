@@ -58,6 +58,10 @@ type RequestContext struct {
 	// MCPTool is set when evaluating a specific MCP tools/call invocation.
 	MCPTool string
 
+	// AllowMCPStreamInit is set when an MCP request is a session handshake or
+	// discovery method (initialize, ping, tools/list).
+	AllowMCPStreamInit bool
+
 	// TaskRules holds the verified TaskAuthorizationRule chain extracted from
 	// the caller's Biscuit during stream authentication so downstream stream
 	// handlers (such as MCP pass-through) can enforce tool-level constraints.
@@ -378,7 +382,7 @@ func (n *SamNode) authorizeWithRules(rawToken []byte, req RequestContext, pubKey
 			ServiceType:        opType,
 			ServiceName:        opName,
 			MCPTool:            req.MCPTool,
-			AllowMCPStreamInit: req.HTTP == nil && req.MCPTool == "" && req.Protocol == string(api.MCPProtocolID),
+			AllowMCPStreamInit: req.AllowMCPStreamInit || (req.HTTP == nil && req.MCPTool == "" && req.Protocol == string(api.MCPProtocolID)),
 		}
 		if req.HTTP != nil {
 			taskReq.HasHTTP = true

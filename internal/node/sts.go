@@ -350,14 +350,10 @@ func withCallerOrTokenAuth(node *SamNode, token string, allowAuthorizationFallba
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.Debugf("[SidecarAuth] Incoming request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 
-		// Extract optional X-Sam-Authentication or Authorization bearer value.
+		// Extract optional X-Sam-Authentication, X-Sam-Biscuit (injected by an
+		// upstream Envoy ext_authz / ext_proc filter), or Authorization bearer value.
 		headerName := api.HeaderSamAuthentication
 		authHeader := r.Header.Get(headerName)
-		if authHeader == "" && allowAuthorizationFallback {
-			headerName = "Authorization"
-			authHeader = r.Header.Get(headerName)
-		}
-
 		var bearer string
 		var hasBearer bool
 		if authHeader != "" {
@@ -366,13 +362,28 @@ func withCallerOrTokenAuth(node *SamNode, token string, allowAuthorizationFallba
 				bearer = strings.TrimSpace(parts[1])
 				hasBearer = true
 			}
+		} else if b64 := strings.TrimSpace(r.Header.Get(api.HeaderSamBiscuit)); b64 != "" {
+			headerName = api.HeaderSamBiscuit
+			authHeader = b64
+			bearer = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(b64, "Bearer "), "bearer "))
+			hasBearer = bearer != ""
+		} else if allowAuthorizationFallback {
+			headerName = "Authorization"
+			authHeader = r.Header.Get(headerName)
+			if authHeader != "" {
+				parts := strings.SplitN(authHeader, " ", 2)
+				if len(parts) == 2 && strings.EqualFold(parts[0], "bearer") {
+					bearer = strings.TrimSpace(parts[1])
+					hasBearer = true
+				}
+			}
 		}
 
 		// Local Unix socket or mTLS (token == ""): transport already authenticates
 		// the local process, but if the caller also supplied a Task Biscuit or JWT,
 		// bind it to the request context (and fail closed if that Biscuit/JWT is invalid/revoked).
 		if fromLocalSocket(r) || token == "" {
-			if hasBearer && (token == "" || !constantTimeEqual(bearer, token)) {
+			if hasBearer && (token == "" || headerName == api.HeaderSamBiscuit || !constantTimeEqual(bearer, token)) {
 				biscuitBytes, isMeshCred, err := node.resolveCallerCredential(r.Context(), bearer)
 				if isMeshCred {
 					if err != nil {
@@ -381,12 +392,13 @@ func withCallerOrTokenAuth(node *SamNode, token string, allowAuthorizationFallba
 					}
 					r = r.WithContext(WithCallerBiscuit(r.Context(), biscuitBytes))
 					r.Header.Del(headerName)
-				} else if headerName == api.HeaderSamAuthentication {
+				} else if headerName == api.HeaderSamAuthentication || headerName == api.HeaderSamBiscuit {
 					http.Error(w, "Forbidden", http.StatusForbidden)
 					return
 				}
 			}
 			r.Header.Del(api.HeaderSamAuthentication)
+			r.Header.Del(api.HeaderSamBiscuit)
 			stripSidecarTokenFromAuthorization(r, token)
 			next.ServeHTTP(w, r)
 			return
@@ -406,7 +418,7 @@ func withCallerOrTokenAuth(node *SamNode, token string, allowAuthorizationFallba
 			return
 		}
 
-		if constantTimeEqual(bearer, token) {
+		if headerName != api.HeaderSamBiscuit && constantTimeEqual(bearer, token) {
 			r.Header.Del(headerName)
 			stripSidecarTokenFromAuthorization(r, token)
 			next.ServeHTTP(w, r)

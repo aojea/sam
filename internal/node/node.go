@@ -2286,6 +2286,15 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 					reqCtx.Egress = &EgressFacts{Host: serviceName, Port: reqPort}
 				}
 			}
+			if serviceType == api.ServiceType_SERVICE_TYPE_MCP {
+				mcpTool, allowInit, err := inspectMCPHTTPRequestBody(r)
+				if err != nil {
+					refuse(w, http.StatusRequestEntityTooLarge, err.Error(), proxyStatusDenied)
+					return
+				}
+				reqCtx.MCPTool = mcpTool
+				reqCtx.AllowMCPStreamInit = allowInit
+			}
 
 			// Verify authorization
 			if err := n.VerifyBiscuitToken(biscuitBytes, reqCtx); err != nil {

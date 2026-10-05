@@ -22,6 +22,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -524,4 +525,26 @@ func buildEnvoyCheckRequestPayload(method, path string, headers map[string]strin
 	checkReq = protowire.AppendTag(checkReq, 1, protowire.BytesType)
 	checkReq = protowire.AppendBytes(checkReq, attrBytes)
 	return checkReq
+}
+
+func TestInspectMCPHTTPRequestBody(t *testing.T) {
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mcp://github/get_pr"}}`
+	req := httptest.NewRequest(http.MethodPost, "/mcp/github", strings.NewReader(body))
+	tool, allowInit, err := inspectMCPHTTPRequestBody(req)
+	if err != nil {
+		t.Fatalf("inspectMCPHTTPRequestBody: %v", err)
+	}
+	if tool != "get_pr" || allowInit {
+		t.Fatalf("got tool=%q allowInit=%v, want tool=\"get_pr\" allowInit=false", tool, allowInit)
+	}
+	restored, _ := io.ReadAll(req.Body)
+	if string(restored) != body {
+		t.Fatalf("body was not restored: got %q, want %q", string(restored), body)
+	}
+
+	initReq := httptest.NewRequest(http.MethodPost, "/mcp/github", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+	tool, allowInit, err = inspectMCPHTTPRequestBody(initReq)
+	if err != nil || tool != "" || !allowInit {
+		t.Fatalf("initialize: got tool=%q allowInit=%v err=%v, want allowInit=true", tool, allowInit, err)
+	}
 }

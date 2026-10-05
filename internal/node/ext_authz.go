@@ -37,10 +37,11 @@ const (
 )
 
 type extAuthzCheckInput struct {
-	Method  string
-	Path    string
-	Host    string
-	Headers map[string]string
+	Method             string
+	Path               string
+	Host               string
+	Headers            map[string]string
+	AllowMCPStreamInit bool
 }
 
 type extAuthzCheckResult struct {
@@ -74,10 +75,11 @@ func handleExtAuthzHTTP(node *SamNode, w http.ResponseWriter, r *http.Request) {
 	}
 
 	res := evaluateExtAuthz(r.Context(), node, extAuthzCheckInput{
-		Method:  method,
-		Path:    checkPath,
-		Host:    r.Host,
-		Headers: headers,
+		Method:             method,
+		Path:               checkPath,
+		Host:               r.Host,
+		Headers:            headers,
+		AllowMCPStreamInit: headers[strings.ToLower(HeaderSamMCPTool)] == "",
 	})
 	if !res.Allowed {
 		http.Error(w, res.Message, res.HTTPStatus)
@@ -108,6 +110,7 @@ func handleExtAuthzGRPC(node *SamNode, w http.ResponseWriter, r *http.Request) {
 		writeGRPCError(w, 3, fmt.Sprintf("invalid CheckRequest: %v", err))
 		return
 	}
+	in.AllowMCPStreamInit = in.Headers[strings.ToLower(HeaderSamMCPTool)] == ""
 	res := evaluateExtAuthz(r.Context(), node, in)
 	respPayload := marshalEnvoyCheckResponse(res)
 
@@ -146,7 +149,7 @@ func evaluateExtAuthz(ctx context.Context, node *SamNode, in extAuthzCheckInput)
 		}
 	}
 
-	target, reqPath := resolveExtAuthzTarget(in)
+	target, reqPath := resolveExtAuthzTarget(node, in)
 	if target != "" {
 		var callerPeer peer.ID
 		var isLocal bool
@@ -183,12 +186,13 @@ func evaluateExtAuthz(ctx context.Context, node *SamNode, in extAuthzCheckInput)
 			reqPath = "/"
 		}
 		reqCtx := RequestContext{
-			PeerID:   callerPeer,
-			Protocol: "ext_authz",
-			Target:   target,
-			MCPTool:  in.Headers[strings.ToLower(HeaderSamMCPTool)],
-			HTTP:     &HTTPRequestFacts{Method: method, Path: reqPath},
-			Local:    isLocal,
+			PeerID:             callerPeer,
+			Protocol:           "ext_authz",
+			Target:             target,
+			MCPTool:            in.Headers[strings.ToLower(HeaderSamMCPTool)],
+			AllowMCPStreamInit: in.AllowMCPStreamInit,
+			HTTP:               &HTTPRequestFacts{Method: method, Path: reqPath},
+			Local:              isLocal,
 		}
 		if after, ok := strings.CutPrefix(target, api.EgressServicePrefix); ok {
 			reqCtx.Egress = &EgressFacts{Host: after, Port: 443}
@@ -295,7 +299,7 @@ func isExtAuthzServiceScheme(scheme string) bool {
 	}
 }
 
-func resolveExtAuthzTarget(in extAuthzCheckInput) (target, reqPath string) {
+func resolveExtAuthzTarget(node *SamNode, in extAuthzCheckInput) (target, reqPath string) {
 	path := in.Path
 	if idx := strings.IndexByte(path, '?'); idx >= 0 {
 		path = path[:idx]
@@ -326,6 +330,17 @@ func resolveExtAuthzTarget(in extAuthzCheckInput) (target, reqPath string) {
 		if route, ok := parseEgressRoute(path); ok && isExtAuthzServiceScheme(route.serviceType) {
 			up := "/" + route.upstreamPath
 			return route.serviceType + "://" + route.serviceName, up
+		}
+	}
+	if node != nil && node.services != nil && strings.TrimSpace(in.Host) != "" {
+		normHost := api.NormalizeMeshHost(in.Host)
+		if normHost != "" {
+			if _, ok := node.services.GetTyped(api.ServiceType_SERVICE_TYPE_EGRESS, normHost); ok {
+				if path == "" {
+					path = "/"
+				}
+				return api.EgressServicePrefix + normHost, path
+			}
 		}
 	}
 	return "", path
@@ -566,6 +581,9 @@ func marshalEnvoyCheckResponse(res extAuthzCheckResult) []byte {
 			var hvoBytes []byte
 			hvoBytes = protowire.AppendTag(hvoBytes, 1, protowire.BytesType)
 			hvoBytes = protowire.AppendBytes(hvoBytes, hvBytes)
+			// Field 3: HeaderAppendAction append_action = OVERWRITE_IF_EXISTS_OR_ADD (2)
+			hvoBytes = protowire.AppendTag(hvoBytes, 3, protowire.VarintType)
+			hvoBytes = protowire.AppendVarint(hvoBytes, 2)
 
 			okBytes = protowire.AppendTag(okBytes, 2, protowire.BytesType)
 			okBytes = protowire.AppendBytes(okBytes, hvoBytes)

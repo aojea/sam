@@ -512,7 +512,11 @@ func TestGatewayExtProcServer(t *testing.T) {
 	setHdrs := resp1Body.GetRequestBody().GetResponse().GetHeaderMutation().GetSetHeaders()
 	foundTaskID := false
 	for _, h := range setHdrs {
-		if strings.EqualFold(h.GetHeader().GetKey(), "X-Sam-Task-Id") && h.GetHeader().GetValue() == "task-extproc-gateway" {
+		val := h.GetHeader().GetValue()
+		if val == "" {
+			val = string(h.GetHeader().GetRawValue())
+		}
+		if strings.EqualFold(h.GetHeader().GetKey(), "X-Sam-Task-Id") && val == "task-extproc-gateway" {
 			foundTaskID = true
 		}
 	}
@@ -585,7 +589,11 @@ func TestGatewayExtProcServer(t *testing.T) {
 	}
 	foundAuth := false
 	for _, h := range resp3Hdr.GetRequestHeaders().GetResponse().GetHeaderMutation().GetSetHeaders() {
-		if strings.EqualFold(h.GetHeader().GetKey(), "Authorization") && h.GetHeader().GetValue() == "Bearer gateway-injected-github-token" {
+		val := h.GetHeader().GetValue()
+		if val == "" {
+			val = string(h.GetHeader().GetRawValue())
+		}
+		if strings.EqualFold(h.GetHeader().GetKey(), "Authorization") && val == "Bearer gateway-injected-github-token" {
 			foundAuth = true
 		}
 	}
