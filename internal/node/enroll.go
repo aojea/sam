@@ -50,25 +50,29 @@ func expireUnix(t *timestamppb.Timestamp) int64 {
 
 // GetOrGenerateKey retrieves a persistent private key or creates one if it's the first run
 func GetOrGenerateKey(s *Store) crypto.PrivKey {
-	kb, _ := s.LoadKey()
-	if len(kb) == 0 {
-		logger.Info("[Store] Generating new Peer Identity...")
-		priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-		if err != nil {
-			logger.Fatalf("Failed to generate key: %v", err)
-		}
-		raw, err := crypto.MarshalPrivateKey(priv)
-		if err != nil {
-			logger.Fatalf("Failed to marshal private key: %v", err)
-		}
-		if err := s.SaveKey(raw); err != nil {
-			logger.Fatalf("Failed to save key: %v", err)
+	kb, err := s.LoadKey()
+	if err == nil && len(kb) > 0 {
+		priv, unmarshalErr := crypto.UnmarshalPrivateKey(kb)
+		if unmarshalErr != nil {
+			logger.Fatalf("Corrupt key in store: %v", unmarshalErr)
 		}
 		return priv
 	}
-	priv, err := crypto.UnmarshalPrivateKey(kb)
+	logger.Info("[Store] Generating new Peer Identity...")
+	priv, _, genErr := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if genErr != nil {
+		logger.Fatalf("Failed to generate key: %v", genErr)
+	}
 	if err != nil {
-		logger.Fatalf("Corrupt key in store: %v", err)
+		logger.Warnf("Skipping key persistence because store is unavailable: %v", err)
+		return priv
+	}
+	raw, marshalErr := crypto.MarshalPrivateKey(priv)
+	if marshalErr != nil {
+		logger.Fatalf("Failed to marshal private key: %v", marshalErr)
+	}
+	if saveErr := s.SaveKey(raw); saveErr != nil {
+		logger.Warnf("Failed to save key: %v", saveErr)
 	}
 	return priv
 }

@@ -48,10 +48,12 @@ func (n *SamNode) controlPlane(controlPlaneURL string) *cpclient.Client {
 	}
 	priv := n.config.PrivKey
 	if priv == nil && n.Store != nil {
-		if kb, err := n.Store.LoadKey(); err == nil && len(kb) > 0 {
-			priv, _ = crypto.UnmarshalPrivateKey(kb)
-		} else {
-			priv = GetOrGenerateKey(n.Store)
+		if kb, err := n.Store.LoadKey(); err == nil {
+			if len(kb) > 0 {
+				priv, _ = crypto.UnmarshalPrivateKey(kb)
+			} else {
+				priv = GetOrGenerateKey(n.Store)
+			}
 		}
 	}
 	if priv != nil {

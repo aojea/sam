@@ -384,11 +384,12 @@ func TestControlPlaneSyncLoop(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	priv := GetOrGenerateKey(store)
 	n := &SamNode{
 		Store:                   store,
 		trustedKeys:             []TrustedKey{{Key: oldPub, ReceivedAt: time.Now()}},
 		controlPlaneSyncTrigger: make(chan struct{}, 1),
-		config:                  Options{ControlPlaneSyncJitter: time.Millisecond},
+		config:                  Options{PrivKey: priv, ControlPlaneSyncJitter: time.Millisecond},
 	}
 	n.SetIdentityCache([]byte("identity"))
 	ctx, cancel := context.WithCancel(context.Background())
