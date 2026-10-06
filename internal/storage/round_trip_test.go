@@ -88,19 +88,19 @@ func requireFieldsRoundTrip(t *testing.T, want, got any, skip ...string) {
 	}
 }
 
-// valuesEqual compares at the coarsest precision any of these columns store,
-// which is whole seconds for the timestamps written with Unix().
+// valuesEqual compares timestamps at the precision the columns store, unix
+// milliseconds, so a table that fell back to seconds would fail here.
 func valuesEqual(w, g reflect.Value) bool {
 	switch wv := w.Interface().(type) {
 	case time.Time:
 		gv, ok := g.Interface().(time.Time)
-		return ok && wv.Unix() == gv.Unix()
+		return ok && wv.UnixMilli() == gv.UnixMilli()
 	case *time.Time:
 		gv, ok := g.Interface().(*time.Time)
 		if !ok || (wv == nil) != (gv == nil) {
 			return false
 		}
-		return wv == nil || wv.Unix() == gv.Unix()
+		return wv == nil || wv.UnixMilli() == gv.UnixMilli()
 	}
 	return reflect.DeepEqual(w.Interface(), g.Interface())
 }

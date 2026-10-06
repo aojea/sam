@@ -519,6 +519,24 @@ var migrations = []migration{
 			)`,
 		},
 	},
+	{
+		// Every BIGINT instant is unix milliseconds. These four tables held
+		// seconds; the guard tells the two apart (10^11 seconds is the year
+		// 5138, 10^11 milliseconds is 1973), so a row is converted once.
+		version:  15,
+		postgres: secondsToMillisMigration,
+		sqlite:   secondsToMillisMigration,
+	},
+}
+
+var secondsToMillisMigration = []string{
+	`UPDATE bootstrap_tokens SET created_at = created_at * 1000 WHERE created_at < 100000000000`,
+	`UPDATE bootstrap_tokens SET expires_at = expires_at * 1000 WHERE expires_at < 100000000000`,
+	`UPDATE bootstrap_tokens SET revoked_at = revoked_at * 1000 WHERE revoked_at IS NOT NULL AND revoked_at < 100000000000`,
+	`UPDATE enrollment_requests SET created_at = created_at * 1000 WHERE created_at < 100000000000`,
+	`UPDATE enrollment_requests SET resolved_at = resolved_at * 1000 WHERE resolved_at IS NOT NULL AND resolved_at < 100000000000`,
+	`UPDATE users SET created_at = created_at * 1000 WHERE created_at < 100000000000`,
+	`UPDATE banned_identities SET banned_at = banned_at * 1000 WHERE banned_at < 100000000000`,
 }
 
 func (s *SQLStore) initSchema() error {
@@ -938,7 +956,7 @@ func (s *SQLStore) SetIdentityBanned(ctx context.Context, identity string, banne
 	}
 	if banned {
 		query := s.rebind(`INSERT INTO banned_identities (identity, banned_at) VALUES (?, ?) ON CONFLICT (identity) DO NOTHING`)
-		_, err := s.db.ExecContext(ctx, query, identity, time.Now().Unix())
+		_, err := s.db.ExecContext(ctx, query, identity, time.Now().UnixMilli())
 		return err
 	}
 	query := s.rebind(`DELETE FROM banned_identities WHERE identity = ?`)
@@ -1337,8 +1355,8 @@ func (s *SQLStore) SaveBootstrapToken(ctx context.Context, token *BootstrapToken
 		token.MaxUsages,
 		token.UsagesCount,
 		token.Description,
-		token.CreatedAt.Unix(),
-		token.ExpiresAt.Unix(),
+		token.CreatedAt.UnixMilli(),
+		token.ExpiresAt.UnixMilli(),
 		token.AutonomousRecovery,
 	)
 	return err
@@ -1373,10 +1391,10 @@ func (s *SQLStore) GetBootstrapToken(ctx context.Context, id string) (*Bootstrap
 	if ownerID.Valid {
 		t.OwnerID = ownerID.String
 	}
-	t.CreatedAt = time.Unix(created, 0)
-	t.ExpiresAt = time.Unix(expires, 0)
+	t.CreatedAt = time.UnixMilli(created)
+	t.ExpiresAt = time.UnixMilli(expires)
 	if revokedAt.Valid {
-		rt := time.Unix(revokedAt.Int64, 0)
+		rt := time.UnixMilli(revokedAt.Int64)
 		t.RevokedAt = &rt
 	}
 	return &t, nil
@@ -1387,7 +1405,7 @@ func (s *SQLStore) GetBootstrapToken(ctx context.Context, id string) (*Bootstrap
 func (s *SQLStore) ConsumeBootstrapTokenUsage(ctx context.Context, id string, now time.Time) error {
 	query := `UPDATE bootstrap_tokens SET usages_count = usages_count + 1
 		WHERE id = ? AND usages_count < max_usages AND revoked_at IS NULL AND expires_at > ?`
-	res, err := s.db.ExecContext(ctx, s.rebind(query), id, now.Unix())
+	res, err := s.db.ExecContext(ctx, s.rebind(query), id, now.UnixMilli())
 	if err != nil {
 		return fmt.Errorf("failed to consume token usage: %w", err)
 	}
@@ -1406,7 +1424,7 @@ func (s *SQLStore) ConsumeBootstrapTokenUsage(ctx context.Context, id string, no
 // a no-op rather than clobbering the original revocation time.
 func (s *SQLStore) RevokeBootstrapToken(ctx context.Context, id string) error {
 	query := `UPDATE bootstrap_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`
-	_, err := s.db.ExecContext(ctx, s.rebind(query), time.Now().Unix(), id)
+	_, err := s.db.ExecContext(ctx, s.rebind(query), time.Now().UnixMilli(), id)
 	if err != nil {
 		return fmt.Errorf("failed to revoke bootstrap token: %w", err)
 	}
@@ -1423,7 +1441,7 @@ func (s *SQLStore) CreateEnrollmentRequest(ctx context.Context, req *EnrollmentR
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	var resAt sql.NullInt64
 	if req.ResolvedAt != nil {
-		resAt = sql.NullInt64{Int64: req.ResolvedAt.Unix(), Valid: true}
+		resAt = sql.NullInt64{Int64: req.ResolvedAt.UnixMilli(), Valid: true}
 	}
 	_, err = s.db.ExecContext(ctx, s.rebind(query),
 		req.ID,
@@ -1433,7 +1451,7 @@ func (s *SQLStore) CreateEnrollmentRequest(ctx context.Context, req *EnrollmentR
 		int(req.Status),
 		string(labelsJSON),
 		req.BiscuitToken,
-		req.CreatedAt.Unix(),
+		req.CreatedAt.UnixMilli(),
 		resAt,
 		req.ResolvedBy,
 	)
@@ -1491,10 +1509,10 @@ func (s *SQLStore) scanEnrollmentRequest(row scannable) (*EnrollmentRequest, err
 		}
 	}
 
-	req.CreatedAt = time.Unix(created, 0)
+	req.CreatedAt = time.UnixMilli(created)
 	req.Status = api.EnrollmentStatus(statusVal)
 	if resAt.Valid {
-		t := time.Unix(resAt.Int64, 0)
+		t := time.UnixMilli(resAt.Int64)
 		req.ResolvedAt = &t
 	}
 
@@ -1539,7 +1557,7 @@ func (s *SQLStore) UpdateEnrollmentRequest(ctx context.Context, id string, statu
 	_, err := s.db.ExecContext(ctx, s.rebind(query),
 		int(status),
 		biscuit,
-		time.Now().Unix(),
+		time.Now().UnixMilli(),
 		resolvedBy,
 		id,
 	)
@@ -1556,7 +1574,7 @@ func (s *SQLStore) ResolveEnrollmentRequest(ctx context.Context, id string, stat
 	res, err := s.db.ExecContext(ctx, s.rebind(query),
 		int(status),
 		biscuit,
-		time.Now().Unix(),
+		time.Now().UnixMilli(),
 		resolvedBy,
 		id,
 		int(api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING),
@@ -1673,10 +1691,10 @@ func (s *SQLStore) ListBootstrapTokens(ctx context.Context) ([]BootstrapToken, e
 		if ownerID.Valid {
 			t.OwnerID = ownerID.String
 		}
-		t.CreatedAt = time.Unix(created, 0)
-		t.ExpiresAt = time.Unix(expires, 0)
+		t.CreatedAt = time.UnixMilli(created)
+		t.ExpiresAt = time.UnixMilli(expires)
 		if revokedAt.Valid {
-			rt := time.Unix(revokedAt.Int64, 0)
+			rt := time.UnixMilli(revokedAt.Int64)
 			t.RevokedAt = &rt
 		}
 		tokens = append(tokens, t)
@@ -1707,7 +1725,7 @@ func (s *SQLStore) SaveUser(ctx context.Context, user *User) error {
 		user.Issuer,
 		user.Email,
 		user.Role,
-		user.CreatedAt.Unix(),
+		user.CreatedAt.UnixMilli(),
 	)
 	return err
 }
@@ -1730,7 +1748,7 @@ func (s *SQLStore) GetUser(ctx context.Context, id string) (*User, error) {
 	if err != nil {
 		return nil, err
 	}
-	user.CreatedAt = time.Unix(created, 0)
+	user.CreatedAt = time.UnixMilli(created)
 	return &user, nil
 }
 
@@ -1756,7 +1774,7 @@ func (s *SQLStore) ListUsers(ctx context.Context) ([]User, error) {
 		); err != nil {
 			return nil, err
 		}
-		user.CreatedAt = time.Unix(created, 0)
+		user.CreatedAt = time.UnixMilli(created)
 		users = append(users, user)
 	}
 	if err := rows.Err(); err != nil {
