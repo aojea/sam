@@ -56,7 +56,7 @@ SAM separates the two layers:
 
 | Layer | Question answered | Primitive |
 |---|---|---|
-| **Subject & channel attestation** | *Which user or workload initiated this request, and through which node?* | OIDC ID token, Kubernetes projected SA JWT, SPIFFE JWT-SVID, or Istio mTLS identity (`source.principal` / XFCC), exchanged into a Biscuit bound to the channel (`client_peer_id`, `actor_node`). |
+| **Subject & channel attestation** | *Which user or workload initiated this request, and through which node?* | OIDC ID token, Kubernetes projected SA JWT, or SPIFFE JWT-SVID, exchanged into a Biscuit bound to the channel (`client_peer_id`, `actor_node`). |
 | **Task authorization (TAR)** | *What subset of standing permissions may this task or sub-agent hop exercise?* | Appended `tar_block` blocks carrying `api.TaskAuthorizationRule`, intersected across hops and translated into downscoped cloud credentials at egress. |
 
 ## Separation of responsibilities
@@ -158,12 +158,12 @@ Where a cluster already runs Envoy, Istio, or `agentgateway`, `sam-node` acts
 as their external Policy Decision Point and Token Service over three standard
 interfaces:
 
-1. **Envoy `ext_authz` (`--ext-authz-addr`):** evaluates standing policy and
-   `tar_block` chains on incoming `CheckRequest` calls, accepts verified
-   SPIFFE principals from `AttributeContext.Source.Principal` or
-   `X-Forwarded-Client-Cert` (XFCC) on trusted proxy listeners, and injects
-   brokered upstream credentials (`Authorization: Bearer ...`,
-   `X-Sam-Principal`, `X-Sam-Task-Id`).
+1. **Envoy `ext_authz` (on the local API listeners):** evaluates standing
+   policy and `tar_block` chains on incoming `CheckRequest` calls. The caller
+   presents a Biscuit, or a platform JWT that `sam-node` exchanges at the
+   control plane into a delegated Biscuit. On `OK` it returns `X-Sam-Biscuit`,
+   `X-Sam-Principal`, `X-Sam-Roles`, `X-Sam-Task-Id` and, for `egress://`
+   targets with a credential broker, the brokered `Authorization` header.
 2. **Envoy `ext_proc` (`envoy.service.ext_proc.v3.ExternalProcessor`):** the
    body-aware counterpart to `ext_authz`. Because MCP tool names travel inside
    the JSON-RPC request body (`params.name`), `ext_proc` inspects the buffered

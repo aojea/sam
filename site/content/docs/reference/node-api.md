@@ -8,9 +8,9 @@ aliases:
 
 The local API that `sam-node run` serves to agents, gateways, and scripts on
 the same machine or cluster. It is available on TCP (`--bind-addr`, default
-`127.0.0.1:8080`), on a Unix socket (`--socket-path`, default
-`<data-dir>/sam.sock`), and optionally on a dedicated Envoy `ext_authz` /
-`ext_proc` listener (`--ext-authz-addr`).
+`127.0.0.1:8080`) and on a Unix socket (`--socket-path`, default
+`<data-dir>/sam.sock`). The Envoy `ext_authz` and `ext_proc` endpoints are
+served on the same listeners.
 
 ## Authentication
 
@@ -85,17 +85,21 @@ revocation ID in the node's local revocation cache until the token expires.
 
 ## Envoy `ext_authz` and `ext_proc` gateway integration
 
-When `--ext-authz-addr` (`host:port` or `unix:/path`) is set (or on the local
-API listener), `sam-node` serves:
+On the local API listeners, `sam-node` serves:
 
 - **Envoy HTTP `ext_authz` (`/ext_authz`, `/ext_authz/*`)** and **gRPC
   `envoy.service.auth.v3.Authorization/Check`**: evaluates standing Datalog
-  policy and any `tar_block` chain on the request. On a trusted `--ext-authz-addr`
-  listener, if no Bearer token is present, `sam-node` extracts the caller's
-  verified SPIFFE principal from `AttributeContext.Source.Principal` or
-  `X-Forwarded-Client-Cert` (XFCC) and exchanges it into a Delegated Session
-  Biscuit. On `OK`, it injects `Authorization: Bearer <upstream-token>`,
-  `X-Sam-Principal`, and `X-Sam-Task-Id`.
+  policy and any `tar_block` chain on the request. The credential is read
+  from `X-Sam-Biscuit`, or from a Bearer value in `X-Sam-Authentication` or
+  `Authorization`. A Bearer value that is a platform JWT is exchanged at the
+  control plane (`POST /token/exchange`) into a delegated Biscuit before
+  evaluation; a request with no credential is refused with `401`. The target
+  service is taken from `X-Sam-Target-Service` or from the `/sam/<peer>/<type>/<name>`
+  request path. On `OK`, the response carries `X-Sam-Biscuit`,
+  `X-Sam-Principal`, `X-Sam-Roles`, and, when the token is task-attenuated,
+  `X-Sam-Task` (the last `TaskAuthorizationRule` as protojson) and
+  `X-Sam-Task-Id`. For an `egress://` target with a configured credential
+  broker it also carries the brokered `Authorization` header for the upstream.
 - **Envoy gRPC `envoy.service.ext_proc.v3.ExternalProcessor/Process`**: the
   body-aware gateway processor. It inspects JSON-RPC bodies on MCP `tools/call`
   requests to enforce `operation.allowed_tools` in `TaskAuthorizationRule`

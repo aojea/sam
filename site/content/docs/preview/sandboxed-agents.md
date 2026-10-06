@@ -127,15 +127,14 @@ In clusters that already route agent traffic through **`agentgateway`**,
 continues to flow through those proxies while `sam-node` serves as the Policy
 Decision Point and Token Service:
 
-- **Envoy `ext_authz` (`--ext-authz-addr`) and `ext_proc`:**
+- **Envoy `ext_authz` and `ext_proc` (on the local API listeners):**
   Istio `AuthorizationPolicy (action: CUSTOM)` or `agentgateway` calls
-  `sam-node`. When no Bearer token is present on a trusted proxy listener,
-  `sam-node` reads the caller's verified SPIFFE ID from
-  `AttributeContext.Source.Principal` or `X-Forwarded-Client-Cert` (XFCC),
-  exchanges it into a Delegated Session Biscuit, evaluates the standing Datalog
-  policy and any `TaskAuthorizationRule` chain (including MCP tool names in
-  JSON-RPC bodies via `ext_proc`), and injects the upstream credential into
-  `Authorization` before the gateway forwards the request.
+  `sam-node` with the caller's Biscuit, or with a platform JWT that
+  `sam-node` exchanges at the control plane into a delegated Biscuit.
+  `sam-node` evaluates the standing Datalog policy and any
+  `TaskAuthorizationRule` chain (including MCP tool names in JSON-RPC bodies
+  via `ext_proc`), and for `egress://` targets injects the brokered upstream
+  credential into `Authorization` before the gateway forwards the request.
 - **RFC 8693 backend token exchange (`POST /oauth/token`):**
   `agentgateway`'s built-in RFC 8693 token exchange policy can point directly
   at `http://sam-node:8080/oauth/token` to exchange workload JWTs or narrow

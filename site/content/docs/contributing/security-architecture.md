@@ -79,7 +79,7 @@ SAM separates caller attestation from task authorization:
 
 | Layer | Question answered | Primitive | Role in SAM |
 | :--- | :--- | :--- | :--- |
-| **1. Workload / Subject & Channel Attestation** | *"Which workload or user initiated this request, and through which node is it travelling?"* | **OIDC ID tokens**, **Kubernetes projected SA JWTs**, **GCE/Cloud Run identity tokens**, **SPIFFE JWT-SVIDs**, or **Istio XFCC**. | Verified at `POST /register` (node enrollment) or `POST /token/exchange` (caller delegation) to mint a Biscuit bound to the transport channel (`client_peer_id`, `actor_node`). |
+| **1. Workload / Subject & Channel Attestation** | *"Which workload or user initiated this request, and through which node is it travelling?"* | **OIDC ID tokens**, **Kubernetes projected SA JWTs**, **GCE/Cloud Run identity tokens**, or **SPIFFE JWT-SVIDs**. | Verified at `POST /register` (node enrollment) or `POST /token/exchange` (caller delegation) to mint a Biscuit bound to the transport channel (`client_peer_id`, `actor_node`). |
 | **2. Task / Session Authorization (TAR)** | *"What subset of standing permissions may this specific task or sub-agent hop exercise right now?"* | **SAM Task Biscuit** (Block 0 Authority + appended `tar_block` blocks carrying `api.TaskAuthorizationRule`). | Attenuated offline across hops, enforced at every SAM Policy Enforcement Point (PEP), and translated into downscoped upstream cloud credentials by `CloudTokenExchanger` at egress. |
 
 ---
@@ -366,11 +366,13 @@ as a standard OIDC issuer:
 
 1. Envoy `ext_authz` (`/ext_authz` and
    `/envoy.service.auth.v3.Authorization/Check`) evaluates standing Datalog
-   policy and `tar_block` rules on incoming Envoy `CheckRequest` calls, accepts
-   verified SPIFFE IDs from `AttributeContext.Source.Principal` or
-   `X-Forwarded-Client-Cert` (XFCC) on trusted proxy listeners, and injects
-   brokered upstream credentials (`Authorization: Bearer ...`,
-   `X-Sam-Principal`, `X-Sam-Task-Id`).
+   policy and `tar_block` rules on incoming Envoy `CheckRequest` calls. The
+   caller presents a Biscuit (`X-Sam-Biscuit`, or a Bearer value in
+   `X-Sam-Authentication` or `Authorization`) or a platform JWT, which
+   `sam-node` exchanges at the control plane into a delegated Biscuit. On `OK`
+   it returns `X-Sam-Biscuit`, `X-Sam-Principal`, `X-Sam-Roles`,
+   `X-Sam-Task-Id` and, for `egress://` targets with a credential broker, the
+   brokered upstream `Authorization` header.
 2. Envoy `ext_proc` (`/envoy.service.ext_proc.v3.ExternalProcessor/Process`)
    inspects buffered JSON-RPC request bodies so `operation.allowed_tools` on
    MCP `tools/call` is enforced before injecting the upstream credential.
@@ -463,8 +465,8 @@ projected service account JWT) to authenticate to a local or cluster
 
 #### Blueprint 3: `agentgateway` / Istio service mesh
 
-Workloads authenticate to `agentgateway` or Istio via mTLS SPIFFE XFCC or a
-Task Biscuit; the gateway calls `sam-node` over `ext_authz`, `ext_proc`, or RFC
+Workloads authenticate to `agentgateway` or Istio with a platform JWT (for
+example a SPIFFE JWT-SVID) or a Task Biscuit; the gateway calls `sam-node` over `ext_authz`, `ext_proc`, or RFC
 8693 `/oauth/token` for local policy enforcement and routes cross-cluster MCP,
 A2A, and cloud egress calls through `sam-node`.
 

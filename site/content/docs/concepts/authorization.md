@@ -202,8 +202,8 @@ permissions:
 
 - On `/mcp` and `/v1/*` (or via RFC 8693 `POST /oauth/token` and Envoy
   `ext_authz` / `ext_proc`), the caller presents its own platform JWT (OIDC ID
-  token, Kubernetes projected SA JWT, SPIFFE JWT-SVID, or Istio mTLS XFCC
-  identity) or a task-attenuated Biscuit.
+  token, Kubernetes projected SA JWT, or SPIFFE JWT-SVID) or a task-attenuated
+  Biscuit.
 - `sam-node` exchanges platform JWTs via `POST /token/exchange` into a
   **Delegated Session Biscuit** carrying the caller's own `user()`, `email()`,
   `group()`, and `role()` facts, bound to the node via `client_peer_id()` and
