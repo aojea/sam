@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/google/sam/internal/console"
 	"github.com/google/sam/internal/secrets"
+	"github.com/google/sam/internal/version"
 )
 
 func main() {
@@ -36,8 +38,13 @@ func main() {
 		staticDir       = flag.String("static-dir", "", "Directory containing static frontend files (default: assets embedded in the binary)")
 		basePath        = flag.String("base-path", "", "Base path prefix for the console (e.g. /console)")
 		externalURL     = flag.String("external-url", "", "Origin browsers reach this console on, e.g. https://console.example. Sets the OIDC redirect_uri and cookie Secure flag instead of trusting the Host and X-Forwarded-Proto headers")
+		showVersion     = flag.Bool("version", false, "Print the version and exit")
 	)
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(version.String())
+		return
+	}
 
 	adminToken, err := secrets.FromPathOrEnv("admin-token", *adminTokenPath, "SAM_ADMIN_TOKEN")
 	if err != nil {
@@ -45,6 +52,9 @@ func main() {
 	}
 	if adminToken == "" {
 		log.Fatal("Admin token is required (via --admin-token-path or env SAM_ADMIN_TOKEN)")
+	}
+	if *externalURL == "" {
+		log.Print("WARNING: --external-url is not set; the OIDC redirect_uri and the session cookie's Secure flag follow the Host and X-Forwarded-Proto request headers, which a client controls. Set --external-url when the console is reachable beyond localhost.")
 	}
 
 	srv, err := console.NewServer(console.Config{

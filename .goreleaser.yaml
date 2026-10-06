@@ -31,7 +31,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w
+      - -s -w -X github.com/google/sam/internal/version.Version={{ .Tag }}
   - id: sam-router
     main: ./cmd/sam-router
     binary: sam-router
@@ -59,7 +59,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w
+      - -s -w -X github.com/google/sam/internal/version.Version={{ .Tag }}
   - id: sam-console
     main: ./cmd/sam-console
     binary: sam-console
@@ -73,7 +73,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w
+      - -s -w -X github.com/google/sam/internal/version.Version={{ .Tag }}
   - id: sam-one
     main: ./cmd/sam-one
     binary: sam-one

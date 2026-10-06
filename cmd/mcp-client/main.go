@@ -32,6 +32,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/google/sam/api"
+	"github.com/google/sam/internal/version"
 )
 
 func main() {
@@ -42,7 +43,12 @@ func main() {
 	listTools := flag.Bool("list", false, "List available tools and exit")
 	streamOpt := flag.Bool("stream", false, "Enable streaming mode for service discovery HTTP API")
 	tokenOpt := flag.String("token", "", "Authorization Bearer token for protected sidecar endpoints")
+	showVersion := flag.Bool("version", false, "Print the version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(version.String())
+		return
+	}
 
 	if *serverURL == "" {
 		log.Fatal("Must specify -url")
@@ -143,7 +149,7 @@ func main() {
 	// Create MCP client
 	client := mcp.NewClient(&mcp.Implementation{
 		Name:    "mcp-test-client",
-		Version: "0.1.0",
+		Version: version.String(),
 	}, nil)
 
 	// Connect to server using the URL

@@ -31,6 +31,7 @@ import (
 	"github.com/google/sam/api"
 	"github.com/google/sam/internal/standalone"
 	"github.com/google/sam/internal/tunnel"
+	"github.com/google/sam/internal/version"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
 )
@@ -68,8 +69,9 @@ func main() {
 	)
 
 	rootCmd := &cobra.Command{
-		Use:   "sam-one",
-		Short: "Sovereign Agent Mesh - all-in-one standalone server",
+		Use:     "sam-one",
+		Short:   "Sovereign Agent Mesh - all-in-one standalone server",
+		Version: version.String(),
 		Run: func(cmd *cobra.Command, args []string) {
 			if os.Getenv("LOG_FORMAT") == "json" {
 				_ = os.Setenv("GOLOG_LOG_FMT", "json")

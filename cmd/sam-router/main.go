@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/google/sam/internal/router"
+	"github.com/google/sam/internal/version"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
 )
@@ -54,8 +55,9 @@ var logger = golog.Logger("sam-router-cli")
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "sam-router",
-		Short: "Sovereign Agent Mesh - libp2p Router Node",
+		Use:     "sam-router",
+		Short:   "Sovereign Agent Mesh - libp2p Router Node",
+		Version: version.String(),
 		Run: func(cmd *cobra.Command, args []string) {
 			// Initialize logging
 			if os.Getenv("LOG_FORMAT") == "json" {

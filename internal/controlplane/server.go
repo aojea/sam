@@ -1768,13 +1768,21 @@ func (s *Server) Close() error {
 
 	var errs []error
 	if s.httpServer != nil {
-		if err := s.httpServer.Shutdown(context.Background()); err != nil {
+		// Bounded: a stuck connection must not hold the drain past what the
+		// orchestrator allows before it kills the process anyway.
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := s.httpServer.Shutdown(ctx); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	s.wg.Wait()
 	return errors.Join(errs...)
 }
+
+// shutdownTimeout bounds the HTTP drain in Close; it stays under the 30s
+// Kubernetes grants a pod by default.
+const shutdownTimeout = 20 * time.Second
 
 // Addr returns the network address the server is listening on.
 func (s *Server) Addr() string {

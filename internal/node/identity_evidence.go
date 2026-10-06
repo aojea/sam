@@ -112,7 +112,7 @@ func requireIdentityEvidenceTransport(next http.Handler) http.Handler {
 }
 
 func writeEvidenceProtoJSON(w http.ResponseWriter, status int, value proto.Message) {
-	body, err := protojson.Marshal(value)
+	body, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(value)
 	if err != nil {
 		logger.Errorf("[IdentityEvidence] Failed to encode response: %v", err)
 		writeEvidenceError(w, http.StatusInternalServerError, "Failed to encode response")

@@ -27,6 +27,7 @@ import (
 	"github.com/google/sam/internal/controlplane"
 	"github.com/google/sam/internal/secrets"
 	"github.com/google/sam/internal/storage"
+	"github.com/google/sam/internal/version"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/spf13/cobra"
@@ -60,8 +61,9 @@ var logger = golog.Logger("sam-control-plane-cli")
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "sam-control-plane",
-		Short: "Sovereign Agent Mesh - Control Plane",
+		Use:     "sam-control-plane",
+		Short:   "Sovereign Agent Mesh - Control Plane",
+		Version: version.String(),
 		// Resolve the DB DSN (may embed a password) before any subcommand runs.
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			resolved, err := secrets.FromPathOrEnv("db-dsn", dbDSNPath, "SAM_DB_DSN")

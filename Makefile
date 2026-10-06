@@ -259,7 +259,7 @@ update:
 	go mod tidy
 
 docker-build-control-plane:
-	docker build --load -t sam-control-plane:local -f Dockerfile.sam-control-plane .
+	docker build --load --build-arg VERSION="$(VERSION)" -t sam-control-plane:local -f Dockerfile.sam-control-plane .
 
 docker-build-router:
 	docker build --load --build-arg VERSION="$(VERSION)" -t sam-router:local -f Dockerfile.sam-router .
@@ -274,7 +274,7 @@ docker-build-e2e-runtime:
 	docker build --load -t sam-e2e-runtime:local -f tests/e2e/docker/Dockerfile.sam-runtime .
 
 docker-build-sam-console:
-	docker build --load -t sam-console:local -f Dockerfile.sam-console .
+	docker build --load --build-arg VERSION="$(VERSION)" -t sam-console:local -f Dockerfile.sam-console .
 
 docker-build: docker-build-control-plane docker-build-router docker-build-node docker-build-mock-oidc docker-build-e2e-runtime docker-build-sam-console
 
