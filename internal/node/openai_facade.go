@@ -467,11 +467,14 @@ func (f *openAIFacade) handleCompletions(w http.ResponseWriter, r *http.Request)
 }
 
 func (f *openAIFacade) serveLocal(w http.ResponseWriter, r *http.Request, serviceName string) {
-	if f.authorizeLocal != nil {
-		if err := f.authorizeLocal(r.Context(), serviceName, r.Method, r.URL.Path); err != nil {
-			writeOpenAIError(w, http.StatusForbidden, "permission_denied", fmt.Sprintf("authorization failed: %v", err))
-			return
-		}
+	if f.authorizeLocal == nil {
+		writeOpenAIError(w, http.StatusServiceUnavailable, "authorization_unavailable",
+			"local authorization is unavailable on this node")
+		return
+	}
+	if err := f.authorizeLocal(r.Context(), serviceName, r.Method, r.URL.Path); err != nil {
+		writeOpenAIError(w, http.StatusForbidden, "permission_denied", fmt.Sprintf("authorization failed: %v", err))
+		return
 	}
 	for _, svc := range f.localServices() {
 		if svc.Info().GetName() != serviceName || svc.Handler() == nil {

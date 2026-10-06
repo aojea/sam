@@ -23,6 +23,7 @@ import { before, test } from "node:test";
 import { AuthorizationError, authorizeCaller, type AuthorizeRequest } from "./authorizer.ts";
 import { BiscuitVerificationError, attenuateBiscuit, loadBiscuit, sealBiscuit } from "./biscuit.ts";
 import { BASELINE_DATALOG } from "./gen/datalog.ts";
+import { encodeTARBlockFact } from "./tar.ts";
 
 type Wasm = Awaited<ReturnType<typeof loadBiscuit>>;
 
@@ -282,5 +283,44 @@ test("attenuateBiscuit and sealBiscuit narrow authority across hops", async () =
     ),
     BiscuitVerificationError,
   );
+});
+
+// An appended block may carry exactly one tar_block fact. Anything else a
+// holder writes there (a rule, a check, a second fact) is refused before the
+// Datalog runs, whatever the authority block grants.
+test("appended blocks carrying anything but one tar_block fact are refused", async () => {
+  const root = nodeToken(CALLER, [`granted_service_all_types(true)`, `target_unrestricted(true)`]);
+  const tarFact = encodeTARBlockFact({ name: "hop", rules: [{ allowedServices: ["mcp://calc"] }] });
+  const append = (build: (block: ReturnType<Wasm["Biscuit"]["block_builder"]>) => void): Uint8Array => {
+    const token = wasm.Biscuit.fromBytes(root, cpKeyPair.getPublicKey());
+    const block = wasm.Biscuit.block_builder();
+    build(block);
+    return token.appendBlock(block).toBytes();
+  };
+
+  const malformed: Record<string, Uint8Array> = {
+    rule: append((b) => b.addRule(wasm.Rule.fromString(`role("sam:role:router") <- role("sam:role:node")`))),
+    check: append((b) => b.addCheck(wasm.Check.fromString(`check if true`))),
+    "extra fact": append((b) => {
+      b.addFact(wasm.Fact.fromString(tarFact));
+      b.addFact(wasm.Fact.fromString(`node(${JSON.stringify(CALLER)})`));
+    }),
+    "rule beside tar_block": append((b) => {
+      b.addFact(wasm.Fact.fromString(tarFact));
+      b.addRule(wasm.Rule.fromString(`granted_service_all_types(true) <- role("sam:role:node")`));
+    }),
+  };
+  for (const [name, token] of Object.entries(malformed)) {
+    await assert.rejects(
+      authorizeCaller(request(token, "mcp://calc"), options([])),
+      (err: unknown) => err instanceof AuthorizationError && /tar_block/.test(err.message),
+      name,
+    );
+  }
+
+  // The well-formed block is the control.
+  const ok = append((b) => b.addFact(wasm.Fact.fromString(tarFact)));
+  const verified = await authorizeCaller(request(ok, "mcp://calc"), options([]));
+  assert.equal(verified.taskRules.length, 1);
 });
 

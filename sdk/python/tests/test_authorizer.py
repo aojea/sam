@@ -266,3 +266,41 @@ def test_attenuate_biscuit_narrows_authority_across_hops():
             [CP_KEY],
         )
 
+
+def test_appended_blocks_carrying_anything_but_one_tar_block_fact_are_refused():
+    """An appended block may carry exactly one tar_block fact. Anything else a
+    holder writes there (a rule, a check, a second fact) is refused before the
+    Datalog runs, whatever the authority block grants."""
+    from agent_mesh.tar import encode_tar_block_fact
+
+    root = node_token(CALLER, ["granted_service_all_types(true)", "target_unrestricted(true)"])
+    tar_fact = encode_tar_block_fact(sam_pb2.TaskAuthorizationRule(name="hop", rules=[sam_pb2.TaskRule(allowed_services=["mcp://calc"])]))
+
+    def append(build) -> bytes:
+        token = ba.Biscuit.from_bytes(root, CP.public_key)
+        bb = ba.BlockBuilder()
+        build(bb)
+        return token.append(bb).to_bytes()
+
+    def rule_only(bb):
+        bb.add_rule(ba.Rule('role("sam:role:router") <- role("sam:role:node")'))
+
+    def check_only(bb):
+        bb.add_check(ba.Check("check if true"))
+
+    def extra_fact(bb):
+        bb.add_fact(ba.Fact(tar_fact))
+        bb.add_fact(ba.Fact(f'node("{CALLER}")'))
+
+    def rule_beside_tar_block(bb):
+        bb.add_fact(ba.Fact(tar_fact))
+        bb.add_rule(ba.Rule('granted_service_all_types(true) <- role("sam:role:node")'))
+
+    for build in (rule_only, check_only, extra_fact, rule_beside_tar_block):
+        with pytest.raises(AuthorizationError, match="tar_block"):
+            authorize_caller(request(append(build)), options([]))
+
+    # The well-formed block is the control.
+    verified = authorize_caller(request(append(lambda bb: bb.add_fact(ba.Fact(tar_fact)))), options([]))
+    assert len(verified.task_rules) == 1
+

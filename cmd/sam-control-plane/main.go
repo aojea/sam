@@ -91,6 +91,9 @@ func main() {
 			if oidcIssuer == "" && workloadIssuer == "" {
 				logger.Fatalf("OIDC issuer is required (use --issuer or --workload-issuer flag)")
 			}
+			if insecureSkipTLSVerify {
+				logger.Warnf("--insecure-skip-tls-verify is set: identity provider TLS certificates are not verified, so anyone on the path to the provider can forge the identities this control plane admits. For development only.")
+			}
 
 			adminToken, err := secrets.FromPathOrEnv("admin-token", adminTokenPath, "SAM_ADMIN_TOKEN")
 			if err != nil {

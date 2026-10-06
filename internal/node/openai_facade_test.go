@@ -50,8 +50,9 @@ func newFakeModelService(name string, handler http.Handler, models ...string) *f
 }
 
 // newTestFacade builds a facade with inert seams; tests override as needed.
-// The provider verifier accepts everyone: tests that care about the gate
-// replace it, and tests of the fail-closed path set it to nil explicitly.
+// The provider verifier and the local authorizer accept everyone: tests that
+// care about a gate replace it, and tests of the fail-closed path set it to
+// nil explicitly.
 func newTestFacade() *openAIFacade {
 	return &openAIFacade{
 		ttl:           time.Minute,
@@ -64,6 +65,7 @@ func newTestFacade() *openAIFacade {
 			return nil, nil
 		},
 		verifyPeerLabels: func(context.Context, string, map[string]string) error { return nil },
+		authorizeLocal:   func(context.Context, string, string, string) error { return nil },
 	}
 }
 
@@ -234,6 +236,29 @@ func TestFacade_Completions_PrefersLocal(t *testing.T) {
 	}
 	if gotPeerHeader != "selfPeer" {
 		t.Errorf("X-Peer-Id: got %q, want %q", gotPeerHeader, "selfPeer")
+	}
+}
+
+// A facade without a local authorizer must not serve local models: the
+// seam is wiring, and missing wiring is a refusal, not an allow.
+func TestFacade_Completions_LocalWithoutAuthorizerFailsClosed(t *testing.T) {
+	f := newTestFacade()
+	f.authorizeLocal = nil
+	localHit := false
+	local := newFakeModelService("local-llm", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		localHit = true
+	}), "m1")
+	f.localServices = func() []Service { return []Service{local} }
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m1"}`))
+	rec := httptest.NewRecorder()
+	f.handleCompletions(rec, req)
+
+	if localHit {
+		t.Fatal("local service was invoked without authorization")
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
 	}
 }
 
