@@ -60,20 +60,6 @@ builds:
       - arm64
     ldflags:
       - -s -w
-  - id: sam-box
-    main: ./cmd/sam-box
-    binary: sam-box
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - windows
-      - darwin
-    goarch:
-      - amd64
-      - arm64
-    ldflags:
-      - -s -w
   - id: sam-console
     main: ./cmd/sam-console
     binary: sam-console
@@ -102,23 +88,6 @@ builds:
       - arm64
     ldflags:
       - -s -w -X github.com/google/sam/internal/version.Version={{ .Tag }}
-  - id: nano-init
-    main: .
-    # nano-init is its own module: it carries a userspace TCP stack, and that
-    # dependency has no business in the graph every other binary builds from.
-    dir: ./cmd/nano-init
-    binary: nano-init
-    env:
-      - CGO_ENABLED=0
-    # linux only: nano-init is PID 1 inside a Linux sandbox — TUN ioctls,
-    # netlink, namespaces and vsock have no meaning anywhere else.
-    goos:
-      - linux
-    goarch:
-      - amd64
-      - arm64
-    ldflags:
-      - -s -w
 archives:
   - formats:
       - tar.gz
@@ -133,6 +102,3 @@ archives:
       - goos: windows
         formats:
           - zip
-    # nano-init only builds for linux (see build id "nano-init" above), so the
-    # windows and darwin archives intentionally have one fewer binary.
-    allow_different_binary_count: true
