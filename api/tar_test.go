@@ -382,3 +382,40 @@ func TestEffectiveTARExpiration(t *testing.T) {
 		t.Fatalf("EffectiveTARExpiration() = %v, want %v", got, hop2Exp)
 	}
 }
+
+func TestBuildTARFromOAuthParamsHardening(t *testing.T) {
+	now := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	shorterExp := timestamppb.New(now.Add(5 * time.Minute))
+	longerExp := timestamppb.New(now.Add(30 * time.Minute))
+
+	// Unknown scope token must be rejected instead of silently ignored.
+	if _, err := BuildTARFromOAuthParams("test", "", []string{"mcp://weather"}, "tools:get_weather", shorterExp); err == nil {
+		t.Fatal("expected unknown scope token 'tools:get_weather' to be rejected")
+	}
+
+	// Combining options with resource/scope must be rejected.
+	optJSON := `{"name":"opt","rules":[{"allowed_services":["mcp://weather"]}]}`
+	if _, err := BuildTARFromOAuthParams("test", optJSON, []string{"mcp://weather"}, "", shorterExp); err == nil {
+		t.Fatal("expected combining options with resource parameter to be rejected")
+	}
+
+	// Shorter expireTime clamps options ExpireTime.
+	optWithLongExp := `{"name":"opt","expire_time":"` + longerExp.AsTime().Format(time.RFC3339) + `","rules":[{"allowed_services":["mcp://weather"]}]}`
+	tar, err := BuildTARFromOAuthParams("test", optWithLongExp, nil, "", shorterExp)
+	if err != nil {
+		t.Fatalf("BuildTARFromOAuthParams: %v", err)
+	}
+	if !tar.GetExpireTime().AsTime().Equal(shorterExp.AsTime()) {
+		t.Fatalf("ExpireTime = %v, want clamped %v", tar.GetExpireTime().AsTime(), shorterExp.AsTime())
+	}
+
+	// Control characters in Name must be rejected.
+	if err := ValidateTaskAuthorizationRule(&TaskAuthorizationRule{Name: "bad\r\nname"}); err == nil {
+		t.Fatal("expected control characters in Name to be rejected")
+	}
+
+	// Encoded path traversal in MatchHTTPPath must fail closed.
+	if MatchHTTPPath("/repos/acme/*", "/repos/acme/%2e%2e/secret") {
+		t.Fatal("expected MatchHTTPPath to reject URL-encoded traversal")
+	}
+}

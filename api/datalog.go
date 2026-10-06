@@ -519,10 +519,10 @@ func init() {
 	// method() or path() fact derives nothing and a narrowed grant fails closed.
 	BaselineSources.HTTPRules = []string{
 		fmt.Sprintf(`%s($t, $k) <- %s($m), %s($t, $k, $set), $set.contains($m)`, FactHTTPMethodOK, FactMethod, FactGrantedMethod),
-		fmt.Sprintf(`%s($t, $k) <- %s($t, $k)`, FactHTTPMethodOK, FactGrantedMethodAny),
+		fmt.Sprintf(`%s($t, $k) <- %s($m), !($m == "CONNECT"), %s($t, $k)`, FactHTTPMethodOK, FactMethod, FactGrantedMethodAny),
 		fmt.Sprintf(`%s($t, $k) <- %s($p), %s($t, $k, $set), $set.contains($p)`, FactHTTPPathOK, FactPath, FactGrantedPathExact),
 		fmt.Sprintf(`%s($t, $k) <- %s($p), %s($t, $k, $prefix), $p.starts_with($prefix)`, FactHTTPPathOK, FactPath, FactGrantedPathPrefix),
-		fmt.Sprintf(`%s($t, $k) <- %s($t, $k)`, FactHTTPPathOK, FactGrantedPathAny),
+		fmt.Sprintf(`%s($t, $k) <- %s($p), $p.starts_with("/"), %s($t, $k)`, FactHTTPPathOK, FactPath, FactGrantedPathAny),
 		fmt.Sprintf(`%s($t, $n) <- %s($t, $n), %s($t, $n), %s($t, $n), %s($t, $n)`, FactGrantedServiceExact, FactService, FactHTTPGrantedServiceExact, FactHTTPMethodOK, FactHTTPPathOK),
 		fmt.Sprintf(`%s($t, $s) <- %s($t, $n), %s($t, $s), $n.ends_with($s), %s($t, $s), %s($t, $s)`, FactGrantedServiceSuffix, FactService, FactHTTPGrantedServiceSuffix, FactHTTPMethodOK, FactHTTPPathOK),
 		fmt.Sprintf(`%s($t, $p) <- %s($t, $n), %s($t, $p), $n.starts_with($p), %s($t, $p), %s($t, $p)`, FactGrantedServicePrefix, FactService, FactHTTPGrantedServicePrefix, FactHTTPMethodOK, FactHTTPPathOK),

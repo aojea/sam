@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -30,8 +31,13 @@ import (
 
 	"github.com/google/sam/api"
 	cpclient "github.com/google/sam/internal/controlplane/client"
+	"github.com/google/sam/internal/credprovider"
+	"github.com/google/sam/internal/envoy"
 	"google.golang.org/protobuf/proto"
 )
+
+// CloudTokenExchanger is an alias for credprovider.Exchanger.
+type CloudTokenExchanger = credprovider.Exchanger
 
 // DefaultSecretsDir is where a node looks for the credentials the control
 // plane names in egress destinations when --secrets-dir is not given.
@@ -53,11 +59,6 @@ func refuse(w http.ResponseWriter, status int, text, errorType string) {
 	http.Error(w, text, status)
 }
 
-type extProcClientEntry struct {
-	client   *http.Client
-	endpoint string
-}
-
 // EgressService serves egress://<name>: this node is the HTTP origin for one
 // destination outside the mesh. The destination, where to forward, and which
 // credential to present are the control plane's decision (an
@@ -75,7 +76,7 @@ type EgressService struct {
 	modelArmorBaseURL string
 	modelArmorClient  *http.Client
 	extProcMu         sync.Mutex
-	extProcClients    map[string]extProcClientEntry
+	extProcClients    map[string]*envoy.CalloutClient
 	handler           http.Handler
 }
 
@@ -121,7 +122,7 @@ func newEgressServiceForNode(node *SamNode, d *api.EgressDestination, secretsDir
 		},
 		target:         target,
 		secretsDir:     secretsDir,
-		extProcClients: make(map[string]extProcClientEntry),
+		extProcClients: make(map[string]*envoy.CalloutClient),
 	}
 	s.initExchanger()
 	s.initExtProcClients()
@@ -130,7 +131,7 @@ func newEgressServiceForNode(node *SamNode, d *api.EgressDestination, secretsDir
 
 func (s *EgressService) initExchanger() {
 	if secretName := api.EgressStaticSecret(s.destination); secretName != "" {
-		s.exchanger = NewStaticSecretExchanger(s.secretsDir, secretName)
+		s.exchanger = credprovider.NewStaticSecretExchanger(s.secretsDir, secretName)
 		s.isStaticSecret = true
 		return
 	}
@@ -138,15 +139,15 @@ func (s *EgressService) initExchanger() {
 		switch kind := b.GetKind().(type) {
 		case *api.CredentialBroker_OidcFederation:
 			if kind.OidcFederation != nil {
-				s.exchanger = NewOIDCFederationExchanger(s.destination.GetName(), kind.OidcFederation, s.mintBorderJWT, nil)
+				s.exchanger = credprovider.NewOIDCFederationExchanger(s.destination.GetName(), kind.OidcFederation, s.mintBorderJWT, nil)
 			}
 		case *api.CredentialBroker_AwsAssumeRole:
 			if kind.AwsAssumeRole != nil {
-				s.exchanger = NewAWSAssumeRoleExchanger(s.destination.GetName(), kind.AwsAssumeRole, s.mintBorderJWT, nil)
+				s.exchanger = credprovider.NewAWSAssumeRoleExchanger(s.destination.GetName(), kind.AwsAssumeRole, s.mintBorderJWT, nil)
 			}
 		case *api.CredentialBroker_PlatformIdentity:
 			if kind.PlatformIdentity != nil {
-				s.exchanger = NewPlatformIdentityExchanger(s.destination.GetName(), kind.PlatformIdentity, nil)
+				s.exchanger = credprovider.NewPlatformIdentityExchanger(s.destination.GetName(), kind.PlatformIdentity, nil)
 			}
 		}
 	}
@@ -173,7 +174,15 @@ func (s *EgressService) mintBorderJWT(ctx context.Context, destination, audience
 
 func (s *EgressService) Info() *api.ServiceInfo { return s.info }
 func (s *EgressService) Handler() http.Handler  { return s.handler }
-func (s *EgressService) Teardown() error        { return nil }
+func (s *EgressService) Teardown() error {
+	s.extProcMu.Lock()
+	defer s.extProcMu.Unlock()
+	for _, c := range s.extProcClients {
+		_ = c.Close()
+	}
+	s.extProcClients = nil
+	return nil
+}
 
 // SetExchanger overrides the CloudTokenExchanger on s (used by tests and custom brokers).
 func (s *EgressService) SetExchanger(ex CloudTokenExchanger) {
@@ -190,7 +199,18 @@ func (s *EgressService) Init(ctx context.Context) error {
 			return err
 		}
 	}
+	allowLocal := s.allowsLocalTarget()
+	var proxyTransport http.RoundTripper
+	if dt, ok := http.DefaultTransport.(*http.Transport); ok {
+		cloned := dt.Clone()
+		cloned.DialContext = func(ctx context.Context, _, addr string) (net.Conn, error) {
+			return dialSafeEgressTCP(ctx, addr, allowLocal)
+		}
+		proxyTransport = cloned
+	}
+
 	proxy := &httputil.ReverseProxy{
+		Transport: proxyTransport,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(s.target)
 			if s.destination.GetPreserveHost() {
@@ -204,7 +224,8 @@ func (s *EgressService) Init(ctx context.Context) error {
 			pr.Out.Header.Del("Authorization")
 			pr.Out.Header.Del("Cookie")
 			for name := range pr.Out.Header {
-				if strings.HasPrefix(name, "X-Sam-") || strings.HasPrefix(name, "X-Forwarded-") || name == api.HeaderPeerID {
+				lower := strings.ToLower(name)
+				if strings.HasPrefix(lower, "x-sam-") || strings.HasPrefix(lower, "x-forwarded-") || strings.EqualFold(name, api.HeaderPeerID) {
 					pr.Out.Header.Del(name)
 				}
 			}

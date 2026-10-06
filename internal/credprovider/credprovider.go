@@ -12,7 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package node
+// Package credprovider implements outbound credential brokering for SAM egress
+// destinations (static secrets, RFC 8693 OIDC federation with optional Google
+// Service Account impersonation, AWS STS AssumeRoleWithWebIdentity with inline
+// IAM session policy compilation, and platform metadata identity) as well as
+// TaskAuthorizationRule scope/permission/resource narrowing.
+package credprovider
 
 import (
 	"bytes"
@@ -34,6 +39,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/google/sam/api"
 )
@@ -44,11 +50,35 @@ const (
 	defaultAWSSTSEndpoint               = "https://sts.amazonaws.com/"
 	defaultGCEMetadataTokenEndpoint     = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
 	maxAWSSessionPolicyBytes            = 2048
+	maxSTSResponseBytes                 = 1 << 20 // 1 MiB
 )
 
-// CloudTokenExchanger translates a verified SAM principal and its intersected
+type callerBiscuitContextKey struct{}
+
+// WithCallerBiscuit attaches a verified caller Biscuit (such as a narrowed
+// Task Biscuit or an exchanged Delegated Session Biscuit) to ctx so outbound
+// credential brokers key their caches and STS mint requests by the caller's
+// exact token.
+func WithCallerBiscuit(ctx context.Context, biscuitBytes []byte) context.Context {
+	if len(biscuitBytes) == 0 {
+		return ctx
+	}
+	cp := append([]byte(nil), biscuitBytes...)
+	return context.WithValue(ctx, callerBiscuitContextKey{}, cp)
+}
+
+// CallerBiscuitFromContext returns the caller Biscuit attached to ctx, or nil.
+func CallerBiscuitFromContext(ctx context.Context) []byte {
+	if ctx == nil {
+		return nil
+	}
+	b, _ := ctx.Value(callerBiscuitContextKey{}).([]byte)
+	return b
+}
+
+// Exchanger translates a verified SAM principal and its intersected
 // TaskAuthorizationRule chain into a downscoped upstream credential.
-type CloudTokenExchanger interface {
+type Exchanger interface {
 	Exchange(ctx context.Context, principal string, rules []*api.TaskAuthorizationRule) (bearerToken string, expiry time.Time, err error)
 }
 
@@ -80,6 +110,9 @@ func NewStaticSecretExchanger(secretsDir, secretName string) *StaticSecretExchan
 func (e *StaticSecretExchanger) Exchange(_ context.Context, _ string, _ []*api.TaskAuthorizationRule) (string, time.Time, error) {
 	if e.secretName == "" {
 		return "", time.Time{}, nil
+	}
+	if filepath.Base(e.secretName) != e.secretName || e.secretName == "." || e.secretName == ".." {
+		return "", time.Time{}, fmt.Errorf("credential %q must be a file name", e.secretName)
 	}
 	data, err := os.ReadFile(filepath.Join(e.secretsDir, e.secretName))
 	if err != nil {
@@ -191,7 +224,7 @@ func (e *OIDCFederationExchanger) Exchange(ctx context.Context, principal string
 		return "", time.Time{}, fmt.Errorf("STS exchange at %s failed: %w", tokenEndpoint, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRequestBodyBytes))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSTSResponseBytes))
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("read STS response: %w", err)
 	}
@@ -263,7 +296,7 @@ func (e *OIDCFederationExchanger) impersonateServiceAccount(ctx context.Context,
 		return "", time.Time{}, fmt.Errorf("service account impersonation failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRequestBodyBytes))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSTSResponseBytes))
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -370,7 +403,7 @@ func (e *AWSAssumeRoleExchanger) Exchange(ctx context.Context, principal string,
 		return "", time.Time{}, fmt.Errorf("AWS STS AssumeRoleWithWebIdentity failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRequestBodyBytes))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSTSResponseBytes))
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -526,7 +559,7 @@ func (e *PlatformIdentityExchanger) Exchange(ctx context.Context, _ string, rule
 		return "", time.Time{}, fmt.Errorf("platform metadata request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRequestBodyBytes))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSTSResponseBytes))
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -582,12 +615,6 @@ func NarrowOIDCScopes(policyScopes []string, destName string, rules []*api.TaskA
 		if len(policyScopes) == 0 || len(tarPerms) == 0 {
 			continue
 		}
-		// Distinguish fine-grained cloud IAM permissions (e.g.
-		// "bigquery.googleapis.com/tables.getData") from OAuth scopes (e.g.
-		// "https://www.googleapis.com/auth/bigquery.readonly" or "read:orders").
-		// If every entry is a non-URL cloud IAM permission (host/resource.verb)
-		// and none matches policyScopes, the TAR is constraining IAM permissions
-		// rather than OAuth scopes; otherwise intersect with policyScopes.
 		hasScopeCandidate := false
 		for _, p := range tarPerms {
 			if isOAuthScopeCandidate(p, policyScopes) {
@@ -610,7 +637,6 @@ func NarrowOIDCScopes(policyScopes []string, destName string, rules []*api.TaskA
 		current = next
 	}
 	if len(policyScopes) == 0 {
-		// Policy grants no OAuth scopes; a TAR can never select or add scopes.
 		return nil, nil
 	}
 	return current, nil
@@ -628,8 +654,6 @@ func isOAuthScopeCandidate(perm string, policyScopes []string) bool {
 	if strings.HasPrefix(perm, "https://") || strings.HasPrefix(perm, "http://") {
 		return true
 	}
-	// Cloud IAM permissions have the form "<service-host>/<resource>.<verb>" (e.g. "bigquery.googleapis.com/tables.getData")
-	// whereas AWS actions have "<service>:<Action>" (no slash) and OAuth scopes have no slash or are URLs.
 	if strings.Contains(perm, "/") && strings.Contains(perm, ".") {
 		return false
 	}
@@ -783,6 +807,16 @@ func CompileAWSSessionPolicy(templateJSON, destName string, rules []*api.TaskAut
 	if len(resources) == 0 {
 		resources = []string{"*"}
 	}
+	for _, a := range actions {
+		if err := validateAWSAction(a); err != nil {
+			return "", err
+		}
+	}
+	for _, res := range resources {
+		if err := validateAWSResource(res); err != nil {
+			return "", err
+		}
+	}
 
 	policyDoc := map[string]any{
 		"Version": "2012-10-17",
@@ -802,6 +836,46 @@ func CompileAWSSessionPolicy(templateJSON, destName string, rules []*api.TaskAut
 		return "", fmt.Errorf("compiled AWS session policy (%d bytes) exceeds %d byte limit", len(encoded), maxAWSSessionPolicyBytes)
 	}
 	return string(encoded), nil
+}
+
+func isASCIIAlphaNum(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+}
+
+func validateAWSAction(a string) error {
+	if a == "*" {
+		return nil
+	}
+	svc, act, ok := strings.Cut(a, ":")
+	if !ok || svc == "" || act == "" {
+		return fmt.Errorf("invalid AWS IAM action %q: expected <service>:<action>", a)
+	}
+	for _, r := range svc {
+		if !isASCIIAlphaNum(r) && r != '-' {
+			return fmt.Errorf("invalid character in AWS IAM service prefix %q", a)
+		}
+	}
+	for _, r := range act {
+		if !isASCIIAlphaNum(r) && r != '*' && r != '?' && r != '-' && r != '_' {
+			return fmt.Errorf("invalid character in AWS IAM action %q", a)
+		}
+	}
+	return nil
+}
+
+func validateAWSResource(res string) error {
+	if res == "*" {
+		return nil
+	}
+	if !strings.HasPrefix(res, "arn:") {
+		return fmt.Errorf("invalid AWS IAM resource %q: must be \"*\" or an ARN", res)
+	}
+	for _, r := range res {
+		if r <= 0x20 || r == 0x7f || r == '"' || r == '\\' {
+			return fmt.Errorf("invalid character in AWS IAM resource %q", res)
+		}
+	}
+	return nil
 }
 
 func stringOrSlice(v any) []string {
@@ -852,9 +926,6 @@ func matchesWildcardPattern(pattern, value string) bool {
 	return false
 }
 
-// intersectWildcardSets computes the logical intersection of two sets of exact
-// or prefix-wildcard strings (e.g. ["s3:*"] ∩ ["s3:GetObject"] = ["s3:GetObject"],
-// and ["//bq/datasets/sales/*"] ∩ ["//bq/datasets/sales/tables/q1"] = ["//bq/datasets/sales/tables/q1"]).
 func intersectWildcardSets(a, b []string) []string {
 	var out []string
 	addUnique := func(s string) {
@@ -879,12 +950,16 @@ func brokerCacheKey(ctx context.Context, destName, principal, targetID, extra st
 	h := sha256.New()
 	if b := CallerBiscuitFromContext(ctx); len(b) > 0 {
 		_, _ = h.Write(b)
-	} else {
-		_, _ = h.Write([]byte(principal))
-		for _, r := range rules {
-			if r != nil {
+	}
+	_, _ = h.Write([]byte("|" + principal + "|"))
+	for _, r := range rules {
+		if r != nil {
+			if raw, err := (proto.MarshalOptions{Deterministic: true}).Marshal(r); err == nil {
+				_, _ = h.Write(raw)
+			} else {
 				_, _ = h.Write([]byte(r.GetName()))
 			}
+			_, _ = h.Write([]byte(";"))
 		}
 	}
 	_, _ = h.Write([]byte("|" + destName + "|" + targetID + "|" + extra + "|" + strings.Join(scopes, ",") + "|" + strings.Join(resources, ",")))

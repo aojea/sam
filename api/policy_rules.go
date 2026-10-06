@@ -246,23 +246,31 @@ func BuildPolicyRules(roles []*PolicyRole, bindings []*PolicyBinding) (rules []P
 		}
 
 		// Custom entries keep their source text: it may carry expressions,
-		// which biscuit-go cannot print back.
+		// which biscuit-go cannot print back. Every entry on a role is gated
+		// on role("<roleName>") so it applies only to holders of that role.
 		for _, dl := range role.CustomDatalog {
 			trimmed := strings.TrimRight(strings.TrimSpace(dl), ";")
 			if trimmed == "" {
 				continue
 			}
-			r, err := parser.FromStringRule(trimmed)
-			if err == nil {
-				rules = append(rules, PolicyRule{Rule: r, Text: trimmed})
+			if _, err := parser.FromStringRule(trimmed); err == nil {
+				headStr, bodyStr, _ := strings.Cut(trimmed, "<-")
+				scopedText := strings.TrimSpace(headStr) + " <- " + fromRole.String() + ", " + strings.TrimSpace(bodyStr)
+				scopedRule, scopedErr := parser.FromStringRule(scopedText)
+				if scopedErr != nil {
+					warnings = append(warnings, fmt.Sprintf("Failed to scope custom Datalog rule %q for role %s: %v", dl, roleName, scopedErr))
+					continue
+				}
+				rules = append(rules, PolicyRule{Rule: scopedRule, Text: scopedText})
 				continue
+			} else {
+				f, err2 := parser.FromStringFact(trimmed)
+				if err2 == nil {
+					add(f.Predicate, fromRole)
+					continue
+				}
+				warnings = append(warnings, fmt.Sprintf("Failed to parse custom Datalog rule/fact %q for role %s: rule_err=%v, fact_err=%v", dl, roleName, err, err2))
 			}
-			f, err2 := parser.FromStringFact(trimmed)
-			if err2 == nil {
-				add(f.Predicate)
-				continue
-			}
-			warnings = append(warnings, fmt.Sprintf("Failed to parse custom Datalog rule/fact %q for role %s: rule_err=%v, fact_err=%v", dl, roleName, err, err2))
 		}
 	}
 

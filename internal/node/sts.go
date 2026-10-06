@@ -28,31 +28,22 @@ import (
 	"time"
 
 	"github.com/google/sam/api"
+	"github.com/google/sam/internal/credprovider"
 	"github.com/google/sam/internal/identity"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-type callerBiscuitContextKey struct{}
-
 // WithCallerBiscuit attaches a verified caller Biscuit (such as a narrowed
 // Task Biscuit or an exchanged Delegated Session Biscuit) to ctx so outbound
 // mesh and egress handlers use it instead of the node's standing identity.
 func WithCallerBiscuit(ctx context.Context, biscuitBytes []byte) context.Context {
-	if len(biscuitBytes) == 0 {
-		return ctx
-	}
-	cp := append([]byte(nil), biscuitBytes...)
-	return context.WithValue(ctx, callerBiscuitContextKey{}, cp)
+	return credprovider.WithCallerBiscuit(ctx, biscuitBytes)
 }
 
 // CallerBiscuitFromContext returns the caller Biscuit attached to ctx, or nil.
 func CallerBiscuitFromContext(ctx context.Context) []byte {
-	if ctx == nil {
-		return nil
-	}
-	b, _ := ctx.Value(callerBiscuitContextKey{}).([]byte)
-	return b
+	return credprovider.CallerBiscuitFromContext(ctx)
 }
 
 // GetRequestIdentity returns the caller Biscuit from ctx when present,
@@ -79,8 +70,8 @@ func (n *SamNode) trustedPublicKeys() []ed25519.PublicKey {
 }
 
 // VerifyLocalBiscuit verifies a raw Biscuit against the node's revocation
-// cache and trusted Control Plane keys, returning its extracted claims and
-// TaskAuthorizationRule chain.
+// cache, banned peer cache, and trusted Control Plane keys, returning its
+// extracted claims and TaskAuthorizationRule chain.
 func (n *SamNode) VerifyLocalBiscuit(rawToken []byte) (*identity.VerifiedBiscuitClaims, error) {
 	if len(rawToken) == 0 {
 		return nil, errors.New("empty biscuit token")
@@ -96,7 +87,43 @@ func (n *SamNode) VerifyLocalBiscuit(rawToken []byte) (*identity.VerifiedBiscuit
 	if len(keys) == 0 {
 		return nil, errors.New("no trusted control plane keys available")
 	}
-	return identity.InspectVerifiedBiscuit(rawToken, keys, n.BiscuitTimeout)
+	claims, err := identity.InspectVerifiedBiscuit(rawToken, keys, n.BiscuitTimeout)
+	if err != nil {
+		return nil, err
+	}
+	if n.revokedPeers != nil {
+		for _, pidStr := range []string{claims.NodePeerID, claims.ActorNodePeerID, claims.ClientPeerID} {
+			if pidStr == "" {
+				continue
+			}
+			if pid, pErr := peer.Decode(pidStr); pErr == nil {
+				if _, banned := n.revokedPeers.Get(pid.String()); banned {
+					return nil, fmt.Errorf("peer %s is banned", pid.String())
+				}
+			}
+		}
+	}
+	return claims, nil
+}
+
+// verifyLocalCallerBiscuit verifies a Biscuit presented to this node's local
+// sidecar or OAuth token endpoint. Unattenuated standing node Biscuits
+// (len(claims.TaskRules) == 0) must be bound to this node's localPeerID;
+// task-attenuated Biscuits (len(claims.TaskRules) > 0) may be further
+// attenuated or exchanged for an outbound border JWT at a PEP node.
+func (n *SamNode) verifyLocalCallerBiscuit(rawToken []byte) (*identity.VerifiedBiscuitClaims, error) {
+	claims, err := n.VerifyLocalBiscuit(rawToken)
+	if err != nil {
+		return nil, err
+	}
+	if len(claims.TaskRules) == 0 {
+		if localPID, pErr := n.localPeerID(); pErr == nil && localPID != "" {
+			if claims.ClientPeerID != "" && claims.ClientPeerID != localPID.String() {
+				return nil, fmt.Errorf("standing biscuit client_peer_id %s is not bound to this node %s", claims.ClientPeerID, localPID.String())
+			}
+		}
+	}
+	return claims, nil
 }
 
 func (n *SamNode) localPeerID() (peer.ID, error) {
@@ -314,7 +341,7 @@ func (n *SamNode) resolveCallerCredential(ctx context.Context, bearer string) ([
 		return nil, false, nil
 	}
 	if rawBiscuit, err := decodeBiscuitToken(bearer); err == nil {
-		if _, verifyErr := n.VerifyLocalBiscuit(rawBiscuit); verifyErr != nil {
+		if _, verifyErr := n.verifyLocalCallerBiscuit(rawBiscuit); verifyErr != nil {
 			return nil, true, verifyErr
 		}
 		return rawBiscuit, true, nil
@@ -481,7 +508,7 @@ func handleNodeOAuthToken(node *SamNode, sidecarToken string, w http.ResponseWri
 
 	if subjectToken != "" && subjectToken != "self" {
 		if rawBiscuit, bErr := decodeBiscuitToken(subjectToken); bErr == nil {
-			claims, vErr := node.VerifyLocalBiscuit(rawBiscuit)
+			claims, vErr := node.verifyLocalCallerBiscuit(rawBiscuit)
 			if vErr != nil {
 				writeNodeOAuthError(w, http.StatusBadRequest, "invalid_grant", vErr.Error())
 				return

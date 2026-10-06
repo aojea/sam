@@ -49,6 +49,14 @@ type KeyPair struct {
 	Expiration time.Time
 }
 
+// OIDCKeyPair holds an ES256 (P-256) key pair for outbound OIDC/STS JWT signing.
+type OIDCKeyPair struct {
+	Kid        string
+	PrivateKey []byte
+	PublicKey  []byte
+	Expiration time.Time
+}
+
 // RouterLease represents a router registered with the control plane.
 type RouterLease struct {
 	PeerID         string
@@ -308,6 +316,27 @@ type Store interface {
 
 	// ListBootstrapTokens retrieves all bootstrap tokens.
 	ListBootstrapTokens(ctx context.Context) ([]BootstrapToken, error)
+
+	// GetCurrentOIDCKey retrieves the active ES256 key pair for OIDC/STS JWT signing.
+	GetCurrentOIDCKey(ctx context.Context) (*OIDCKeyPair, error)
+
+	// GetAllValidOIDCKeys retrieves the active ES256 key pair and any non-expired historical key pairs.
+	GetAllValidOIDCKeys(ctx context.Context) ([]OIDCKeyPair, error)
+
+	// SaveInitialOIDCKey saves the initial ES256 key pair if no OIDC keys exist yet.
+	SaveInitialOIDCKey(ctx context.Context, kid string, priv, pub []byte) error
+
+	// RotateOIDCKeys rotates the current ES256 key to a new key pair and sets the expiration of the old key.
+	RotateOIDCKeys(ctx context.Context, kid string, newPriv, newPub []byte, gracePeriod time.Duration) error
+
+	// SaveRevokedBiscuit persists a Biscuit revocation ID until its expiration time.
+	SaveRevokedBiscuit(ctx context.Context, revocationID string, expiresAt time.Time) error
+
+	// ListRevokedBiscuits returns all unexpired Biscuit revocation IDs as of now and prunes expired rows.
+	ListRevokedBiscuits(ctx context.Context, now time.Time) (map[string]time.Time, error)
+
+	// IsBiscuitRevoked checks if the given base64url-encoded revocation ID is currently revoked.
+	IsBiscuitRevoked(ctx context.Context, revocationID string, now time.Time) (bool, error)
 
 	// Close closes the underlying database connection.
 	Close() error

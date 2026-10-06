@@ -278,6 +278,7 @@ func (s *Server) Start(ctx context.Context) error {
 		BiscuitTimeout:        10 * time.Second,
 		AdminToken:            s.adminToken,
 		AutoApproveEnrollment: !s.opts.ControlPlane.ManualEnrollment,
+		STSIssuerURL:          s.opts.ExternalURL,
 	}, store)
 	if err != nil {
 		return fmt.Errorf("failed to create control plane: %w", err)
@@ -714,7 +715,7 @@ func (r *responseRecorder) WriteHeader(statusCode int) {
 }
 
 // wrapPublicHTTPHandler augments control-plane endpoints that return
-// RouterAddresses (/info, /enroll, /enroll/status, /enroll/oidc, /refresh) on
+// RouterAddresses (/info, /enroll, /enroll/status, /register) on
 // the public listener when no explicit --external-url was configured: it
 // derives the router's public ws/wss multiaddr from the incoming request's
 // Host / X-Forwarded-Host and X-Forwarded-Proto headers so single-step PaaS
@@ -758,7 +759,7 @@ func (s *Server) wrapPublicHTTPHandler(next http.Handler) http.Handler {
 
 func returnsRouterAddresses(path string) bool {
 	switch path {
-	case "/info", "/enroll", "/enroll/status", "/enroll/oidc", "/refresh":
+	case "/info", "/enroll", "/enroll/status", "/register":
 		return true
 	default:
 		return false
@@ -793,7 +794,7 @@ func prependInferredRouterAddr(path string, body []byte, inferredAddr string) ([
 		msg.RouterAddresses = prepend(msg.RouterAddresses)
 		b, err := proto.Marshal(&msg)
 		return b, err == nil
-	case "/enroll/oidc", "/refresh":
+	case "/register":
 		var msg api.EnrollResponse
 		if err := proto.Unmarshal(body, &msg); err != nil {
 			return nil, false

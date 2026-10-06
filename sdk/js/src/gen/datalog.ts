@@ -21,10 +21,10 @@ export const BASELINE_DATALOG = {
   ],
   "http_rules": [
     "http_method_ok($t, $k) <- method($m), granted_method($t, $k, $set), $set.contains($m)",
-    "http_method_ok($t, $k) <- granted_method_any($t, $k)",
+    "http_method_ok($t, $k) <- method($m), !($m == \"CONNECT\"), granted_method_any($t, $k)",
     "http_path_ok($t, $k) <- path($p), granted_path_exact($t, $k, $set), $set.contains($p)",
     "http_path_ok($t, $k) <- path($p), granted_path_prefix($t, $k, $prefix), $p.starts_with($prefix)",
-    "http_path_ok($t, $k) <- granted_path_any($t, $k)",
+    "http_path_ok($t, $k) <- path($p), $p.starts_with(\"/\"), granted_path_any($t, $k)",
     "granted_service_exact($t, $n) <- service($t, $n), http_granted_service_exact($t, $n), http_method_ok($t, $n), http_path_ok($t, $n)",
     "granted_service_suffix($t, $s) <- service($t, $n), http_granted_service_suffix($t, $s), $n.ends_with($s), http_method_ok($t, $s), http_path_ok($t, $s)",
     "granted_service_prefix($t, $p) <- service($t, $n), http_granted_service_prefix($t, $p), $n.starts_with($p), http_method_ok($t, $p), http_path_ok($t, $p)",

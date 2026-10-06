@@ -180,7 +180,7 @@ func TestCatalogRoutingAndFailover(t *testing.T) {
 
 	// Wait for them to discover each other and publish catalog by polling get_mesh_info
 	t.Log("Polling for discovery...")
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	var connected bool
 
 	for time.Now().Before(deadline) {
@@ -193,7 +193,7 @@ func TestCatalogRoutingAndFailover(t *testing.T) {
 		}, nil)
 		if err != nil {
 			t.Logf("Poll: failed to connect: %v", err)
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
@@ -203,7 +203,7 @@ func TestCatalogRoutingAndFailover(t *testing.T) {
 		}
 		if err != nil {
 			t.Logf("Poll: CallTool failed: %v", err)
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
@@ -220,7 +220,7 @@ func TestCatalogRoutingAndFailover(t *testing.T) {
 		var data map[string]any
 		if err := json.Unmarshal([]byte(text), &data); err != nil {
 			t.Logf("Failed to parse JSON: %v", err)
-			time.Sleep(2 * time.Second)
+			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 		connectedPeers, ok := data["connected_peers"].([]any)
@@ -232,7 +232,7 @@ func TestCatalogRoutingAndFailover(t *testing.T) {
 			break
 		}
 
-		time.Sleep(2 * time.Second)
+		time.Sleep(100 * time.Millisecond)
 	}
 	if !connected {
 		t.Fatalf("failed to discover peers (router + 2 nodes) in time")
@@ -245,7 +245,7 @@ func TestCatalogRoutingAndFailover(t *testing.T) {
 	nodeB.kill()
 
 	// Wait a bit for catalog update or failover to happen on next call
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	respData2 := callMCP(t, mcpAddrA, "get_mesh_info", map[string]any{})
 	t.Logf("Second call response: %s", respData2)

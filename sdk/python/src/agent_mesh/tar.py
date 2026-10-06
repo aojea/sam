@@ -31,7 +31,29 @@ _DATALOG: dict = json.loads(resources.files("agent_mesh._gen").joinpath("datalog
 
 _TAR_BLOCK_SOURCE_RE = re.compile(_DATALOG["tar_block_source_pattern"])
 _HTTP_METHOD_RE = re.compile(_DATALOG["http_method_syntax"])
-_VALID_SERVICE_TYPES = frozenset({"mcp", "a2a", "inference", "http", "egress"})
+_DNS_NAME_RE = re.compile(
+    r"^(?:(?:\*\.)?[a-zA-Z0-9_](?:[a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?(?:\.[a-zA-Z0-9_](?:[a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?)*(?:\.\*)?|\*)$"
+)
+_VALID_SERVICE_TYPES = frozenset({"mcp", "a2a", "inference", "http", "egress", "system"})
+
+
+def _is_printable_ascii(s: str) -> bool:
+    return all(0x20 <= ord(c) <= 0x7E for c in s)
+
+
+def _has_ascii_control(s: str) -> bool:
+    return any(ord(c) < 0x20 or ord(c) == 0x7F for c in s)
+
+
+def _has_encoded_path_traversal(p: str) -> bool:
+    for i, c in enumerate(p):
+        if ord(c) < 0x20 or ord(c) == 0x7F or c == "\\":
+            return True
+        if c == "%" and i + 2 < len(p):
+            hx = p[i + 1 : i + 3].lower()
+            if hx in ("2e", "2f", "5c", "00"):
+                return True
+    return False
 
 
 def _b64url_encode(raw: bytes) -> str:
@@ -49,6 +71,11 @@ def _b64url_decode(b64_payload: str) -> bytes:
 
 
 def validate_service_pattern(s: str) -> None:
+    if not s:
+        raise ValueError("allowed_services entry cannot be empty")
+    max_name = _DATALOG["max_tar_name_length"]
+    if len(s.encode("utf-8")) > max_name:
+        raise ValueError(f"allowed_services entry {s!r} exceeds max length {max_name}")
     if s == "*":
         return
     scheme, sep, target = s.partition("://")
@@ -56,20 +83,29 @@ def validate_service_pattern(s: str) -> None:
         raise ValueError(f"invalid service format: {s}")
     if scheme not in _VALID_SERVICE_TYPES:
         raise ValueError(f'invalid service type "{scheme}" in {s}')
-    if not target or "/" in target or target.count("*") > 1:
+    if not target or "/" in target or "?" in target or "#" in target or "@" in target or target.count("*") > 1:
         raise ValueError(f'invalid service target "{target}" in {s}')
+    if target != "*" and not _DNS_NAME_RE.match(target):
+        raise ValueError(f'invalid service format {s!r}: "{target}" is not a valid DNS name')
+    if scheme == "egress" and target != target.lower():
+        raise ValueError(f"invalid egress service {s!r}: hostname must be lowercase")
     if "*" in target and target != "*":
-        valid_suffix = target.startswith("*.") and len(target[2:]) > 0
-        valid_prefix = target.endswith(".*") and len(target[:-2]) > 0
+        valid_suffix = target.startswith("*.") and not target.endswith(".*") and len(target[2:]) > 0
+        valid_prefix = target.endswith(".*") and not target.startswith("*.") and len(target[:-2]) > 0
         if not valid_suffix and not valid_prefix:
             raise ValueError(f"wildcard in {s!r} must be '*', '*.<suffix>' or '<prefix>.*'")
 
 
 def validate_http_grant_path(p: str) -> None:
+    max_name = _DATALOG["max_tar_name_length"]
+    if len(p.encode("utf-8")) > max_name:
+        raise ValueError(f"path {p!r} exceeds max length {max_name}")
     if not p.startswith("/"):
         raise ValueError(f"path {p!r} must start with '/'")
     if "?" in p or "#" in p:
         raise ValueError(f"path {p!r} must not contain '?' or '#'")
+    if _has_encoded_path_traversal(p):
+        raise ValueError(f"path {p!r} must not contain encoded traversal sequences or control characters")
     stars = p.count("*")
     if stars > 1 or (stars == 1 and not p.endswith("*")):
         raise ValueError(f"path {p!r}: '*' is only valid once, at the end")
@@ -91,8 +127,13 @@ def _validate_tar_string_list(field_name: str, values: Sequence[str], check_elem
 
 def validate_task_rule(r: sam_pb2.TaskRule) -> None:
     max_desc = _DATALOG["max_tar_description_length"]
+    max_name = _DATALOG["max_tar_name_length"]
     if len(r.description.encode("utf-8")) > max_desc:
         raise ValueError(f"TaskRule.description exceeds {max_desc} bytes")
+    if _has_ascii_control(r.description):
+        raise ValueError("TaskRule.description must not contain control characters")
+    if len(r.allowed_services) == 0:
+        raise ValueError("TaskRule.allowed_services must not be empty")
     _validate_tar_string_list("allowed_services", r.allowed_services, validate_service_pattern)
 
     max_res = _DATALOG["max_tar_resource_length"]
@@ -102,38 +143,60 @@ def validate_task_rule(r: sam_pb2.TaskRule) -> None:
             raise ValueError("resource must not be empty")
         if len(res.encode("utf-8")) > max_res:
             raise ValueError(f"resource exceeds {max_res} bytes")
+        if _has_ascii_control(res):
+            raise ValueError("resource must not contain control characters")
 
     _validate_tar_string_list("allowed_resources", r.allowed_resources, _check_resource)
 
     if r.HasField("operation"):
         op = r.operation
 
-        def _check_non_empty(label: str) -> Callable[[str], None]:
-            def _fn(v: str) -> None:
-                if not v:
-                    raise ValueError(f"{label} must not be empty")
-
-            return _fn
+        def _check_tool(tool: str) -> None:
+            if (
+                not tool
+                or len(tool.encode("utf-8")) > max_name
+                or any(c in tool for c in "/?# \t\r\n")
+                or not _is_printable_ascii(tool)
+            ):
+                raise ValueError(f"invalid tool name {tool!r} in allowed_tools")
 
         def _check_method(m: str) -> None:
             if not _HTTP_METHOD_RE.match(m):
                 raise ValueError(f"invalid HTTP method {m!r}")
-            if m == "CONNECT":
-                raise ValueError("CONNECT is not a grantable HTTP method")
 
-        _validate_tar_string_list("operation.allowed_tools", op.allowed_tools, _check_non_empty("tool name"))
+        def _check_perm(perm: str) -> None:
+            if (
+                not perm
+                or len(perm.encode("utf-8")) > max_name
+                or any(c in perm for c in " \t\r\n")
+                or not _is_printable_ascii(perm)
+            ):
+                raise ValueError(f"invalid permission {perm!r} in allowed_permissions")
+
+        _validate_tar_string_list("operation.allowed_tools", op.allowed_tools, _check_tool)
         _validate_tar_string_list("operation.allowed_methods", op.allowed_methods, _check_method)
         _validate_tar_string_list("operation.allowed_paths", op.allowed_paths, validate_http_grant_path)
-        _validate_tar_string_list("operation.allowed_permissions", op.allowed_permissions, _check_non_empty("permission"))
+        _validate_tar_string_list("operation.allowed_permissions", op.allowed_permissions, _check_perm)
 
 
 def validate_task_authorization_rule(rule: sam_pb2.TaskAuthorizationRule, require_non_empty_rules: bool = True) -> None:
     max_name = _DATALOG["max_tar_name_length"]
     if len(rule.name.encode("utf-8")) > max_name:
         raise ValueError(f"TaskAuthorizationRule.name exceeds {max_name} bytes")
+    if not _is_printable_ascii(rule.name):
+        raise ValueError("TaskAuthorizationRule.name must contain only printable ASCII characters")
     max_desc = _DATALOG["max_tar_description_length"]
     if len(rule.display_name.encode("utf-8")) > max_desc:
         raise ValueError(f"TaskAuthorizationRule.display_name exceeds {max_desc} bytes")
+    if _has_ascii_control(rule.display_name):
+        raise ValueError("TaskAuthorizationRule.display_name must not contain control characters")
+    if rule.HasField("expire_time"):
+        seconds = rule.expire_time.seconds
+        nanos = rule.expire_time.nanos
+        if nanos < 0 or nanos >= 1_000_000_000:
+            raise ValueError("TaskAuthorizationRule.expire_time has invalid nanos")
+        if seconds <= 0 or seconds > 253402300799:
+            raise ValueError("TaskAuthorizationRule.expire_time must be after the Unix epoch")
     if require_non_empty_rules and len(rule.rules) == 0:
         raise ValueError("TaskAuthorizationRule.rules must not be empty")
     max_rules = _DATALOG["max_rules_per_tar"]
@@ -144,12 +207,6 @@ def validate_task_authorization_rule(rule: sam_pb2.TaskAuthorizationRule, requir
             validate_task_rule(r)
         except Exception as err:  # noqa: BLE001
             raise ValueError(f"TaskAuthorizationRule.rules[{i}]: {err}") from err
-    if rule.HasField("expire_time"):
-        seconds = rule.expire_time.seconds
-        nanos = rule.expire_time.nanos
-        if nanos < 0 or nanos >= 1_000_000_000:
-            raise ValueError("TaskAuthorizationRule.expire_time has invalid nanos")
-        _ = seconds
 
 
 def encode_tar_block_payload(rule: sam_pb2.TaskAuthorizationRule) -> str:
@@ -217,29 +274,36 @@ class TaskRequestContext:
     path: str = ""
     mcp_tool: str = ""
     allow_mcp_stream_init: bool = False
-    resource: str = ""
-    permission: str = ""
 
 
 def match_service_pattern(pattern: str, service_type: str, service_name: str) -> bool:
-    if not service_type or not service_name:
+    if not service_type or not service_name or not pattern:
         return False
     if pattern == "*":
         return True
     pat_type, sep, pat_target = pattern.partition("://")
-    if not sep or pat_type != service_type:
+    if not sep or pat_type != service_type or not pat_target:
         return False
     if pat_target == "*":
         return True
-    if pat_target.startswith("*."):
+    if pat_target.startswith("*.") and not pat_target.endswith(".*"):
         return service_name.endswith(pat_target[1:])
-    if pat_target.endswith(".*"):
+    if pat_target.endswith(".*") and not pat_target.startswith("*."):
         return service_name.startswith(pat_target[:-1])
     return service_name == pat_target
 
 
+def is_safe_request_http_path(req_path: str) -> bool:
+    if not req_path.startswith("/") or "?" in req_path or "#" in req_path or _has_encoded_path_traversal(req_path):
+        return False
+    for seg in req_path.split("/"):
+        if seg in (".", ".."):
+            return False
+    return True
+
+
 def match_http_path(pattern: str, req_path: str) -> bool:
-    if not req_path:
+    if not pattern or not is_safe_request_http_path(req_path):
         return False
     if pattern.endswith("*"):
         return req_path.startswith(pattern[:-1])
@@ -247,12 +311,12 @@ def match_http_path(pattern: str, req_path: str) -> bool:
 
 
 def match_task_rule(rule: sam_pb2.TaskRule, req: TaskRequestContext) -> bool:
-    if rule.allowed_services:
-        if not any(match_service_pattern(pat, req.service_type, req.service_name) for pat in rule.allowed_services):
-            return False
-    if rule.allowed_resources:
-        if not req.resource or req.resource not in rule.allowed_resources:
-            return False
+    if not rule.allowed_services:
+        return False
+    if not any(match_service_pattern(pat, req.service_type, req.service_name) for pat in rule.allowed_services):
+        return False
+    # Note: rule.allowed_resources and operation.allowed_permissions are opaque
+    # to the wire PEP and consumed by CloudTokenExchanger at egress.
     if rule.HasField("operation"):
         op = rule.operation
         if op.allowed_tools:
@@ -263,18 +327,12 @@ def match_task_rule(rule: sam_pb2.TaskRule, req: TaskRequestContext) -> bool:
                     return False
             elif req.mcp_tool not in op.allowed_tools:
                 return False
-        if op.allowed_methods:
-            if not req.has_http or not req.method or req.method == "CONNECT":
+        if op.allowed_methods or op.allowed_paths:
+            if not req.has_http or not req.method or req.method == "CONNECT" or not is_safe_request_http_path(req.path):
                 return False
-            if req.method not in op.allowed_methods:
+            if op.allowed_methods and req.method not in op.allowed_methods:
                 return False
-        if op.allowed_paths:
-            if not req.has_http or not req.path or req.method == "CONNECT":
-                return False
-            if not any(match_http_path(pat, req.path) for pat in op.allowed_paths):
-                return False
-        if op.allowed_permissions:
-            if not req.permission or req.permission not in op.allowed_permissions:
+            if op.allowed_paths and not any(match_http_path(pat, req.path) for pat in op.allowed_paths):
                 return False
     return True
 

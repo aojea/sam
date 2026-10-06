@@ -154,4 +154,13 @@ func TestKeysResponseSignatureChain(t *testing.T) {
 			t.Fatal("a response without signatures must not be accepted")
 		}
 	})
+
+	t.Run("malformed public key length is refused", func(t *testing.T) {
+		resp := signed()
+		resp.PublicKeys = append(resp.PublicKeys, []byte("short"))
+		resp.Signatures = append(resp.Signatures, make([]byte, ed25519.SignatureSize))
+		if _, err := VerifyKeysResponse(resp, []ed25519.PublicKey{oldPub}, now); err == nil {
+			t.Fatal("a response with a malformed key length must not be accepted")
+		}
+	})
 }

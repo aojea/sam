@@ -22,14 +22,14 @@ case "${ARCH}" in
     *)          echo "Unsupported architecture: ${ARCH}"; exit 1;;
 esac
 
-# Get latest release version
+# Get latest release version via GitHub redirect (avoids api.github.com rate limits)
 echo "Fetching latest release information..."
-LATEST_RELEASE_URL="https://api.github.com/repos/${REPO}/releases/latest"
-# `|| true`: with pipefail, a grep that matches nothing would kill the script
-# here instead of reaching the friendly error below.
-VERSION=$(curl -s $LATEST_RELEASE_URL | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || true)
+VERSION=$(curl -fsSL -o /dev/null -w "%{url_effective}" "https://github.com/${REPO}/releases/latest" | sed 's|.*/||' || true)
+if [ -z "$VERSION" ] || [ "$VERSION" = "releases" ]; then
+    VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases?per_page=1" | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+fi
 
-if [ -z "$VERSION" ]; then
+if [ -z "$VERSION" ] || [ "$VERSION" = "releases" ]; then
     echo "Error: Could not find the latest release."
     exit 1
 fi
@@ -39,6 +39,7 @@ echo "Found latest version: ${VERSION}"
 # Construct download URL (matches goreleaser name template)
 TAR_NAME="sam_${OS_NAME}_${ARCH_NAME}.tar.gz"
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${TAR_NAME}"
+CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
 
 # Create a temporary directory
 TMP_DIR=$(mktemp -d)
@@ -51,12 +52,33 @@ if ! curl -sfL -o "${TAR_NAME}" "${DOWNLOAD_URL}"; then
     exit 1
 fi
 
+if curl -sfL -o checksums.txt "${CHECKSUMS_URL}"; then
+    echo "Verifying SHA-256 checksum..."
+    EXPECTED_SUM=$(awk -v f="${TAR_NAME}" '$2 == f {print $1}' checksums.txt)
+    if [ -z "${EXPECTED_SUM}" ]; then
+        echo "Error: ${TAR_NAME} not found in checksums.txt"
+        exit 1
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        ACTUAL_SUM=$(sha256sum "${TAR_NAME}" | awk '{print $1}')
+    elif command -v shasum >/dev/null 2>&1; then
+        ACTUAL_SUM=$(shasum -a 256 "${TAR_NAME}" | awk '{print $1}')
+    else
+        echo "Error: Neither sha256sum nor shasum is available to verify archive integrity."
+        exit 1
+    fi
+    if [ "${EXPECTED_SUM}" != "${ACTUAL_SUM}" ]; then
+        echo "Error: SHA-256 checksum mismatch for ${TAR_NAME} (expected ${EXPECTED_SUM}, got ${ACTUAL_SUM})"
+        exit 1
+    fi
+fi
+
 echo "Extracting..."
 tar -xzf "${TAR_NAME}"
 
 echo "Installing to ${INSTALL_DIR} (may require sudo)..."
 INSTALLED_BINS=()
-for b in sam-node sam-control-plane sam-router mcp-client sam-box sam-console nano-init; do
+for b in sam-one sam-node sam-control-plane sam-router mcp-client sam-box sam-console nano-init; do
     if [ -f "$b" ]; then
         INSTALLED_BINS+=("$b")
     fi

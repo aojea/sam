@@ -16,6 +16,7 @@ package node
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,16 +27,14 @@ import (
 	"strings"
 	"time"
 
+	extprocv3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	"github.com/google/sam/api"
-	corev3 "github.com/google/sam/third_party/envoy/envoy/config/core/v3"
-	extprocv3http "github.com/google/sam/third_party/envoy/envoy/extensions/filters/http/ext_proc/v3"
-	extprocv3 "github.com/google/sam/third_party/envoy/envoy/service/ext_proc/v3"
+	"github.com/google/sam/internal/envoy"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
 const (
-	defaultExtProcMessageTimeout = 200 * time.Millisecond
-	defaultExtProcMaxBufferBytes = 1 << 20 // 1 MiB
+	defaultExtProcMaxBufferBytes = envoy.DefaultMaxBufferBytes
 	defaultModelArmorTimeout     = 5 * time.Second
 )
 
@@ -89,70 +88,6 @@ func (r *boundedResponseRecorder) Write(p []byte) (int, error) {
 	return r.body.Write(p)
 }
 
-// isProtectedEgressHeader reports whether a header name is off-limits to an
-// ext_proc inspector. Inspectors may add/modify application headers, or block a
-// request, but must never select or overwrite credentials, host routing, or
-// SAM identity headers.
-func isProtectedEgressHeader(name string) bool {
-	lower := strings.ToLower(strings.TrimSpace(name))
-	switch lower {
-	case "authorization", "host", ":authority", "cookie":
-		return true
-	}
-	return strings.HasPrefix(lower, "x-sam-") || strings.HasPrefix(lower, "x-forwarded-")
-}
-
-func applySafeHeaderMutations(h http.Header, mut *extprocv3.HeaderMutation) {
-	if mut == nil {
-		return
-	}
-	for _, rem := range mut.GetRemoveHeaders() {
-		if isProtectedEgressHeader(rem) {
-			logger.Warnf("[EgressInspect] Refused ext_proc removal of protected header %q", rem)
-			continue
-		}
-		h.Del(rem)
-	}
-	for _, opt := range mut.GetSetHeaders() {
-		hv := opt.GetHeader()
-		if hv == nil {
-			continue
-		}
-		key := strings.TrimSpace(hv.GetKey())
-		if key == "" || strings.HasPrefix(key, ":") {
-			if strings.EqualFold(key, ":authority") {
-				logger.Warnf("[EgressInspect] Refused ext_proc mutation of protected pseudo-header :authority")
-			}
-			continue
-		}
-		if isProtectedEgressHeader(key) {
-			logger.Warnf("[EgressInspect] Refused ext_proc mutation of protected header %q", key)
-			continue
-		}
-		val := hv.GetValue()
-		if val == "" && len(hv.GetRawValue()) > 0 {
-			val = string(hv.GetRawValue())
-		}
-		appendHdr := false
-		if opt.GetAppend() != nil {
-			appendHdr = opt.GetAppend().GetValue()
-		} else if opt.GetAppendAction() == corev3.HeaderValueOption_APPEND_IF_EXISTS_OR_ADD {
-			appendHdr = false // default to overwrite unless explicitly set
-		}
-		if opt.GetAppendAction() == corev3.HeaderValueOption_ADD_IF_ABSENT && h.Get(key) != "" {
-			continue
-		}
-		if opt.GetAppendAction() == corev3.HeaderValueOption_OVERWRITE_IF_EXISTS && h.Get(key) == "" {
-			continue
-		}
-		if appendHdr {
-			h.Add(key, val)
-		} else {
-			h.Set(key, val)
-		}
-	}
-}
-
 func buildSamAttributesStruct(destName string, ec egressCallerContext) map[string]*structpb.Struct {
 	st, err := structpb.NewStruct(map[string]any{
 		"principal":   ec.principal,
@@ -168,41 +103,6 @@ func buildSamAttributesStruct(destName string, ec egressCallerContext) map[strin
 	return map[string]*structpb.Struct{"sam": st}
 }
 
-func httpHeadersToProto(r *http.Request, destName string) *corev3.HeaderMap {
-	var list []*corev3.HeaderValue
-	if r != nil {
-		list = append(list,
-			&corev3.HeaderValue{Key: ":method", Value: r.Method},
-			&corev3.HeaderValue{Key: ":path", Value: r.URL.RequestURI()},
-			&corev3.HeaderValue{Key: ":authority", Value: destName},
-			&corev3.HeaderValue{Key: ":scheme", Value: "https"},
-		)
-		for k, vals := range r.Header {
-			if isProtectedEgressHeader(k) {
-				continue
-			}
-			list = append(list, &corev3.HeaderValue{
-				Key:   strings.ToLower(k),
-				Value: strings.Join(vals, ", "),
-			})
-		}
-	}
-	return &corev3.HeaderMap{Headers: list}
-}
-
-func responseHeadersToProto(status int, h http.Header) *corev3.HeaderMap {
-	list := []*corev3.HeaderValue{
-		{Key: ":status", Value: strconv.Itoa(status)},
-	}
-	for k, vals := range h {
-		list = append(list, &corev3.HeaderValue{
-			Key:   strings.ToLower(k),
-			Value: strings.Join(vals, ", "),
-		})
-	}
-	return &corev3.HeaderMap{Headers: list}
-}
-
 // writeImmediateResponse writes an ImmediateResponse from an ext_proc processor
 // back to the HTTP caller with a Proxy-Status header identifying the block.
 func writeImmediateResponse(w http.ResponseWriter, imm *extprocv3.ImmediateResponse, destName, task string) {
@@ -210,7 +110,7 @@ func writeImmediateResponse(w http.ResponseWriter, imm *extprocv3.ImmediateRespo
 	if code := int(imm.GetStatus().GetCode()); code >= 100 && code <= 599 {
 		status = code
 	}
-	applySafeHeaderMutations(w.Header(), imm.GetHeaders())
+	envoy.ApplySafeHeaderMutations(w.Header(), imm.GetHeaders())
 	details := imm.GetDetails()
 	if details == "" {
 		details = "ext_proc_blocked"
@@ -257,7 +157,11 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 
 	maxBytes := int64(defaultExtProcMaxBufferBytes)
 	hasExplicitMax := false
+	hasModelArmor := false
 	for _, ins := range inspectors {
+		if ins.GetModelArmor() != nil {
+			hasModelArmor = true
+		}
 		if ep := ins.GetExtProc(); ep != nil && ep.GetMaxBufferedBytes() > 0 {
 			if !hasExplicitMax || int64(ep.GetMaxBufferedBytes()) > maxBytes {
 				maxBytes = int64(ep.GetMaxBufferedBytes())
@@ -283,25 +187,48 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	if hasModelArmor && len(reqBody) > 0 {
+		if ce := strings.TrimSpace(r.Header.Get("Content-Encoding")); ce != "" && !strings.EqualFold(ce, "identity") {
+			if strings.EqualFold(ce, "gzip") {
+				gz, gzErr := gzip.NewReader(bytes.NewReader(reqBody))
+				if gzErr != nil {
+					refuse(w, http.StatusBadRequest, "invalid gzip request body", proxyStatusDenied)
+					return
+				}
+				decompressed, readErr := io.ReadAll(io.LimitReader(gz, maxBytes+1))
+				_ = gz.Close()
+				if readErr != nil || int64(len(decompressed)) > maxBytes {
+					refuse(w, http.StatusRequestEntityTooLarge, "decompressed request body exceeds max_buffered_bytes", proxyStatusDenied)
+					return
+				}
+				reqBody = decompressed
+				r.Header.Del("Content-Encoding")
+			} else {
+				refuse(w, http.StatusUnsupportedMediaType, fmt.Sprintf("unsupported Content-Encoding %q with Model Armor inspection", ce), proxyStatusDenied)
+				return
+			}
+		}
+	}
+
 	// Strip caller auth and X-Sam-* headers on a working copy before any inspector sees them.
 	r.Header.Del("Authorization")
 	r.Header.Del("Cookie")
 	for name := range r.Header {
-		if strings.HasPrefix(name, "X-Sam-") || strings.HasPrefix(name, "X-Forwarded-") || name == api.HeaderPeerID {
+		lower := strings.ToLower(name)
+		if strings.HasPrefix(lower, "x-sam-") || strings.HasPrefix(lower, "x-forwarded-") || strings.EqualFold(name, api.HeaderPeerID) {
 			r.Header.Del(name)
 		}
 	}
 
 	// Track active ext_proc streams that also want response headers/body.
 	type activeExtProc struct {
-		cfg    *api.ExtProc
-		stream *extProcClientStream
-		mode   *extprocv3http.ProcessingMode
+		cfg     *api.ExtProc
+		session *envoy.CalloutSession
 	}
 	var activeStreams []*activeExtProc
 	defer func() {
 		for _, as := range activeStreams {
-			as.stream.Close()
+			as.session.Close()
 		}
 	}()
 
@@ -356,7 +283,14 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 				continue
 			}
 			ep := kind.ExtProc
-			stream, mode, imm, newBody, err := s.runExtProcRequestPhase(r, ep, reqBody, callerCtx)
+			client, err := s.getExtProcClient(ep)
+			var session *envoy.CalloutSession
+			var imm *extprocv3.ImmediateResponse
+			var newBody []byte
+			if err == nil {
+				attrs := buildSamAttributesStruct(s.info.Name, callerCtx)
+				session, imm, newBody, err = client.RunRequestPhase(r, ep, s.info.Name, reqBody, attrs)
+			}
 			if err != nil {
 				if !ep.GetFailureModeAllow() {
 					logger.Warnw("Egress Inspection Verdict",
@@ -379,19 +313,19 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 				continue
 			}
 			if imm != nil {
-				if stream != nil {
-					stream.Close()
+				if session != nil {
+					session.Close()
 				}
 				writeImmediateResponse(w, imm, s.info.Name, callerCtx.task)
 				return
 			}
 			reqBody = newBody
-			if stream != nil {
-				if mode.GetResponseHeaderMode() != extprocv3http.ProcessingMode_SKIP || mode.GetResponseBodyMode() != extprocv3http.ProcessingMode_NONE {
-					activeStreams = append(activeStreams, &activeExtProc{cfg: ep, stream: stream, mode: mode})
+			if session != nil {
+				if session.NeedsResponseBuffer() {
+					activeStreams = append(activeStreams, &activeExtProc{cfg: ep, session: session})
 					needResponseBuffer = true
 				} else {
-					stream.Close()
+					session.Close()
 				}
 			}
 		}
@@ -426,6 +360,9 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Request uncompressed responses from upstream when buffering for inspection.
+	r.Header.Del("Accept-Encoding")
+
 	rec := newBoundedResponseRecorder(maxBytes)
 	proxy.ServeHTTP(rec, r)
 	respStatus := rec.code
@@ -434,7 +371,7 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 
 	// Run response phase across active ext_proc streams and BUFFERED ModelArmor inspectors.
 	for _, as := range activeStreams {
-		imm, mutatedBody, err := s.runExtProcResponsePhase(as.cfg, as.stream, as.mode, respStatus, respHeader, respBody)
+		imm, mutatedBody, err := as.session.RunResponsePhase(respStatus, respHeader, respBody)
 		if err != nil {
 			if !as.cfg.GetFailureModeAllow() {
 				refuse(w, http.StatusBadGateway, "ext_proc response inspection error", proxyStatusConfigurationError)
@@ -457,6 +394,29 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 		ma := ins.GetModelArmor()
 		if ma == nil || ma.GetResponse() != api.ResponseInspection_RESPONSE_INSPECTION_BUFFERED {
 			continue
+		}
+		if ce := strings.TrimSpace(respHeader.Get("Content-Encoding")); ce != "" && !strings.EqualFold(ce, "identity") && len(respBody) > 0 {
+			if strings.EqualFold(ce, "gzip") {
+				gz, gzErr := gzip.NewReader(bytes.NewReader(respBody))
+				if gzErr != nil {
+					if !ma.GetFailOpen() {
+						refuse(w, http.StatusBadGateway, "invalid gzip upstream response body", proxyStatusDenied)
+						return
+					}
+				} else {
+					decompressed, readErr := io.ReadAll(io.LimitReader(gz, maxBytes+1))
+					_ = gz.Close()
+					if readErr != nil || int64(len(decompressed)) > maxBytes {
+						refuse(w, http.StatusBadGateway, "decompressed upstream response exceeds max_buffered_bytes", proxyStatusDenied)
+						return
+					}
+					respBody = decompressed
+					respHeader.Del("Content-Encoding")
+				}
+			} else if !ma.GetFailOpen() {
+				refuse(w, http.StatusBadGateway, fmt.Sprintf("unsupported upstream Content-Encoding %q for Model Armor response inspection", ce), proxyStatusDenied)
+				return
+			}
 		}
 		var blocked bool
 		var err error
@@ -499,36 +459,6 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 	_, _ = w.Write(respBody)
 }
 
-func initialExtProcMode(cfg *api.ExtProc) *extprocv3http.ProcessingMode {
-	pm := cfg.GetProcessingMode()
-	mode := &extprocv3http.ProcessingMode{
-		RequestHeaderMode:   extprocv3http.ProcessingMode_SEND,
-		ResponseHeaderMode:  extprocv3http.ProcessingMode_SEND,
-		RequestBodyMode:     extprocv3http.ProcessingMode_NONE,
-		ResponseBodyMode:    extprocv3http.ProcessingMode_NONE,
-		RequestTrailerMode:  extprocv3http.ProcessingMode_SKIP,
-		ResponseTrailerMode: extprocv3http.ProcessingMode_SKIP,
-	}
-	if pm == nil {
-		return mode
-	}
-	if pm.GetRequestHeaderMode() == api.ExtProcProcessingMode_SKIP {
-		mode.RequestHeaderMode = extprocv3http.ProcessingMode_SKIP
-	}
-	if pm.GetResponseHeaderMode() == api.ExtProcProcessingMode_SKIP {
-		mode.ResponseHeaderMode = extprocv3http.ProcessingMode_SKIP
-	}
-	mode.RequestBodyMode = extprocv3http.ProcessingMode_BodySendMode(pm.GetRequestBodyMode())
-	mode.ResponseBodyMode = extprocv3http.ProcessingMode_BodySendMode(pm.GetResponseBodyMode())
-	if pm.GetRequestTrailerMode() == api.ExtProcProcessingMode_SEND {
-		mode.RequestTrailerMode = extprocv3http.ProcessingMode_SEND
-	}
-	if pm.GetResponseTrailerMode() == api.ExtProcProcessingMode_SEND {
-		mode.ResponseTrailerMode = extprocv3http.ProcessingMode_SEND
-	}
-	return mode
-}
-
 func extProcClientCacheKey(cfg *api.ExtProc) string {
 	return strings.TrimSpace(cfg.GetTarget()) + "|" + strings.TrimSpace(cfg.GetCa()) + "|" + strings.TrimSpace(cfg.GetClientCertificate())
 }
@@ -536,231 +466,27 @@ func extProcClientCacheKey(cfg *api.ExtProc) string {
 func (s *EgressService) initExtProcClients() {
 	for _, ins := range s.destination.GetInspection().GetInspectors() {
 		if ep := ins.GetExtProc(); ep != nil {
-			_, _, _ = s.getExtProcHTTPClient(ep)
+			_, _ = s.getExtProcClient(ep)
 		}
 	}
 }
 
-func (s *EgressService) getExtProcHTTPClient(cfg *api.ExtProc) (*http.Client, string, error) {
+func (s *EgressService) getExtProcClient(cfg *api.ExtProc) (*envoy.CalloutClient, error) {
 	key := extProcClientCacheKey(cfg)
 	s.extProcMu.Lock()
 	defer s.extProcMu.Unlock()
 	if s.extProcClients == nil {
-		s.extProcClients = make(map[string]extProcClientEntry)
+		s.extProcClients = make(map[string]*envoy.CalloutClient)
 	}
-	if entry, ok := s.extProcClients[key]; ok {
-		return entry.client, entry.endpoint, nil
+	if c, ok := s.extProcClients[key]; ok {
+		return c, nil
 	}
-	client, endpoint, err := buildExtProcHTTPClient(cfg, s.secretsDir)
+	c, err := envoy.NewCalloutClient(cfg, s.secretsDir)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	s.extProcClients[key] = extProcClientEntry{
-		client:   client,
-		endpoint: endpoint,
-	}
-	return client, endpoint, nil
-}
-
-func (s *EgressService) runExtProcRequestPhase(r *http.Request, cfg *api.ExtProc, reqBody []byte, callerCtx egressCallerContext) (*extProcClientStream, *extprocv3http.ProcessingMode, *extprocv3.ImmediateResponse, []byte, error) {
-	msgTimeout := defaultExtProcMessageTimeout
-	if cfg.GetMessageTimeout().IsValid() && cfg.GetMessageTimeout().AsDuration() > 0 {
-		msgTimeout = cfg.GetMessageTimeout().AsDuration()
-	}
-	client, endpoint, err := s.getExtProcHTTPClient(cfg)
-	if err != nil {
-		return nil, nil, nil, reqBody, err
-	}
-	stream, err := dialExtProcStream(r.Context(), client, endpoint, msgTimeout*4)
-	if err != nil {
-		return nil, nil, nil, reqBody, err
-	}
-
-	mode := initialExtProcMode(cfg)
-	attrs := buildSamAttributesStruct(s.info.Name, callerCtx)
-
-	if mode.GetRequestHeaderMode() != extprocv3http.ProcessingMode_SKIP {
-		endOfStream := len(reqBody) == 0 || mode.GetRequestBodyMode() == extprocv3http.ProcessingMode_NONE
-		err := stream.Send(&extprocv3.ProcessingRequest{
-			Attributes: attrs,
-			Request: &extprocv3.ProcessingRequest_RequestHeaders{
-				RequestHeaders: &extprocv3.HttpHeaders{
-					Headers:     httpHeadersToProto(r, s.info.Name),
-					EndOfStream: endOfStream,
-				},
-			},
-		})
-		if err != nil {
-			stream.Close()
-			return nil, nil, nil, reqBody, err
-		}
-		resp, err := stream.Recv(msgTimeout)
-		if err != nil {
-			stream.Close()
-			return nil, nil, nil, reqBody, err
-		}
-		if cfg.GetAllowModeOverride() && resp.GetModeOverride() != nil {
-			applyModeOverride(mode, resp.GetModeOverride())
-		}
-		if resp.GetOverrideMessageTimeout().IsValid() && resp.GetOverrideMessageTimeout().AsDuration() > 0 {
-			msgTimeout = resp.GetOverrideMessageTimeout().AsDuration()
-		}
-		if imm := resp.GetImmediateResponse(); imm != nil {
-			return stream, mode, imm, reqBody, nil
-		}
-		if hr := resp.GetRequestHeaders().GetResponse(); hr != nil {
-			applySafeHeaderMutations(r.Header, hr.GetHeaderMutation())
-			if bm := hr.GetBodyMutation(); bm != nil {
-				if bm.GetClearBody() {
-					reqBody = nil
-				} else if bm.GetBody() != nil {
-					reqBody = bm.GetBody()
-				}
-			}
-		}
-	}
-
-	if len(reqBody) > 0 && mode.GetRequestBodyMode() != extprocv3http.ProcessingMode_NONE {
-		err := stream.Send(&extprocv3.ProcessingRequest{
-			Attributes: attrs,
-			Request: &extprocv3.ProcessingRequest_RequestBody{
-				RequestBody: &extprocv3.HttpBody{
-					Body:        reqBody,
-					EndOfStream: true,
-				},
-			},
-		})
-		if err != nil {
-			stream.Close()
-			return nil, nil, nil, reqBody, err
-		}
-		resp, err := stream.Recv(msgTimeout)
-		if err != nil {
-			stream.Close()
-			return nil, nil, nil, reqBody, err
-		}
-		if cfg.GetAllowModeOverride() && resp.GetModeOverride() != nil {
-			applyModeOverride(mode, resp.GetModeOverride())
-		}
-		if imm := resp.GetImmediateResponse(); imm != nil {
-			return stream, mode, imm, reqBody, nil
-		}
-		if br := resp.GetRequestBody().GetResponse(); br != nil {
-			applySafeHeaderMutations(r.Header, br.GetHeaderMutation())
-			if bm := br.GetBodyMutation(); bm != nil {
-				if bm.GetClearBody() {
-					reqBody = nil
-				} else if bm.GetBody() != nil {
-					reqBody = bm.GetBody()
-				}
-			}
-		}
-	}
-
-	return stream, mode, nil, reqBody, nil
-}
-
-func (s *EgressService) runExtProcResponsePhase(cfg *api.ExtProc, stream *extProcClientStream, mode *extprocv3http.ProcessingMode, status int, respHeader http.Header, respBody []byte) (*extprocv3.ImmediateResponse, []byte, error) {
-	msgTimeout := defaultExtProcMessageTimeout
-	if cfg.GetMessageTimeout().IsValid() && cfg.GetMessageTimeout().AsDuration() > 0 {
-		msgTimeout = cfg.GetMessageTimeout().AsDuration()
-	}
-	defer func() { _ = stream.CloseSend() }()
-
-	if mode.GetResponseHeaderMode() != extprocv3http.ProcessingMode_SKIP {
-		endOfStream := len(respBody) == 0 || mode.GetResponseBodyMode() == extprocv3http.ProcessingMode_NONE
-		err := stream.Send(&extprocv3.ProcessingRequest{
-			Request: &extprocv3.ProcessingRequest_ResponseHeaders{
-				ResponseHeaders: &extprocv3.HttpHeaders{
-					Headers:     responseHeadersToProto(status, respHeader),
-					EndOfStream: endOfStream,
-				},
-			},
-		})
-		if err != nil {
-			return nil, respBody, err
-		}
-		resp, err := stream.Recv(msgTimeout)
-		if err != nil {
-			return nil, respBody, err
-		}
-		if cfg.GetAllowModeOverride() && resp.GetModeOverride() != nil {
-			applyModeOverride(mode, resp.GetModeOverride())
-		}
-		if imm := resp.GetImmediateResponse(); imm != nil {
-			return imm, respBody, nil
-		}
-		if hr := resp.GetResponseHeaders().GetResponse(); hr != nil {
-			applySafeHeaderMutations(respHeader, hr.GetHeaderMutation())
-			if bm := hr.GetBodyMutation(); bm != nil {
-				if bm.GetClearBody() {
-					respBody = nil
-				} else if bm.GetBody() != nil {
-					respBody = bm.GetBody()
-				}
-			}
-		}
-	}
-
-	if len(respBody) > 0 && mode.GetResponseBodyMode() != extprocv3http.ProcessingMode_NONE {
-		maxBytes := int(cfg.GetMaxBufferedBytes())
-		if maxBytes <= 0 {
-			maxBytes = defaultExtProcMaxBufferBytes
-		}
-		if len(respBody) > maxBytes {
-			return nil, respBody, fmt.Errorf("response body (%d bytes) exceeds max_buffered_bytes (%d)", len(respBody), maxBytes)
-		}
-		err := stream.Send(&extprocv3.ProcessingRequest{
-			Request: &extprocv3.ProcessingRequest_ResponseBody{
-				ResponseBody: &extprocv3.HttpBody{
-					Body:        respBody,
-					EndOfStream: true,
-				},
-			},
-		})
-		if err != nil {
-			return nil, respBody, err
-		}
-		resp, err := stream.Recv(msgTimeout)
-		if err != nil {
-			return nil, respBody, err
-		}
-		if imm := resp.GetImmediateResponse(); imm != nil {
-			return imm, respBody, nil
-		}
-		if br := resp.GetResponseBody().GetResponse(); br != nil {
-			applySafeHeaderMutations(respHeader, br.GetHeaderMutation())
-			if bm := br.GetBodyMutation(); bm != nil {
-				if bm.GetClearBody() {
-					respBody = nil
-				} else if bm.GetBody() != nil {
-					respBody = bm.GetBody()
-				}
-			}
-		}
-	}
-	return nil, respBody, nil
-}
-
-func applyModeOverride(dst, override *extprocv3http.ProcessingMode) {
-	if override.GetRequestHeaderMode() != extprocv3http.ProcessingMode_DEFAULT {
-		dst.RequestHeaderMode = override.GetRequestHeaderMode()
-	}
-	if override.GetResponseHeaderMode() != extprocv3http.ProcessingMode_DEFAULT {
-		dst.ResponseHeaderMode = override.GetResponseHeaderMode()
-	}
-	if override.GetRequestBodyMode() != extprocv3http.ProcessingMode_NONE {
-		dst.RequestBodyMode = override.GetRequestBodyMode()
-	}
-	if override.GetResponseBodyMode() != extprocv3http.ProcessingMode_NONE {
-		dst.ResponseBodyMode = override.GetResponseBodyMode()
-	}
-	if override.GetRequestTrailerMode() != extprocv3http.ProcessingMode_DEFAULT {
-		dst.RequestTrailerMode = override.GetRequestTrailerMode()
-	}
-	if override.GetResponseTrailerMode() != extprocv3http.ProcessingMode_DEFAULT {
-		dst.ResponseTrailerMode = override.GetResponseTrailerMode()
-	}
+	s.extProcClients[key] = c
+	return c, nil
 }
 
 func (s *EgressService) inspectModelArmorRequest(ctx context.Context, cfg *api.ModelArmor, body []byte, callerCtx egressCallerContext) ([]byte, bool, error) {

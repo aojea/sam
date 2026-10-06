@@ -202,8 +202,15 @@ func NewServer(cfg Config) (*Server, error) {
 
 	routes := http.NewServeMux()
 
-	// Proxy all API requests to the control plane
-	routes.Handle("/api/", http.StripPrefix("/api", proxy))
+	// Proxy all API requests to the control plane, guarding cookie-backed
+	// state-mutating calls against cross-origin form submissions (CSRF).
+	apiProxy := http.StripPrefix("/api", proxy)
+	routes.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		if !s.checkCookieCSRF(w, r) {
+			return
+		}
+		apiProxy.ServeHTTP(w, r)
+	})
 
 	// Serve static files
 	fileServer := http.FileServerFS(assets)
@@ -239,6 +246,35 @@ func NewServer(cfg Config) (*Server, error) {
 	s.mux.Handle("/", routes)
 
 	return s, nil
+}
+
+// checkCookieCSRF blocks cross-site state-mutating requests to /api/* that rely
+// on the ambient sam_session cookie rather than an explicit Authorization header.
+func (s *Server) checkCookieCSRF(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+		return true
+	}
+	if r.Header.Get("Authorization") != "" {
+		return true
+	}
+	if sfs := strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site"))); sfs != "" && sfs != "same-origin" && sfs != "none" {
+		http.Error(w, "cross-origin cookie request rejected", http.StatusForbidden)
+		return false
+	}
+	if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
+		u, err := url.Parse(origin)
+		_, expectedHost := s.origin(r)
+		if err != nil || u.Host == "" || !strings.EqualFold(u.Host, expectedHost) {
+			http.Error(w, "cross-origin cookie request rejected", http.StatusForbidden)
+			return false
+		}
+	}
+	ct := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))
+	if ct == "application/x-www-form-urlencoded" || ct == "multipart/form-data" || ct == "text/plain" {
+		http.Error(w, "HTML form content types are not accepted on /api/*", http.StatusUnsupportedMediaType)
+		return false
+	}
+	return true
 }
 
 // Defaults for discoverProviderWithRetry; matches sam-control-plane's
@@ -279,7 +315,11 @@ func discoverProviderWithRetry(ctx context.Context, issuer string, maxAttempts i
 }
 
 func (s *Server) Handler() http.Handler {
-	return s.mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+		s.mux.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) HandleLogout(w http.ResponseWriter, r *http.Request) {

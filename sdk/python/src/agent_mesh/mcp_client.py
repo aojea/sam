@@ -28,12 +28,18 @@ import mcp_types
 import trio
 from libp2p.abc import IHost, INetStream
 from libp2p.peer.id import ID
-from libp2p.utils.varint import encode_varint_prefixed, read_varint_prefixed_bytes
+from libp2p.utils.varint import encode_varint_prefixed
 from mcp import ClientSession
 from mcp.shared.message import SessionMessage
 
 from ._proto import sam_pb2 as pb
-from .auth import AUTH_HANDSHAKE_TIMEOUT, MAX_AUTH_FRAME_BYTES, MCP_PROTOCOL, AuthRejectedError
+from .auth import (
+    AUTH_HANDSHAKE_TIMEOUT,
+    MAX_AUTH_FRAME_BYTES,
+    MCP_PROTOCOL,
+    AuthRejectedError,
+    read_bounded_varint_prefixed_bytes,
+)
 from .biscuit import BiscuitVerificationError, VerifiedBiscuit, require_role, verify_peer_biscuit
 from .controlplane import ROLE_NODE
 from .host import open_stream
@@ -94,10 +100,7 @@ class ToolCallResult:
 
 
 async def _read_frame(stream: INetStream) -> bytes:
-    data = await read_varint_prefixed_bytes(stream)
-    if len(data) > MAX_MCP_MESSAGE_BYTES:
-        raise ValueError(f"frame of {len(data)} bytes exceeds the {MAX_MCP_MESSAGE_BYTES} byte cap")
-    return data
+    return await read_bounded_varint_prefixed_bytes(stream, MAX_MCP_MESSAGE_BYTES)
 
 
 @asynccontextmanager
@@ -118,9 +121,10 @@ async def open_mcp_session(
     try:
         with trio.fail_after(AUTH_HANDSHAKE_TIMEOUT):
             await stream.write(encode_varint_prefixed(frame))
-            data = await read_varint_prefixed_bytes(stream)
-        if len(data) > MAX_AUTH_FRAME_BYTES:
-            raise AuthRejectedError(str(peer_id), "oversized auth response")
+            try:
+                data = await read_bounded_varint_prefixed_bytes(stream, MAX_AUTH_FRAME_BYTES)
+            except ValueError as err:
+                raise AuthRejectedError(str(peer_id), "oversized auth response") from err
         resp = pb.AuthResponse.FromString(data)
         if not resp.success:
             raise AuthRejectedError(str(peer_id), resp.error or "no reason given")

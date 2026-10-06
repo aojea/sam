@@ -212,6 +212,24 @@
       "protocol": "/sam/mcp/1.0.0",
       "mcp_tool": "get_weather",
       "allow": false
+    },
+    {
+      "name": "cloud_broker_resources_and_permissions_allowed_on_wire",
+      "biscuit_b64": "EscCCtwBCjQxMkQzS29vV0FHQkRGVm1kSFVveERxUE5QTk1BOEFhVFFkWEFHZ1FKM0xhTHFxRndVcURDCg5jbGllbnRfcGVlcl9pZAoKZXhwaXJhdGlvbgoNc2FtOnJvbGU6bm9kZQoZZ3JhbnRlZF9zZXJ2aWNlX2FsbF90eXBlcwoTdGFyZ2V0X3VucmVzdHJpY3RlZBIAGAMiCQoHCBgSAxiACCIKCggIgQgSAxiACCINCgsIgggSBiCA14zSByIJCgcIBhIDGIMIIgkKBwiECBICMAEiCQoHCIUIEgIwARIkCAASIFRfjc79B/D8bBSsa9C/O1xttSQ5Fnh5HGLhUqDqcgklGkAwQBYoM3AlkokHpgqObXJHjNZZWhQf2Cfa04Hz6K1g3+R2Pfw7Fa4OW0Njmf4g1rETmh2mnAzQ80Qp9Zvz7UgOGqkCCr4BCqABQ2hCamJHOTFaQzFpY205clpYSXRhRzl3R2x3U0dXVm5jbVZ6Y3pvdkwzTXpMbUZ0WVhwdmJtRjNjeTVqYjIwYUl4SURSMFZVR2c0dllXTnRaUzFpZFdOclpYUXZLaUlNY3pNNlIyVjBUMkpxWldOMElocGhjbTQ2WVhkek9uTXpPam82WVdOdFpTMWlkV05yWlhRdktpSUdDSUNWcE1rSAoJdGFyX2Jsb2NrEgAYAyIKCggIhwgSAxiGCBIkCAASIGmnqIxozQ3HE4IyWTbChRQMn98v5IilkRPa957XVya+GkAKKJzzZoUpP9GJwC1R7G1WI3RsnxPECC7vAIMVvvJY6Rw55xtTzSPYRmoglKFnmBXQ9MYtC50ik9CdN0wcR1oLIiIKIM+4wV3EJPN0zpUYVcfsJ1rzb8JJ5On8o8PSTcxXqPBP",
+      "target_service": "egress://s3.amazonaws.com",
+      "protocol": "/libp2p-http",
+      "method": "GET",
+      "path": "/acme-bucket/report.csv",
+      "allow": true,
+      "expected_effective_expiration": "2034-06-01T00:00:00Z"
+    },
+    {
+      "name": "empty_allowed_services_in_rule_rejected",
+      "biscuit_b64": "EscCCtwBCjQxMkQzS29vV0FHQkRGVm1kSFVveERxUE5QTk1BOEFhVFFkWEFHZ1FKM0xhTHFxRndVcURDCg5jbGllbnRfcGVlcl9pZAoKZXhwaXJhdGlvbgoNc2FtOnJvbGU6bm9kZQoZZ3JhbnRlZF9zZXJ2aWNlX2FsbF90eXBlcwoTdGFyZ2V0X3VucmVzdHJpY3RlZBIAGAMiCQoHCBgSAxiACCIKCggIgQgSAxiACCINCgsIgggSBiCA14zSByIJCgcIBhIDGIMIIgkKBwiECBICMAEiCQoHCIUIEgIwARIkCAASIFRfjc79B/D8bBSsa9C/O1xttSQ5Fnh5HGLhUqDqcgklGkAwQBYoM3AlkokHpgqObXJHjNZZWhQf2Cfa04Hz6K1g3+R2Pfw7Fa4OW0Njmf4g1rETmh2mnAzQ80Qp9Zvz7UgOGusBCoABCmNDaE5sYlhCMGVTMXpaWEoyYVdObGN5MXlkV3hsR2lzS0tVMXBjM05wYm1jZ1lXeHNiM2RsWkY5elpYSjJhV05sY3lCdGRYTjBJR1poYVd3Z1kyeHZjMlZrSWdZSWdKV2t5UWMKCXRhcl9ibG9jaxIAGAMiCgoICIcIEgMYhggSJAgAEiAjAbhMNi/EWVbTPbH8kpctlb4d0sGkfCMlCyGuDn8Q8RpAgvf7RQRkE1zn/EJdhIgpxhSJZdu7JZOUjccY+R2X3MRARvJP9JOoins03rXSotGUXI+I3cqH15uEXEwmWv8ADyIiCiCE/lJuZjNLcdrf7vm2pHEQh1eAcFnMvPpis946kZ9r/Q==",
+      "target_service": "mcp://weather",
+      "protocol": "/sam/mcp/1.0.0",
+      "mcp_tool": "get_weather",
+      "allow": false
     }
   ]
 }

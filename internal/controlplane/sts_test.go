@@ -735,3 +735,200 @@ func TestOAuth21AuthorizationCodePKCEAndTokenExchange(t *testing.T) {
 		t.Fatalf("expected authorizeBiscuitForEgress to reject banned CIDv1 peer ID with 403 'is banned', got status=%d err=%v", status, err)
 	}
 }
+
+func TestSTSSecurityHardening(t *testing.T) {
+	issuer, mintOIDC := startCustomMockOIDC(t)
+	srv, store, baseURL := setupTestServer(t, issuer)
+	defer func() { _ = srv.Close() }()
+
+	ctx := context.Background()
+	initRoles := []*api.PolicyRole{
+		{Name: api.RoleNode, AllowedServices: []string{"egress://s3.amazonaws.com"}, AllowedTargets: []string{"*"}},
+	}
+	initBindings := []*api.PolicyBinding{
+		{Role: api.RoleNode, Members: []string{api.SystemAuthenticated}},
+	}
+	if err := store.SavePolicyDocument(ctx, initRoles, initBindings, nil); err != nil {
+		t.Fatalf("SavePolicyDocument: %v", err)
+	}
+
+	nodePriv, nodePeerID, nodeBiscuit, _ := enrollTestNodeForSTS(t, baseURL, mintOIDC)
+	otherPriv, otherPeerID, otherBiscuit, _ := enrollTestNodeForSTS(t, baseURL, mintOIDC)
+
+	// 1. OIDC key persistence and rotation in SQL store
+	initialKeys, err := store.GetAllValidOIDCKeys(ctx)
+	if err != nil || len(initialKeys) != 1 {
+		t.Fatalf("expected 1 persisted OIDC key, got %d (err=%v)", len(initialKeys), err)
+	}
+	if _, err := srv.RotateOIDCKey(time.Hour); err != nil {
+		t.Fatalf("RotateOIDCKey: %v", err)
+	}
+	rotatedKeys, err := store.GetAllValidOIDCKeys(ctx)
+	if err != nil || len(rotatedKeys) != 2 {
+		t.Fatalf("expected 2 valid OIDC keys after rotation, got %d (err=%v)", len(rotatedKeys), err)
+	}
+	reloadedSigner, err := NewLocalES256SignerWithStore(store)
+	if err != nil {
+		t.Fatalf("NewLocalES256SignerWithStore: %v", err)
+	}
+	reloadedJWKS, err := reloadedSigner.JWKS(ctx)
+	if err != nil || len(reloadedJWKS.Keys) != 2 {
+		t.Fatalf("expected reloaded signer to have 2 keys, got %v (err=%v)", reloadedJWKS, err)
+	}
+
+	// 2. Configure AWS egress destination served ONLY by role "egress-gateway" (bound to nodePeerID)
+	roles := []*api.PolicyRole{
+		{Name: api.RoleNode, AllowedServices: []string{"egress://s3.amazonaws.com"}, AllowedTargets: []string{"*"}},
+		{Name: "egress-gateway", AllowedServices: []string{"egress://s3.amazonaws.com"}, AllowedTargets: []string{"*"}},
+	}
+	bindings := []*api.PolicyBinding{
+		{Role: api.RoleNode, Members: []string{api.SystemAuthenticated}},
+		{Role: "egress-gateway", Members: []string{"node:" + nodePeerID.String()}},
+	}
+	egress := []*api.EgressDestination{
+		{
+			Name:     "s3.amazonaws.com",
+			ServedBy: []string{"egress-gateway"},
+			Broker: &api.CredentialBroker{
+				Kind: &api.CredentialBroker_AwsAssumeRole{
+					AwsAssumeRole: &api.AWSAssumeRole{
+						RoleArn: "arn:aws:iam::123456789012:role/sam-s3",
+					},
+				},
+			},
+		},
+	}
+	if err := store.SavePolicyDocument(ctx, roles, bindings, egress); err != nil {
+		t.Fatalf("SavePolicyDocument: %v", err)
+	}
+
+	// Calling /sts/token from otherPeerID (not in ServedBy) must fail with 403
+	callSTS := func(callerPriv crypto.PrivKey, callerID peer.ID, callerBiscuit []byte, aud string) *http.Response {
+		t.Helper()
+		ts := time.Now().UnixMilli()
+		sig, _ := callerPriv.Sign(api.STSTokenChallenge(callerID.String(), ts))
+		reqProto := &api.STSTokenRequest{
+			Biscuit:            nodeBiscuit,
+			Destination:        "s3.amazonaws.com",
+			Audience:           aud,
+			ChallengeUnixMs:    ts,
+			ChallengeSignature: sig,
+		}
+		reqBytes, _ := proto.Marshal(reqProto)
+		httpReq, _ := http.NewRequest(http.MethodPost, baseURL+"/sts/token", bytes.NewReader(reqBytes))
+		httpReq.Header.Set("Content-Type", "application/x-protobuf")
+		httpReq.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString(callerBiscuit))
+		resp, err := http.DefaultClient.Do(httpReq)
+		if err != nil {
+			t.Fatalf("POST /sts/token: %v", err)
+		}
+		return resp
+	}
+
+	unauthNodeResp := callSTS(otherPriv, otherPeerID, otherBiscuit, "")
+	_ = unauthNodeResp.Body.Close()
+	if unauthNodeResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 when non-ServedBy node calls /sts/token, got %d", unauthNodeResp.StatusCode)
+	}
+
+	// Calling /sts/token from nodePeerID with a mismatched custom audience on aws_assume_role must fail with 403
+	badAudResp := callSTS(nodePriv, nodePeerID, nodeBiscuit, "https://evil.example.com")
+	_ = badAudResp.Body.Close()
+	if badAudResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 when custom audience mismatches aws_assume_role config, got %d", badAudResp.StatusCode)
+	}
+
+	// Calling /sts/token from nodePeerID with valid audience succeeds
+	okResp := callSTS(nodePriv, nodePeerID, nodeBiscuit, "sts.amazonaws.com")
+	_ = okResp.Body.Close()
+	if okResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from authorized ServedBy node, got %d", okResp.StatusCode)
+	}
+}
+
+func TestOAuthAndControlPlaneHardening(t *testing.T) {
+	issuer, mintOIDC := startCustomMockOIDC(t)
+	workloadIssuer, mintWorkload := startCustomMockOIDC(t)
+	srv, store, baseURL := setupTestServer(t, issuer, func(o *Options) {
+		o.WorkloadIssuer = workloadIssuer
+	})
+	defer func() { _ = srv.Close() }()
+	srv.config.AdminToken = "admin-secret"
+
+	ctx := context.Background()
+	roles := []*api.PolicyRole{
+		{Name: api.RoleNode, AllowedServices: []string{"*"}, AllowedTargets: []string{"*"}},
+	}
+	bindings := []*api.PolicyBinding{
+		{Role: api.RoleNode, Members: []string{api.SystemAuthenticated}},
+	}
+	if err := store.SavePolicyDocument(ctx, roles, bindings, nil); err != nil {
+		t.Fatalf("SavePolicyDocument: %v", err)
+	}
+
+	// 1. Workload JWT on unauthenticated /oauth/token must be rejected with 403
+	workloadJWT := mintWorkload(map[string]interface{}{"sub": "spiffe://cluster.local/ns/default/sa/agent"})
+	exForm := url.Values{
+		"grant_type":         {api.GrantTypeTokenExchange},
+		"subject_token":      {workloadJWT},
+		"subject_token_type": {api.TokenTypeIDToken},
+	}
+	wResp, err := http.PostForm(baseURL+"/oauth/token", exForm)
+	if err != nil {
+		t.Fatalf("POST /oauth/token: %v", err)
+	}
+	_ = wResp.Body.Close()
+	if wResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for workload JWT on unauthenticated /oauth/token, got %d", wResp.StatusCode)
+	}
+
+	// 2. GET /oauth/authorize?approve=true must NOT auto-approve on GET (renders consent form instead)
+	aliceJWT := mintOIDC(map[string]interface{}{"sub": "alice-sub"})
+	verifierHash := sha256.Sum256([]byte("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"))
+	codeChallenge := base64.RawURLEncoding.EncodeToString(verifierHash[:])
+	getAuthReq, _ := http.NewRequest(http.MethodGet, baseURL+"/oauth/authorize?response_type=code&client_id=c1&code_challenge="+codeChallenge+"&code_challenge_method=S256&approve=true", nil)
+	getAuthReq.Header.Set("Authorization", "Bearer "+aliceJWT)
+	getAuthResp, err := http.DefaultClient.Do(getAuthReq)
+	if err != nil {
+		t.Fatalf("GET /oauth/authorize: %v", err)
+	}
+	getAuthBody, _ := io.ReadAll(getAuthResp.Body)
+	_ = getAuthResp.Body.Close()
+	if !strings.Contains(getAuthResp.Header.Get("Content-Type"), "text/html") || strings.Contains(string(getAuthBody), `"code":`) {
+		t.Fatalf("expected GET /oauth/authorize?approve=true to render HTML form rather than issuing a code, got Content-Type=%s body=%s", getAuthResp.Header.Get("Content-Type"), string(getAuthBody))
+	}
+
+	// 3. POST /oauth/authorize with javascript: redirect_uri must be rejected with 400
+	badRedirForm := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"c1"},
+		"code_challenge":        {codeChallenge},
+		"code_challenge_method": {"S256"},
+		"redirect_uri":          {"javascript:alert(1)"},
+		"approve":               {"true"},
+	}
+	badRedirReq, _ := http.NewRequest(http.MethodPost, baseURL+"/oauth/authorize", strings.NewReader(badRedirForm.Encode()))
+	badRedirReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	badRedirReq.Header.Set("Authorization", "Bearer "+aliceJWT)
+	badRedirResp, err := http.DefaultClient.Do(badRedirReq)
+	if err != nil {
+		t.Fatalf("POST /oauth/authorize: %v", err)
+	}
+	_ = badRedirResp.Body.Close()
+	if badRedirResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for javascript: redirect_uri, got %d", badRedirResp.StatusCode)
+	}
+
+	// 4. POST /policies with text/plain Content-Type must be rejected with 415
+	polReq, _ := http.NewRequest(http.MethodPost, baseURL+"/policies", strings.NewReader(""))
+	polReq.Header.Set("Content-Type", "text/plain")
+	polReq.Header.Set("Authorization", "Bearer admin-secret")
+	polResp, err := http.DefaultClient.Do(polReq)
+	if err != nil {
+		t.Fatalf("POST /policies: %v", err)
+	}
+	_ = polResp.Body.Close()
+	if polResp.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("expected 415 for text/plain POST /policies, got %d", polResp.StatusCode)
+	}
+}

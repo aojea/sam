@@ -27,7 +27,7 @@ from typing import Callable, Optional, Sequence
 
 import biscuit_auth as ba
 
-from .biscuit import BiscuitVerificationError, VerifiedBiscuit, _limits, verify_peer_biscuit
+from .biscuit import BiscuitVerificationError, VerifiedBiscuit, _extract_tar_chain, _limits, verify_peer_biscuit
 from .discovery import parse_service_target
 from .tar import TaskRequestContext, evaluate_task_rules
 
@@ -176,12 +176,14 @@ def _identity_target_facts(own_biscuit: bytes, keys: Sequence[bytes], now: datet
             last_err = err
     if verifying_key is None:
         raise BiscuitVerificationError(f"own credential is not signed by a trusted control plane key: {last_err}")
+    tok = _token(own_biscuit, verifying_key)
+    _extract_tar_chain(tok)
     b = ba.AuthorizerBuilder()
     b.set_limits(_limits())
     b.add_fact(ba.Fact(BASELINE_DATALOG["fact_time"] + "({now})", {"now": now}))
     b.add_check(ba.Check(BASELINE_DATALOG["time_check"]))
     b.add_policy(ba.Policy(BASELINE_DATALOG["allow_if_true"]))
-    authorizer = b.build(_token(own_biscuit, verifying_key))
+    authorizer = b.build(tok)
     try:
         authorizer.authorize()
     except Exception as err:  # noqa: BLE001

@@ -19,12 +19,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -32,6 +31,7 @@ import (
 	"time"
 
 	"github.com/google/sam/api"
+	"github.com/google/sam/internal/tlsinspect"
 	gostream "github.com/libp2p/go-libp2p-gostream"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -44,178 +44,8 @@ const (
 	// raw TCP CONNECT tunnel.
 	HeaderSamTunnelUpgrade = "sam-tcp-tunnel"
 
-	tlsRecordTypeHandshake      = 0x16
-	tlsHandshakeTypeClientHello = 0x01
-	tlsExtServerName            = 0x0000
-	tlsExtEncryptedClientHello  = 0xfe0d
-	maxTLSRecordBytes           = 16384
-	clientHelloReadTimeout      = 5 * time.Second
+	clientHelloReadTimeout = 5 * time.Second
 )
-
-// readAndVerifyTLSClientHello reads a single TLS record from r, verifies that
-// it is an unencrypted TLS ClientHello whose SNI matches expectedHost and that
-// Encrypted Client Hello (ECH, 0xfe0d) is not present, and returns the exact
-// raw record bytes so the caller can replay them to the upstream server before
-// splicing.
-func readAndVerifyTLSClientHello(r io.Reader, expectedHost string) ([]byte, string, error) {
-	var hdr [5]byte
-	if _, err := io.ReadFull(r, hdr[:]); err != nil {
-		return nil, "", fmt.Errorf("failed to read TLS record header: %w", err)
-	}
-	if hdr[0] != tlsRecordTypeHandshake {
-		return nil, "", fmt.Errorf("expected TLS Handshake record (0x16), got 0x%02x", hdr[0])
-	}
-	recLen := int(binary.BigEndian.Uint16(hdr[3:5]))
-	if recLen <= 0 || recLen > maxTLSRecordBytes {
-		return nil, "", fmt.Errorf("invalid TLS record length %d", recLen)
-	}
-	payload := make([]byte, recLen)
-	if _, err := io.ReadFull(r, payload); err != nil {
-		return nil, "", fmt.Errorf("failed to read TLS Handshake record body: %w", err)
-	}
-
-	rawRecord := make([]byte, 5+recLen)
-	copy(rawRecord[:5], hdr[:])
-	copy(rawRecord[5:], payload)
-
-	sni, hasECH, err := parseClientHelloSNIAndECH(payload)
-	if err != nil {
-		return rawRecord, "", err
-	}
-	if hasECH {
-		return rawRecord, sni, errors.New("TLS ClientHello contains Encrypted Client Hello (ECH), which is forbidden on named TCP tunnels")
-	}
-	if sni == "" {
-		return rawRecord, "", errors.New("TLS ClientHello is missing SNI server_name extension")
-	}
-	normSNI := api.NormalizeMeshHost(sni)
-	normExpected := api.NormalizeMeshHost(expectedHost)
-	if normSNI != normExpected {
-		return rawRecord, sni, fmt.Errorf("TLS ClientHello SNI %q does not match destination %q", sni, expectedHost)
-	}
-	return rawRecord, normSNI, nil
-}
-
-func parseClientHelloSNIAndECH(b []byte) (sni string, hasECH bool, err error) {
-	if len(b) < 4 {
-		return "", false, errors.New("truncated TLS handshake message")
-	}
-	if b[0] != tlsHandshakeTypeClientHello {
-		return "", false, fmt.Errorf("expected TLS ClientHello (0x01), got 0x%02x", b[0])
-	}
-	hsLen := int(b[1])<<16 | int(b[2])<<8 | int(b[3])
-	b = b[4:]
-	if len(b) < hsLen {
-		return "", false, errors.New("TLS ClientHello record shorter than handshake length")
-	}
-	b = b[:hsLen]
-
-	// legacy_version (2) + random (32)
-	if len(b) < 34 {
-		return "", false, errors.New("truncated TLS ClientHello fixed header")
-	}
-	b = b[34:]
-
-	// legacy_session_id (1-byte length)
-	if len(b) < 1 {
-		return "", false, errors.New("truncated TLS ClientHello session_id")
-	}
-	sidLen := int(b[0])
-	b = b[1:]
-	if len(b) < sidLen {
-		return "", false, errors.New("truncated TLS ClientHello session_id bytes")
-	}
-	b = b[sidLen:]
-
-	// cipher_suites (2-byte length)
-	if len(b) < 2 {
-		return "", false, errors.New("truncated TLS ClientHello cipher_suites")
-	}
-	csLen := int(binary.BigEndian.Uint16(b[:2]))
-	b = b[2:]
-	if csLen == 0 || csLen%2 != 0 || len(b) < csLen {
-		return "", false, errors.New("invalid TLS ClientHello cipher_suites length")
-	}
-	b = b[csLen:]
-
-	// legacy_compression_methods (1-byte length)
-	if len(b) < 1 {
-		return "", false, errors.New("truncated TLS ClientHello compression_methods")
-	}
-	compLen := int(b[0])
-	b = b[1:]
-	if compLen == 0 || len(b) < compLen {
-		return "", false, errors.New("invalid TLS ClientHello compression_methods length")
-	}
-	b = b[compLen:]
-
-	if len(b) == 0 {
-		// No extensions present -> no SNI.
-		return "", false, nil
-	}
-	if len(b) < 2 {
-		return "", false, errors.New("truncated TLS ClientHello extensions length")
-	}
-	extTotalLen := int(binary.BigEndian.Uint16(b[:2]))
-	b = b[2:]
-	if len(b) < extTotalLen {
-		return "", false, errors.New("truncated TLS ClientHello extensions block")
-	}
-	b = b[:extTotalLen]
-
-	for len(b) >= 4 {
-		extType := binary.BigEndian.Uint16(b[:2])
-		extLen := int(binary.BigEndian.Uint16(b[2:4]))
-		b = b[4:]
-		if len(b) < extLen {
-			return "", false, errors.New("truncated TLS extension data")
-		}
-		extData := b[:extLen]
-		b = b[extLen:]
-
-		switch extType {
-		case tlsExtEncryptedClientHello:
-			hasECH = true
-		case tlsExtServerName:
-			parsed, err := parseServerNameExtension(extData)
-			if err != nil {
-				return "", false, err
-			}
-			sni = parsed
-		}
-	}
-	if len(b) != 0 {
-		return "", false, errors.New("trailing bytes in TLS ClientHello extensions")
-	}
-	return sni, hasECH, nil
-}
-
-func parseServerNameExtension(b []byte) (string, error) {
-	if len(b) < 2 {
-		return "", errors.New("truncated server_name extension")
-	}
-	listLen := int(binary.BigEndian.Uint16(b[:2]))
-	b = b[2:]
-	if len(b) < listLen {
-		return "", errors.New("truncated server_name list")
-	}
-	b = b[:listLen]
-	var hostName string
-	for len(b) >= 3 {
-		nameType := b[0]
-		nameLen := int(binary.BigEndian.Uint16(b[1:3]))
-		b = b[3:]
-		if len(b) < nameLen || nameLen == 0 {
-			return "", errors.New("invalid server_name entry length")
-		}
-		val := string(b[:nameLen])
-		b = b[nameLen:]
-		if nameType == 0x00 {
-			hostName = val
-		}
-	}
-	return hostName, nil
-}
 
 func (s *EgressService) isAllowedTCPPort(port int) bool {
 	if port <= 0 || port > 65535 {
@@ -236,6 +66,80 @@ func (s *EgressService) resolveTCPTargetAddr(reqPort int) string {
 		return net.JoinHostPort(s.target.Hostname(), strconv.Itoa(reqPort))
 	}
 	return net.JoinHostPort(s.destination.GetName(), strconv.Itoa(reqPort))
+}
+
+func (s *EgressService) allowsLocalTarget() bool {
+	if s.destination.GetTargetUrl() == "" || s.target == nil {
+		return false
+	}
+	h := strings.TrimSpace(s.target.Hostname())
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	if ip, err := netip.ParseAddr(h); err == nil {
+		unmapped := ip.Unmap()
+		return unmapped.IsLoopback() || unmapped.IsPrivate()
+	}
+	return false
+}
+
+func isForbiddenEgressAddr(addr netip.Addr, allowLocal bool) bool {
+	ip := addr.Unmap()
+	if !ip.IsValid() || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true
+	}
+	if !allowLocal {
+		if ip.IsLoopback() || ip.IsPrivate() {
+			return true
+		}
+		if ip.Is4() {
+			b := ip.As4()
+			// RFC 6598 Carrier-Grade NAT (100.64.0.0/10)
+			if b[0] == 100 && b[1] >= 64 && b[1] <= 127 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func dialSafeEgressTCP(ctx context.Context, addr string, allowLocal bool) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	var ips []netip.Addr
+	if parsed, pErr := netip.ParseAddr(host); pErr == nil {
+		ips = []netip.Addr{parsed}
+	} else {
+		resolved, rErr := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		if rErr != nil {
+			return nil, rErr
+		}
+		ips = resolved
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("no IP addresses resolved for %s", host)
+	}
+	var allowed []netip.Addr
+	for _, ip := range ips {
+		if !isForbiddenEgressAddr(ip, allowLocal) {
+			allowed = append(allowed, ip)
+		}
+	}
+	if len(allowed) == 0 {
+		return nil, fmt.Errorf("egress dial to %s refused: resolved IP is in a forbidden range", host)
+	}
+	var d net.Dialer
+	var lastErr error
+	for _, ip := range allowed {
+		conn, dErr := d.DialContext(ctx, "tcp", net.JoinHostPort(ip.Unmap().String(), port))
+		if dErr == nil {
+			return conn, nil
+		}
+		lastErr = dErr
+	}
+	return nil, lastErr
 }
 
 // ServeTunnel handles a named TCP CONNECT tunnel on an EGRESS_MODE_TCP
@@ -282,7 +186,7 @@ func (s *EgressService) ServeTunnel(ctx context.Context, w http.ResponseWriter, 
 	}
 
 	_ = clientConn.SetReadDeadline(time.Now().Add(clientHelloReadTimeout))
-	rawHello, sni, err := readAndVerifyTLSClientHello(reader, s.destination.GetName())
+	rawHello, sni, err := tlsinspect.VerifyClientHello(reader, s.destination.GetName())
 	_ = clientConn.SetReadDeadline(time.Time{})
 	if err != nil {
 		recordEgressDecision(s.info.Name, egressOutcomeDeny)
@@ -298,9 +202,8 @@ func (s *EgressService) ServeTunnel(ctx context.Context, w http.ResponseWriter, 
 	}
 
 	targetAddr := s.resolveTCPTargetAddr(reqPort)
-	var d net.Dialer
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	upstreamConn, err := d.DialContext(dialCtx, "tcp", targetAddr)
+	upstreamConn, err := dialSafeEgressTCP(dialCtx, targetAddr, s.allowsLocalTarget())
 	cancel()
 	if err != nil {
 		logger.Warnw("Egress TCP Tunnel Verdict",

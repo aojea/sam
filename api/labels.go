@@ -39,6 +39,10 @@ var labelKeySyntax = regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,63}$`)
 // realistic cloud region/zone or on-prem naming convention.
 const maxLabelValueLen = 255
 
+// MaxNodeLabels bounds the number of labels a single node may declare at
+// enrollment so label facts cannot exhaust the Biscuit authorizer fact budget.
+const MaxNodeLabels = 64
+
 // ValidateLabelKey checks that a label key is well-formed: 1-63 characters
 // from [a-zA-Z0-9_.-].
 func ValidateLabelKey(key string) error {
@@ -70,6 +74,9 @@ func ValidateLabelValue(value string) error {
 func ValidateLabels(labels map[string]string) error {
 	if len(labels) == 0 {
 		return nil
+	}
+	if len(labels) > MaxNodeLabels {
+		return fmt.Errorf("too many labels (%d): maximum is %d", len(labels), MaxNodeLabels)
 	}
 	keys := make([]string, 0, len(labels))
 	for k := range labels {

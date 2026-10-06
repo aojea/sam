@@ -32,12 +32,13 @@ import (
 	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
+	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/sam/api"
 	"github.com/google/sam/internal/identity"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -487,63 +488,26 @@ func TestExtAuthzHTTPAndGRPC(t *testing.T) {
 	}
 
 	// 3. gRPC ext_authz Check (/envoy.service.auth.v3.Authorization/Check)
-	grpcReqPayload := buildEnvoyCheckRequestPayload("POST", "/mcp/github", map[string]string{
-		"authorization":                   "Bearer " + narrowedB64,
-		strings.ToLower(HeaderSamMCPTool): "get_pr",
+	grpcResp, err := newNodeEnvoyGateway(h.node).Check(context.Background(), &authv3.CheckRequest{
+		Attributes: &authv3.AttributeContext{
+			Request: &authv3.AttributeContext_Request{
+				Http: &authv3.AttributeContext_HttpRequest{
+					Method: "POST",
+					Path:   "/mcp/github",
+					Headers: map[string]string{
+						"authorization":                   "Bearer " + narrowedB64,
+						strings.ToLower(HeaderSamMCPTool): "get_pr",
+					},
+				},
+			},
+		},
 	})
-	var grpcBody bytes.Buffer
-	_ = writeGRPCFrame(&grpcBody, grpcReqPayload)
-
-	grpcReq := httptest.NewRequest(http.MethodPost, "/envoy.service.auth.v3.Authorization/Check", &grpcBody)
-	grpcReq.Header.Set("Content-Type", "application/grpc")
-	grpcRec := httptest.NewRecorder()
-	handleExtAuthzGRPC(h.node, grpcRec, grpcReq)
-	if grpcRec.Code != http.StatusOK {
-		t.Fatalf("expected gRPC HTTP 200, got %d", grpcRec.Code)
-	}
-	respFrame, err := readGRPCFrame(grpcRec.Body)
 	if err != nil {
-		t.Fatalf("readGRPCFrame: %v", err)
+		t.Fatalf("Check: %v", err)
 	}
-	// First field is status {code: 0}; field 3 is ok_response.
-	num, typ, n := protowire.ConsumeTag(respFrame)
-	if n < 0 || num != 1 || typ != protowire.BytesType {
-		t.Fatalf("unexpected CheckResponse tag: num=%d typ=%d", num, typ)
+	if grpcResp.GetStatus().GetCode() != int32(codes.OK) || grpcResp.GetOkResponse() == nil {
+		t.Fatalf("expected gRPC CheckResponse status.code == OK, got %+v", grpcResp)
 	}
-	statusBytes, m := protowire.ConsumeBytes(respFrame[n:])
-	if m < 0 || len(statusBytes) < 2 || statusBytes[1] != 0 {
-		t.Fatalf("expected gRPC CheckResponse status.code == 0 (OK), got %x", statusBytes)
-	}
-}
-
-func buildEnvoyCheckRequestPayload(method, path string, headers map[string]string) []byte {
-	var httpBytes []byte
-	httpBytes = protowire.AppendTag(httpBytes, 2, protowire.BytesType)
-	httpBytes = protowire.AppendString(httpBytes, method)
-	for k, v := range headers {
-		var entry []byte
-		entry = protowire.AppendTag(entry, 1, protowire.BytesType)
-		entry = protowire.AppendString(entry, k)
-		entry = protowire.AppendTag(entry, 2, protowire.BytesType)
-		entry = protowire.AppendString(entry, v)
-		httpBytes = protowire.AppendTag(httpBytes, 3, protowire.BytesType)
-		httpBytes = protowire.AppendBytes(httpBytes, entry)
-	}
-	httpBytes = protowire.AppendTag(httpBytes, 4, protowire.BytesType)
-	httpBytes = protowire.AppendString(httpBytes, path)
-
-	var reqBytes []byte
-	reqBytes = protowire.AppendTag(reqBytes, 2, protowire.BytesType)
-	reqBytes = protowire.AppendBytes(reqBytes, httpBytes)
-
-	var attrBytes []byte
-	attrBytes = protowire.AppendTag(attrBytes, 4, protowire.BytesType)
-	attrBytes = protowire.AppendBytes(attrBytes, reqBytes)
-
-	var checkReq []byte
-	checkReq = protowire.AppendTag(checkReq, 1, protowire.BytesType)
-	checkReq = protowire.AppendBytes(checkReq, attrBytes)
-	return checkReq
 }
 
 func TestInspectMCPHTTPRequestBody(t *testing.T) {
@@ -565,5 +529,107 @@ func TestInspectMCPHTTPRequestBody(t *testing.T) {
 	tool, allowInit, err = inspectMCPHTTPRequestBody(initReq)
 	if err != nil || tool != "" || !allowInit {
 		t.Fatalf("initialize: got tool=%q allowInit=%v err=%v, want allowInit=true", tool, allowInit, err)
+	}
+}
+
+func TestCrossNodeBiscuitAndBannedPeerRejection(t *testing.T) {
+	h := newSTSNodeHarness(t)
+
+	otherPriv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherPID, err := peer.IDFromPrivateKey(otherPriv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignBiscuit, _, err := identity.MintBiscuitToken(
+		h.cpPriv,
+		jwt.MapClaims{"sub": "mallory", "email": "mallory@example.com"},
+		nil,
+		otherPID,
+		time.Now().Add(time.Hour),
+		[]string{api.RoleNode, "developer"},
+		h.policyRoles,
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignB64 := base64.StdEncoding.EncodeToString(foreignBiscuit)
+
+	// 1. Foreign node's Biscuit must be rejected as a subject_token on /oauth/token.
+	form := url.Values{}
+	form.Set("grant_type", api.GrantTypeTokenExchange)
+	form.Set("subject_token", foreignB64)
+	form.Set("subject_token_type", api.TokenTypeBiscuit)
+	req := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Bearer secret-sidecar-token")
+	rec := httptest.NewRecorder()
+	handleNodeOAuthToken(h.node, "secret-sidecar-token", rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatal("expected /oauth/token to reject foreign node Biscuit")
+	}
+
+	// 2. Foreign node's Biscuit must be rejected on ext_authz even if X-Sam-Peer-Id is spoofed.
+	authzReq := httptest.NewRequest(http.MethodGet, "/ext_authz/sam/mcp/github", nil)
+	authzReq.Header.Set("Authorization", "Bearer "+foreignB64)
+	authzReq.Header.Set("X-Sam-Peer-Id", otherPID.String())
+	authzRec := httptest.NewRecorder()
+	handleExtAuthzHTTP(h.node, authzRec, authzReq)
+	if authzRec.Code != http.StatusForbidden {
+		t.Fatalf("expected ext_authz to reject foreign Biscuit with spoofed X-Sam-Peer-Id, got %d", authzRec.Code)
+	}
+
+	// 3. Banning the local peer in revokedPeers causes VerifyLocalBiscuit and ext_authz to reject.
+	h.node.revokedPeers.Add(h.peerID.String(), time.Now().Unix())
+	defer h.node.revokedPeers.Remove(h.peerID.String())
+
+	if _, err := h.node.VerifyLocalBiscuit(h.nodeBiscuit); err == nil {
+		t.Fatal("expected VerifyLocalBiscuit to reject banned peer")
+	}
+	localAuthzReq := httptest.NewRequest(http.MethodGet, "/ext_authz/sam/mcp/github", nil)
+	localAuthzReq.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString(h.nodeBiscuit))
+	localAuthzRec := httptest.NewRecorder()
+	handleExtAuthzHTTP(h.node, localAuthzRec, localAuthzReq)
+	if localAuthzRec.Code != http.StatusForbidden {
+		t.Fatalf("expected ext_authz to reject banned peer, got %d", localAuthzRec.Code)
+	}
+}
+
+func TestExtAuthzMCPBodyInspection(t *testing.T) {
+	h := newSTSNodeHarness(t)
+	tar := &api.TaskAuthorizationRule{
+		Name: "tasks/get-pr-only",
+		Rules: []*api.TaskRule{{
+			AllowedServices: []string{"mcp://github"},
+			Operation:       &api.TaskOperation{AllowedTools: []string{"get_pr"}},
+		}},
+	}
+	taskBiscuit, err := identity.AttenuateBiscuit(h.nodeBiscuit, tar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b64Biscuit := base64.StdEncoding.EncodeToString(taskBiscuit)
+
+	// 1. HTTP ext_authz with tools/call for disallowed tool "merge_pr" in JSON-RPC body (without X-Sam-Mcp-Tool header) -> 403.
+	disallowedBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"merge_pr"}}`
+	httpReq := httptest.NewRequest(http.MethodPost, "/ext_authz/sam/mcp/github", strings.NewReader(disallowedBody))
+	httpReq.Header.Set("Authorization", "Bearer "+b64Biscuit)
+	httpRec := httptest.NewRecorder()
+	handleExtAuthzHTTP(h.node, httpRec, httpReq)
+	if httpRec.Code != http.StatusForbidden {
+		t.Fatalf("expected HTTP ext_authz to reject disallowed MCP tool in body, got %d", httpRec.Code)
+	}
+
+	// 2. HTTP ext_authz with tools/call for allowed tool "get_pr" in JSON-RPC body -> 200.
+	allowedBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pr"}}`
+	httpReqOK := httptest.NewRequest(http.MethodPost, "/ext_authz/sam/mcp/github", strings.NewReader(allowedBody))
+	httpReqOK.Header.Set("Authorization", "Bearer "+b64Biscuit)
+	httpRecOK := httptest.NewRecorder()
+	handleExtAuthzHTTP(h.node, httpRecOK, httpReqOK)
+	if httpRecOK.Code != http.StatusOK {
+		t.Fatalf("expected HTTP ext_authz to allow get_pr tool in body, got %d", httpRecOK.Code)
 	}
 }

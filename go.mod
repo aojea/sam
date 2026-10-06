@@ -7,6 +7,7 @@ require (
 	github.com/biscuit-auth/biscuit-go/v2 v2.2.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/dustin/go-humanize v1.1.0
+	github.com/envoyproxy/go-control-plane/envoy v1.39.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/ipfs/go-cid v0.6.2
@@ -34,6 +35,8 @@ require (
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sys v0.48.0
 	golang.org/x/time v0.16.0
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa
+	google.golang.org/grpc v1.82.1
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v2 v2.4.0
 	modernc.org/sqlite v1.60.0
@@ -46,9 +49,11 @@ require (
 	github.com/benbjohnson/clock v1.3.5 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/cncf/xds/go v0.0.0-20260202195803-dba9d589def2 // indirect
 	github.com/davidlazar/go-crypto v0.0.0-20200604182044-b73af7476f6c // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
 	github.com/dunglas/httpsfv v1.1.0 // indirect
+	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
 	github.com/filecoin-project/go-clock v0.1.0 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
@@ -112,6 +117,7 @@ require (
 	github.com/pion/transport/v4 v4.0.2 // indirect
 	github.com/pion/turn/v5 v5.0.12 // indirect
 	github.com/pion/webrtc/v4 v4.2.17 // indirect
+	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/polydawn/refmt v0.90.0 // indirect
 	github.com/prometheus/common v0.70.1 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect

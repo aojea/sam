@@ -50,6 +50,7 @@ var (
 	nodeRetention         time.Duration
 	meshReconnectInterval time.Duration
 	adminTokenPath        string
+	stsIssuerURL          string
 	insecureSkipTLSVerify bool
 	logLevel              string
 	autoApproveEnrollment bool
@@ -93,6 +94,9 @@ func main() {
 			if err != nil {
 				logger.Fatalf("%v", err)
 			}
+			if stsIssuerURL == "" {
+				stsIssuerURL = strings.TrimSpace(os.Getenv("SAM_STS_ISSUER_URL"))
+			}
 
 			var auds []string
 			for _, aud := range strings.Split(allowedAudiencesFlag, ",") {
@@ -135,6 +139,7 @@ func main() {
 				NodeRetention:         nodeRetention,
 				AdminToken:            adminToken,
 				AutoApproveEnrollment: autoApproveEnrollment,
+				STSIssuerURL:          stsIssuerURL,
 			}
 
 			srv, err := controlplane.NewServer(opts, store)
@@ -186,6 +191,7 @@ func main() {
 	rootCmd.Flags().DurationVar(&nodeRetention, "node-retention", controlplane.DefaultNodeRetention, "How long an enrolled node's record is kept after its session expired before it is deleted. Banned nodes are always kept. 0 keeps every record forever.")
 	rootCmd.Flags().DurationVar(&meshReconnectInterval, "mesh-reconnect-interval", controlplane.DefaultMeshReconnectInterval, "How often the event publisher re-reads the router leases and dials any router it is not connected to.")
 	rootCmd.Flags().StringVar(&adminTokenPath, "admin-token-path", "", "Path to file containing the token for authenticating policy REST API requests (or env SAM_ADMIN_TOKEN)")
+	rootCmd.Flags().StringVar(&stsIssuerURL, "sts-issuer-url", "", "Canonical external URL of this control plane for OIDC/STS issuer and discovery metadata (or env SAM_STS_ISSUER_URL)")
 	rootCmd.Flags().BoolVar(&insecureSkipTLSVerify, "insecure-skip-tls-verify", false, "Skip TLS verification for OIDC providers")
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	rootCmd.Flags().BoolVar(&autoApproveEnrollment, "auto-approve-enrollment", false, "Auto-approve valid bootstrap token enrollment requests")

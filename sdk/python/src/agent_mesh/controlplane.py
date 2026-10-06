@@ -143,9 +143,9 @@ def verify_keys_response(resp: pb.KeysResponse, trusted: Sequence[bytes], now_ms
     payload = pb.KeysResponse(public_keys=list(resp.public_keys), sign_time=resp.sign_time).SerializeToString(deterministic=True)
     keys: list[bytes] = []
     verified = False
-    for pub, sig in zip(resp.public_keys, resp.signatures):
+    for i, (pub, sig) in enumerate(zip(resp.public_keys, resp.signatures)):
         if len(pub) != PUBLIC_KEY_SIZE:
-            continue
+            raise ValueError(f"keys response key {i} has invalid size {len(pub)} (expected {PUBLIC_KEY_SIZE})")
         keys.append(bytes(pub))
         if not verified and any(t == pub for t in trusted) and verify_ed25519(pub, payload, sig):
             verified = True
@@ -204,7 +204,7 @@ class ControlPlaneClient:
     def keys(self, trusted: Sequence[bytes]) -> list[bytes]:
         """GET /keys: every signing key the control plane currently trusts,
         verified against a key the caller already trusts (the enrollment key)."""
-        return verify_keys_response(pb.KeysResponse.FromString(self._request("GET", "/keys")), trusted)
+        return verify_keys_response(pb.KeysResponse.FromString(self._request("GET", "/keys")), trusted, self._now_ms())
 
     def enroll_bootstrap(
         self,

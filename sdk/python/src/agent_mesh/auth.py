@@ -24,7 +24,12 @@ import trio
 from libp2p.abc import IHost, INetStream
 from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
-from libp2p.utils.varint import encode_varint_prefixed, read_varint_prefixed_bytes
+from libp2p.utils.varint import (
+    MessageTooLarge,
+    ParseError,
+    encode_varint_prefixed,
+    read_varint_prefixed_bytes_limited,
+)
 
 from ._proto import sam_pb2 as pb
 from .biscuit import BiscuitVerificationError, VerifiedBiscuit, verify_peer_biscuit
@@ -48,11 +53,17 @@ class AuthRejectedError(Exception):
         self.reason = reason
 
 
+async def read_bounded_varint_prefixed_bytes(stream: INetStream, max_bytes: int) -> bytes:
+    """Reads a varint-length-prefixed frame, rejecting any length prefix above
+    max_bytes before reading the frame payload."""
+    try:
+        return await read_varint_prefixed_bytes_limited(stream, max_bytes)
+    except (MessageTooLarge, ParseError) as err:
+        raise ValueError(f"frame exceeds the {max_bytes} byte cap or has invalid varint: {err}") from err
+
+
 async def _read_frame(stream: INetStream) -> bytes:
-    data = await read_varint_prefixed_bytes(stream)
-    if len(data) > MAX_AUTH_FRAME_BYTES:
-        raise ValueError(f"frame of {len(data)} bytes exceeds the {MAX_AUTH_FRAME_BYTES} byte cap")
-    return data
+    return await read_bounded_varint_prefixed_bytes(stream, MAX_AUTH_FRAME_BYTES)
 
 
 async def authenticate_with_peer(host: IHost, peer_id: ID, frame: bytes, trusted_keys: Sequence[bytes]) -> VerifiedBiscuit:

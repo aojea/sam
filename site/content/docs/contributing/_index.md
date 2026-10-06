@@ -30,8 +30,7 @@ in the repository has the details.
 Two rules from `AGENTS.md` shape most changes. Components talk to each other
 only through `api/sam.proto` (protobuf for anything a mesh component speaks,
 protojson of the same messages for the operator API). And no new module may be
-added to `go.mod` without discussion. Conformance harnesses with external gRPC
-dependencies such as `tests/extproc/` live in their own module for that reason.
+added to `go.mod` without discussion.
 For the security model, token invariants, and scope boundaries of the mesh, see
 [Security Architecture & Posture](security-architecture/).
 

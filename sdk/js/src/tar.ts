@@ -21,10 +21,47 @@ import { TaskAuthorizationRuleSchema, type TaskAuthorizationRule, type TaskRule 
 
 const TAR_BLOCK_SOURCE_RE = new RegExp(BASELINE_DATALOG.tar_block_source_pattern);
 const HTTP_METHOD_RE = new RegExp(BASELINE_DATALOG.http_method_syntax);
+const DNS_NAME_RE = /^(?:(?:\*\.)?[a-zA-Z0-9_](?:[a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?(?:\.[a-zA-Z0-9_](?:[a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?)*(?:\.\*)?|\*)$/;
 const TEXT_ENCODER = new TextEncoder();
 
 function utf8Length(s: string): number {
   return TEXT_ENCODER.encode(s).length;
+}
+
+function isPrintableASCII(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (code < 0x20 || code > 0x7e) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function hasASCIIControl(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasEncodedPathTraversal(p: string): boolean {
+  for (let i = 0; i < p.length; i++) {
+    const code = p.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f || p[i] === "\\") {
+      return true;
+    }
+    if (p[i] === "%" && i + 2 < p.length) {
+      const hex = p.slice(i + 1, i + 3).toLowerCase();
+      if (hex === "2e" || hex === "2f" || hex === "5c" || hex === "00") {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function countChar(s: string, ch: string): number {
@@ -38,6 +75,12 @@ function countChar(s: string, ch: string): number {
 }
 
 export function validateServicePattern(s: string): void {
+  if (s === "") {
+    throw new Error("allowed_services entry cannot be empty");
+  }
+  if (utf8Length(s) > BASELINE_DATALOG.max_tar_name_length) {
+    throw new Error(`allowed_services entry "${s}" exceeds max length ${BASELINE_DATALOG.max_tar_name_length}`);
+  }
   if (s === "*") {
     return;
   }
@@ -47,15 +90,21 @@ export function validateServicePattern(s: string): void {
   }
   const serviceType = s.slice(0, idx);
   const target = s.slice(idx + 3);
-  if (!isServiceType(serviceType) && serviceType !== "http") {
+  if (!isServiceType(serviceType) && serviceType !== "http" && serviceType !== "system") {
     throw new Error(`invalid service type "${serviceType}" in ${s}`);
   }
-  if (target === "" || target.includes("/") || countChar(target, "*") > 1) {
+  if (target === "" || target.includes("/") || target.includes("?") || target.includes("#") || target.includes("@") || countChar(target, "*") > 1) {
     throw new Error(`invalid service target "${target}" in ${s}`);
   }
+  if (target !== "*" && !DNS_NAME_RE.test(target)) {
+    throw new Error(`invalid service format "${s}": "${target}" is not a valid DNS name`);
+  }
+  if (serviceType === "egress" && target !== target.toLowerCase()) {
+    throw new Error(`invalid egress service "${s}": hostname must be lowercase`);
+  }
   if (target.includes("*") && target !== "*") {
-    const validSuffix = target.startsWith("*.") && target.slice(2).length > 0;
-    const validPrefix = target.endsWith(".*") && target.slice(0, -2).length > 0;
+    const validSuffix = target.startsWith("*.") && !target.endsWith(".*") && target.slice(2).length > 0;
+    const validPrefix = target.endsWith(".*") && !target.startsWith("*.") && target.slice(0, -2).length > 0;
     if (!validSuffix && !validPrefix) {
       throw new Error(`wildcard in "${s}" must be '*', '*.<suffix>' or '<prefix>.*'`);
     }
@@ -63,11 +112,17 @@ export function validateServicePattern(s: string): void {
 }
 
 export function validateHTTPGrantPath(p: string): void {
+  if (utf8Length(p) > BASELINE_DATALOG.max_tar_name_length) {
+    throw new Error(`path ${JSON.stringify(p)} exceeds max length ${BASELINE_DATALOG.max_tar_name_length}`);
+  }
   if (!p.startsWith("/")) {
     throw new Error(`path ${JSON.stringify(p)} must start with '/'`);
   }
   if (p.includes("?") || p.includes("#")) {
     throw new Error(`path ${JSON.stringify(p)} must not contain '?' or '#'`);
+  }
+  if (hasEncodedPathTraversal(p)) {
+    throw new Error(`path ${JSON.stringify(p)} must not contain encoded traversal sequences or control characters`);
   }
   const stars = countChar(p, "*");
   if (stars > 1 || (stars === 1 && !p.endsWith("*"))) {
@@ -97,6 +152,12 @@ export function validateTaskRule(r: TaskRule): void {
   if (utf8Length(r.description) > BASELINE_DATALOG.max_tar_description_length) {
     throw new Error(`TaskRule.description exceeds ${BASELINE_DATALOG.max_tar_description_length} bytes`);
   }
+  if (hasASCIIControl(r.description)) {
+    throw new Error("TaskRule.description must not contain control characters");
+  }
+  if (r.allowedServices.length === 0) {
+    throw new Error("TaskRule.allowed_services must not be empty");
+  }
   validateTARStringList("allowed_services", r.allowedServices, validateServicePattern);
   validateTARStringList("allowed_resources", r.allowedResources, (res) => {
     if (res === "") {
@@ -105,26 +166,36 @@ export function validateTaskRule(r: TaskRule): void {
     if (utf8Length(res) > BASELINE_DATALOG.max_tar_resource_length) {
       throw new Error(`resource exceeds ${BASELINE_DATALOG.max_tar_resource_length} bytes`);
     }
+    if (hasASCIIControl(res)) {
+      throw new Error("resource must not contain control characters");
+    }
   });
   if (r.operation !== undefined) {
     const op = r.operation;
     validateTARStringList("operation.allowed_tools", op.allowedTools, (tool) => {
-      if (tool === "") {
-        throw new Error("tool name must not be empty");
+      if (
+        tool === "" ||
+        utf8Length(tool) > BASELINE_DATALOG.max_tar_name_length ||
+        /[/\?# \t\r\n]/.test(tool) ||
+        !isPrintableASCII(tool)
+      ) {
+        throw new Error(`invalid tool name ${JSON.stringify(tool)} in allowed_tools`);
       }
     });
     validateTARStringList("operation.allowed_methods", op.allowedMethods, (m) => {
       if (!HTTP_METHOD_RE.test(m)) {
         throw new Error(`invalid HTTP method ${JSON.stringify(m)}`);
       }
-      if (m === "CONNECT") {
-        throw new Error("CONNECT is not a grantable HTTP method");
-      }
     });
     validateTARStringList("operation.allowed_paths", op.allowedPaths, validateHTTPGrantPath);
     validateTARStringList("operation.allowed_permissions", op.allowedPermissions, (perm) => {
-      if (perm === "") {
-        throw new Error("permission must not be empty");
+      if (
+        perm === "" ||
+        utf8Length(perm) > BASELINE_DATALOG.max_tar_name_length ||
+        /[ \t\r\n]/.test(perm) ||
+        !isPrintableASCII(perm)
+      ) {
+        throw new Error(`invalid permission ${JSON.stringify(perm)} in allowed_permissions`);
       }
     });
   }
@@ -134,8 +205,23 @@ export function validateTaskAuthorizationRule(rule: TaskAuthorizationRule, requi
   if (utf8Length(rule.name) > BASELINE_DATALOG.max_tar_name_length) {
     throw new Error(`TaskAuthorizationRule.name exceeds ${BASELINE_DATALOG.max_tar_name_length} bytes`);
   }
+  if (!isPrintableASCII(rule.name)) {
+    throw new Error("TaskAuthorizationRule.name must contain only printable ASCII characters");
+  }
   if (utf8Length(rule.displayName) > BASELINE_DATALOG.max_tar_description_length) {
     throw new Error(`TaskAuthorizationRule.display_name exceeds ${BASELINE_DATALOG.max_tar_description_length} bytes`);
+  }
+  if (hasASCIIControl(rule.displayName)) {
+    throw new Error("TaskAuthorizationRule.display_name must not contain control characters");
+  }
+  if (rule.expireTime !== undefined) {
+    const { seconds, nanos } = rule.expireTime;
+    if (nanos < 0 || nanos >= 1_000_000_000) {
+      throw new Error("TaskAuthorizationRule.expire_time has invalid nanos");
+    }
+    if (seconds <= 0n || seconds > 253402300799n) {
+      throw new Error("TaskAuthorizationRule.expire_time must be after the Unix epoch");
+    }
   }
   if (requireNonEmptyRules && rule.rules.length === 0) {
     throw new Error("TaskAuthorizationRule.rules must not be empty");
@@ -244,12 +330,10 @@ export interface TaskRequestContext {
   path: string;
   mcpTool: string;
   allowMCPStreamInit: boolean;
-  resource?: string;
-  permission?: string;
 }
 
 export function matchServicePattern(pattern: string, serviceType: string, serviceName: string): boolean {
-  if (serviceType === "" || serviceName === "") {
+  if (serviceType === "" || serviceName === "" || pattern === "") {
     return false;
   }
   if (pattern === "*") {
@@ -261,23 +345,35 @@ export function matchServicePattern(pattern: string, serviceType: string, servic
   }
   const patType = pattern.slice(0, idx);
   const patTarget = pattern.slice(idx + 3);
-  if (patType !== serviceType) {
+  if (patType !== serviceType || patTarget === "") {
     return false;
   }
   if (patTarget === "*") {
     return true;
   }
-  if (patTarget.startsWith("*.")) {
+  if (patTarget.startsWith("*.") && !patTarget.endsWith(".*")) {
     return serviceName.endsWith(patTarget.slice(1));
   }
-  if (patTarget.endsWith(".*")) {
+  if (patTarget.endsWith(".*") && !patTarget.startsWith("*.")) {
     return serviceName.startsWith(patTarget.slice(0, -1));
   }
   return serviceName === patTarget;
 }
 
+export function isSafeRequestHTTPPath(reqPath: string): boolean {
+  if (!reqPath.startsWith("/") || reqPath.includes("?") || reqPath.includes("#") || hasEncodedPathTraversal(reqPath)) {
+    return false;
+  }
+  for (const seg of reqPath.split("/")) {
+    if (seg === "." || seg === "..") {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function matchHTTPPath(pattern: string, reqPath: string): boolean {
-  if (reqPath === "") {
+  if (pattern === "" || !isSafeRequestHTTPPath(reqPath)) {
     return false;
   }
   if (pattern.endsWith("*")) {
@@ -287,17 +383,14 @@ export function matchHTTPPath(pattern: string, reqPath: string): boolean {
 }
 
 export function matchTaskRule(rule: TaskRule, req: TaskRequestContext): boolean {
-  if (rule.allowedServices.length > 0) {
-    if (!rule.allowedServices.some((pat) => matchServicePattern(pat, req.serviceType, req.serviceName))) {
-      return false;
-    }
+  if (rule.allowedServices.length === 0) {
+    return false;
   }
-  if (rule.allowedResources.length > 0) {
-    const res = req.resource ?? "";
-    if (res === "" || !rule.allowedResources.includes(res)) {
-      return false;
-    }
+  if (!rule.allowedServices.some((pat) => matchServicePattern(pat, req.serviceType, req.serviceName))) {
+    return false;
   }
+  // Note: rule.allowedResources and operation.allowedPermissions are opaque to
+  // the wire PEP and consumed by CloudTokenExchanger at egress.
   if (rule.operation !== undefined) {
     const op = rule.operation;
     if (op.allowedTools.length > 0) {
@@ -312,25 +405,14 @@ export function matchTaskRule(rule: TaskRule, req: TaskRequestContext): boolean 
         return false;
       }
     }
-    if (op.allowedMethods.length > 0) {
-      if (!req.hasHttp || req.method === "" || req.method === "CONNECT") {
+    if (op.allowedMethods.length > 0 || op.allowedPaths.length > 0) {
+      if (!req.hasHttp || req.method === "" || req.method === "CONNECT" || !isSafeRequestHTTPPath(req.path)) {
         return false;
       }
-      if (!op.allowedMethods.includes(req.method)) {
+      if (op.allowedMethods.length > 0 && !op.allowedMethods.includes(req.method)) {
         return false;
       }
-    }
-    if (op.allowedPaths.length > 0) {
-      if (!req.hasHttp || req.path === "" || req.method === "CONNECT") {
-        return false;
-      }
-      if (!op.allowedPaths.some((pat) => matchHTTPPath(pat, req.path))) {
-        return false;
-      }
-    }
-    if (op.allowedPermissions.length > 0) {
-      const perm = req.permission ?? "";
-      if (perm === "" || !op.allowedPermissions.includes(perm)) {
+      if (op.allowedPaths.length > 0 && !op.allowedPaths.some((pat) => matchHTTPPath(pat, req.path))) {
         return false;
       }
     }

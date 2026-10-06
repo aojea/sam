@@ -70,8 +70,8 @@ func TestBuildPolicyRules(t *testing.T) {
 		"target_restricted(true) <- role(\"test-role\")":                                       false,
 		"granted_target_set(\"node\", [\"legacy-peer\", \"peer-abc\"]) <- role(\"test-role\")": false,
 		"granted_target_set(\"custom-fact\", [\"custom-val\"]) <- role(\"test-role\")":         false,
-		"custom_rule($x) <- fact($x), $x > 3":                                                  false,
-		"custom_fact(\"hello\") <- true":                                                       false,
+		"custom_rule($x) <- role(\"test-role\"), fact($x), $x > 3":                             false,
+		"custom_fact(\"hello\") <- role(\"test-role\")":                                        false,
 	}
 
 	for _, rule := range rules {

@@ -16,6 +16,8 @@ package api
 
 import (
 	"testing"
+
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestValidateServiceFormat(t *testing.T) {
@@ -79,5 +81,34 @@ func TestValidateTargetFormat(t *testing.T) {
 				t.Errorf("ValidateTargetFormat() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateServiceAnnounce(t *testing.T) {
+	validAnnounce := func() *ServiceAnnounce {
+		return &ServiceAnnounce{
+			PeerId:       "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB",
+			Type:         ServiceType_SERVICE_TYPE_MCP,
+			ServiceName:  "weather",
+			Keys:         []string{"get_weather"},
+			Labels:       map[string]string{"env": "prod"},
+			AnnounceTime: timestamppb.Now(),
+		}
+	}
+	if err := ValidateServiceAnnounce(validAnnounce()); err != nil {
+		t.Fatalf("ValidateServiceAnnounce(valid) = %v", err)
+	}
+
+	epochAnnounce := validAnnounce()
+	epochAnnounce.AnnounceTime.Seconds = 0
+	epochAnnounce.AnnounceTime.Nanos = 0
+	if err := ValidateServiceAnnounce(epochAnnounce); err == nil {
+		t.Fatal("expected epoch AnnounceTime to be rejected")
+	}
+
+	badLabelAnnounce := validAnnounce()
+	badLabelAnnounce.Labels = map[string]string{"bad key!": "val"}
+	if err := ValidateServiceAnnounce(badLabelAnnounce); err == nil {
+		t.Fatal("expected invalid label key in ServiceAnnounce to be rejected")
 	}
 }

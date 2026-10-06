@@ -624,6 +624,74 @@ func buildConformanceSuite() tarConformanceSuite {
 				MCPTool:       "get_weather",
 				Allow:         false,
 			},
+			{
+				Name: "cloud_broker_resources_and_permissions_allowed_on_wire",
+				BiscuitB64: b64(func() []byte {
+					brokerHop := &api.TaskAuthorizationRule{
+						Name:       "cloud-broker-hop",
+						ExpireTime: timestamppb.New(hop1Exp),
+						Rules: []*api.TaskRule{
+							{
+								AllowedServices:  []string{"egress://s3.amazonaws.com"},
+								AllowedResources: []string{"arn:aws:s3:::acme-bucket/*"},
+								Operation: &api.TaskOperation{
+									AllowedMethods:     []string{"GET"},
+									AllowedPaths:       []string{"/acme-bucket/*"},
+									AllowedPermissions: []string{"s3:GetObject"},
+								},
+							},
+						},
+					}
+					tok, err := identity.AttenuateBiscuitWithRand(newDeterministicReader("cloud-broker-hop"), callerRootBytes, brokerHop)
+					if err != nil {
+						panic(err)
+					}
+					return tok
+				}()),
+				TargetService:               "egress://s3.amazonaws.com",
+				Protocol:                    "/libp2p-http",
+				Method:                      strPtr("GET"),
+				Path:                        "/acme-bucket/report.csv",
+				Allow:                       true,
+				ExpectedEffectiveExpiration: hop1Exp.Format(time.RFC3339),
+			},
+			{
+				Name: "empty_allowed_services_in_rule_rejected",
+				BiscuitB64: b64(func() []byte {
+					raw, err := proto.MarshalOptions{Deterministic: true}.Marshal(&api.TaskAuthorizationRule{
+						Name:       "empty-services-rule",
+						ExpireTime: timestamppb.New(hop1Exp),
+						Rules: []*api.TaskRule{
+							{
+								Description:     "Missing allowed_services must fail closed",
+								AllowedServices: nil,
+							},
+						},
+					})
+					if err != nil {
+						panic(err)
+					}
+					f := biscuit.Fact{Predicate: biscuit.Predicate{
+						Name: api.FactTARBlock,
+						IDs:  []biscuit.Term{biscuit.String(base64.RawURLEncoding.EncodeToString(raw))},
+					}}
+					bb := callerRoot.CreateBlock()
+					_ = bb.AddFact(f)
+					b, err := callerRoot.Append(newDeterministicReader("empty-services-rule"), bb.Build())
+					if err != nil {
+						panic(err)
+					}
+					out, err := b.Serialize()
+					if err != nil {
+						panic(err)
+					}
+					return out
+				}()),
+				TargetService: "mcp://weather",
+				Protocol:      string(api.MCPProtocolID),
+				MCPTool:       "get_weather",
+				Allow:         false,
+			},
 		},
 	}
 }

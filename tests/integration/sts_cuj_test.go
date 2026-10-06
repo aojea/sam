@@ -17,8 +17,8 @@ package integration_test
 import (
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -32,60 +32,97 @@ import (
 	"testing"
 	"time"
 
+	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
+	extprocv3http "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/ext_proc/v3"
+	extprocv3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
+	typev3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 	"github.com/google/sam/api"
-	corev3 "github.com/google/sam/third_party/envoy/envoy/config/core/v3"
-	extprocv3http "github.com/google/sam/third_party/envoy/envoy/extensions/filters/http/ext_proc/v3"
-	extprocv3 "github.com/google/sam/third_party/envoy/envoy/service/ext_proc/v3"
-	typev3 "github.com/google/sam/third_party/envoy/envoy/type/v3"
-	"google.golang.org/protobuf/proto"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
-func writeExtProcFrame(w io.Writer, msg proto.Message) error {
-	payload, err := proto.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	var hdr [5]byte
-	hdr[0] = 0
-	binary.BigEndian.PutUint32(hdr[1:5], uint32(len(payload)))
-	if _, err := w.Write(hdr[:]); err != nil {
-		return err
-	}
-	_, err = w.Write(payload)
-	return err
+type cujExtProcCallout struct {
+	extprocv3.UnimplementedExternalProcessorServer
 }
 
-func readExtProcFrame(r io.Reader, msg proto.Message) error {
-	var hdr [5]byte
-	if _, err := io.ReadFull(r, hdr[:]); err != nil {
-		return err
+func (c *cujExtProcCallout) Process(stream extprocv3.ExternalProcessor_ProcessServer) error {
+	for {
+		req, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var resp *extprocv3.ProcessingResponse
+		if rh := req.GetRequestHeaders(); rh != nil {
+			var path string
+			for _, hv := range rh.GetHeaders().GetHeaders() {
+				if hv.GetKey() == ":path" {
+					path = hv.GetValue()
+					if path == "" {
+						path = string(hv.GetRawValue())
+					}
+				}
+			}
+			if strings.HasSuffix(path, "/blocked-by-dlp") {
+				resp = &extprocv3.ProcessingResponse{
+					Response: &extprocv3.ProcessingResponse_ImmediateResponse{
+						ImmediateResponse: &extprocv3.ImmediateResponse{
+							Status:  &typev3.HttpStatus{Code: typev3.StatusCode_Forbidden},
+							Body:    []byte("blocked by ext_proc callout"),
+							Details: "dlp_violation",
+						},
+					},
+				}
+			} else {
+				resp = &extprocv3.ProcessingResponse{
+					Response: &extprocv3.ProcessingResponse_RequestHeaders{
+						RequestHeaders: &extprocv3.HeadersResponse{
+							Response: &extprocv3.CommonResponse{
+								Status: extprocv3.CommonResponse_CONTINUE,
+								HeaderMutation: &extprocv3.HeaderMutation{
+									SetHeaders: []*corev3.HeaderValueOption{
+										{Header: &corev3.HeaderValue{Key: "X-Ext-Proc-Inspected", Value: "true"}},
+									},
+								},
+							},
+						},
+					},
+				}
+			}
+		} else if req.GetResponseHeaders() != nil {
+			resp = &extprocv3.ProcessingResponse{
+				Response: &extprocv3.ProcessingResponse_ResponseHeaders{
+					ResponseHeaders: &extprocv3.HeadersResponse{
+						Response: &extprocv3.CommonResponse{
+							Status: extprocv3.CommonResponse_CONTINUE,
+						},
+					},
+				},
+			}
+		}
+		if resp != nil {
+			if err := stream.Send(resp); err != nil {
+				return err
+			}
+			if resp.GetImmediateResponse() != nil {
+				return nil
+			}
+		}
 	}
-	length := binary.BigEndian.Uint32(hdr[1:5])
-	payload := make([]byte, length)
-	if _, err := io.ReadFull(r, payload); err != nil {
-		return err
-	}
-	return proto.Unmarshal(payload, msg)
 }
 
-func startH2CExtProcCallout(t *testing.T, handler http.Handler) string {
+func startGRPCExtProcCallout(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen tcp: %v", err)
 	}
-	var protocols http.Protocols
-	protocols.SetHTTP1(true)
-	protocols.SetUnencryptedHTTP2(true)
-	srv := &http.Server{
-		Handler:   handler,
-		Protocols: &protocols,
-	}
+	srv := grpc.NewServer()
+	extprocv3.RegisterExternalProcessorServer(srv, &cujExtProcCallout{})
 	go func() { _ = srv.Serve(ln) }()
-	t.Cleanup(func() {
-		_ = srv.Close()
-		_ = ln.Close()
-	})
+	t.Cleanup(srv.Stop)
 	return ln.Addr().String()
 }
 
@@ -109,75 +146,7 @@ func TestSTSTaskScopedSecurityCUJ(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	extProcCalloutAddr := startH2CExtProcCallout(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/grpc+proto")
-		w.Header().Set("Trailer", "Grpc-Status, Grpc-Message")
-		w.WriteHeader(http.StatusOK)
-		rc := http.NewResponseController(w)
-		_ = rc.Flush()
-		for {
-			var req extprocv3.ProcessingRequest
-			if err := readExtProcFrame(r.Body, &req); err != nil {
-				break
-			}
-			var resp *extprocv3.ProcessingResponse
-			if rh := req.GetRequestHeaders(); rh != nil {
-				var path string
-				for _, hv := range rh.GetHeaders().GetHeaders() {
-					if hv.GetKey() == ":path" {
-						path = hv.GetValue()
-						if path == "" {
-							path = string(hv.GetRawValue())
-						}
-					}
-				}
-				if strings.HasSuffix(path, "/blocked-by-dlp") {
-					resp = &extprocv3.ProcessingResponse{
-						Response: &extprocv3.ProcessingResponse_ImmediateResponse{
-							ImmediateResponse: &extprocv3.ImmediateResponse{
-								Status:  &typev3.HttpStatus{Code: typev3.StatusCode_Forbidden},
-								Body:    []byte("blocked by ext_proc callout"),
-								Details: "dlp_violation",
-							},
-						},
-					}
-				} else {
-					resp = &extprocv3.ProcessingResponse{
-						Response: &extprocv3.ProcessingResponse_RequestHeaders{
-							RequestHeaders: &extprocv3.HeadersResponse{
-								Response: &extprocv3.CommonResponse{
-									Status: extprocv3.CommonResponse_CONTINUE,
-									HeaderMutation: &extprocv3.HeaderMutation{
-										SetHeaders: []*corev3.HeaderValueOption{
-											{Header: &corev3.HeaderValue{Key: "X-Ext-Proc-Inspected", Value: "true"}},
-										},
-									},
-								},
-							},
-						},
-					}
-				}
-			} else if req.GetResponseHeaders() != nil {
-				resp = &extprocv3.ProcessingResponse{
-					Response: &extprocv3.ProcessingResponse_ResponseHeaders{
-						ResponseHeaders: &extprocv3.HeadersResponse{
-							Response: &extprocv3.CommonResponse{
-								Status: extprocv3.CommonResponse_CONTINUE,
-							},
-						},
-					},
-				}
-			}
-			if resp != nil {
-				_ = writeExtProcFrame(w, resp)
-				_ = rc.Flush()
-				if resp.GetImmediateResponse() != nil {
-					break
-				}
-			}
-		}
-		w.Header().Set("Grpc-Status", "0")
-	}))
+	extProcCalloutAddr := startGRPCExtProcCallout(t)
 
 	policyFile := filepath.Join(tmpDir, "policies.yaml")
 	policyYAML := fmt.Sprintf(`roles:
@@ -577,19 +546,15 @@ egress:
 	})
 
 	t.Run("Gateway ext_proc over h2c datapath on live sam-node (egress credential injection and MCP tools/call across mesh)", func(t *testing.T) {
-		var h2cProtocols http.Protocols
-		h2cProtocols.SetUnencryptedHTTP2(true)
-		h2cClient := &http.Client{
-			Timeout: 10 * time.Second,
-			Transport: &http.Transport{
-				ForceAttemptHTTP2: true,
-				Protocols:         &h2cProtocols,
-			},
+		cc, err := grpc.NewClient("passthrough:///"+pepAPI, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			t.Fatalf("grpc.NewClient: %v", err)
 		}
-		extProcURL := "http://" + pepAPI + "/envoy.service.ext_proc.v3.ExternalProcessor/Process"
+		defer func() { _ = cc.Close() }()
+		epClient := extprocv3.NewExternalProcessorClient(cc)
 		mcpBackendCalls.Store(0)
 
-		// Envoy-compatible Gateway proxy that runs the ExternalProcessor/Process h2c stream
+		// Envoy-compatible Gateway proxy that runs the ExternalProcessor/Process gRPC stream
 		// against pepAPI (including ModeOverride BUFFERED body inspection and HeaderMutation)
 		// before forwarding to the target backend or mesh dataplane.
 		gatewayProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -599,21 +564,12 @@ egress:
 				_ = r.Body.Close()
 			}
 
-			pr, pw := io.Pipe()
-			procReq, _ := http.NewRequestWithContext(r.Context(), http.MethodPost, extProcURL, pr)
-			procReq.Header.Set("Content-Type", "application/grpc+proto")
-			procReq.Header.Set("TE", "trailers")
-
-			respCh := make(chan *http.Response, 1)
-			errCh := make(chan error, 1)
-			go func() {
-				resp, err := h2cClient.Do(procReq)
-				if err != nil {
-					errCh <- err
-					return
-				}
-				respCh <- resp
-			}()
+			stream, err := epClient.Process(r.Context())
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			defer func() { _ = stream.CloseSend() }()
 
 			hdrs := []*corev3.HeaderValue{
 				{Key: ":method", Value: r.Method},
@@ -623,29 +579,20 @@ egress:
 			for k, vals := range r.Header {
 				hdrs = append(hdrs, &corev3.HeaderValue{Key: strings.ToLower(k), Value: strings.Join(vals, ", ")})
 			}
-			_ = writeExtProcFrame(pw, &extprocv3.ProcessingRequest{
+			if err := stream.Send(&extprocv3.ProcessingRequest{
 				Request: &extprocv3.ProcessingRequest_RequestHeaders{
 					RequestHeaders: &extprocv3.HttpHeaders{
 						EndOfStream: len(bodyBytes) == 0,
 						Headers:     &corev3.HeaderMap{Headers: hdrs},
 					},
 				},
-			})
-			if len(bodyBytes) == 0 {
-				_ = pw.Close()
-			}
-
-			var procHTTPResp *http.Response
-			select {
-			case procHTTPResp = <-respCh:
-			case err := <-errCh:
+			}); err != nil {
 				http.Error(w, err.Error(), http.StatusBadGateway)
 				return
 			}
-			defer func() { _ = procHTTPResp.Body.Close() }()
 
-			var procResp extprocv3.ProcessingResponse
-			if err := readExtProcFrame(procHTTPResp.Body, &procResp); err != nil {
+			procResp, err := stream.Recv()
+			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadGateway)
 				return
 			}
@@ -674,18 +621,20 @@ egress:
 			applyMuts(procResp.GetRequestHeaders().GetResponse().GetHeaderMutation())
 
 			if len(bodyBytes) > 0 && procResp.GetModeOverride().GetRequestBodyMode() == extprocv3http.ProcessingMode_BUFFERED {
-				_ = writeExtProcFrame(pw, &extprocv3.ProcessingRequest{
+				if err := stream.Send(&extprocv3.ProcessingRequest{
 					Request: &extprocv3.ProcessingRequest_RequestBody{
 						RequestBody: &extprocv3.HttpBody{
 							Body:        bodyBytes,
 							EndOfStream: true,
 						},
 					},
-				})
-				_ = pw.Close()
+				}); err != nil {
+					http.Error(w, err.Error(), http.StatusBadGateway)
+					return
+				}
 
-				var bodyProcResp extprocv3.ProcessingResponse
-				if err := readExtProcFrame(procHTTPResp.Body, &bodyProcResp); err != nil {
+				bodyProcResp, err := stream.Recv()
+				if err != nil {
 					http.Error(w, err.Error(), http.StatusBadGateway)
 					return
 				}
@@ -695,8 +644,6 @@ egress:
 					return
 				}
 				applyMuts(bodyProcResp.GetRequestBody().GetResponse().GetHeaderMutation())
-			} else {
-				_ = pw.Close()
 			}
 
 			// Route /sam/... requests through caller node's real libp2p mesh proxy,

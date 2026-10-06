@@ -54,13 +54,11 @@ func ValidateServiceAnnounce(a *ServiceAnnounce) error {
 	if len(a.GetLabels()) > MaxAnnounceLabels {
 		return fmt.Errorf("labels count %d exceeds %d", len(a.GetLabels()), MaxAnnounceLabels)
 	}
-	for k, v := range a.GetLabels() {
-		if k == "" || len(k) > MaxAnnounceStringLen || len(v) > MaxAnnounceStringLen {
-			return fmt.Errorf("invalid label %q", k)
-		}
+	if err := ValidateLabels(a.GetLabels()); err != nil {
+		return fmt.Errorf("invalid labels: %w", err)
 	}
-	if a.GetAnnounceTime() == nil {
-		return fmt.Errorf("missing announce_time")
+	if a.GetAnnounceTime() == nil || !a.GetAnnounceTime().IsValid() || a.GetAnnounceTime().AsTime().Unix() <= 0 {
+		return fmt.Errorf("missing or invalid announce_time")
 	}
 	return nil
 }

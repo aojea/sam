@@ -21,6 +21,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -28,6 +29,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -53,6 +55,8 @@ const (
 	maxSTSTokenTTL = 15 * time.Minute
 	// oauthAuthCodeTTL is the lifetime of a single-use OAuth 2.1 authorization code.
 	oauthAuthCodeTTL = 5 * time.Minute
+	// maxPendingOAuthCodes caps the in-memory OAuth 2.1 authorization code table.
+	maxPendingOAuthCodes = 4096
 )
 
 // JSONWebKey represents a single public key in an RFC 7517 JSON Web Key Set.
@@ -85,21 +89,92 @@ type es256KeyEntry struct {
 	expiresAt time.Time // zero for the currently active signing key
 }
 
-// LocalES256Signer is the default in-memory OIDCSigner using P-256 (ES256) keys
-// with overlap grace-period support during key rotation.
+// LocalES256Signer is the default OIDCSigner using P-256 (ES256) keys
+// with overlap grace-period support and optional SQLStore persistence.
 type LocalES256Signer struct {
 	mu      sync.RWMutex
+	store   storage.Store
 	current es256KeyEntry
 	retired []es256KeyEntry
 }
 
-// NewLocalES256Signer creates a LocalES256Signer with a freshly generated P-256 key.
-func NewLocalES256Signer() (*LocalES256Signer, error) {
+// NewLocalES256SignerWithStore creates a LocalES256Signer backed by store when non-nil.
+func NewLocalES256SignerWithStore(store storage.Store) (*LocalES256Signer, error) {
+	if store != nil {
+		ctx := context.Background()
+		if dbKeys, err := store.GetAllValidOIDCKeys(ctx); err == nil && len(dbKeys) > 0 {
+			var current *es256KeyEntry
+			var retired []es256KeyEntry
+			for _, k := range dbKeys {
+				entry, decErr := decodeOIDCKeyPair(k)
+				if decErr != nil {
+					continue
+				}
+				if k.Expiration.IsZero() && current == nil {
+					e := entry
+					current = &e
+				} else {
+					retired = append(retired, entry)
+				}
+			}
+			if current != nil {
+				return &LocalES256Signer{
+					store:   store,
+					current: *current,
+					retired: retired,
+				}, nil
+			}
+		}
+	}
+
 	entry, err := generateES256KeyEntry()
 	if err != nil {
 		return nil, err
 	}
-	return &LocalES256Signer{current: entry}, nil
+	if store != nil {
+		ctx := context.Background()
+		privBytes, mErr := x509.MarshalECPrivateKey(entry.priv)
+		pubBytes, pErr := entry.priv.PublicKey.Bytes()
+		if mErr == nil && pErr == nil {
+			_ = store.SaveInitialOIDCKey(ctx, entry.kid, privBytes, pubBytes)
+			if cur, gErr := store.GetCurrentOIDCKey(ctx); gErr == nil && cur != nil {
+				if loaded, dErr := decodeOIDCKeyPair(*cur); dErr == nil {
+					entry = loaded
+				}
+			}
+		}
+	}
+	return &LocalES256Signer{store: store, current: entry}, nil
+}
+
+func decodeOIDCKeyPair(k storage.OIDCKeyPair) (es256KeyEntry, error) {
+	priv, err := x509.ParseECPrivateKey(k.PrivateKey)
+	if err != nil {
+		return es256KeyEntry{}, err
+	}
+	uncompressed := k.PublicKey
+	if len(uncompressed) != 65 {
+		uncompressed, err = priv.PublicKey.Bytes()
+		if err != nil || len(uncompressed) != 65 {
+			return es256KeyEntry{}, fmt.Errorf("invalid P-256 public key bytes")
+		}
+	}
+	xBytes := uncompressed[1:33]
+	yBytes := uncompressed[33:65]
+	return es256KeyEntry{
+		kid:  k.Kid,
+		priv: priv,
+		jwk: JSONWebKey{
+			Kty: "EC",
+			Crv: "P-256",
+			Use: "sig",
+			Alg: "ES256",
+			Kid: k.Kid,
+			X:   base64.RawURLEncoding.EncodeToString(xBytes),
+			Y:   base64.RawURLEncoding.EncodeToString(yBytes),
+		},
+		expiresAt: k.Expiration,
+	}, nil
 }
 
 func generateES256KeyEntry() (es256KeyEntry, error) {
@@ -137,6 +212,16 @@ func (s *LocalES256Signer) Rotate(gracePeriod time.Duration) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if s.store != nil {
+		privBytes, mErr := x509.MarshalECPrivateKey(next.priv)
+		pubBytes, pErr := next.priv.PublicKey.Bytes()
+		if mErr != nil || pErr != nil {
+			return "", fmt.Errorf("failed to marshal rotated ES256 key")
+		}
+		if err := s.store.RotateOIDCKeys(context.Background(), next.kid, privBytes, pubBytes, gracePeriod); err != nil {
+			return "", err
+		}
+	}
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -157,7 +242,16 @@ func (s *LocalES256Signer) Rotate(gracePeriod time.Duration) (string, error) {
 }
 
 // SignJWT signs claims with the active ES256 key and sets the "kid" header.
-func (s *LocalES256Signer) SignJWT(_ context.Context, claims jwt.MapClaims) (string, error) {
+func (s *LocalES256Signer) SignJWT(ctx context.Context, claims jwt.MapClaims) (string, error) {
+	if s.store != nil {
+		if cur, err := s.store.GetCurrentOIDCKey(ctx); err == nil && cur != nil {
+			if loaded, dErr := decodeOIDCKeyPair(*cur); dErr == nil {
+				s.mu.Lock()
+				s.current = loaded
+				s.mu.Unlock()
+			}
+		}
+	}
 	s.mu.RLock()
 	active := s.current
 	s.mu.RUnlock()
@@ -168,7 +262,20 @@ func (s *LocalES256Signer) SignJWT(_ context.Context, claims jwt.MapClaims) (str
 }
 
 // JWKS returns the active public key plus any retired keys still within their overlap grace window.
-func (s *LocalES256Signer) JWKS(_ context.Context) (*JSONWebKeySet, error) {
+func (s *LocalES256Signer) JWKS(ctx context.Context) (*JSONWebKeySet, error) {
+	if s.store != nil {
+		if dbKeys, err := s.store.GetAllValidOIDCKeys(ctx); err == nil && len(dbKeys) > 0 {
+			keys := make([]JSONWebKey, 0, len(dbKeys))
+			for _, k := range dbKeys {
+				if entry, dErr := decodeOIDCKeyPair(k); dErr == nil {
+					keys = append(keys, entry.jwk)
+				}
+			}
+			if len(keys) > 0 {
+				return &JSONWebKeySet{Keys: keys}, nil
+			}
+		}
+	}
 	now := time.Now()
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -191,6 +298,20 @@ func (s *Server) RotateOIDCKey(gracePeriod time.Duration) (string, error) {
 	return local.Rotate(gracePeriod)
 }
 
+func isValidHostHeader(host string) bool {
+	if host == "" || len(host) > 255 {
+		return false
+	}
+	for i := 0; i < len(host); i++ {
+		c := host[i]
+		isAlphaNum := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		if !isAlphaNum && c != '.' && c != '-' && c != ':' && c != '[' && c != ']' {
+			return false
+		}
+	}
+	return true
+}
+
 // oidcIssuerURL returns the canonical OIDC issuer URL for this control plane.
 func (s *Server) oidcIssuerURL(r *http.Request) string {
 	if iss := strings.TrimRight(strings.TrimSpace(s.config.STSIssuerURL), "/"); iss != "" {
@@ -198,11 +319,11 @@ func (s *Server) oidcIssuerURL(r *http.Request) string {
 	}
 	scheme := "http"
 	if r != nil {
-		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		if r.TLS != nil || (s.config.TrustForwardedHeaders && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")) {
 			scheme = "https"
 		}
-		if r.Host != "" {
-			return scheme + "://" + r.Host
+		if host := strings.TrimSpace(r.Host); isValidHostHeader(host) {
+			return scheme + "://" + host
 		}
 	}
 	if s.listener != nil {
@@ -302,6 +423,9 @@ func (s *Server) RevokeBiscuitID(revocationID string, expiry time.Time) {
 	s.revokedBiscuitsMu.Lock()
 	s.revokedBiscuits[revocationID] = expiry
 	s.revokedBiscuitsMu.Unlock()
+	if s.store != nil {
+		_ = s.store.SaveRevokedBiscuit(context.Background(), revocationID, expiry)
+	}
 }
 
 func extractRootRevocationID(rawToken []byte) (string, error) {
@@ -352,6 +476,14 @@ func (s *Server) clearBannedNodeRevocationID(peerID string) {
 func (s *Server) listRevokedBiscuitIDs(ctx context.Context, bannedPeers []string) ([]string, error) {
 	now := time.Now()
 	set := make(map[string]bool)
+
+	if s.store != nil {
+		if dbRev, err := s.store.ListRevokedBiscuits(ctx, now); err == nil {
+			for id := range dbRev {
+				set[id] = true
+			}
+		}
+	}
 
 	var missingPeers []string
 	bannedPeerSet := make(map[string]bool, len(bannedPeers))
@@ -411,28 +543,135 @@ func (s *Server) listRevokedBiscuitIDs(ctx context.Context, bannedPeers []string
 	return out, nil
 }
 
-func (s *Server) isBiscuitRevoked(revocationIDs [][]byte) bool {
+func (s *Server) isBiscuitRevoked(ctx context.Context, revocationIDs [][]byte) bool {
 	if len(revocationIDs) == 0 {
 		return false
 	}
 	now := time.Now()
 	s.revokedBiscuitsMu.RLock()
-	defer s.revokedBiscuitsMu.RUnlock()
-	if len(s.revokedBiscuits) == 0 && len(s.bannedNodeRevIDs) == 0 {
-		return false
-	}
 	for _, rawID := range revocationIDs {
 		encoded := base64.RawURLEncoding.EncodeToString(rawID)
 		if exp, ok := s.revokedBiscuits[encoded]; ok && now.Before(exp) {
+			s.revokedBiscuitsMu.RUnlock()
 			return true
 		}
 		for _, bannedRevID := range s.bannedNodeRevIDs {
 			if bannedRevID != "" && bannedRevID == encoded {
+				s.revokedBiscuitsMu.RUnlock()
+				return true
+			}
+		}
+	}
+	s.revokedBiscuitsMu.RUnlock()
+
+	if s.store != nil {
+		for _, rawID := range revocationIDs {
+			encoded := base64.RawURLEncoding.EncodeToString(rawID)
+			if revoked, err := s.store.IsBiscuitRevoked(ctx, encoded, now); err == nil && revoked {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func (s *Server) configuredIssuers() []string {
+	seen := make(map[string]bool)
+	var out []string
+	add := func(iss string) {
+		iss = strings.TrimSpace(iss)
+		if iss != "" && !seen[iss] {
+			seen[iss] = true
+			out = append(out, iss)
+		}
+	}
+	for _, iss := range strings.Split(s.config.OIDCIssuer, ",") {
+		add(iss)
+	}
+	for iss := range s.workloadIssuers {
+		add(iss)
+	}
+	for iss := range s.workloadEmailSuffixes {
+		add(iss)
+	}
+	s.providersMu.RLock()
+	for iss := range s.providers {
+		add(iss)
+	}
+	s.providersMu.RUnlock()
+	return out
+}
+
+func (s *Server) checkBiscuitRevocationAndBans(ctx context.Context, claims *identity.VerifiedBiscuitClaims) (int, error) {
+	if s.isBiscuitRevoked(ctx, claims.RevocationIDs) {
+		return http.StatusForbidden, errors.New("caller biscuit is revoked")
+	}
+	now := time.Now()
+	for _, rawPeerID := range []string{claims.NodePeerID, claims.ActorNodePeerID, claims.ClientPeerID} {
+		if rawPeerID == "" {
+			continue
+		}
+		pID, err := peer.Decode(rawPeerID)
+		if err != nil {
+			return http.StatusForbidden, fmt.Errorf("invalid peer ID %q: %w", rawPeerID, err)
+		}
+		canonical := pID.String()
+		banned, err := s.store.IsNodeBanned(ctx, canonical)
+		if err != nil {
+			return http.StatusInternalServerError, fmt.Errorf("failed to check node ban: %w", err)
+		}
+		if banned {
+			return http.StatusForbidden, fmt.Errorf("peer %s is banned", canonical)
+		}
+		nodeRec, err := s.store.GetNode(ctx, canonical)
+		if err != nil {
+			if !errors.Is(err, storage.ErrNotFound) {
+				return http.StatusInternalServerError, fmt.Errorf("failed to load node %s: %w", canonical, err)
+			}
+			continue
+		}
+		if err := nodeRec.CheckAdmission(now); err != nil {
+			return http.StatusForbidden, fmt.Errorf("peer %s is not admitted: %w", canonical, err)
+		}
+		if nodeRec.OwnerID != "" {
+			if owner, uErr := s.store.GetUser(ctx, nodeRec.OwnerID); uErr == nil && owner != nil && owner.Issuer != "" {
+				if ownerBanned, bErr := s.store.IsIdentityBanned(ctx, owner.IdentityKey()); bErr != nil {
+					return http.StatusInternalServerError, fmt.Errorf("failed to check owner ban: %w", bErr)
+				} else if ownerBanned {
+					return http.StatusForbidden, fmt.Errorf("owner of peer %s is banned", canonical)
+				}
+			}
+		}
+		if nodeRec.ClaimsJSON != "" {
+			var storedClaims jwt.MapClaims
+			if json.Unmarshal([]byte(nodeRec.ClaimsJSON), &storedClaims) == nil {
+				if key := oidcIdentityKey(storedClaims); key != "" {
+					if idBanned, bErr := s.store.IsIdentityBanned(ctx, key); bErr != nil {
+						return http.StatusInternalServerError, fmt.Errorf("failed to check identity ban: %w", bErr)
+					} else if idBanned {
+						return http.StatusForbidden, fmt.Errorf("identity of peer %s is banned", canonical)
+					}
+				}
+			}
+		}
+	}
+	if claims.User != "" {
+		if user, err := s.store.GetUser(ctx, claims.User); err == nil && user != nil && user.Issuer != "" {
+			if banned, bErr := s.store.IsIdentityBanned(ctx, user.IdentityKey()); bErr != nil {
+				return http.StatusInternalServerError, fmt.Errorf("failed to check user ban: %w", bErr)
+			} else if banned {
+				return http.StatusForbidden, fmt.Errorf("user %s is banned", claims.User)
+			}
+		}
+		for _, iss := range s.configuredIssuers() {
+			if banned, bErr := s.store.IsIdentityBanned(ctx, iss+"|"+claims.User); bErr != nil {
+				return http.StatusInternalServerError, fmt.Errorf("failed to check identity ban: %w", bErr)
+			} else if banned {
+				return http.StatusForbidden, fmt.Errorf("user %s is banned", claims.User)
+			}
+		}
+	}
+	return http.StatusOK, nil
 }
 
 // HandleRevocations serves GET `/revocations` (mesh protocol, binary protobuf).
@@ -534,6 +773,7 @@ func (s *Server) HandleTokenExchange(w http.ResponseWriter, r *http.Request) {
 		req.TaskRule,
 		req.Seal,
 		0,
+		true,
 	)
 	if err != nil {
 		logger.Infow("Border Crossing",
@@ -580,6 +820,7 @@ func (s *Server) mintDelegatedBiscuitFromJWT(
 	taskRule *api.TaskAuthorizationRule,
 	seal bool,
 	requestedTTLSeconds int64,
+	allowWorkload bool,
 ) ([]byte, time.Time, string, []string, int, error) {
 	verifyCtx, cancel := context.WithTimeout(ctx, JWTVerificationTimeout)
 	defer cancel()
@@ -587,6 +828,9 @@ func (s *Server) mintDelegatedBiscuitFromJWT(
 	claims, token, err := identity.VerifyJWT(verifyCtx, subjectJWT, s.config.AllowedAudiences, s.getProviders())
 	if err != nil {
 		return nil, time.Time{}, "", nil, http.StatusUnauthorized, fmt.Errorf("JWT validation failed: %w", err)
+	}
+	if !allowWorkload && s.isWorkloadClaims(claims) {
+		return nil, time.Time{}, "", nil, http.StatusForbidden, errWorkloadIdentity
 	}
 	if verifiedEmail(claims) == "" {
 		delete(claims, "email")
@@ -703,11 +947,6 @@ func (s *Server) HandleSTSToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "destination is required", http.StatusBadRequest)
 		return
 	}
-	audience, audErr := s.resolveEgressAudience(r.Context(), req.Destination, req.Audience)
-	if audErr != nil {
-		http.Error(w, audErr.Error(), http.StatusForbidden)
-		return
-	}
 
 	nodePubKey, err := crypto.UnmarshalPublicKey(nodeRecord.PublicKey)
 	if err != nil {
@@ -719,6 +958,30 @@ func (s *Server) HandleSTSToken(w http.ResponseWriter, r *http.Request) {
 	if err := verifyFreshChallenge(nodePubKey, challengePayload, req.ChallengeUnixMs, req.ChallengeSignature); err != nil {
 		logger.Warnw("STS token challenge verification failed", "peer_id", nodeRecord.PeerID, "error", err)
 		writeChallengeError(w, "Invalid STS token challenge: "+err.Error())
+		return
+	}
+
+	// Verify that if the destination is configured in PolicyConfig.egress with
+	// served_by constraints, the calling sam-node is authorized to serve it.
+	destHost := api.NormalizeMeshHost(strings.TrimPrefix(strings.TrimSpace(req.Destination), api.EgressServicePrefix))
+	if egressList, err := s.store.GetEgressDestinations(r.Context()); err == nil {
+		for _, d := range egressList {
+			if d != nil && d.GetName() == destHost {
+				if len(d.GetServedBy()) > 0 {
+					callingRoles := s.nodeRoles(r.Context(), nodeRecord)
+					if !api.EgressServedBy(d, callingRoles, nodeRecord.Labels) {
+						http.Error(w, fmt.Sprintf("calling node %s is not in served_by for egress://%s", nodeRecord.PeerID, destHost), http.StatusForbidden)
+						return
+					}
+				}
+				break
+			}
+		}
+	}
+
+	audience, audErr := s.resolveEgressAudience(r.Context(), req.Destination, req.Audience)
+	if audErr != nil {
+		http.Error(w, audErr.Error(), http.StatusForbidden)
 		return
 	}
 
@@ -822,10 +1085,10 @@ func (s *Server) resolveEgressAudience(ctx context.Context, destination, reqAudi
 					return policyAud, nil
 				}
 				if aws := d.GetBroker().GetAwsAssumeRole(); aws != nil && strings.TrimSpace(aws.GetRoleArn()) != "" {
-					if reqAud == "" {
-						return "sts.amazonaws.com", nil
+					if reqAud != "" && reqAud != "sts.amazonaws.com" {
+						return "", fmt.Errorf("requested audience %q does not match AWS STS audience \"sts.amazonaws.com\" for egress://%s", reqAud, destHost)
 					}
-					return reqAud, nil
+					return "sts.amazonaws.com", nil
 				}
 				break
 			}
@@ -863,8 +1126,8 @@ func (s *Server) authorizeBiscuitForEgress(ctx context.Context, rawBiscuit []byt
 	if err != nil {
 		return nil, http.StatusForbidden, fmt.Errorf("invalid caller biscuit: %w", err)
 	}
-	if s.isBiscuitRevoked(claims.RevocationIDs) {
-		return nil, http.StatusForbidden, errors.New("caller biscuit is revoked")
+	if status, revErr := s.checkBiscuitRevocationAndBans(ctx, claims); revErr != nil {
+		return nil, status, revErr
 	}
 	if claims.ClientPeerID == "" {
 		return nil, http.StatusForbidden, errors.New("caller biscuit lacks client_peer_id")
@@ -875,24 +1138,6 @@ func (s *Server) authorizeBiscuitForEgress(ctx context.Context, rawBiscuit []byt
 	}
 	if err := identity.RequireAuthorityRequestBinding(claims.Biscuit, clientPeer); err != nil {
 		return nil, http.StatusForbidden, err
-	}
-
-	for _, rawPeerID := range []string{claims.NodePeerID, claims.ActorNodePeerID, claims.ClientPeerID} {
-		if rawPeerID == "" {
-			continue
-		}
-		pID, err := peer.Decode(rawPeerID)
-		if err != nil {
-			return nil, http.StatusForbidden, fmt.Errorf("invalid peer ID %q: %w", rawPeerID, err)
-		}
-		canonical := pID.String()
-		banned, err := s.store.IsNodeBanned(ctx, canonical)
-		if err != nil {
-			return nil, http.StatusInternalServerError, fmt.Errorf("failed to check node ban: %w", err)
-		}
-		if banned {
-			return nil, http.StatusForbidden, fmt.Errorf("peer %s is banned", canonical)
-		}
 	}
 
 	authorizer, err := claims.Biscuit.Authorizer(claims.VerifyingKey, identity.AuthorizerOptions(s.config.BiscuitTimeout)...)
@@ -1019,12 +1264,33 @@ var oauthConsentPageTmpl = template.Must(template.New("consent").Parse(`<!DOCTYP
 </body>
 </html>`))
 
+func isValidOAuthRedirectURI(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Fragment != "" || u.Host == "" {
+		return false
+	}
+	if strings.EqualFold(u.Scheme, "https") {
+		return true
+	}
+	if strings.EqualFold(u.Scheme, "http") {
+		host := u.Hostname()
+		if strings.EqualFold(host, "localhost") {
+			return true
+		}
+		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+			return true
+		}
+	}
+	return false
+}
+
 // HandleOAuthAuthorize serves GET and POST `/oauth/authorize` (OAuth 2.1 Authorization Code + PKCE S256).
 func (s *Server) HandleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Invalid form parameters", http.StatusBadRequest)
 		return
@@ -1041,6 +1307,10 @@ func (s *Server) HandleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirectURI := strings.TrimSpace(r.Form.Get("redirect_uri"))
+	if redirectURI != "" && !isValidOAuthRedirectURI(redirectURI) {
+		http.Error(w, "Invalid redirect_uri: must be https or loopback http without fragment", http.StatusBadRequest)
+		return
+	}
 	state := r.Form.Get("state")
 	codeChallenge := strings.TrimSpace(r.Form.Get("code_challenge"))
 	codeChallengeMethod := strings.TrimSpace(r.Form.Get("code_challenge_method"))
@@ -1075,6 +1345,15 @@ func (s *Server) HandleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, errWorkloadIdentity.Error(), http.StatusForbidden)
 		return
 	}
+	if subjectKey := oidcIdentityKey(claims); subjectKey != "" {
+		if banned, bErr := s.store.IsIdentityBanned(r.Context(), subjectKey); bErr != nil {
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		} else if banned {
+			http.Error(w, "Identity is banned", http.StatusForbidden)
+			return
+		}
+	}
 
 	actorPeerStr := strings.TrimSpace(r.Form.Get("actor_peer_id"))
 	var actorPeerID peer.ID
@@ -1082,6 +1361,11 @@ func (s *Server) HandleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 		pID, err := peer.Decode(actorPeerStr)
 		if err != nil {
 			http.Error(w, "Invalid actor_peer_id", http.StatusBadRequest)
+			return
+		}
+		nodeRec, err := s.store.GetNode(r.Context(), pID.String())
+		if err != nil || nodeRec == nil || nodeRec.CheckAdmission(time.Now()) != nil {
+			http.Error(w, "Invalid or un-admitted actor_peer_id", http.StatusForbidden)
 			return
 		}
 		actorPeerID = pID
@@ -1099,7 +1383,9 @@ func (s *Server) HandleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Method == http.MethodGet && r.Form.Get("approve") != "true" && strings.Contains(r.Header.Get("Accept"), "text/html") {
+	// Browser HTML navigations (or any GET carrying an approve query param) must
+	// always render the consent form and submit approval via POST.
+	if r.Method == http.MethodGet && (strings.Contains(r.Header.Get("Accept"), "text/html") || r.Form.Get("approve") != "") {
 		var svcList []string
 		var taskName string
 		if tarRule != nil {
@@ -1119,11 +1405,15 @@ func (s *Server) HandleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 			"Scope":               scope,
 			"Resources":           resources,
 			"Options":             optionsParam,
-			"ActorPeerID":         actorPeerStr,
+			"ActorPeerID":         actorPeerID.String(),
 			"IDToken":             subjectJWT,
 			"TaskName":            taskName,
 			"Services":            strings.Join(svcList, ", "),
 		})
+		return
+	}
+	if r.Method == http.MethodPost && r.PostForm.Get("approve") != "true" {
+		http.Error(w, "Consent approval required", http.StatusForbidden)
 		return
 	}
 
@@ -1140,6 +1430,11 @@ func (s *Server) HandleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 		if now.After(v.ExpiresAt) {
 			delete(s.oauthCodes, k)
 		}
+	}
+	if len(s.oauthCodes) >= maxPendingOAuthCodes {
+		s.oauthCodesMu.Unlock()
+		http.Error(w, "Too many pending authorization requests", http.StatusTooManyRequests)
+		return
 	}
 	s.oauthCodes[code] = &oauthAuthCode{
 		Code:          code,
@@ -1213,20 +1508,6 @@ func (s *Server) resolveDefaultActorPeer(ctx context.Context, r *http.Request) (
 	if nodeRecord := s.admittedNode(r); nodeRecord != nil {
 		return peer.Decode(nodeRecord.PeerID)
 	}
-	if actorToken := strings.TrimSpace(r.Form.Get("actor_token")); actorToken != "" {
-		rawActor, err := decodeBase64Biscuit(actorToken)
-		if err != nil {
-			return "", fmt.Errorf("invalid actor_token: %w", err)
-		}
-		trustedKeys, err := s.store.GetAllValidPublicKeys(ctx)
-		if err != nil {
-			return "", err
-		}
-		return identity.VerifyAndExtractPeerID(trustedKeys, rawActor, s.config.BiscuitTimeout)
-	}
-	if peerStr := strings.TrimSpace(r.Form.Get("actor_peer_id")); peerStr != "" {
-		return peer.Decode(peerStr)
-	}
 	_, pub, err := s.store.GetCurrentKey(ctx)
 	if err != nil {
 		return "", err
@@ -1259,7 +1540,7 @@ func (s *Server) handleOAuthAuthCodeGrant(w http.ResponseWriter, r *http.Request
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "Authorization code is invalid or expired")
 		return
 	}
-	if clientID != "" && entry.ClientID != "" && clientID != entry.ClientID {
+	if entry.ClientID != "" && clientID != entry.ClientID {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "client_id mismatch")
 		return
 	}
@@ -1286,7 +1567,7 @@ func (s *Server) handleOAuthAuthCodeGrant(w http.ResponseWriter, r *http.Request
 	}
 
 	seal := r.Form.Get("seal") == "true"
-	biscuitData, biscuitExpiry, _, _, status, err := s.mintDelegatedBiscuitFromJWT(r.Context(), entry.SubjectJWT, actorPeerID, entry.TAR, seal, 0)
+	biscuitData, biscuitExpiry, _, _, status, err := s.mintDelegatedBiscuitFromJWT(r.Context(), entry.SubjectJWT, actorPeerID, entry.TAR, seal, 0, false)
 	if err != nil {
 		writeOAuthError(w, status, "invalid_grant", err.Error())
 		return
@@ -1357,6 +1638,10 @@ func (s *Server) handleOAuthTokenExchangeGrant(w http.ResponseWriter, r *http.Re
 			writeOAuthError(w, http.StatusUnauthorized, "invalid_grant", "Invalid subject biscuit: "+err.Error())
 			return
 		}
+		if status, revErr := s.checkBiscuitRevocationAndBans(r.Context(), claims); revErr != nil {
+			writeOAuthError(w, status, "invalid_grant", revErr.Error())
+			return
+		}
 		biscuitData = rawBiscuit
 		biscuitExpiry = claims.Expiration
 		if tarRule != nil {
@@ -1375,13 +1660,14 @@ func (s *Server) handleOAuthTokenExchangeGrant(w http.ResponseWriter, r *http.Re
 			}
 		}
 	} else {
+		admitted := s.admittedNode(r)
 		actorPeerID, err := s.resolveDefaultActorPeer(r.Context(), r)
 		if err != nil {
 			writeOAuthError(w, http.StatusBadRequest, "invalid_request", "Could not resolve actor peer_id: "+err.Error())
 			return
 		}
 		var status int
-		biscuitData, biscuitExpiry, _, _, status, err = s.mintDelegatedBiscuitFromJWT(r.Context(), subjectToken, actorPeerID, tarRule, seal, reqTTL)
+		biscuitData, biscuitExpiry, _, _, status, err = s.mintDelegatedBiscuitFromJWT(r.Context(), subjectToken, actorPeerID, tarRule, seal, reqTTL, admitted != nil)
 		if err != nil {
 			writeOAuthError(w, status, "invalid_grant", err.Error())
 			return

@@ -486,6 +486,39 @@ var migrations = []migration{
 			`ALTER TABLE egress_destinations ADD COLUMN config_json TEXT DEFAULT '' NOT NULL`,
 		},
 	},
+	{
+		// Persist OIDC ES256 signing keys and root Biscuit revocation IDs so
+		// multi-replica control planes and restarts preserve JWKS and revocations.
+		version: 14,
+		postgres: []string{
+			`CREATE TABLE IF NOT EXISTS oidc_keyring (
+				id SERIAL PRIMARY KEY,
+				kid VARCHAR(64) NOT NULL UNIQUE,
+				private_key BYTEA NOT NULL,
+				public_key BYTEA NOT NULL UNIQUE,
+				expiration BIGINT,
+				created_at BIGINT NOT NULL
+			)`,
+			`CREATE TABLE IF NOT EXISTS revoked_biscuits (
+				revocation_id VARCHAR(255) PRIMARY KEY,
+				expires_at BIGINT NOT NULL
+			)`,
+		},
+		sqlite: []string{
+			`CREATE TABLE IF NOT EXISTS oidc_keyring (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				kid TEXT NOT NULL UNIQUE,
+				private_key BLOB NOT NULL,
+				public_key BLOB NOT NULL UNIQUE,
+				expiration BIGINT,
+				created_at BIGINT NOT NULL
+			)`,
+			`CREATE TABLE IF NOT EXISTS revoked_biscuits (
+				revocation_id TEXT PRIMARY KEY,
+				expires_at BIGINT NOT NULL
+			)`,
+		},
+	},
 }
 
 func (s *SQLStore) initSchema() error {
@@ -1730,6 +1763,164 @@ func (s *SQLStore) ListUsers(ctx context.Context) ([]User, error) {
 		return nil, err
 	}
 	return users, nil
+}
+
+// GetCurrentOIDCKey implements Store.
+func (s *SQLStore) GetCurrentOIDCKey(ctx context.Context) (*OIDCKeyPair, error) {
+	query := s.rebind(`SELECT kid, private_key, public_key FROM oidc_keyring WHERE expiration IS NULL ORDER BY id DESC LIMIT 1`)
+	var kid string
+	var privBytes, pubBytes []byte
+	err := s.db.QueryRowContext(ctx, query).Scan(&kid, &privBytes, &pubBytes)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &OIDCKeyPair{
+		Kid:        kid,
+		PrivateKey: privBytes,
+		PublicKey:  pubBytes,
+	}, nil
+}
+
+// GetAllValidOIDCKeys implements Store.
+func (s *SQLStore) GetAllValidOIDCKeys(ctx context.Context) ([]OIDCKeyPair, error) {
+	query := s.rebind(`SELECT kid, private_key, public_key, expiration FROM oidc_keyring WHERE expiration IS NULL OR expiration > ? ORDER BY id DESC`)
+	rows, err := s.db.QueryContext(ctx, query, time.Now().UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var keys []OIDCKeyPair
+	for rows.Next() {
+		var kid string
+		var priv, pub []byte
+		var exp sql.NullInt64
+		if err := rows.Scan(&kid, &priv, &pub, &exp); err != nil {
+			return nil, err
+		}
+		var expiration time.Time
+		if exp.Valid {
+			expiration = time.UnixMilli(exp.Int64)
+		}
+		privCopy := make([]byte, len(priv))
+		copy(privCopy, priv)
+		pubCopy := make([]byte, len(pub))
+		copy(pubCopy, pub)
+		keys = append(keys, OIDCKeyPair{
+			Kid:        kid,
+			PrivateKey: privCopy,
+			PublicKey:  pubCopy,
+			Expiration: expiration,
+		})
+	}
+	return keys, rows.Err()
+}
+
+// SaveInitialOIDCKey implements Store.
+func (s *SQLStore) SaveInitialOIDCKey(ctx context.Context, kid string, priv, pub []byte) error {
+	var query string
+	if s.isPostgres() {
+		query = s.rebind(`INSERT INTO oidc_keyring (kid, private_key, public_key, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (kid) DO NOTHING`)
+	} else {
+		query = s.rebind(`INSERT OR IGNORE INTO oidc_keyring (kid, private_key, public_key, created_at) VALUES (?, ?, ?, ?)`)
+	}
+	_, err := s.db.ExecContext(ctx, query, kid, priv, pub, time.Now().UnixMilli())
+	return err
+}
+
+// RotateOIDCKeys implements Store.
+func (s *SQLStore) RotateOIDCKeys(ctx context.Context, kid string, newPriv, newPub []byte, gracePeriod time.Duration) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	now := time.Now()
+	if gracePeriod > 0 {
+		expireTime := now.Add(gracePeriod)
+		updateQuery := s.rebind(`UPDATE oidc_keyring SET expiration = ? WHERE expiration IS NULL`)
+		if _, err := tx.ExecContext(ctx, updateQuery, expireTime.UnixMilli()); err != nil {
+			return err
+		}
+	} else {
+		deleteActiveQuery := s.rebind(`DELETE FROM oidc_keyring WHERE expiration IS NULL`)
+		if _, err := tx.ExecContext(ctx, deleteActiveQuery); err != nil {
+			return err
+		}
+	}
+
+	insertQuery := s.rebind(`INSERT INTO oidc_keyring (kid, private_key, public_key, created_at) VALUES (?, ?, ?, ?)`)
+	if _, err := tx.ExecContext(ctx, insertQuery, kid, newPriv, newPub, now.UnixMilli()); err != nil {
+		return err
+	}
+
+	deleteQuery := s.rebind(`DELETE FROM oidc_keyring WHERE expiration IS NOT NULL AND expiration <= ?`)
+	if _, err := tx.ExecContext(ctx, deleteQuery, now.UnixMilli()); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// SaveRevokedBiscuit implements Store.
+func (s *SQLStore) SaveRevokedBiscuit(ctx context.Context, revocationID string, expiresAt time.Time) error {
+	if revocationID == "" {
+		return nil
+	}
+	var query string
+	if s.isPostgres() {
+		query = s.rebind(`INSERT INTO revoked_biscuits (revocation_id, expires_at) VALUES (?, ?) ON CONFLICT (revocation_id) DO UPDATE SET expires_at = EXCLUDED.expires_at`)
+	} else {
+		query = s.rebind(`INSERT INTO revoked_biscuits (revocation_id, expires_at) VALUES (?, ?) ON CONFLICT (revocation_id) DO UPDATE SET expires_at = excluded.expires_at`)
+	}
+	_, err := s.db.ExecContext(ctx, query, revocationID, expiresAt.UnixMilli())
+	return err
+}
+
+// ListRevokedBiscuits implements Store.
+func (s *SQLStore) ListRevokedBiscuits(ctx context.Context, now time.Time) (map[string]time.Time, error) {
+	nowMs := now.UnixMilli()
+	pruneQuery := s.rebind(`DELETE FROM revoked_biscuits WHERE expires_at <= ?`)
+	_, _ = s.db.ExecContext(ctx, pruneQuery, nowMs)
+
+	query := s.rebind(`SELECT revocation_id, expires_at FROM revoked_biscuits WHERE expires_at > ?`)
+	rows, err := s.db.QueryContext(ctx, query, nowMs)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	res := make(map[string]time.Time)
+	for rows.Next() {
+		var revID string
+		var expMs int64
+		if err := rows.Scan(&revID, &expMs); err != nil {
+			return nil, err
+		}
+		res[revID] = time.UnixMilli(expMs)
+	}
+	return res, rows.Err()
+}
+
+// IsBiscuitRevoked implements Store.
+func (s *SQLStore) IsBiscuitRevoked(ctx context.Context, revocationID string, now time.Time) (bool, error) {
+	if revocationID == "" {
+		return false, nil
+	}
+	query := s.rebind(`SELECT 1 FROM revoked_biscuits WHERE revocation_id = ? AND expires_at > ? LIMIT 1`)
+	var one int
+	err := s.db.QueryRowContext(ctx, query, revocationID, now.UnixMilli()).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Ping implements Store.

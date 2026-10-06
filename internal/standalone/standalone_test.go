@@ -183,6 +183,29 @@ func TestPrependInferredRouterAddr(t *testing.T) {
 	if len(enrollOut.RouterAddresses) != 2 || enrollOut.RouterAddresses[0] != inferred || enrollOut.RouterAddresses[1] != local {
 		t.Fatalf("BootstrapEnrollResponse.RouterAddresses = %v, want [%s %s]", enrollOut.RouterAddresses, inferred, local)
 	}
+
+	regIn, _ := proto.Marshal(&api.EnrollResponse{
+		BiscuitToken:    []byte("tok"),
+		RouterAddresses: []string{local},
+	})
+	regOutBytes, ok := prependInferredRouterAddr("/register", regIn, inferred)
+	if !ok {
+		t.Fatal("prependInferredRouterAddr(/register) returned false")
+	}
+	var regOut api.EnrollResponse
+	if err := proto.Unmarshal(regOutBytes, &regOut); err != nil {
+		t.Fatalf("Unmarshal EnrollResponse: %v", err)
+	}
+	if len(regOut.RouterAddresses) != 2 || regOut.RouterAddresses[0] != inferred || regOut.RouterAddresses[1] != local {
+		t.Fatalf("EnrollResponse.RouterAddresses = %v, want [%s %s]", regOut.RouterAddresses, inferred, local)
+	}
+
+	if returnsRouterAddresses("/refresh") {
+		t.Fatal("returnsRouterAddresses(/refresh) = true, want false")
+	}
+	if !returnsRouterAddresses("/register") {
+		t.Fatal("returnsRouterAddresses(/register) = false, want true")
+	}
 }
 
 func TestResponseRecorder(t *testing.T) {

@@ -33,9 +33,10 @@ from libp2p.connection_types import ConnectionType
 from libp2p.custom_types import TProtocol
 from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.peer.id import ID
-from libp2p.utils.varint import encode_varint_prefixed, read_varint_prefixed_bytes
+from libp2p.utils.varint import encode_varint_prefixed
 
 from ._proto import circuit_pb2 as circuit
+from .auth import read_bounded_varint_prefixed_bytes
 from .host import DIAL_TIMEOUT, HANGUP_GRACE, open_stream
 from .identity import canonical_peer_id
 
@@ -45,6 +46,7 @@ HOP_PROTOCOL = TProtocol("/libp2p/circuit/relay/0.2.0/hop")
 STOP_PROTOCOL = TProtocol("/libp2p/circuit/relay/0.2.0/stop")
 
 RELAY_MESSAGE_TIMEOUT = 10.0
+MAX_RELAY_MESSAGE_BYTES = 64 * 1024
 
 
 def split_circuit_address(addr: multiaddr.Multiaddr) -> tuple[multiaddr.Multiaddr, ID]:
@@ -68,7 +70,7 @@ async def reserve_relay(host: IHost, relay_peer_id: ID) -> circuit.Reservation:
         with trio.fail_after(RELAY_MESSAGE_TIMEOUT):
             req = circuit.HopMessage(type=circuit.HopMessage.RESERVE)
             await stream.write(encode_varint_prefixed(req.SerializeToString()))
-            resp = circuit.HopMessage.FromString(await read_varint_prefixed_bytes(stream))
+            resp = circuit.HopMessage.FromString(await read_bounded_varint_prefixed_bytes(stream, MAX_RELAY_MESSAGE_BYTES))
     finally:
         await stream.close()
     if resp.type != circuit.HopMessage.STATUS:
@@ -92,7 +94,7 @@ async def dial_through_relay(host: IHost, relay_peer_id: ID, target: ID) -> INet
         with trio.fail_after(RELAY_MESSAGE_TIMEOUT):
             req = circuit.HopMessage(type=circuit.HopMessage.CONNECT, peer=circuit.Peer(id=target.to_bytes()))
             await stream.write(encode_varint_prefixed(req.SerializeToString()))
-            resp = circuit.HopMessage.FromString(await read_varint_prefixed_bytes(stream))
+            resp = circuit.HopMessage.FromString(await read_bounded_varint_prefixed_bytes(stream, MAX_RELAY_MESSAGE_BYTES))
         if resp.type != circuit.HopMessage.STATUS or resp.status != circuit.OK:
             raise RuntimeError(
                 f"relay {relay_peer_id} refused to connect to {target}: {circuit.Status.Name(resp.status) if resp.status else resp.type}"
@@ -127,7 +129,7 @@ def stop_stream_handler(host: IHost) -> Callable[[INetStream], object]:
         relay_peer_id = stream.muxed_conn.peer_id
         try:
             with trio.fail_after(RELAY_MESSAGE_TIMEOUT):
-                msg = circuit.StopMessage.FromString(await read_varint_prefixed_bytes(stream))
+                msg = circuit.StopMessage.FromString(await read_bounded_varint_prefixed_bytes(stream, MAX_RELAY_MESSAGE_BYTES))
                 if msg.type != circuit.StopMessage.CONNECT:
                     await stream.write(
                         encode_varint_prefixed(circuit.StopMessage(type=circuit.StopMessage.STATUS, status=circuit.UNEXPECTED_MESSAGE).SerializeToString())

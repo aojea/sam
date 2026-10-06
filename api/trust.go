@@ -110,8 +110,8 @@ func VerifyKeysResponse(resp *KeysResponse, trusted []ed25519.PublicKey, now tim
 	if len(resp.Signatures) != len(resp.PublicKeys) {
 		return nil, fmt.Errorf("keys response carries %d signatures for %d keys", len(resp.Signatures), len(resp.PublicKeys))
 	}
-	if resp.SignTime == nil {
-		return nil, errors.New("keys response carries no sign_time")
+	if resp.SignTime == nil || !resp.SignTime.IsValid() || resp.SignTime.AsTime().Unix() <= 0 {
+		return nil, errors.New("keys response carries missing or invalid sign_time")
 	}
 	issued := resp.SignTime.AsTime()
 	if now.Sub(issued) > KeysResponseFreshness || issued.Sub(now) > KeysResponseFreshness {
@@ -125,7 +125,7 @@ func VerifyKeysResponse(resp *KeysResponse, trusted []ed25519.PublicKey, now tim
 	verified := false
 	for i, kb := range resp.PublicKeys {
 		if len(kb) != ed25519.PublicKeySize {
-			continue
+			return nil, fmt.Errorf("keys response public_keys[%d] has invalid length %d", i, len(kb))
 		}
 		pub := ed25519.PublicKey(kb)
 		keys = append(keys, pub)

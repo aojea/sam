@@ -202,7 +202,7 @@ export function verifyKeysResponse(resp: KeysResponse, trusted: Uint8Array[], no
   let verified = false;
   resp.publicKeys.forEach((pub, i) => {
     if (pub.length !== ED25519_PUBLIC_KEY_SIZE) {
-      return;
+      throw new Error(`keys response key ${i} has invalid size ${pub.length} (expected ${ED25519_PUBLIC_KEY_SIZE})`);
     }
     keys.push(pub);
     if (verified) {
@@ -268,7 +268,7 @@ export class ControlPlaneClient {
    */
   async keys(trusted: Uint8Array[]): Promise<Uint8Array[]> {
     const body = await this.#request("GET", "/keys");
-    return verifyKeysResponse(fromBinary(KeysResponseSchema, body), trusted);
+    return verifyKeysResponse(fromBinary(KeysResponseSchema, body), trusted, this.#now());
   }
 
   /**

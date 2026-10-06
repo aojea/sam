@@ -224,6 +224,7 @@ func StartNode(configJSON string) error {
 		AutoRelayMinInterval: 30 * time.Second,
 		AutoRelayBootDelay:   0 * time.Second,
 		AutoRelayBackoff:     3 * time.Second,
+		RequiredRole:         api.RoleNode,
 	})
 	if err != nil {
 		_ = store.Close()

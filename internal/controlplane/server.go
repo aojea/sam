@@ -163,7 +163,7 @@ func NewServer(config Options, store storage.Store) (*Server, error) {
 	signer := config.OIDCSigner
 	if signer == nil {
 		var err error
-		signer, err = NewLocalES256Signer()
+		signer, err = NewLocalES256SignerWithStore(store)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize OIDC signer: %w", err)
 		}
@@ -531,6 +531,9 @@ func (s *Server) runKeyRotationLoop() {
 				}
 			} else {
 				logger.Infof("Key rotation committed. New current public key: %s", hex.EncodeToString(newPub))
+				if _, oidcErr := s.RotateOIDCKey(s.config.KeyGracePeriod); oidcErr != nil {
+					logger.Warnf("Failed to rotate OIDC signing key: %v", oidcErr)
+				}
 				if err := s.getMeshAdapter().PublishEvent(s.ctx, api.MeshEvent_KEY_ROTATION, "", newPub); err != nil {
 					logger.Warnf("Failed to publish KEY_ROTATION event to mesh: %v", err)
 				}
@@ -839,6 +842,18 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var ownerID string
+	if !s.isWorkloadClaims(claims) {
+		if sub, _ := claims["sub"].(string); sub != "" {
+			if u, uErr := s.store.GetUser(ctx, sub); uErr == nil && u != nil {
+				iss, _ := claims["iss"].(string)
+				if u.Issuer == "" || iss == "" || u.Issuer == iss {
+					ownerID = u.ID
+				}
+			}
+		}
+	}
+
 	nodeRecord := &storage.EnrolledNode{
 		PeerID:         canonical,
 		PublicKey:      req.PublicKey,
@@ -846,6 +861,7 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		Role:           primaryRole,
 		EnrollmentType: "OIDC",
 		ClaimsJSON:     string(claimsBytes),
+		OwnerID:        ownerID,
 		Labels:         req.Labels,
 		EnrolledAt:     time.Now(),
 		ExpiresAt:      sessionExpiresAt,
@@ -1089,6 +1105,38 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		}
 		nodeRecord.ClaimsJSON = string(claimsBytes)
 		nodeRecord.ExpiresAt = time.Now().Add(s.sessionTTLForClaims(freshClaims))
+	} else if nodeRecord.ClaimsJSON != "" {
+		var storedClaims jwt.MapClaims
+		if err := json.Unmarshal([]byte(nodeRecord.ClaimsJSON), &storedClaims); err != nil {
+			logger.Errorf("Failed to unmarshal stored OIDC claims for node %s: %v", nodeRecord.PeerID, err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		if storedKey := oidcIdentityKey(storedClaims); storedKey != "" {
+			if banned, err := s.store.IsIdentityBanned(ctx, storedKey); err != nil {
+				logger.Errorf("Failed to check identity ban for %s: %v", canonical, err)
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return
+			} else if banned {
+				logger.Warnw("Banned identity attempted refresh without JWT", "peer_id", canonical, "identity", storedKey)
+				http.Error(w, "Identity is banned", http.StatusForbidden)
+				return
+			}
+		}
+	}
+
+	if nodeRecord.OwnerID != "" {
+		if owner, uErr := s.store.GetUser(ctx, nodeRecord.OwnerID); uErr == nil && owner != nil && owner.Issuer != "" {
+			if banned, bErr := s.store.IsIdentityBanned(ctx, owner.IdentityKey()); bErr != nil {
+				logger.Errorf("Failed to check owner ban for %s: %v", canonical, bErr)
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return
+			} else if banned {
+				logger.Warnw("Node owned by banned user attempted refresh", "peer_id", canonical, "owner_id", nodeRecord.OwnerID)
+				http.Error(w, "Node owner is banned", http.StatusForbidden)
+				return
+			}
+		}
 	}
 
 	// Fetch current signing private key and policy config
@@ -1140,6 +1188,7 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 
 		finalRoles := []string{nodeRecord.Role}
 		finalRoles = append(finalRoles, customAccessRoles...)
+		nodeRecord.Labels = filterAllowedLabels(allowedLabelPatterns(finalRoles, policyRoles), nodeRecord.Labels)
 
 		bBytes, _, err := identity.MintBiscuitToken(privKey, claims, nil, pID, biscuitExpiry, finalRoles, policyRoles, nodeRecord.Labels)
 		if err != nil {
@@ -1150,6 +1199,8 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		biscuitBytes = bBytes
 	} else {
 		// Bootstrap node
+		finalRoles, _ := nodeRoles(nodeRecord, bindings)
+		nodeRecord.Labels = filterAllowedLabels(allowedLabelPatterns(finalRoles, policyRoles), nodeRecord.Labels)
 		bBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, nodeRecord.Role, biscuitExpiry, policyRoles, nodeRecord.Labels)
 		if err != nil {
 			logger.Errorf("Failed to mint refreshed token for node %s: %v", nodeRecord.PeerID, err)
@@ -1418,7 +1469,13 @@ func (s *Server) HandlePolicies(w http.ResponseWriter, r *http.Request) {
 		defer func() { _ = r.Body.Close() }()
 
 		req := &api.PolicyConfig{}
-		isJSON := strings.HasPrefix(r.Header.Get("Content-Type"), "application/json")
+		ct := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
+		isJSON := strings.HasPrefix(ct, "application/json")
+		isProto := strings.HasPrefix(ct, "application/x-protobuf") || strings.HasPrefix(ct, "application/protobuf")
+		if !isJSON && !isProto {
+			http.Error(w, "Unsupported Content-Type: must be application/json or application/x-protobuf", http.StatusUnsupportedMediaType)
+			return
+		}
 		if isJSON {
 			// Strict: an unknown field here is a typo like "allowed_service", and
 			// discarding it would quietly drop the permission it was meant to grant.
@@ -1620,12 +1677,11 @@ func (s *Server) HandleEgress(w http.ResponseWriter, r *http.Request) {
 // role plus the custom roles its identity resolves to, from the bindings.
 func nodeRoles(nodeRecord *storage.EnrolledNode, bindings []*api.PolicyBinding) ([]string, error) {
 	roles := []string{nodeRecord.Role}
-	if nodeRecord.EnrollmentType != "OIDC" {
-		return roles, nil
-	}
 	var claims jwt.MapClaims
-	if err := json.Unmarshal([]byte(nodeRecord.ClaimsJSON), &claims); err != nil {
-		return nil, err
+	if nodeRecord.EnrollmentType == "OIDC" && nodeRecord.ClaimsJSON != "" {
+		if err := json.Unmarshal([]byte(nodeRecord.ClaimsJSON), &claims); err != nil {
+			return nil, err
+		}
 	}
 	for _, r := range resolveRoles(nodeRecord.PeerID, claims, bindings) {
 		if !strings.HasPrefix(r, "sam:role:") && r != nodeRecord.Role {
@@ -1633,6 +1689,21 @@ func nodeRoles(nodeRecord *storage.EnrolledNode, bindings []*api.PolicyBinding) 
 		}
 	}
 	return roles, nil
+}
+
+func (s *Server) nodeRoles(ctx context.Context, nodeRecord *storage.EnrolledNode) []string {
+	if nodeRecord == nil {
+		return nil
+	}
+	_, bindings, err := s.store.GetMeshPolicy(ctx)
+	if err != nil {
+		return []string{nodeRecord.Role}
+	}
+	roles, err := nodeRoles(nodeRecord, bindings)
+	if err != nil {
+		return []string{nodeRecord.Role}
+	}
+	return roles
 }
 
 // HandleAdminPolicy HTTP GET `/admin/policy`: the mesh policy as the operator
@@ -2413,6 +2484,10 @@ func (s *Server) HandleAdminEnrollments(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
+	for i := range list {
+		list[i].BiscuitToken = nil
+		list[i].PublicKey = nil
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -2811,7 +2886,8 @@ func (s *Server) remintApprovedBootstrapBiscuit(ctx context.Context, existingReq
 	}
 
 	biscuitExpiry := time.Now().Add(s.config.BiscuitTTL)
-	biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, nodeRecord.Role, biscuitExpiry, policyRoles, nodeRecord.Labels)
+	allowedLabels := filterAllowedLabels(allowedLabelPatterns(s.nodeRoles(ctx, nodeRecord), policyRoles), nodeRecord.Labels)
+	biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, nodeRecord.Role, biscuitExpiry, policyRoles, allowedLabels)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to mint refreshed bootstrap biscuit: %w", err)
 	}
@@ -2937,16 +3013,22 @@ func (s *Server) HandleUserStatus(w http.ResponseWriter, r *http.Request) {
 		roles, bindings, err := s.store.GetMeshPolicy(ctx)
 		if err != nil && err != storage.ErrNotFound {
 			logger.Errorf("Failed to list policy: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
 		}
 		egress, err := s.store.GetEgressDestinations(ctx)
 		if err != nil && err != storage.ErrNotFound {
 			logger.Errorf("Failed to list egress destinations: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
 		}
-		if rendered, err := marshalPolicyJSON(roles, bindings, egress); err == nil {
-			resp["policy_json"] = rendered
-		} else {
+		rendered, err := marshalPolicyJSON(roles, bindings, egress)
+		if err != nil {
 			logger.Errorf("Failed to render policy: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
 		}
+		resp["policy_json"] = rendered
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -3230,6 +3312,25 @@ func allowedLabelPatterns(roles []string, policyRoles []*api.PolicyRole) []strin
 	return patterns
 }
 
+// filterAllowedLabels returns the subset of labels that are still permitted by
+// patterns. On /refresh, labels declared at enrollment time whose grant has
+// since been removed from the policy are dropped from the re-minted Biscuit.
+func filterAllowedLabels(patterns []string, labels map[string]string) map[string]string {
+	if len(labels) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(labels))
+	for k, v := range labels {
+		if api.LabelPatternsAllow(patterns, map[string]string{k: v}) == nil {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func resolveRoles(peerID string, claims jwt.MapClaims, bindings []*api.PolicyBinding) []string {
 	if claims == nil {
 		claims = make(jwt.MapClaims)
@@ -3361,10 +3462,8 @@ func validatePolicyConfig(req *api.PolicyConfig) error {
 				return fmt.Errorf("in role %s: %w", r.Name, err)
 			}
 		}
-		for _, g := range r.Http {
-			if err := api.ValidateHTTPGrant(g, r.AllowedServices); err != nil {
-				return fmt.Errorf("in role %s: %w", r.Name, err)
-			}
+		if err := api.ValidateHTTPGrants(r.Http, r.AllowedServices); err != nil {
+			return fmt.Errorf("in role %s: %w", r.Name, err)
 		}
 		for _, dl := range r.CustomDatalog {
 			trimmed := strings.TrimRight(strings.TrimSpace(dl), ";")

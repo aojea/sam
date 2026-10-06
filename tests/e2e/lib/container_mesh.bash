@@ -525,9 +525,11 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local mount_args=()
     local config_args=()
     if [[ -n "${config_path}" ]]; then
-      local abs_config
-      abs_config=$(realpath "${config_path}")
-      mount_args+=(-v "${abs_config}:/etc/sam/node-config.yaml:ro")
+      chmod 0755 "${MESH_SOCKET_DIR}"
+      local staged_config="${MESH_SOCKET_DIR}/node-${idx}-config.yaml"
+      cp "${config_path}" "${staged_config}"
+      chmod 0644 "${staged_config}"
+      mount_args+=(-v "${staged_config}:/etc/sam/node-config.yaml:ro")
       config_args+=(--config /etc/sam/node-config.yaml)
     fi
 

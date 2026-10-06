@@ -402,8 +402,8 @@ inspector never sees destination credentials:
    `Proxy-Status` and applying Sensitive Data Protection de-identification
    replacements.
 3. Envoy `ext_proc` callouts (`ext_proc`) stream headers, bodies, and trailers
-   over standard-library HTTP/2 gRPC (using trimmed protos vendored under
-   `third_party/envoy/` with zero extra root `go.mod` dependencies) with
+   over gRPC (`internal/envoy`, backed by `google.golang.org/grpc` and
+   `github.com/envoyproxy/go-control-plane/envoy`) with
    `ProcessingRequest.attributes["sam"]` populated (`principal`, `roles`,
    `actor_node`, `task`, `service`, `destination`). Any mutation to
    `Authorization`, `Host`, `:authority`, or `X-Sam-*` by the processor is

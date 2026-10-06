@@ -18,6 +18,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/google/sam/internal/storage"
 )
 
 // HandleAdminStatus returns a consolidated JSON state of the control plane.
@@ -53,6 +55,10 @@ func (s *Server) HandleAdminStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
+	for i := range reqs {
+		reqs[i].BiscuitToken = nil
+		reqs[i].PublicKey = nil
+	}
 
 	tokens, err := s.store.ListBootstrapTokens(ctx)
 	if err != nil {
@@ -69,19 +75,23 @@ func (s *Server) HandleAdminStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	roles, bindings, err := s.store.GetMeshPolicy(r.Context())
-	if err != nil {
+	if err != nil && err != storage.ErrNotFound {
 		logger.Errorf("Failed to list policy: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
 	}
 	egress, err := s.store.GetEgressDestinations(r.Context())
-	if err != nil {
+	if err != nil && err != storage.ErrNotFound {
 		logger.Errorf("Failed to list egress destinations: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
 	}
 
-	var policyJSON string
-	if rendered, err := marshalPolicyJSON(roles, bindings, egress); err == nil {
-		policyJSON = rendered
-	} else {
+	policyJSON, err := marshalPolicyJSON(roles, bindings, egress)
+	if err != nil {
 		logger.Errorf("Failed to render policy: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
 	}
 
 	resp := map[string]any{

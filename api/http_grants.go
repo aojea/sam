@@ -73,6 +73,9 @@ func ValidateHTTPGrant(g *HTTPGrant, allowedServices []string) error {
 		if !httpMethodSyntax.MatchString(m) {
 			return fmt.Errorf("http entry %q: method %q must be an uppercase HTTP method such as \"GET\"", g.GetService(), m)
 		}
+		if m == "CONNECT" {
+			return fmt.Errorf("http entry %q: method %q is not an HTTP request method; use EGRESS_MODE_TCP for tunnels", g.GetService(), m)
+		}
 	}
 	for _, p := range g.GetPaths() {
 		if err := validateHTTPGrantPath(p); err != nil {
@@ -80,6 +83,41 @@ func ValidateHTTPGrant(g *HTTPGrant, allowedServices []string) error {
 		}
 	}
 	return nil
+}
+
+// ValidateHTTPGrants validates all PolicyRole.http entries for a single role,
+// ensuring each entry is valid and no two entries narrow the same service
+// (which would otherwise combine their method and path facts across grants).
+func ValidateHTTPGrants(grants []*HTTPGrant, allowedServices []string) error {
+	seen := make(map[string]bool, len(grants))
+	for _, g := range grants {
+		if err := ValidateHTTPGrant(g, allowedServices); err != nil {
+			return err
+		}
+		if seen[g.GetService()] {
+			return fmt.Errorf("duplicate http entry for service %q; combine methods and paths into a single entry", g.GetService())
+		}
+		seen[g.GetService()] = true
+	}
+	return nil
+}
+
+// hasEncodedPathTraversal reports whether p contains URL-encoded dot or slash
+// sequences (%2e, %2f, %5c, case-insensitive) or ASCII control characters.
+func hasEncodedPathTraversal(p string) bool {
+	for i := 0; i < len(p); i++ {
+		c := p[i]
+		if c < 0x20 || c == 0x7f || c == '\\' {
+			return true
+		}
+		if c == '%' && i+2 < len(p) {
+			hex := strings.ToLower(p[i+1 : i+3])
+			if hex == "2e" || hex == "2f" || hex == "5c" || hex == "00" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // validateHTTPGrantPath accepts "/exact" or "/prefix/*". The path is matched
@@ -91,6 +129,9 @@ func validateHTTPGrantPath(p string) error {
 	}
 	if strings.ContainsAny(p, "?#") {
 		return fmt.Errorf("path %q must not carry a query or a fragment", p)
+	}
+	if hasEncodedPathTraversal(p) {
+		return fmt.Errorf("path %q must not contain encoded traversal sequences or control characters", p)
 	}
 	trimmed := strings.TrimSuffix(p, "*")
 	if strings.Contains(trimmed, "*") {

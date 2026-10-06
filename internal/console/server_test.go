@@ -591,3 +591,82 @@ func TestNormalizeBasePath(t *testing.T) {
 		}
 	}
 }
+
+func TestConsoleCSRFAndSecurityHeaders(t *testing.T) {
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/info" {
+			data, _ := proto.Marshal(&api.ControlPlaneInfoResponse{})
+			w.Header().Set("Content-Type", "application/x-protobuf")
+			_, _ = w.Write(data)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer controlPlane.Close()
+
+	srv, err := NewServer(Config{
+		ControlPlaneURL: controlPlane.URL,
+		AdminToken:      "test-admin-token",
+		StaticFS:        EmbeddedAssets(),
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	console := httptest.NewServer(srv.Handler())
+	defer console.Close()
+
+	// 1. Check anti-clickjacking headers on GET /
+	getResp, err := http.Get(console.URL + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	_ = getResp.Body.Close()
+	if got := getResp.Header.Get("X-Frame-Options"); got != "DENY" {
+		t.Errorf("X-Frame-Options = %q, want DENY", got)
+	}
+	if got := getResp.Header.Get("Content-Security-Policy"); got != "frame-ancestors 'none'" {
+		t.Errorf("Content-Security-Policy = %q, want frame-ancestors 'none'", got)
+	}
+
+	// 2. Cross-origin cookie-authenticated POST /api/policies must be rejected with 403
+	crossReq, _ := http.NewRequest(http.MethodPost, console.URL+"/api/policies", strings.NewReader(`{}`))
+	crossReq.Header.Set("Content-Type", "application/json")
+	crossReq.Header.Set("Origin", "https://evil.example.com")
+	crossReq.AddCookie(&http.Cookie{Name: "sam_session", Value: "test-admin-token"})
+	crossResp, err := http.DefaultClient.Do(crossReq)
+	if err != nil {
+		t.Fatalf("POST /api/policies: %v", err)
+	}
+	_ = crossResp.Body.Close()
+	if crossResp.StatusCode != http.StatusForbidden {
+		t.Errorf("cross-origin POST /api/policies got %d, want 403", crossResp.StatusCode)
+	}
+
+	// 3. HTML form Content-Type on cookie-authenticated POST /api/* must be rejected with 415
+	formReq, _ := http.NewRequest(http.MethodPost, console.URL+"/api/admin/enrollments/123/approve", strings.NewReader("a=b"))
+	formReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	formReq.AddCookie(&http.Cookie{Name: "sam_session", Value: "test-admin-token"})
+	formResp, err := http.DefaultClient.Do(formReq)
+	if err != nil {
+		t.Fatalf("POST /api/admin/enrollments/123/approve: %v", err)
+	}
+	_ = formResp.Body.Close()
+	if formResp.StatusCode != http.StatusUnsupportedMediaType {
+		t.Errorf("form POST /api/* got %d, want 415", formResp.StatusCode)
+	}
+
+	// 4. Same-origin JSON POST /api/policies succeeds
+	sameReq, _ := http.NewRequest(http.MethodPost, console.URL+"/api/policies", strings.NewReader(`{}`))
+	sameReq.Header.Set("Content-Type", "application/json")
+	sameReq.Header.Set("Origin", console.URL)
+	sameReq.Header.Set("Sec-Fetch-Site", "same-origin")
+	sameReq.AddCookie(&http.Cookie{Name: "sam_session", Value: "test-admin-token"})
+	sameResp, err := http.DefaultClient.Do(sameReq)
+	if err != nil {
+		t.Fatalf("same-origin POST /api/policies: %v", err)
+	}
+	_ = sameResp.Body.Close()
+	if sameResp.StatusCode != http.StatusOK {
+		t.Errorf("same-origin POST /api/policies got %d, want 200", sameResp.StatusCode)
+	}
+}

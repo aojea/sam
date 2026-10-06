@@ -56,18 +56,7 @@ func StartSidecarServer(node *SamNode, addr, socketPath, token, certFile, keyFil
 	mux.HandleFunc("/oauth/revoke", func(w http.ResponseWriter, r *http.Request) {
 		handleNodeOAuthRevoke(node, token, w, r)
 	})
-	mux.HandleFunc("/ext_authz", func(w http.ResponseWriter, r *http.Request) {
-		handleExtAuthzHTTP(node, w, r)
-	})
-	mux.HandleFunc("/ext_authz/", func(w http.ResponseWriter, r *http.Request) {
-		handleExtAuthzHTTP(node, w, r)
-	})
-	mux.HandleFunc("/envoy.service.auth.v3.Authorization/Check", func(w http.ResponseWriter, r *http.Request) {
-		handleExtAuthzGRPC(node, w, r)
-	})
-	mux.HandleFunc("/envoy.service.auth.v2.Authorization/Check", func(w http.ResponseWriter, r *http.Request) {
-		handleExtAuthzGRPC(node, w, r)
-	})
+	newNodeEnvoyGateway(node).RegisterRoutes(mux)
 
 	// Gated like the rest: the labels carry peer IDs and per-peer request counts,
 	// and this mux is reachable by any local process over TCP. Socket callers are
@@ -126,9 +115,6 @@ func StartSidecarServer(node *SamNode, addr, socketPath, token, certFile, keyFil
 
 	// Mount MCP handler
 	mcpHandler := NewMCPHandler(node)
-	mux.Handle(ExtProcMethodPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleGatewayExtProc(node, w, r)
-	}))
 	mux.Handle("/", withCallerOrTokenAuth(node, token, true, withMeshConnection(node, mcpHandler)))
 
 	var protocols http.Protocols
@@ -824,9 +810,10 @@ func createEgressProxy(node *SamNode) http.Handler {
 
 		r.Header.Set(api.HeaderSamBiscuit, base64.StdEncoding.EncodeToString(biscuitBytes))
 
-		// Strip the local sidecar gate header before forwarding off-node; a caller-supplied
+		// Strip the local sidecar gate header and caller cookies before forwarding off-node; a caller-supplied
 		// "Authorization" header passes straight through untouched as the destination's own credential.
 		r.Header.Del(api.HeaderSamAuthentication)
+		r.Header.Del("Cookie")
 
 		if serveEgressLocally(node, transport, w, r) {
 			return

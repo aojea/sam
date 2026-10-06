@@ -271,6 +271,8 @@ func TestValidateHTTPGrant(t *testing.T) {
 		{"query in path", &HTTPGrant{Service: "mcp://tools", Paths: []string{"/user?x=1"}}, "query"},
 		{"wildcard in the middle", &HTTPGrant{Service: "mcp://tools", Paths: []string{"/a/*/b"}}, "only allowed at the end"},
 		{"dot segment", &HTTPGrant{Service: "mcp://tools", Paths: []string{"/a/../b"}}, "dot segment"},
+		{"encoded dot segment", &HTTPGrant{Service: "mcp://tools", Paths: []string{"/a/%2e%2e/b"}}, "encoded traversal"},
+		{"CONNECT method rejected", &HTTPGrant{Service: "egress://api.github.com", Methods: []string{"CONNECT"}}, "not an HTTP request method"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -285,5 +287,16 @@ func TestValidateHTTPGrant(t *testing.T) {
 				t.Fatalf("error = %v, want it to contain %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateHTTPGrantsRejectsDuplicateService(t *testing.T) {
+	allowed := []string{"egress://api.github.com", "mcp://tools"}
+	dup := []*HTTPGrant{
+		{Service: "egress://api.github.com", Methods: []string{"GET"}, Paths: []string{"/repos/*"}},
+		{Service: "egress://api.github.com", Methods: []string{"POST"}, Paths: []string{"/issues/*"}},
+	}
+	if err := ValidateHTTPGrants(dup, allowed); err == nil || !strings.Contains(err.Error(), "duplicate http entry") {
+		t.Fatalf("ValidateHTTPGrants(dup) = %v, want duplicate error", err)
 	}
 }

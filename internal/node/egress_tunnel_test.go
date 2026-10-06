@@ -16,7 +16,6 @@ package node
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -24,7 +23,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/binary"
 	"io"
 	"math/big"
 	"net"
@@ -38,108 +36,6 @@ import (
 
 	"github.com/google/sam/api"
 )
-
-func buildTestTLSClientHelloRecord(sni string, includeECH bool) []byte {
-	var exts bytes.Buffer
-	if sni != "" {
-		hostBytes := []byte(sni)
-		// server_name extension (0x0000)
-		var snList bytes.Buffer
-		snList.WriteByte(0x00) // host_name type
-		_ = binary.Write(&snList, binary.BigEndian, uint16(len(hostBytes)))
-		snList.Write(hostBytes)
-
-		var snExt bytes.Buffer
-		_ = binary.Write(&snExt, binary.BigEndian, uint16(snList.Len()))
-		snExt.Write(snList.Bytes())
-
-		_ = binary.Write(&exts, binary.BigEndian, uint16(tlsExtServerName))
-		_ = binary.Write(&exts, binary.BigEndian, uint16(snExt.Len()))
-		exts.Write(snExt.Bytes())
-	}
-	if includeECH {
-		echPayload := []byte{0x01, 0x02, 0x03, 0x04}
-		_ = binary.Write(&exts, binary.BigEndian, uint16(tlsExtEncryptedClientHello))
-		_ = binary.Write(&exts, binary.BigEndian, uint16(len(echPayload)))
-		exts.Write(echPayload)
-	}
-
-	var body bytes.Buffer
-	// legacy_version TLS 1.2 (0x0303)
-	body.Write([]byte{0x03, 0x03})
-	// random (32 bytes)
-	body.Write(make([]byte, 32))
-	// session_id length (0)
-	body.WriteByte(0x00)
-	// cipher_suites length (2) + TLS_AES_128_GCM_SHA256 (0x1301)
-	body.Write([]byte{0x00, 0x02, 0x13, 0x01})
-	// compression_methods length (1) + null (0x00)
-	body.Write([]byte{0x01, 0x00})
-	if exts.Len() > 0 {
-		_ = binary.Write(&body, binary.BigEndian, uint16(exts.Len()))
-		body.Write(exts.Bytes())
-	}
-
-	var hs bytes.Buffer
-	hs.WriteByte(tlsHandshakeTypeClientHello)
-	hsLen := body.Len()
-	hs.Write([]byte{byte(hsLen >> 16), byte(hsLen >> 8), byte(hsLen)})
-	hs.Write(body.Bytes())
-
-	var rec bytes.Buffer
-	rec.WriteByte(tlsRecordTypeHandshake)
-	rec.Write([]byte{0x03, 0x01})
-	_ = binary.Write(&rec, binary.BigEndian, uint16(hs.Len()))
-	rec.Write(hs.Bytes())
-	return rec.Bytes()
-}
-
-func TestReadAndVerifyTLSClientHello(t *testing.T) {
-	t.Run("matching SNI succeeds and preserves raw record", func(t *testing.T) {
-		raw := buildTestTLSClientHelloRecord("pg.internal.example", false)
-		gotRaw, gotSNI, err := readAndVerifyTLSClientHello(bytes.NewReader(raw), "pg.internal.example")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if gotSNI != "pg.internal.example" {
-			t.Fatalf("got SNI %q, want pg.internal.example", gotSNI)
-		}
-		if !bytes.Equal(gotRaw, raw) {
-			t.Fatalf("returned raw record does not match input bytes")
-		}
-	})
-
-	t.Run("mismatched SNI is rejected", func(t *testing.T) {
-		raw := buildTestTLSClientHelloRecord("evil.internal.example", false)
-		_, _, err := readAndVerifyTLSClientHello(bytes.NewReader(raw), "pg.internal.example")
-		if err == nil || !strings.Contains(err.Error(), "does not match destination") {
-			t.Fatalf("expected SNI mismatch error, got %v", err)
-		}
-	})
-
-	t.Run("missing SNI is rejected", func(t *testing.T) {
-		raw := buildTestTLSClientHelloRecord("", false)
-		_, _, err := readAndVerifyTLSClientHello(bytes.NewReader(raw), "pg.internal.example")
-		if err == nil || !strings.Contains(err.Error(), "missing SNI") {
-			t.Fatalf("expected missing SNI error, got %v", err)
-		}
-	})
-
-	t.Run("Encrypted Client Hello (ECH 0xfe0d) is rejected", func(t *testing.T) {
-		raw := buildTestTLSClientHelloRecord("pg.internal.example", true)
-		_, _, err := readAndVerifyTLSClientHello(bytes.NewReader(raw), "pg.internal.example")
-		if err == nil || !strings.Contains(err.Error(), "Encrypted Client Hello") {
-			t.Fatalf("expected ECH error, got %v", err)
-		}
-	})
-
-	t.Run("non-TLS traffic is rejected", func(t *testing.T) {
-		_, _, err := readAndVerifyTLSClientHello(strings.NewReader("GET / HTTP/1.1\r\n\r\n"), "pg.internal.example")
-		if err == nil || !strings.Contains(err.Error(), "expected TLS Handshake record") {
-			t.Fatalf("expected non-TLS record error, got %v", err)
-		}
-	})
-}
 
 func startTestTLSServer(t *testing.T, dnsName string, upstreamHits *atomic.Int32) (string, *x509.CertPool) {
 	t.Helper()

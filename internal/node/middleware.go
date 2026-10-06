@@ -440,6 +440,14 @@ func (n *SamNode) authorizeWithRules(rawToken []byte, req RequestContext, pubKey
 		"role", roleStr,
 	)
 	if actorNodeStr != "" {
+		if n.revokedPeers != nil {
+			if actorPID, pErr := peer.Decode(actorNodeStr); pErr == nil {
+				if _, isRevoked := n.revokedPeers.Get(actorPID.String()); isRevoked {
+					logger.Infow("Audit Traceability", append(req.auditFields(), "decision", "deny", "reason", "actor_node is revoked")...)
+					return nil, fmt.Errorf("actor_node %s is revoked", actorPID.String())
+				}
+			}
+		}
 		auditFields = append(auditFields, "actor_node", actorNodeStr)
 	}
 	if len(taskRules) > 0 {

@@ -78,6 +78,24 @@ func HTTPMethodSyntaxPattern() string {
 	return httpMethodSyntax.String()
 }
 
+func isPrintableASCIIString(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+func hasASCIIControl(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] == 0x7f {
+			return true
+		}
+	}
+	return false
+}
+
 // ValidateTARServicePattern validates an entry in TaskRule.allowed_services
 // using the same dot-anchored service grammar as PolicyRole.allowed_services
 // ("*", "<type>://*", "<type>://*.<suffix>", "<type>://<prefix>.*",
@@ -90,6 +108,9 @@ func ValidateTARServicePattern(svc string) error {
 		return fmt.Errorf("allowed_services entry %q exceeds max length %d", svc, MaxTARNameLength)
 	}
 	if err := ValidateServiceFormat(svc); err != nil {
+		return err
+	}
+	if err := ValidateEgressServicePattern(svc); err != nil {
 		return err
 	}
 	if svc == "*" {
@@ -115,8 +136,14 @@ func ValidateTaskAuthorizationRule(rule *TaskAuthorizationRule) error {
 	if len(rule.GetName()) > MaxTARNameLength {
 		return fmt.Errorf("name exceeds max length %d", MaxTARNameLength)
 	}
+	if !isPrintableASCIIString(rule.GetName()) {
+		return fmt.Errorf("name must contain only printable ASCII characters")
+	}
 	if len(rule.GetDisplayName()) > MaxTARDescriptionLength {
 		return fmt.Errorf("display_name exceeds max length %d", MaxTARDescriptionLength)
+	}
+	if hasASCIIControl(rule.GetDisplayName()) {
+		return fmt.Errorf("display_name must not contain control characters")
 	}
 	if exp := rule.GetExpireTime(); exp != nil {
 		if !exp.IsValid() {
@@ -144,6 +171,9 @@ func validateTaskRule(idx int, r *TaskRule) error {
 	if len(r.GetDescription()) > MaxTARDescriptionLength {
 		return fmt.Errorf("rule[%d]: description exceeds max length %d", idx, MaxTARDescriptionLength)
 	}
+	if hasASCIIControl(r.GetDescription()) {
+		return fmt.Errorf("rule[%d]: description must not contain control characters", idx)
+	}
 	services := r.GetAllowedServices()
 	if len(services) == 0 {
 		return fmt.Errorf("rule[%d]: allowed_services must not be empty", idx)
@@ -160,7 +190,7 @@ func validateTaskRule(idx int, r *TaskRule) error {
 		return fmt.Errorf("rule[%d]: allowed_resources count %d exceeds max %d", idx, len(r.GetAllowedResources()), MaxEntriesPerTARList)
 	}
 	for _, res := range r.GetAllowedResources() {
-		if res == "" || len(res) > MaxTARResourceLength {
+		if res == "" || len(res) > MaxTARResourceLength || hasASCIIControl(res) {
 			return fmt.Errorf("rule[%d]: invalid allowed_resources entry %q", idx, res)
 		}
 	}
@@ -172,7 +202,7 @@ func validateTaskRule(idx int, r *TaskRule) error {
 		return fmt.Errorf("rule[%d]: allowed_tools count %d exceeds max %d", idx, len(op.GetAllowedTools()), MaxEntriesPerTARList)
 	}
 	for _, tool := range op.GetAllowedTools() {
-		if tool == "" || len(tool) > MaxTARNameLength || strings.ContainsAny(tool, "/?# \t\r\n") {
+		if tool == "" || len(tool) > MaxTARNameLength || strings.ContainsAny(tool, "/?# \t\r\n") || !isPrintableASCIIString(tool) {
 			return fmt.Errorf("rule[%d]: invalid tool name %q in allowed_tools", idx, tool)
 		}
 	}
@@ -199,7 +229,7 @@ func validateTaskRule(idx int, r *TaskRule) error {
 		return fmt.Errorf("rule[%d]: allowed_permissions count %d exceeds max %d", idx, len(op.GetAllowedPermissions()), MaxEntriesPerTARList)
 	}
 	for _, perm := range op.GetAllowedPermissions() {
-		if perm == "" || len(perm) > MaxTARNameLength || strings.ContainsAny(perm, " \t\r\n") {
+		if perm == "" || len(perm) > MaxTARNameLength || strings.ContainsAny(perm, " \t\r\n") || !isPrintableASCIIString(perm) {
 			return fmt.Errorf("rule[%d]: invalid permission %q in allowed_permissions", idx, perm)
 		}
 	}
@@ -246,7 +276,7 @@ func DecodeTARBlockPayload(b64 string) (*TaskAuthorizationRule, error) {
 	if b64 == "" {
 		return nil, fmt.Errorf("empty tar_block payload")
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(b64)
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(b64)
 	if err != nil {
 		return nil, fmt.Errorf("invalid base64url in tar_block: %w", err)
 	}
@@ -309,11 +339,26 @@ func MatchServicePattern(pattern, reqType, reqName string) bool {
 	return reqName == pName
 }
 
+// IsSafeRequestHTTPPath reports whether reqPath is a normalized, leading-slash
+// HTTP path free of dot segments ("." or ".."), URL-encoded dot/slash/backslash
+// traversal sequences, query/fragment delimiters, and ASCII control characters.
+func IsSafeRequestHTTPPath(reqPath string) bool {
+	if !strings.HasPrefix(reqPath, "/") || strings.ContainsAny(reqPath, "?#") || hasEncodedPathTraversal(reqPath) {
+		return false
+	}
+	for _, seg := range strings.Split(reqPath, "/") {
+		if seg == "." || seg == ".." {
+			return false
+		}
+	}
+	return true
+}
+
 // MatchHTTPPath reports whether a path pattern from TaskOperation.allowed_paths
 // ("/exact" or "/prefix/*") matches reqPath using the same semantics as
 // BuildHTTPGrantFacts and BaselineSources.HTTPRules.
 func MatchHTTPPath(pattern, reqPath string) bool {
-	if pattern == "" || reqPath == "" {
+	if pattern == "" || !IsSafeRequestHTTPPath(reqPath) {
 		return false
 	}
 	if strings.HasSuffix(pattern, "*") {
@@ -393,7 +438,7 @@ func MatchTaskRule(rule *TaskRule, req TaskRequestContext) bool {
 	methods := op.GetAllowedMethods()
 	paths := op.GetAllowedPaths()
 	if len(methods) > 0 || len(paths) > 0 {
-		if !req.HasHTTP || req.Method == "" || req.Method == "CONNECT" || req.Path == "" {
+		if !req.HasHTTP || req.Method == "" || req.Method == "CONNECT" || !IsSafeRequestHTTPPath(req.Path) {
 			return false
 		}
 		if len(methods) > 0 && !slices.Contains(methods, req.Method) {
@@ -560,6 +605,8 @@ func BuildTARFromOAuthParams(defaultName, optionsParam string, resources []strin
 			perms = append(perms, strings.TrimPrefix(tok, "permission:"))
 		case strings.Contains(tok, "://") || tok == "*":
 			services = append(services, tok)
+		default:
+			return nil, fmt.Errorf("unrecognized scope token %q", tok)
 		}
 	}
 
@@ -591,11 +638,16 @@ func BuildTARFromOAuthParams(defaultName, optionsParam string, resources []strin
 			Rules:      []*TaskRule{rule},
 		}
 	} else {
+		if len(services) > 0 || len(tools) > 0 || len(methods) > 0 || len(paths) > 0 || len(perms) > 0 {
+			return nil, fmt.Errorf("cannot combine options parameter with resource or scope parameters")
+		}
 		if tar.Name == "" && defaultName != "" {
 			tar.Name = defaultName
 		}
-		if tar.ExpireTime == nil && expireTime != nil {
-			tar.ExpireTime = expireTime
+		if expireTime != nil {
+			if tar.ExpireTime == nil || (expireTime.IsValid() && tar.ExpireTime.IsValid() && expireTime.AsTime().Before(tar.ExpireTime.AsTime())) {
+				tar.ExpireTime = expireTime
+			}
 		}
 	}
 

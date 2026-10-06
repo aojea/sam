@@ -33,8 +33,9 @@ from libp2p.custom_types import TProtocol
 from libp2p.kad_dht.pb import kademlia_pb2 as kad
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
-from libp2p.utils.varint import encode_varint_prefixed, read_varint_prefixed_bytes
+from libp2p.utils.varint import encode_varint_prefixed
 
+from .auth import read_bounded_varint_prefixed_bytes
 from .host import dial, open_stream
 
 logger = logging.getLogger("agent_mesh")
@@ -47,6 +48,7 @@ ServiceType = Literal["mcp", "inference", "a2a", "egress"]
 _QUERY_TIMEOUT = 5.0
 _MAX_ROUNDS = 3
 _MAX_PEERS_PER_ROUND = 8
+MAX_DHT_MESSAGE_BYTES = 256 * 1024
 
 
 @dataclass
@@ -98,7 +100,7 @@ async def _query(host: IHost, peer_id: ID, req: kad.Message) -> kad.Message | No
     try:
         with trio.fail_after(_QUERY_TIMEOUT):
             await stream.write(encode_varint_prefixed(req.SerializeToString()))
-            resp = kad.Message.FromString(await read_varint_prefixed_bytes(stream))
+            resp = kad.Message.FromString(await read_bounded_varint_prefixed_bytes(stream, MAX_DHT_MESSAGE_BYTES))
     except Exception as err:  # noqa: BLE001
         logger.debug("dht: query to %s failed: %s", peer_id, err)
         return None

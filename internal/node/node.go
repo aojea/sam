@@ -2308,12 +2308,23 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 				recordEgressDecision(serviceName, egressOutcomeAllow)
 			}
 
-			// Strip the biscuit header so it doesn't leak to the backend service
-			r.Header.Del(api.HeaderSamBiscuit)
-			// Set, not Add: an inbound value is a spoof attempt, only the
-			// transport-verified identity may reach the backend.
-			r.Header.Del(api.HeaderSamNoTrailingSlash)
+			// Strip the biscuit header and any caller-supplied X-Sam-* headers so
+			// only transport-verified identity attributes reach the backend service.
+			for name := range r.Header {
+				if strings.HasPrefix(strings.ToLower(name), "x-sam-") {
+					r.Header.Del(name)
+				}
+			}
+			r.Header.Del("Cookie")
 			r.Header.Set(api.HeaderPeerID, remotePeer.String())
+			if claims, cErr := n.VerifyLocalBiscuit(biscuitBytes); cErr == nil && claims != nil {
+				if p := claims.Principal(); p != "" {
+					r.Header.Set(api.HeaderSamPrincipal, p)
+				}
+				if len(claims.Roles) > 0 {
+					r.Header.Set(api.HeaderSamRoles, strings.Join(claims.Roles, ","))
+				}
+			}
 
 			// Under the type the policy was evaluated on: a same-named service
 			// of another type is not what the caller was granted.

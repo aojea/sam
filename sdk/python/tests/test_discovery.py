@@ -227,3 +227,30 @@ def test_the_routers_are_asked_at_once():
         assert trio.current_time() - started == pytest.approx(_QUERY_TIMEOUT)
 
     trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
+
+
+def test_read_bounded_varint_prefixed_bytes_rejects_oversized_prefix_before_reading_payload():
+    from libp2p.utils.varint import encode_uvarint
+
+    from agent_mesh.auth import read_bounded_varint_prefixed_bytes
+
+    class _BombStream:
+        def __init__(self, header: bytes):
+            self._header = header
+            self.payload_reads = 0
+
+        async def read(self, n=None):
+            if self._header:
+                out, self._header = self._header[:1], self._header[1:]
+                return out
+            self.payload_reads += 1
+            return b"x" * (n or 1)
+
+    async def main():
+        bomb = _BombStream(encode_uvarint(2 * 1024 * 1024 * 1024))
+        with pytest.raises(ValueError, match="exceeds"):
+            await read_bounded_varint_prefixed_bytes(bomb, 64 * 1024)
+        assert bomb.payload_reads == 0
+
+    trio.run(main)
+

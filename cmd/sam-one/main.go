@@ -46,6 +46,7 @@ func main() {
 		dataDir              string
 		dbDriver             string
 		dbDSN                string
+		dbDSNPath            string
 		joinTokenPath        string
 		noJoinToken          bool
 		adminTokenPath       string
@@ -92,6 +93,11 @@ func main() {
 			// Secrets arrive through a file or the environment, never as a
 			// flag value that would sit in `ps` and shell history. Env keeps
 			// single-container platforms (Cloud Run) configurable.
+			if resolvedDSN, err := secretFromPathOrEnv(dbDSNPath, "SAM_DB_DSN"); err != nil {
+				logger.Fatalf("Invalid --db-dsn-path: %v", err)
+			} else if resolvedDSN != "" {
+				dbDSN = resolvedDSN
+			}
 			joinToken, err := secretFromPathOrEnv(joinTokenPath, "SAM_TOKEN")
 			if err != nil {
 				logger.Fatalf("Invalid --token-path: %v", err)
@@ -204,7 +210,8 @@ func main() {
 	rootCmd.Flags().StringSliceVar(&p2pListen, "p2p-listen", nil, "Optional extra native libp2p listen multiaddrs")
 	rootCmd.Flags().StringVar(&dataDir, "data-dir", ".", "Directory for the database, router key and generated tokens")
 	rootCmd.Flags().StringVar(&dbDriver, "db-driver", "sqlite", "Database driver (sqlite or postgres)")
-	rootCmd.Flags().StringVar(&dbDSN, "db-dsn", "", "Database DSN (default <data-dir>/sam.db for sqlite)")
+	rootCmd.Flags().StringVar(&dbDSN, "db-dsn", "", "Database DSN (default <data-dir>/sam.db for sqlite; avoid for postgres: embeds a password; prefer --db-dsn-path or SAM_DB_DSN)")
+	rootCmd.Flags().StringVar(&dbDSNPath, "db-dsn-path", "", "Path to file containing the database DSN/Connection URL (overrides --db-dsn; or env SAM_DB_DSN)")
 	rootCmd.Flags().StringVar(&joinTokenPath, "token-path", "", "File containing the cluster join token (or env SAM_TOKEN; auto-generated and persisted in --data-dir if neither is set)")
 	rootCmd.Flags().BoolVar(&noJoinToken, "no-join-token", false, "Run without a standing join token; devices enroll only with minted bootstrap tokens (token create/qr) or OIDC")
 	rootCmd.Flags().StringVar(&adminTokenPath, "admin-token-path", "", "File containing the admin API bearer token (or env SAM_ADMIN_TOKEN; auto-generated and persisted in --data-dir if neither is set)")
