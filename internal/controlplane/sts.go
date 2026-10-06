@@ -89,13 +89,16 @@ type es256KeyEntry struct {
 	expiresAt time.Time // zero for the currently active signing key
 }
 
+const oidcKeyCacheTTL = time.Minute
+
 // LocalES256Signer is the default OIDCSigner using P-256 (ES256) keys
 // with overlap grace-period support and optional SQLStore persistence.
 type LocalES256Signer struct {
-	mu      sync.RWMutex
-	store   storage.Store
-	current es256KeyEntry
-	retired []es256KeyEntry
+	mu       sync.RWMutex
+	store    storage.Store
+	current  es256KeyEntry
+	retired  []es256KeyEntry
+	loadedAt time.Time
 }
 
 // NewLocalES256SignerWithStore creates a LocalES256Signer backed by store when non-nil.
@@ -119,9 +122,10 @@ func NewLocalES256SignerWithStore(store storage.Store) (*LocalES256Signer, error
 			}
 			if current != nil {
 				return &LocalES256Signer{
-					store:   store,
-					current: *current,
-					retired: retired,
+					store:    store,
+					current:  *current,
+					retired:  retired,
+					loadedAt: time.Now(),
 				}, nil
 			}
 		}
@@ -144,7 +148,7 @@ func NewLocalES256SignerWithStore(store storage.Store) (*LocalES256Signer, error
 			}
 		}
 	}
-	return &LocalES256Signer{store: store, current: entry}, nil
+	return &LocalES256Signer{store: store, current: entry, loadedAt: time.Now()}, nil
 }
 
 func decodeOIDCKeyPair(k storage.OIDCKeyPair) (es256KeyEntry, error) {
@@ -238,23 +242,28 @@ func (s *LocalES256Signer) Rotate(gracePeriod time.Duration) (string, error) {
 	}
 	s.retired = kept
 	s.current = next
+	s.loadedAt = now
 	return next.kid, nil
 }
 
 // SignJWT signs claims with the active ES256 key and sets the "kid" header.
 func (s *LocalES256Signer) SignJWT(ctx context.Context, claims jwt.MapClaims) (string, error) {
-	if s.store != nil {
+	s.mu.RLock()
+	active := s.current
+	stale := s.store != nil && time.Since(s.loadedAt) >= oidcKeyCacheTTL
+	s.mu.RUnlock()
+
+	if stale {
 		if cur, err := s.store.GetCurrentOIDCKey(ctx); err == nil && cur != nil {
 			if loaded, dErr := decodeOIDCKeyPair(*cur); dErr == nil {
 				s.mu.Lock()
 				s.current = loaded
+				s.loadedAt = time.Now()
+				active = loaded
 				s.mu.Unlock()
 			}
 		}
 	}
-	s.mu.RLock()
-	active := s.current
-	s.mu.RUnlock()
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	tok.Header["kid"] = active.kid

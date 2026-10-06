@@ -106,9 +106,15 @@ func evaluateExtAuthz(ctx context.Context, node *SamNode, in extAuthzCheckInput)
 	}
 	callerPeer := localPID
 	if len(claims.TaskRules) > 0 && claims.ClientPeerID != "" {
-		if pid, decErr := peer.Decode(claims.ClientPeerID); decErr == nil {
-			callerPeer = pid
+		pid, decErr := peer.Decode(claims.ClientPeerID)
+		if decErr != nil {
+			return extAuthzCheckResult{
+				Allowed:    false,
+				HTTPStatus: http.StatusBadRequest,
+				Message:    "Invalid client_peer_id in token",
+			}
 		}
+		callerPeer = pid
 	}
 	isLocal := callerPeer == localPID
 

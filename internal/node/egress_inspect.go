@@ -405,13 +405,20 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 				} else {
 					decompressed, readErr := io.ReadAll(io.LimitReader(gz, maxBytes+1))
 					_ = gz.Close()
-					if readErr != nil || int64(len(decompressed)) > maxBytes {
+					if int64(len(decompressed)) > maxBytes {
 						refuse(w, http.StatusBadGateway, "decompressed upstream response exceeds max_buffered_bytes", proxyStatusDenied)
 						return
 					}
-					respBody = decompressed
-					respHeader.Del("Content-Encoding")
-					respHeader.Del("Content-Length")
+					if readErr != nil {
+						if !ma.GetFailOpen() {
+							refuse(w, http.StatusBadGateway, "invalid gzip upstream response body", proxyStatusDenied)
+							return
+						}
+					} else {
+						respBody = decompressed
+						respHeader.Del("Content-Encoding")
+						respHeader.Del("Content-Length")
+					}
 				}
 			} else if !ma.GetFailOpen() {
 				refuse(w, http.StatusBadGateway, fmt.Sprintf("unsupported upstream Content-Encoding %q for Model Armor response inspection", ce), proxyStatusDenied)

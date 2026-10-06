@@ -63,10 +63,6 @@ func GetOrGenerateKey(s *Store) crypto.PrivKey {
 	if genErr != nil {
 		logger.Fatalf("Failed to generate key: %v", genErr)
 	}
-	if err != nil {
-		logger.Warnf("Skipping key persistence because store is unavailable: %v", err)
-		return priv
-	}
 	raw, marshalErr := crypto.MarshalPrivateKey(priv)
 	if marshalErr != nil {
 		logger.Fatalf("Failed to marshal private key: %v", marshalErr)
