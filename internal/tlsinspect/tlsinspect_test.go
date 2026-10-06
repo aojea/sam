@@ -50,11 +50,11 @@ func buildTestClientHelloRecord(serverName string, includeECH bool) []byte {
 	}
 
 	var body []byte
-	body = append(body, 0x03, 0x03)       // legacy_version TLS 1.2
-	body = append(body, make([]byte, 32)...) // random
-	body = append(body, 0x00)             // session_id length = 0
+	body = append(body, 0x03, 0x03)             // legacy_version TLS 1.2
+	body = append(body, make([]byte, 32)...)    // random
+	body = append(body, 0x00)                   // session_id length = 0
 	body = append(body, 0x00, 0x02, 0x13, 0x01) // cipher_suites (TLS_AES_128_GCM_SHA256)
-	body = append(body, 0x01, 0x00)       // compression_methods (null)
+	body = append(body, 0x01, 0x00)             // compression_methods (null)
 	if len(exts) > 0 {
 		extBlock := make([]byte, 2+len(exts))
 		binary.BigEndian.PutUint16(extBlock[0:2], uint16(len(exts)))

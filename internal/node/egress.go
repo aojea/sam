@@ -207,6 +207,12 @@ func (s *EgressService) Init(ctx context.Context) error {
 			return dialSafeEgressTCP(ctx, addr, allowLocal)
 		}
 		proxyTransport = cloned
+	} else {
+		proxyTransport = &http.Transport{
+			DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
+				return dialSafeEgressTCP(ctx, addr, allowLocal)
+			},
+		}
 	}
 
 	proxy := &httputil.ReverseProxy{
@@ -221,12 +227,10 @@ func (s *EgressService) Init(ctx context.Context) error {
 			// What the caller sent authenticated it to the node, and what the
 			// node knows about the caller is for policy; none of it is for the
 			// destination, which sees the node's own credential only.
-			pr.Out.Header.Del("Authorization")
-			pr.Out.Header.Del("Cookie")
 			for name := range pr.Out.Header {
 				lower := strings.ToLower(name)
-				if strings.HasPrefix(lower, "x-sam-") || strings.HasPrefix(lower, "x-forwarded-") || strings.EqualFold(name, api.HeaderPeerID) {
-					pr.Out.Header.Del(name)
+				if lower == "authorization" || lower == "cookie" || strings.HasPrefix(lower, "x-sam-") || strings.HasPrefix(lower, "x-forwarded-") || strings.EqualFold(name, api.HeaderPeerID) {
+					delete(pr.Out.Header, name)
 				}
 			}
 			if auth, ok := pr.In.Context().Value(egressAuthKey{}).(string); ok && auth != "" {

@@ -203,6 +203,7 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 				}
 				reqBody = decompressed
 				r.Header.Del("Content-Encoding")
+				r.Header.Del("Content-Length")
 			} else {
 				refuse(w, http.StatusUnsupportedMediaType, fmt.Sprintf("unsupported Content-Encoding %q with Model Armor inspection", ce), proxyStatusDenied)
 				return
@@ -211,12 +212,10 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Strip caller auth and X-Sam-* headers on a working copy before any inspector sees them.
-	r.Header.Del("Authorization")
-	r.Header.Del("Cookie")
 	for name := range r.Header {
 		lower := strings.ToLower(name)
-		if strings.HasPrefix(lower, "x-sam-") || strings.HasPrefix(lower, "x-forwarded-") || strings.EqualFold(name, api.HeaderPeerID) {
-			r.Header.Del(name)
+		if lower == "authorization" || lower == "cookie" || strings.HasPrefix(lower, "x-sam-") || strings.HasPrefix(lower, "x-forwarded-") || strings.EqualFold(name, api.HeaderPeerID) {
+			delete(r.Header, name)
 		}
 	}
 
@@ -412,6 +411,7 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 					}
 					respBody = decompressed
 					respHeader.Del("Content-Encoding")
+					respHeader.Del("Content-Length")
 				}
 			} else if !ma.GetFailOpen() {
 				refuse(w, http.StatusBadGateway, fmt.Sprintf("unsupported upstream Content-Encoding %q for Model Armor response inspection", ce), proxyStatusDenied)

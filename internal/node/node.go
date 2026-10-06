@@ -2311,11 +2311,11 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 			// Strip the biscuit header and any caller-supplied X-Sam-* headers so
 			// only transport-verified identity attributes reach the backend service.
 			for name := range r.Header {
-				if strings.HasPrefix(strings.ToLower(name), "x-sam-") {
-					r.Header.Del(name)
+				lower := strings.ToLower(name)
+				if lower == "cookie" || strings.HasPrefix(lower, "x-sam-") {
+					delete(r.Header, name)
 				}
 			}
-			r.Header.Del("Cookie")
 			r.Header.Set(api.HeaderPeerID, remotePeer.String())
 			if claims, cErr := n.VerifyLocalBiscuit(biscuitBytes); cErr == nil && claims != nil {
 				if p := claims.Principal(); p != "" {
