@@ -304,9 +304,7 @@ func (s *Server) RevokeBiscuitID(revocationID string, expiry time.Time) {
 	s.revokedBiscuitsMu.Unlock()
 }
 
-// RevokeBiscuitToken extracts the root (block 0) RevocationId of rawToken and
-// records it in the control plane's revocation set.
-func (s *Server) RevokeBiscuitToken(rawToken []byte, expiry time.Time) (string, error) {
+func extractRootRevocationID(rawToken []byte) (string, error) {
 	b, err := biscuit.Unmarshal(rawToken)
 	if err != nil {
 		return "", err
@@ -315,14 +313,51 @@ func (s *Server) RevokeBiscuitToken(rawToken []byte, expiry time.Time) (string, 
 	if len(ids) == 0 {
 		return "", errors.New("biscuit has no revocation IDs")
 	}
-	revID := base64.RawURLEncoding.EncodeToString(ids[0])
+	return base64.RawURLEncoding.EncodeToString(ids[0]), nil
+}
+
+// RevokeBiscuitToken extracts the root (block 0) RevocationId of rawToken and
+// records it in the control plane's revocation set.
+func (s *Server) RevokeBiscuitToken(rawToken []byte, expiry time.Time) (string, error) {
+	revID, err := extractRootRevocationID(rawToken)
+	if err != nil {
+		return "", err
+	}
 	s.RevokeBiscuitID(revID, expiry)
 	return revID, nil
 }
 
-func (s *Server) listRevokedBiscuitIDs(ctx context.Context) ([]string, error) {
+func (s *Server) cacheBannedNodeRevocationID(peerID string, rawBiscuit []byte) {
+	if peerID == "" || len(rawBiscuit) == 0 {
+		return
+	}
+	revID, err := extractRootRevocationID(rawBiscuit)
+	if err != nil || revID == "" {
+		return
+	}
+	s.revokedBiscuitsMu.Lock()
+	s.bannedNodeRevIDs[peerID] = revID
+	s.revokedBiscuitsMu.Unlock()
+}
+
+func (s *Server) clearBannedNodeRevocationID(peerID string) {
+	if peerID == "" {
+		return
+	}
+	s.revokedBiscuitsMu.Lock()
+	delete(s.bannedNodeRevIDs, peerID)
+	s.revokedBiscuitsMu.Unlock()
+}
+
+func (s *Server) listRevokedBiscuitIDs(ctx context.Context, bannedPeers []string) ([]string, error) {
 	now := time.Now()
 	set := make(map[string]bool)
+
+	var missingPeers []string
+	bannedPeerSet := make(map[string]bool, len(bannedPeers))
+	for _, p := range bannedPeers {
+		bannedPeerSet[p] = true
+	}
 
 	s.revokedBiscuitsMu.Lock()
 	for id, exp := range s.revokedBiscuits {
@@ -332,20 +367,39 @@ func (s *Server) listRevokedBiscuitIDs(ctx context.Context) ([]string, error) {
 			delete(s.revokedBiscuits, id)
 		}
 	}
+	for peerID := range s.bannedNodeRevIDs {
+		if !bannedPeerSet[peerID] {
+			delete(s.bannedNodeRevIDs, peerID)
+		}
+	}
+	for _, peerID := range bannedPeers {
+		if revID, ok := s.bannedNodeRevIDs[peerID]; ok {
+			if revID != "" {
+				set[revID] = true
+			}
+		} else {
+			missingPeers = append(missingPeers, peerID)
+		}
+	}
 	s.revokedBiscuitsMu.Unlock()
 
-	nodes, err := s.store.ListNodes(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, n := range nodes {
-		if !n.Banned || len(n.Biscuit) == 0 {
-			continue
-		}
-		if b, uErr := biscuit.Unmarshal(n.Biscuit); uErr == nil {
-			if ids := b.RevocationIds(); len(ids) > 0 {
-				set[base64.RawURLEncoding.EncodeToString(ids[0])] = true
+	for _, peerID := range missingPeers {
+		n, err := s.store.GetNode(ctx, peerID)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				continue
 			}
+			return nil, err
+		}
+		var revID string
+		if len(n.Biscuit) > 0 {
+			revID, _ = extractRootRevocationID(n.Biscuit)
+		}
+		s.revokedBiscuitsMu.Lock()
+		s.bannedNodeRevIDs[peerID] = revID
+		s.revokedBiscuitsMu.Unlock()
+		if revID != "" {
+			set[revID] = true
 		}
 	}
 
@@ -357,21 +411,25 @@ func (s *Server) listRevokedBiscuitIDs(ctx context.Context) ([]string, error) {
 	return out, nil
 }
 
-func (s *Server) isBiscuitRevoked(ctx context.Context, revocationIDs [][]byte) bool {
+func (s *Server) isBiscuitRevoked(revocationIDs [][]byte) bool {
 	if len(revocationIDs) == 0 {
 		return false
 	}
-	revokedList, err := s.listRevokedBiscuitIDs(ctx)
-	if err != nil || len(revokedList) == 0 {
+	now := time.Now()
+	s.revokedBiscuitsMu.RLock()
+	defer s.revokedBiscuitsMu.RUnlock()
+	if len(s.revokedBiscuits) == 0 && len(s.bannedNodeRevIDs) == 0 {
 		return false
 	}
-	revokedSet := make(map[string]bool, len(revokedList))
-	for _, id := range revokedList {
-		revokedSet[id] = true
-	}
 	for _, rawID := range revocationIDs {
-		if revokedSet[base64.RawURLEncoding.EncodeToString(rawID)] {
+		encoded := base64.RawURLEncoding.EncodeToString(rawID)
+		if exp, ok := s.revokedBiscuits[encoded]; ok && now.Before(exp) {
 			return true
+		}
+		for _, bannedRevID := range s.bannedNodeRevIDs {
+			if bannedRevID != "" && bannedRevID == encoded {
+				return true
+			}
 		}
 	}
 	return false
@@ -393,7 +451,7 @@ func (s *Server) HandleRevocations(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	revocationIDs, err := s.listRevokedBiscuitIDs(ctx)
+	revocationIDs, err := s.listRevokedBiscuitIDs(ctx, bannedPeers)
 	if err != nil {
 		logger.Errorf("Failed to retrieve revoked biscuit IDs for /revocations: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -779,6 +837,23 @@ func (s *Server) resolveEgressAudience(ctx context.Context, destination, reqAudi
 	return "https://" + destHost, nil
 }
 
+var stsDestinationRules = []biscuit.Rule{
+	mustParseSTSRule(fmt.Sprintf(`%s($t, $k) <- %s($t, $k)`, api.FactHTTPMethodOK, api.FactService)),
+	mustParseSTSRule(fmt.Sprintf(`%s($t, $k) <- %s($t, $k)`, api.FactHTTPPathOK, api.FactService)),
+	mustParseSTSRule(fmt.Sprintf(`%s($t, "*") <- %s($t, $n)`, api.FactHTTPMethodOK, api.FactService)),
+	mustParseSTSRule(fmt.Sprintf(`%s($t, "*") <- %s($t, $n)`, api.FactHTTPPathOK, api.FactService)),
+	mustParseSTSRule(fmt.Sprintf(`%s("*", "*") <- %s($t, $n)`, api.FactHTTPMethodOK, api.FactService)),
+	mustParseSTSRule(fmt.Sprintf(`%s("*", "*") <- %s($t, $n)`, api.FactHTTPPathOK, api.FactService)),
+}
+
+func mustParseSTSRule(s string) biscuit.Rule {
+	r, err := parser.FromStringRule(s)
+	if err != nil {
+		panic(fmt.Sprintf("invalid static STS Datalog rule %q: %v", s, err))
+	}
+	return r
+}
+
 func (s *Server) authorizeBiscuitForEgress(ctx context.Context, rawBiscuit []byte, destination string) (*identity.VerifiedBiscuitClaims, int, error) {
 	trustedKeys, err := s.store.GetAllValidPublicKeys(ctx)
 	if err != nil {
@@ -788,7 +863,7 @@ func (s *Server) authorizeBiscuitForEgress(ctx context.Context, rawBiscuit []byt
 	if err != nil {
 		return nil, http.StatusForbidden, fmt.Errorf("invalid caller biscuit: %w", err)
 	}
-	if s.isBiscuitRevoked(ctx, claims.RevocationIDs) {
+	if s.isBiscuitRevoked(claims.RevocationIDs) {
 		return nil, http.StatusForbidden, errors.New("caller biscuit is revoked")
 	}
 	if claims.ClientPeerID == "" {
@@ -853,22 +928,7 @@ func (s *Server) authorizeBiscuitForEgress(ctx context.Context, rawBiscuit []byt
 	// Destination-level STS minting checks whether the role grants egress://<destination>
 	// at all (plain or HTTP-narrowed); per-request method/path restrictions are
 	// enforced by the egress sam-node PEP on the wire HTTP request.
-	if r, rErr := parser.FromStringRule(fmt.Sprintf(`%s($t, $k) <- %s($t, $k)`, api.FactHTTPMethodOK, api.FactService)); rErr == nil {
-		authorizer.AddRule(r)
-	}
-	if r, rErr := parser.FromStringRule(fmt.Sprintf(`%s($t, $k) <- %s($t, $k)`, api.FactHTTPPathOK, api.FactService)); rErr == nil {
-		authorizer.AddRule(r)
-	}
-	if r, rErr := parser.FromStringRule(fmt.Sprintf(`%s($t, "*") <- %s($t, $n)`, api.FactHTTPMethodOK, api.FactService)); rErr == nil {
-		authorizer.AddRule(r)
-	}
-	if r, rErr := parser.FromStringRule(fmt.Sprintf(`%s($t, "*") <- %s($t, $n)`, api.FactHTTPPathOK, api.FactService)); rErr == nil {
-		authorizer.AddRule(r)
-	}
-	if r, rErr := parser.FromStringRule(fmt.Sprintf(`%s("*", "*") <- %s($t, $n)`, api.FactHTTPMethodOK, api.FactService)); rErr == nil {
-		authorizer.AddRule(r)
-	}
-	if r, rErr := parser.FromStringRule(fmt.Sprintf(`%s("*", "*") <- %s($t, $n)`, api.FactHTTPPathOK, api.FactService)); rErr == nil {
+	for _, r := range stsDestinationRules {
 		authorizer.AddRule(r)
 	}
 

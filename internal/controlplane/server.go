@@ -102,6 +102,7 @@ type Server struct {
 
 	revokedBiscuitsMu sync.RWMutex
 	revokedBiscuits   map[string]time.Time
+	bannedNodeRevIDs  map[string]string
 
 	oauthCodesMu sync.Mutex
 	oauthCodes   map[string]*oauthAuthCode
@@ -187,6 +188,7 @@ func NewServer(config Options, store storage.Store) (*Server, error) {
 		stsLimiter:            stsLimiter,
 		oidcSigner:            signer,
 		revokedBiscuits:       make(map[string]time.Time),
+		bannedNodeRevIDs:      make(map[string]string),
 		oauthCodes:            make(map[string]*oauthAuthCode),
 		providers:             make(map[string]*oidc.Provider),
 		workloadIssuers:       workloadIssuers,
@@ -2639,6 +2641,7 @@ func (s *Server) HandleAdminNodeAction(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
+		s.clearBannedNodeRevocationID(node.PeerID)
 		logger.Infow("Node and identity unbanned", "peer_id", canonical)
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -3183,6 +3186,7 @@ func (s *Server) banNode(ctx context.Context, node *storage.EnrolledNode) error 
 	if err := SetNodeBan(ctx, s.store, node, true); err != nil {
 		return err
 	}
+	s.cacheBannedNodeRevocationID(node.PeerID, node.Biscuit)
 	s.dropCatalogEntry(node.PeerID)
 	return nil
 }
