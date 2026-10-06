@@ -143,6 +143,10 @@ export class AgentMesh {
   #credential: MeshCredential;
   readonly #state: StateStore | undefined;
   readonly #jwtSource: (() => Promise<string>) | undefined;
+  // Refreshes run one after another, as sam-node's refreshMu: the control
+  // plane redeems only the last biscuit it issued, so two in flight would
+  // leave the loser holding a spent one.
+  #refreshChain: Promise<unknown> = Promise.resolve();
 
   private constructor(
     identity: Identity,
@@ -297,8 +301,21 @@ export class AgentMesh {
    * Trades the current biscuit for a fresh one and persists it. The control
    * plane redeems only the last biscuit it issued, so a lost refresh result
    * means re-enrolling; persisting before returning keeps that rare.
+   * Concurrent calls wait for each other.
    */
   async refresh(): Promise<MeshCredential> {
+    const run = this.#refreshChain.then(
+      () => this.#refreshOnce(),
+      () => this.#refreshOnce(),
+    );
+    this.#refreshChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  async #refreshOnce(): Promise<MeshCredential> {
     let jwt: string | undefined;
     if (this.#jwtSource !== undefined) {
       try {

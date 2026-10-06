@@ -42,7 +42,10 @@ function proto(bytes: Uint8Array): Response {
 }
 
 /** A control plane that approves everything and hands out numbered biscuits. */
-function fakeControlPlane(keysOk = true): { fetch: typeof fetch; issued: number; lastRefreshJwt: string; keys: Identity[]; keysOk: boolean } {
+function fakeControlPlane(
+  keysOk = true,
+  opts: { strictRefresh?: boolean; refreshDelayMs?: number; rejectNextRefresh?: boolean } = {},
+): { fetch: typeof fetch; issued: number; lastRefreshJwt: string; keys: Identity[]; keysOk: boolean } {
   // keys is what /keys serves and signs with; a test rotates by replacing it.
   const state = { issued: 0, lastRefreshJwt: "", keys: [cpKey], keysOk };
   const current = () => (state.keys[state.keys.length - 1] as Identity).publicKeyRaw;
@@ -71,6 +74,20 @@ function fakeControlPlane(keysOk = true): { fetch: typeof fetch; issued: number;
         );
       case "POST /refresh": {
         const refreshReq = fromBinary(TokenRefreshRequestSchema, new Uint8Array(await req.arrayBuffer()));
+        if (opts.rejectNextRefresh) {
+          opts.rejectNextRefresh = false;
+          return new Response("control plane unavailable", { status: 503 });
+        }
+        if (opts.strictRefresh) {
+          // The real control plane redeems only the last biscuit it issued.
+          const presented = Buffer.from(req.headers.get("Authorization")?.replace(/^Bearer /, "") ?? "", "base64").toString();
+          if (presented !== `biscuit-${state.issued}`) {
+            return new Response(`stale biscuit ${presented}`, { status: 401 });
+          }
+        }
+        if (opts.refreshDelayMs) {
+          await new Promise((resolve) => setTimeout(resolve, opts.refreshDelayMs));
+        }
         state.lastRefreshJwt = refreshReq.jwt;
         state.issued++;
         return proto(
@@ -246,6 +263,35 @@ test("enroll works without a state directory and keeps the enrollment key when /
   await mesh.save();
   await mesh.refresh();
   assert.deepEqual(mesh.credential.biscuit, text("biscuit-2"));
+});
+
+// A session refreshes on its own schedule while a pull from the control
+// plane may refresh too. The control plane redeems only the last biscuit it
+// issued and both write the same state file, so refreshes must run one
+// after another (sam-node's refreshMu, the Python SDK's lock).
+test("concurrent refreshes run one after the other", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sam-sdk-"));
+  try {
+    const opts = { strictRefresh: true, refreshDelayMs: 10, rejectNextRefresh: false };
+    const cp = fakeControlPlane(true, opts);
+    const mesh = await AgentMesh.enroll({ controlPlaneUrl: "http://127.0.0.1:1", bootstrapToken: "sbt_secret", stateDir: join(dir, "state"), fetch: cp.fetch });
+
+    const results = await Promise.allSettled(Array.from({ length: 8 }, () => mesh.refresh()));
+    const failures = results.filter((r) => r.status === "rejected");
+    assert.deepEqual(failures, []);
+    assert.deepEqual(mesh.credential.biscuit, text("biscuit-9"));
+    const onDisk = JSON.parse(await readFile(join(dir, "state", "credential.json"), "utf8")) as Record<string, unknown>;
+    assert.equal(Buffer.from(onDisk.biscuit as string, "base64").toString(), "biscuit-9");
+
+    // A failed refresh does not block the one queued behind it.
+    opts.rejectNextRefresh = true;
+    const [failed, next] = await Promise.allSettled([mesh.refresh(), mesh.refresh()]);
+    assert.equal(failed?.status, "rejected");
+    assert.equal(next?.status, "fulfilled");
+    assert.deepEqual(mesh.credential.biscuit, text("biscuit-10"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("enroll refuses ambiguous credentials", async () => {
