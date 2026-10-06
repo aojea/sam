@@ -698,6 +698,13 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "JWT validation failed: "+err.Error(), http.StatusUnauthorized)
 		return
 	}
+	// Bans and ownership are keyed on issuer|subject; a token without a
+	// subject would enroll an identity that can never be banned.
+	if oidcIdentityKey(claims) == "" {
+		logger.Warnw("JWT without a subject refused", "peer_id", req.PeerId)
+		http.Error(w, "JWT validation failed: token has no sub claim", http.StatusUnauthorized)
+		return
+	}
 	// An email the issuer marks unverified must not resolve bindings or be
 	// minted as an email() fact.
 	if verifiedEmail(claims) == "" {
@@ -1756,6 +1763,11 @@ func readProtoJSON(w http.ResponseWriter, r *http.Request, msg proto.Message) bo
 	defer func() { _ = r.Body.Close() }()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+			return false
+		}
 		http.Error(w, "Failed to read body", http.StatusBadRequest)
 		return false
 	}
@@ -3259,6 +3271,11 @@ func SetNodeBan(ctx context.Context, store storage.Store, node *storage.Enrolled
 			return fmt.Errorf("stored claims for %s are unreadable: %w", node.PeerID, err)
 		}
 		identity = oidcIdentityKey(claims)
+		if identity == "" {
+			// /register refuses a token without a subject, so this is a record
+			// from before that check. The device ban must still land.
+			logger.Warnw("Enrollment record carries claims without a subject; banning the device only", "peer_id", node.PeerID)
+		}
 	}
 	return store.SetNodeAndIdentityBanned(ctx, node.PeerID, identity, banned)
 }

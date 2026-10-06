@@ -2586,6 +2586,37 @@ func TestAuthDenialPaths(t *testing.T) {
 		}
 	})
 
+	t.Run("oversized operator-plane body answers 413", func(t *testing.T) {
+		oversized := bytes.Repeat([]byte("a"), maxRequestBodyBytes+1)
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/admin/bootstrap-tokens", bytes.NewReader(oversized))
+		req.Header.Set("Authorization", "Bearer super-secret-admin-token")
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Errorf("expected 413 for oversized JSON body, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("JWT without a subject is rejected", func(t *testing.T) {
+		// Bans are keyed on issuer|subject; an identity without one could
+		// never be banned, so it never enrolls.
+		noSubJWT := mintToken(map[string]interface{}{
+			"email": "nobody@example.com",
+		})
+		resp, err := client.Post(baseURL+"/register", "application/x-protobuf", bytes.NewReader(newEnrollBody(noSubJWT)))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("expected 401 for a JWT without sub, got %d", resp.StatusCode)
+		}
+	})
+
 	t.Run("admin endpoint rejects wrong token", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", baseURL+"/admin/status", nil)
 		req.Header.Set("Authorization", "Bearer this-is-not-the-admin-token")
