@@ -420,6 +420,10 @@ func (s *Server) allowNodeSTSRequest(peerID string) bool {
 	return s.stsLimiter.Allow(peerID)
 }
 
+// revokedPruneMin is the smallest revocation set RevokeBiscuitID bothers to
+// sweep for expired entries.
+const revokedPruneMin = 64
+
 // RevokeBiscuitID records a root Biscuit revocation ID (base64url-encoded) as
 // revoked until expiry.
 func (s *Server) RevokeBiscuitID(revocationID string, expiry time.Time) {
@@ -433,10 +437,13 @@ func (s *Server) RevokeBiscuitID(revocationID string, expiry time.Time) {
 	s.revokedBiscuitsMu.Lock()
 	// Expired entries also go on read; dropping them here too keeps the map
 	// bounded when nothing polls /revocations.
-	for id, exp := range s.revokedBiscuits {
-		if !now.Before(exp) {
-			delete(s.revokedBiscuits, id)
+	if len(s.revokedBiscuits) >= s.revokedPruneAt {
+		for id, exp := range s.revokedBiscuits {
+			if !now.Before(exp) {
+				delete(s.revokedBiscuits, id)
+			}
 		}
+		s.revokedPruneAt = max(revokedPruneMin, 2*len(s.revokedBiscuits))
 	}
 	s.revokedBiscuits[revocationID] = expiry
 	s.revokedBiscuitsMu.Unlock()

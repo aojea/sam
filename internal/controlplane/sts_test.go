@@ -24,6 +24,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -933,8 +934,8 @@ func TestOAuthAndControlPlaneHardening(t *testing.T) {
 	}
 }
 
-// A revocation that expired leaves the in-memory set on the next write, not
-// only when /revocations is read.
+// Expired revocations leave the in-memory set as writes accumulate, not only
+// when /revocations is read, and the set stays bounded by its live entries.
 func TestRevokeBiscuitIDPrunesExpiredEntries(t *testing.T) {
 	srv, store, _ := setupTestServer(t, "")
 	defer func() {
@@ -942,13 +943,15 @@ func TestRevokeBiscuitIDPrunesExpiredEntries(t *testing.T) {
 		_ = store.Close()
 	}()
 
-	srv.RevokeBiscuitID("expired", time.Now().Add(-time.Minute))
+	for i := 0; i < 4*revokedPruneMin; i++ {
+		srv.RevokeBiscuitID(fmt.Sprintf("expired-%d", i), time.Now().Add(-time.Minute))
+	}
 	srv.RevokeBiscuitID("live", time.Now().Add(time.Hour))
 
 	srv.revokedBiscuitsMu.RLock()
 	defer srv.revokedBiscuitsMu.RUnlock()
-	if _, ok := srv.revokedBiscuits["expired"]; ok {
-		t.Error("expired revocation still cached")
+	if n := len(srv.revokedBiscuits); n > revokedPruneMin+1 {
+		t.Errorf("revocation set holds %d entries after %d expired writes, want at most %d", n, 4*revokedPruneMin, revokedPruneMin+1)
 	}
 	if _, ok := srv.revokedBiscuits["live"]; !ok {
 		t.Error("live revocation missing")

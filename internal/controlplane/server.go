@@ -102,7 +102,11 @@ type Server struct {
 
 	revokedBiscuitsMu sync.RWMutex
 	revokedBiscuits   map[string]time.Time
-	bannedNodeRevIDs  map[string]string
+	// revokedPruneAt is the size at which RevokeBiscuitID next drops expired
+	// entries; it doubles after each pass, so a write costs O(1) amortized and
+	// the map holds at most twice its live entries.
+	revokedPruneAt   int
+	bannedNodeRevIDs map[string]string
 
 	oauthCodesMu sync.Mutex
 	oauthCodes   map[string]*oauthAuthCode
@@ -188,6 +192,7 @@ func NewServer(config Options, store storage.Store) (*Server, error) {
 		stsLimiter:            stsLimiter,
 		oidcSigner:            signer,
 		revokedBiscuits:       make(map[string]time.Time),
+		revokedPruneAt:        revokedPruneMin,
 		bannedNodeRevIDs:      make(map[string]string),
 		oauthCodes:            make(map[string]*oauthAuthCode),
 		providers:             make(map[string]*oidc.Provider),
