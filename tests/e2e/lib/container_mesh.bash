@@ -246,7 +246,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   # peer, or nothing.
   mesh_enrolled_node() {
     local peer_id="$1"
-    mesh_admin_status | jq -c --arg id "${peer_id}" '.enrolled_nodes // [] | .[] | select(.PeerID == $id)'
+    mesh_admin_status | jq -c --arg id "${peer_id}" '.enrolled_nodes // [] | .[] | select(.peer_id == $id)'
   }
 
   # POST /debug/connect-peer on node <idx>; the REST endpoint that replaced
@@ -484,11 +484,11 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local router_peer_id=""
     local lease_deadline=$((SECONDS + 60))
     while [[ -z "${router_peer_id}" ]]; do
-      # active_routers is null, not [], until the first lease lands.
+      # active_routers is absent until the first lease lands.
       router_peer_id=$(docker run --rm --network "${MESH_NETWORK:-kind}" "${MESH_RUNTIME_IMAGE}" \
           curl -sf --max-time 5 -H "Authorization: Bearer super-secret-admin-token" \
           "http://${router_node_ip}:8080/admin/status" 2>/dev/null |
-        jq -r '.active_routers // [] | sort_by(.LastRenewal) | last | .PeerID // empty')
+        jq -r '.active_routers // [] | sort_by(.last_renewal_time) | last | .peer_id // empty')
       if [[ -z "${router_peer_id}" ]] && ((SECONDS >= lease_deadline)); then
         echo "router lease did not reach the control plane within 60s" >&2
         return 1

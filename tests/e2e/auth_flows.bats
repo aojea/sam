@@ -23,8 +23,8 @@ assert_enrolled() {
     echo "control plane has no enrollment for ${peer_id}" >&2
     return 1
   fi
-  [[ "$(jq -r '.EnrollmentType' <<<"${record}")" == "${enrollment_type}" ]]
-  [[ "$(jq -r '.Role' <<<"${record}")" == "sam:role:node" ]]
+  [[ "$(jq -r '.enrollment_type' <<<"${record}")" == "${enrollment_type}" ]]
+  [[ "$(jq -r '.role' <<<"${record}")" == "sam:role:node" ]]
   echo "${record}"
 }
 
@@ -107,7 +107,7 @@ assert_enrolled() {
   local record
   record="$(assert_enrolled login OIDC)"
   echo "enrollment: ${record}"
-  [[ "$(jq -r '.ClaimsJSON | fromjson | .sub' <<<"${record}")" == "test-user" ]]
+  [[ "$(jq -r '.claims_json | fromjson | .sub' <<<"${record}")" == "test-user" ]]
 
   # The labels join declared must come back attested. /sam/identity hands back
   # the raw biscuit rather than decoded claims, so read the signed
