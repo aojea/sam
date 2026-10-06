@@ -429,7 +429,15 @@ func (s *Server) RevokeBiscuitID(revocationID string, expiry time.Time) {
 	if expiry.IsZero() {
 		expiry = time.Now().Add(s.config.BiscuitTTL)
 	}
+	now := time.Now()
 	s.revokedBiscuitsMu.Lock()
+	// Expired entries also go on read; dropping them here too keeps the map
+	// bounded when nothing polls /revocations.
+	for id, exp := range s.revokedBiscuits {
+		if !now.Before(exp) {
+			delete(s.revokedBiscuits, id)
+		}
+	}
 	s.revokedBiscuits[revocationID] = expiry
 	s.revokedBiscuitsMu.Unlock()
 	if s.store != nil {

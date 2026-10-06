@@ -527,6 +527,21 @@ var migrations = []migration{
 		postgres: secondsToMillisMigration,
 		sqlite:   secondsToMillisMigration,
 	},
+	{
+		// The scans that run on every bootstrap (/info's ban set), every
+		// lease lookup, every revocation pull and the node GC; nodes is the
+		// one table that grows with the mesh.
+		version:  16,
+		postgres: indexMigration,
+		sqlite:   indexMigration,
+	},
+}
+
+var indexMigration = []string{
+	`CREATE INDEX IF NOT EXISTS idx_nodes_banned_expires_at ON nodes (banned, expires_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_routers_expires_at ON routers (expires_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_revoked_biscuits_expires_at ON revoked_biscuits (expires_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_enrollment_requests_created_at ON enrollment_requests (created_at)`,
 }
 
 var secondsToMillisMigration = []string{
@@ -962,6 +977,38 @@ func (s *SQLStore) SetIdentityBanned(ctx context.Context, identity string, banne
 	query := s.rebind(`DELETE FROM banned_identities WHERE identity = ?`)
 	_, err := s.db.ExecContext(ctx, query, identity)
 	return err
+}
+
+// SetNodeAndIdentityBanned implements Store.
+func (s *SQLStore) SetNodeAndIdentityBanned(ctx context.Context, peerID, identity string, banned bool) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, s.rebind(`UPDATE nodes SET banned = ? WHERE peer_id = ?`), banned, peerID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	if identity != "" {
+		if banned {
+			_, err = tx.ExecContext(ctx, s.rebind(`INSERT INTO banned_identities (identity, banned_at) VALUES (?, ?) ON CONFLICT (identity) DO NOTHING`), identity, time.Now().UnixMilli())
+		} else {
+			_, err = tx.ExecContext(ctx, s.rebind(`DELETE FROM banned_identities WHERE identity = ?`), identity)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // IsIdentityBanned implements Store.

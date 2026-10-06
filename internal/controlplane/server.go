@@ -3247,20 +3247,15 @@ func (s *Server) banNode(ctx context.Context, node *storage.EnrolledNode) error 
 // is shed with a new keypair, and an unban that lifts only the peer id leaves
 // the human locked out of /register.
 func SetNodeBan(ctx context.Context, store storage.Store, node *storage.EnrolledNode, banned bool) error {
-	if err := store.SetNodeBanned(ctx, node.PeerID, banned); err != nil {
-		return err
+	var identity string
+	if node.ClaimsJSON != "" {
+		var claims jwt.MapClaims
+		if err := json.Unmarshal([]byte(node.ClaimsJSON), &claims); err != nil {
+			return fmt.Errorf("stored claims for %s are unreadable: %w", node.PeerID, err)
+		}
+		identity = oidcIdentityKey(claims)
 	}
-	if node.ClaimsJSON == "" {
-		return nil
-	}
-	var claims jwt.MapClaims
-	if err := json.Unmarshal([]byte(node.ClaimsJSON), &claims); err != nil {
-		return fmt.Errorf("stored claims for %s are unreadable: %w", node.PeerID, err)
-	}
-	if key := oidcIdentityKey(claims); key != "" {
-		return store.SetIdentityBanned(ctx, key, banned)
-	}
-	return nil
+	return store.SetNodeAndIdentityBanned(ctx, node.PeerID, identity, banned)
 }
 
 // allowedLabelPatterns collects the label grants of every role an identity

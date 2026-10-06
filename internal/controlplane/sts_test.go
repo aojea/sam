@@ -932,3 +932,25 @@ func TestOAuthAndControlPlaneHardening(t *testing.T) {
 		t.Fatalf("expected 415 for text/plain POST /policies, got %d", polResp.StatusCode)
 	}
 }
+
+// A revocation that expired leaves the in-memory set on the next write, not
+// only when /revocations is read.
+func TestRevokeBiscuitIDPrunesExpiredEntries(t *testing.T) {
+	srv, store, _ := setupTestServer(t, "")
+	defer func() {
+		_ = srv.Close()
+		_ = store.Close()
+	}()
+
+	srv.RevokeBiscuitID("expired", time.Now().Add(-time.Minute))
+	srv.RevokeBiscuitID("live", time.Now().Add(time.Hour))
+
+	srv.revokedBiscuitsMu.RLock()
+	defer srv.revokedBiscuitsMu.RUnlock()
+	if _, ok := srv.revokedBiscuits["expired"]; ok {
+		t.Error("expired revocation still cached")
+	}
+	if _, ok := srv.revokedBiscuits["live"]; !ok {
+		t.Error("live revocation missing")
+	}
+}

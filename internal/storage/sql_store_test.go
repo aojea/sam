@@ -421,6 +421,48 @@ func TestIdentityBanOps(t *testing.T) {
 	}
 }
 
+// A ban names the device and the identity behind it in one transaction: an
+// unknown peer rolls the identity ban back, so the two never disagree.
+func TestSetNodeAndIdentityBannedIsAtomic(t *testing.T) {
+	store := newTestStore(t)
+	defer func() { _ = store.Close() }()
+	ctx := context.Background()
+	const identity = "http://issuer.example|atomic-sub"
+
+	err := store.SetNodeAndIdentityBanned(ctx, "12D3KooWNoSuchNode", identity, true)
+	if err != ErrNotFound {
+		t.Fatalf("banning an unknown node: got %v, want ErrNotFound", err)
+	}
+	if banned, _ := store.IsIdentityBanned(ctx, identity); banned {
+		t.Fatal("identity ban survived the rolled-back node ban")
+	}
+
+	node := &EnrolledNode{PeerID: "12D3KooWAtomicNode", PublicKey: []byte("pk"), Biscuit: []byte("b"), Role: api.RoleNode, EnrollmentType: "oidc", EnrolledAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)}
+	if err := store.EnrollNode(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetNodeAndIdentityBanned(ctx, node.PeerID, identity, true); err != nil {
+		t.Fatalf("ban: %v", err)
+	}
+	nodeBanned, _ := store.IsNodeBanned(ctx, node.PeerID)
+	identityBanned, _ := store.IsIdentityBanned(ctx, identity)
+	if !nodeBanned || !identityBanned {
+		t.Fatalf("after ban: node=%v identity=%v, want both true", nodeBanned, identityBanned)
+	}
+	if err := store.SetNodeAndIdentityBanned(ctx, node.PeerID, identity, false); err != nil {
+		t.Fatalf("unban: %v", err)
+	}
+	nodeBanned, _ = store.IsNodeBanned(ctx, node.PeerID)
+	identityBanned, _ = store.IsIdentityBanned(ctx, identity)
+	if nodeBanned || identityBanned {
+		t.Fatalf("after unban: node=%v identity=%v, want both false", nodeBanned, identityBanned)
+	}
+	// A bootstrap-enrolled node has no identity to ban.
+	if err := store.SetNodeAndIdentityBanned(ctx, node.PeerID, "", true); err != nil {
+		t.Fatalf("ban without identity: %v", err)
+	}
+}
+
 func TestRouterLeaseOps(t *testing.T) {
 	store := newTestStore(t)
 	defer func() { _ = store.Close() }()

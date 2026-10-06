@@ -231,6 +231,12 @@ type Store interface {
 	// this is what makes a ban survive keypair regeneration.
 	SetIdentityBanned(ctx context.Context, identity string, banned bool) error
 
+	// SetNodeAndIdentityBanned is SetNodeBanned and SetIdentityBanned in one
+	// transaction, so a failure cannot leave the device banned while its
+	// identity may still enroll a new one, or the other way round. An empty
+	// identity bans the node alone.
+	SetNodeAndIdentityBanned(ctx context.Context, peerID, identity string, banned bool) error
+
 	// IsIdentityBanned checks if an identity is currently banned.
 	IsIdentityBanned(ctx context.Context, identity string) (bool, error)
 

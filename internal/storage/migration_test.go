@@ -18,6 +18,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -145,5 +146,38 @@ func TestMigrationConvertsSecondsToMillis(t *testing.T) {
 	}
 	if bannedAt != created.UnixMilli() {
 		t.Errorf("banned_at = %d, want %d", bannedAt, created.UnixMilli())
+	}
+}
+
+// Migration 16 indexes the scans that run on every bootstrap and every GC
+// pass; the index list is the contract the planner relies on.
+func TestMigrationCreatesIndexes(t *testing.T) {
+	store, err := NewSQLStore("sqlite", filepath.Join(t.TempDir(), "cp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+
+	rows, err := store.db.Query(`SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%' ORDER BY name`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var got []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, name)
+	}
+	want := []string{
+		"idx_enrollment_requests_created_at",
+		"idx_nodes_banned_expires_at",
+		"idx_revoked_biscuits_expires_at",
+		"idx_routers_expires_at",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("indexes = %v, want %v", got, want)
 	}
 }
