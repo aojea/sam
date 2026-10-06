@@ -675,13 +675,21 @@ func TestOAuth21AuthorizationCodePKCEAndTokenExchange(t *testing.T) {
 	}
 
 	// Verify that a non-canonical (CIDv1 base32) peer ID in Biscuit claims is
-	// canonicalized before checking IsNodeBanned in authorizeBiscuitForEgress.
+	// canonicalized by InspectVerifiedBiscuit and caught by IsNodeBanned in authorizeBiscuitForEgress.
 	if err := store.SetNodeBanned(ctx, nodePeerID.String(), true); err != nil {
 		t.Fatalf("SetNodeBanned: %v", err)
 	}
 	cidV1Str := peer.ToCid(nodePeerID).String()
 	if cidV1Str == nodePeerID.String() {
 		t.Fatalf("expected CIDv1 string %q to differ from canonical base58 %q", cidV1Str, nodePeerID.String())
+	}
+	unbannedPriv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateEd25519Key: %v", err)
+	}
+	unbannedPeerID, err := peer.IDFromPrivateKey(unbannedPriv)
+	if err != nil {
+		t.Fatalf("IDFromPrivateKey: %v", err)
 	}
 	cpPriv, _, err := store.GetCurrentKey(ctx)
 	if err != nil {
@@ -693,12 +701,16 @@ func TestOAuth21AuthorizationCodePKCEAndTokenExchange(t *testing.T) {
 		IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(time.Hour))},
 	}})
 	_ = bBuilder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: api.FactActorNode,
+		Name: api.FactNode,
 		IDs:  []biscuit.Term{biscuit.String(cidV1Str)},
 	}})
 	_ = bBuilder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactActorNode,
+		IDs:  []biscuit.Term{biscuit.String(unbannedPeerID.String())},
+	}})
+	_ = bBuilder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 		Name: api.FactClientPeerID,
-		IDs:  []biscuit.Term{biscuit.String(cidV1Str)},
+		IDs:  []biscuit.Term{biscuit.String(unbannedPeerID.String())},
 	}})
 	_ = bBuilder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 		Name: api.FactUser,
@@ -712,7 +724,14 @@ func TestOAuth21AuthorizationCodePKCEAndTokenExchange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nonCanonicalB.Serialize: %v", err)
 	}
-	if _, status, err := srv.authorizeBiscuitForEgress(ctx, nonCanonicalBiscuit, "bigquery.googleapis.com"); err == nil || status != http.StatusForbidden {
-		t.Fatalf("expected authorizeBiscuitForEgress to reject banned CIDv1 peer ID with 403, got status=%d err=%v", status, err)
+	inspected, err := identity.InspectVerifiedBiscuit(nonCanonicalBiscuit, []ed25519.PublicKey{cpPubKey}, time.Second)
+	if err != nil {
+		t.Fatalf("InspectVerifiedBiscuit: %v", err)
+	}
+	if inspected.NodePeerID != nodePeerID.String() {
+		t.Fatalf("expected InspectVerifiedBiscuit to canonicalize NodePeerID to %q, got %q", nodePeerID.String(), inspected.NodePeerID)
+	}
+	if _, status, err := srv.authorizeBiscuitForEgress(ctx, nonCanonicalBiscuit, "bigquery.googleapis.com"); err == nil || status != http.StatusForbidden || !strings.Contains(err.Error(), "is banned") {
+		t.Fatalf("expected authorizeBiscuitForEgress to reject banned CIDv1 peer ID with 403 'is banned', got status=%d err=%v", status, err)
 	}
 }

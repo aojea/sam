@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +38,56 @@ const (
 	defaultExtProcMaxBufferBytes = 1 << 20 // 1 MiB
 	defaultModelArmorTimeout     = 5 * time.Second
 )
+
+// boundedResponseRecorder buffers an upstream HTTP response up to maxBytes+1
+// so response inspection cannot consume unbounded memory on large or streaming
+// upstream payloads.
+type boundedResponseRecorder struct {
+	header      http.Header
+	body        bytes.Buffer
+	code        int
+	wroteHeader bool
+	maxBytes    int64
+	overflowed  bool
+}
+
+func newBoundedResponseRecorder(maxBytes int64) *boundedResponseRecorder {
+	if maxBytes <= 0 {
+		maxBytes = defaultExtProcMaxBufferBytes
+	}
+	return &boundedResponseRecorder{
+		header:   make(http.Header),
+		code:     http.StatusOK,
+		maxBytes: maxBytes,
+	}
+}
+
+func (r *boundedResponseRecorder) Header() http.Header {
+	return r.header
+}
+
+func (r *boundedResponseRecorder) WriteHeader(statusCode int) {
+	if r.wroteHeader {
+		return
+	}
+	r.code = statusCode
+	r.wroteHeader = true
+}
+
+func (r *boundedResponseRecorder) Write(p []byte) (int, error) {
+	if !r.wroteHeader {
+		r.WriteHeader(http.StatusOK)
+	}
+	remaining := (r.maxBytes + 1) - int64(r.body.Len())
+	if int64(len(p)) > remaining {
+		if remaining > 0 {
+			_, _ = r.body.Write(p[:remaining])
+		}
+		r.overflowed = true
+		return 0, errors.New("response body exceeds max_buffered_bytes")
+	}
+	return r.body.Write(p)
+}
 
 // isProtectedEgressHeader reports whether a header name is off-limits to an
 // ext_proc inspector. Inspectors may add/modify application headers, or block a
@@ -206,18 +255,21 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 
 	callerCtx := s.extractCallerContext(r.Context())
 
+	maxBytes := int64(defaultExtProcMaxBufferBytes)
+	hasExplicitMax := false
+	for _, ins := range inspectors {
+		if ep := ins.GetExtProc(); ep != nil && ep.GetMaxBufferedBytes() > 0 {
+			if !hasExplicitMax || int64(ep.GetMaxBufferedBytes()) > maxBytes {
+				maxBytes = int64(ep.GetMaxBufferedBytes())
+				hasExplicitMax = true
+			}
+		}
+	}
+
 	// Read and buffer the request body once if present so multiple inspectors can
 	// inspect and optionally rewrite it before forwarding upstream.
 	var reqBody []byte
 	if r.Body != nil && r.Body != http.NoBody {
-		maxBytes := int64(defaultExtProcMaxBufferBytes)
-		for _, ins := range inspectors {
-			if ep := ins.GetExtProc(); ep != nil && ep.GetMaxBufferedBytes() > 0 {
-				if int64(ep.GetMaxBufferedBytes()) > maxBytes {
-					maxBytes = int64(ep.GetMaxBufferedBytes())
-				}
-			}
-		}
 		var err error
 		reqBody, err = io.ReadAll(io.LimitReader(r.Body, maxBytes+1))
 		_ = r.Body.Close()
@@ -374,11 +426,11 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	rec := httptest.NewRecorder()
+	rec := newBoundedResponseRecorder(maxBytes)
 	proxy.ServeHTTP(rec, r)
-	respStatus := rec.Code
+	respStatus := rec.code
 	respHeader := rec.Header().Clone()
-	respBody := rec.Body.Bytes()
+	respBody := rec.body.Bytes()
 
 	// Run response phase across active ext_proc streams and BUFFERED ModelArmor inspectors.
 	for _, as := range activeStreams {
@@ -395,6 +447,10 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		respBody = mutatedBody
+	}
+	if rec.overflowed {
+		refuse(w, http.StatusBadGateway, "upstream response exceeds max_buffered_bytes", proxyStatusDenied)
+		return
 	}
 
 	for _, ins := range inspectors {

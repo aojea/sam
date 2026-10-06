@@ -705,3 +705,18 @@ func TestExtProcEgressClientAgainstSubprocessCallout(t *testing.T) {
 		t.Fatalf("expected 502 on trailers-only gRPC rejection, got %d", recErr.Code)
 	}
 }
+
+func TestBoundedResponseRecorderOverflow(t *testing.T) {
+	rec := newBoundedResponseRecorder(16)
+	n, err := rec.Write([]byte("0123456789"))
+	if err != nil || n != 10 || rec.overflowed {
+		t.Fatalf("expected first write to succeed: n=%d err=%v overflowed=%v", n, err, rec.overflowed)
+	}
+	_, err = rec.Write([]byte("0123456789"))
+	if err == nil || !rec.overflowed {
+		t.Fatalf("expected second write exceeding maxBytes=16 to overflow: err=%v overflowed=%v", err, rec.overflowed)
+	}
+	if rec.body.Len() > 17 {
+		t.Fatalf("expected bounded buffer to cap at maxBytes+1 (17), got %d", rec.body.Len())
+	}
+}

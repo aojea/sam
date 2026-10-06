@@ -712,18 +712,34 @@ func CompileAWSSessionPolicy(templateJSON, destName string, rules []*api.TaskAut
 	var tmplResources []string
 	hasTemplate := strings.TrimSpace(templateJSON) != ""
 	if hasTemplate {
+		type awsStatement struct {
+			Effect   string `json:"Effect"`
+			Action   any    `json:"Action"`
+			Resource any    `json:"Resource"`
+		}
 		var doc struct {
-			Version   string `json:"Version"`
-			Statement []struct {
-				Effect   string `json:"Effect"`
-				Action   any    `json:"Action"`
-				Resource any    `json:"Resource"`
-			} `json:"Statement"`
+			Version   string          `json:"Version"`
+			Statement json.RawMessage `json:"Statement"`
 		}
 		if err := json.Unmarshal([]byte(templateJSON), &doc); err != nil {
 			return "", fmt.Errorf("invalid aws_assume_role.session_policy JSON: %w", err)
 		}
-		for _, st := range doc.Statement {
+		var statements []awsStatement
+		trimmedStmt := bytes.TrimSpace(doc.Statement)
+		if len(trimmedStmt) > 0 {
+			if trimmedStmt[0] == '[' {
+				if err := json.Unmarshal(trimmedStmt, &statements); err != nil {
+					return "", fmt.Errorf("invalid aws_assume_role.session_policy Statement array: %w", err)
+				}
+			} else {
+				var st awsStatement
+				if err := json.Unmarshal(trimmedStmt, &st); err != nil {
+					return "", fmt.Errorf("invalid aws_assume_role.session_policy Statement object: %w", err)
+				}
+				statements = []awsStatement{st}
+			}
+		}
+		for _, st := range statements {
 			if !strings.EqualFold(st.Effect, "Allow") {
 				continue
 			}

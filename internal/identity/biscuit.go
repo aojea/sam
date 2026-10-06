@@ -912,15 +912,39 @@ func InspectVerifiedBiscuit(biscuitData []byte, trustedPublicKeys []ed25519.Publ
 		return vals[0]
 	}
 
+	canonicalPeer := func(factName string) (string, error) {
+		raw := firstString(factName)
+		if raw == "" {
+			return "", nil
+		}
+		p, err := peer.Decode(raw)
+		if err != nil {
+			return "", fmt.Errorf("invalid %s peer ID in biscuit: %w", factName, err)
+		}
+		return p.String(), nil
+	}
+	nodePeerID, err := canonicalPeer(api.FactNode)
+	if err != nil {
+		return nil, err
+	}
+	actorNodePeerID, err := canonicalPeer(api.FactActorNode)
+	if err != nil {
+		return nil, err
+	}
+	clientPeerID, err := canonicalPeer(api.FactClientPeerID)
+	if err != nil {
+		return nil, err
+	}
+
 	return &VerifiedBiscuitClaims{
 		Biscuit:         b,
 		VerifyingKey:    verifyingKey,
 		User:            firstString(api.FactUser),
 		Email:           firstString(api.FactEmail),
 		Roles:           queryStrings(api.FactRole),
-		NodePeerID:      firstString(api.FactNode),
-		ActorNodePeerID: firstString(api.FactActorNode),
-		ClientPeerID:    firstString(api.FactClientPeerID),
+		NodePeerID:      nodePeerID,
+		ActorNodePeerID: actorNodePeerID,
+		ClientPeerID:    clientPeerID,
 		Expiration:      expiry,
 		RevocationIDs:   b.RevocationIds(),
 		TaskRules:       rules,

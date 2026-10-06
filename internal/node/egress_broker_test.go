@@ -435,3 +435,36 @@ type exchangerFunc func(ctx context.Context, principal string, rules []*api.Task
 func (f exchangerFunc) Exchange(ctx context.Context, principal string, rules []*api.TaskAuthorizationRule) (string, time.Time, error) {
 	return f(ctx, principal, rules)
 }
+
+func TestCompileAWSSessionPolicySingleStatementObject(t *testing.T) {
+	singleStmtTemplate := `{
+		"Version": "2012-10-17",
+		"Statement": {
+			"Effect": "Allow",
+			"Action": ["s3:GetObject", "s3:PutObject"],
+			"Resource": "arn:aws:s3:::corp-bucket/*"
+		}
+	}`
+	tar := &api.TaskAuthorizationRule{
+		Name: "read-only-s3",
+		Rules: []*api.TaskRule{
+			{
+				AllowedServices:  []string{"egress://s3.amazonaws.com"},
+				AllowedResources: []string{"arn:aws:s3:::corp-bucket/reports/*"},
+				Operation: &api.TaskOperation{
+					AllowedPermissions: []string{"s3:GetObject"},
+				},
+			},
+		},
+	}
+	compiled, err := CompileAWSSessionPolicy(singleStmtTemplate, "s3.amazonaws.com", []*api.TaskAuthorizationRule{tar})
+	if err != nil {
+		t.Fatalf("CompileAWSSessionPolicy with single Statement object failed: %v", err)
+	}
+	if !strings.Contains(compiled, "s3:GetObject") || strings.Contains(compiled, "s3:PutObject") {
+		t.Fatalf("unexpected compiled policy actions: %s", compiled)
+	}
+	if !strings.Contains(compiled, "arn:aws:s3:::corp-bucket/reports/*") {
+		t.Fatalf("unexpected compiled policy resources: %s", compiled)
+	}
+}
