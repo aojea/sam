@@ -15,125 +15,220 @@
 package tlsinspect
 
 import (
-	"bytes"
+	"context"
+	"crypto/ecdh"
+	"crypto/rand"
+	"crypto/tls"
 	"encoding/binary"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
-func buildTestClientHelloRecord(serverName string, includeECH bool) []byte {
-	var exts []byte
-	if serverName != "" {
-		nameBytes := []byte(serverName)
-		sniEntry := make([]byte, 3+len(nameBytes))
-		sniEntry[0] = 0x00 // host_name
-		binary.BigEndian.PutUint16(sniEntry[1:3], uint16(len(nameBytes)))
-		copy(sniEntry[3:], nameBytes)
-
-		sniList := make([]byte, 2+len(sniEntry))
-		binary.BigEndian.PutUint16(sniList[0:2], uint16(len(sniEntry)))
-		copy(sniList[2:], sniEntry)
-
-		ext := make([]byte, 4+len(sniList))
-		binary.BigEndian.PutUint16(ext[0:2], ExtServerName)
-		binary.BigEndian.PutUint16(ext[2:4], uint16(len(sniList)))
-		copy(ext[4:], sniList)
-		exts = append(exts, ext...)
+// buildECHConfigList constructs a valid RFC 9180 / draft-ietf-tls-esni-18
+// ECHConfigList for crypto/tls so a standard Go tls.Client emits a real
+// Encrypted Client Hello (0xfe0d) extension with outerSNI as its cleartext
+// public_name and encrypts the inner ServerName.
+func buildECHConfigList(t *testing.T, outerSNI string) []byte {
+	t.Helper()
+	priv, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
 	}
-	if includeECH {
-		echPayload := []byte{0x01, 0x02, 0x03, 0x04}
-		ext := make([]byte, 4+len(echPayload))
-		binary.BigEndian.PutUint16(ext[0:2], ExtEncryptedClientHello)
-		binary.BigEndian.PutUint16(ext[2:4], uint16(len(echPayload)))
-		copy(ext[4:], echPayload)
-		exts = append(exts, ext...)
-	}
+	pub := priv.PublicKey().Bytes()
 
-	var body []byte
-	body = append(body, 0x03, 0x03)             // legacy_version TLS 1.2
-	body = append(body, make([]byte, 32)...)    // random
-	body = append(body, 0x00)                   // session_id length = 0
-	body = append(body, 0x00, 0x02, 0x13, 0x01) // cipher_suites (TLS_AES_128_GCM_SHA256)
-	body = append(body, 0x01, 0x00)             // compression_methods (null)
-	if len(exts) > 0 {
-		extBlock := make([]byte, 2+len(exts))
-		binary.BigEndian.PutUint16(extBlock[0:2], uint16(len(exts)))
-		copy(extBlock[2:], exts)
-		body = append(body, extBlock...)
-	}
+	var contents []byte
+	contents = append(contents, 0x01)       // config_id = 1
+	contents = append(contents, 0x00, 0x20) // kem_id = DHKEM(X25519, HKDF-SHA256)
+	contents = binary.BigEndian.AppendUint16(contents, uint16(len(pub)))
+	contents = append(contents, pub...)
+	contents = binary.BigEndian.AppendUint16(contents, 4) // cipher_suites length
+	contents = append(contents, 0x00, 0x01, 0x00, 0x01)   // HKDF-SHA256 + AES-128-GCM
+	contents = append(contents, 0x00)                     // maximum_name_length
+	contents = append(contents, byte(len(outerSNI)))      // public_name length
+	contents = append(contents, []byte(outerSNI)...)      // public_name (outer cleartext SNI)
+	contents = binary.BigEndian.AppendUint16(contents, 0) // extensions length = 0
 
-	hs := make([]byte, 4+len(body))
-	hs[0] = HandshakeTypeClientHello
-	hs[1] = byte(len(body) >> 16)
-	hs[2] = byte(len(body) >> 8)
-	hs[3] = byte(len(body))
-	copy(hs[4:], body)
+	var cfg []byte
+	cfg = binary.BigEndian.AppendUint16(cfg, ExtEncryptedClientHello) // version = 0xfe0d
+	cfg = binary.BigEndian.AppendUint16(cfg, uint16(len(contents)))
+	cfg = append(cfg, contents...)
 
-	rec := make([]byte, 5+len(hs))
-	rec[0] = RecordTypeHandshake
-	rec[1] = 0x03
-	rec[2] = 0x01
-	binary.BigEndian.PutUint16(rec[3:5], uint16(len(hs)))
-	copy(rec[5:], hs)
-	return rec
+	var list []byte
+	list = binary.BigEndian.AppendUint16(list, uint16(len(cfg)))
+	list = append(list, cfg...)
+	return list
 }
 
-func TestVerifyClientHello(t *testing.T) {
-	t.Run("matching_sni_and_case_insensitive_normalization", func(t *testing.T) {
-		raw := buildTestClientHelloRecord("DB.Internal.Example.COM.", false)
-		gotRaw, gotSNI, err := VerifyClientHello(bytes.NewReader(raw), "db.internal.example.com")
+// interceptingTransport returns an *http.Transport whose DialContext pipes the
+// client connection through VerifyClientHello(expectedDest) before forwarding
+// the peeked ClientHello and remaining stream to the target httptest.Server.
+func interceptingTransport(targetAddr string, expectedDest string, tlsCfg *tls.Config, onInspect func(sni string, err error)) *http.Transport {
+	return &http.Transport{
+		TLSClientConfig: tlsCfg,
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			clientConn, proxyConn := net.Pipe()
+			go func() {
+				rawRecord, gotSNI, err := VerifyClientHello(proxyConn, expectedDest)
+				if onInspect != nil {
+					onInspect(gotSNI, err)
+				}
+				if err != nil {
+					_ = proxyConn.Close()
+					return
+				}
+				upstream, dialErr := (&net.Dialer{}).DialContext(ctx, "tcp", targetAddr)
+				if dialErr != nil {
+					_ = proxyConn.Close()
+					return
+				}
+				if _, writeErr := upstream.Write(rawRecord); writeErr != nil {
+					_ = upstream.Close()
+					_ = proxyConn.Close()
+					return
+				}
+				var wg sync.WaitGroup
+				wg.Add(2)
+				go func() {
+					defer wg.Done()
+					_, _ = io.Copy(upstream, proxyConn)
+					_ = upstream.Close()
+				}()
+				go func() {
+					defer wg.Done()
+					_, _ = io.Copy(proxyConn, upstream)
+					_ = proxyConn.Close()
+				}()
+				wg.Wait()
+			}()
+			return clientConn, nil
+		},
+	}
+}
+
+func TestVerifyClientHelloWithTLSServer(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer ts.Close()
+
+	baseTLSConfig := func() *tls.Config {
+		cfg := ts.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+		// httptest.NewTLSServer issues a cert for 127.0.0.1 / example.com;
+		// skip hostname verification on the client side so we can test custom SNIs
+		// while still verifying the server certificate against ts.Certificate().
+		cfg.InsecureSkipVerify = true
+		return cfg
+	}
+
+	t.Run("matching_sni_completes_tls_handshake_and_http_request", func(t *testing.T) {
+		var gotSNI string
+		var inspectErr error
+		tlsCfg := baseTLSConfig()
+		tlsCfg.ServerName = "DB.Internal.Example.COM"
+
+		client := &http.Client{
+			Transport: interceptingTransport(ts.Listener.Addr().String(), "db.internal.example.com", tlsCfg, func(sni string, err error) {
+				gotSNI = sni
+				inspectErr = err
+			}),
+		}
+		resp, err := client.Get("https://db.internal.example.com/healthz")
 		if err != nil {
-			t.Fatalf("VerifyClientHello: %v", err)
+			t.Fatalf("client.Get failed: %v (inspectErr=%v)", err, inspectErr)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
+		if inspectErr != nil {
+			t.Fatalf("unexpected inspect error: %v", inspectErr)
 		}
 		if gotSNI != "db.internal.example.com" {
-			t.Fatalf("normalizedSNI = %q, want db.internal.example.com", gotSNI)
-		}
-		if !bytes.Equal(gotRaw, raw) {
-			t.Fatalf("RawRecord mismatch")
+			t.Fatalf("gotSNI = %q, want db.internal.example.com", gotSNI)
 		}
 	})
 
-	t.Run("mismatched_sni_rejected", func(t *testing.T) {
-		raw := buildTestClientHelloRecord("evil.example.com", false)
-		_, _, err := VerifyClientHello(bytes.NewReader(raw), "db.internal.example.com")
-		if err == nil || !strings.Contains(err.Error(), "does not match destination") {
-			t.Fatalf("expected SNI mismatch error, got %v", err)
+	t.Run("mismatched_sni_rejected_before_upstream_handshake", func(t *testing.T) {
+		var inspectErr error
+		tlsCfg := baseTLSConfig()
+		tlsCfg.ServerName = "evil.example.com"
+
+		client := &http.Client{
+			Transport: interceptingTransport(ts.Listener.Addr().String(), "db.internal.example.com", tlsCfg, func(_ string, err error) {
+				inspectErr = err
+			}),
+		}
+		_, err := client.Get("https://evil.example.com/healthz")
+		if err == nil {
+			t.Fatal("expected TLS handshake to fail on mismatched SNI")
+		}
+		if inspectErr == nil || !strings.Contains(inspectErr.Error(), "does not match destination") {
+			t.Fatalf("expected SNI mismatch error from VerifyClientHello, got %v", inspectErr)
 		}
 	})
 
-	t.Run("missing_sni_rejected", func(t *testing.T) {
-		raw := buildTestClientHelloRecord("", false)
-		_, _, err := VerifyClientHello(bytes.NewReader(raw), "db.internal.example.com")
-		if err == nil || !strings.Contains(err.Error(), "missing SNI") {
-			t.Fatalf("expected missing SNI error, got %v", err)
+	t.Run("missing_sni_on_ip_literal_rejected", func(t *testing.T) {
+		var inspectErr error
+		tlsCfg := baseTLSConfig()
+		tlsCfg.ServerName = ""
+
+		client := &http.Client{
+			Transport: interceptingTransport(ts.Listener.Addr().String(), "db.internal.example.com", tlsCfg, func(_ string, err error) {
+				inspectErr = err
+			}),
+		}
+		// Requesting an IP literal causes Go's crypto/tls to omit the SNI extension.
+		_, err := client.Get("https://127.0.0.1/healthz")
+		if err == nil {
+			t.Fatal("expected TLS handshake without SNI to fail")
+		}
+		if inspectErr == nil || !strings.Contains(inspectErr.Error(), "missing SNI") {
+			t.Fatalf("expected missing SNI error from VerifyClientHello, got %v", inspectErr)
 		}
 	})
 
-	t.Run("ech_extension_rejected", func(t *testing.T) {
-		raw := buildTestClientHelloRecord("db.internal.example.com", true)
-		_, _, err := VerifyClientHello(bytes.NewReader(raw), "db.internal.example.com")
-		if err == nil || !strings.Contains(err.Error(), "Encrypted Client Hello") {
-			t.Fatalf("expected ECH error, got %v", err)
+	t.Run("encrypted_client_hello_ech_rejected_even_when_outer_sni_matches", func(t *testing.T) {
+		var inspectErr error
+		tlsCfg := baseTLSConfig()
+		tlsCfg.MinVersion = tls.VersionTLS13
+		// Inner secret SNI is evil.example.com, while outer cleartext public_name
+		// in ECHConfigList is db.internal.example.com (matching the allowed destination).
+		tlsCfg.ServerName = "evil.example.com"
+		tlsCfg.EncryptedClientHelloConfigList = buildECHConfigList(t, "db.internal.example.com")
+
+		client := &http.Client{
+			Transport: interceptingTransport(ts.Listener.Addr().String(), "db.internal.example.com", tlsCfg, func(_ string, err error) {
+				inspectErr = err
+			}),
+		}
+		_, err := client.Get("https://evil.example.com/healthz")
+		if err == nil {
+			t.Fatal("expected TLS handshake with ECH to be rejected")
+		}
+		if inspectErr == nil || !strings.Contains(inspectErr.Error(), "Encrypted Client Hello") {
+			t.Fatalf("expected ECH rejection error from VerifyClientHello, got %v", inspectErr)
 		}
 	})
 
-	t.Run("trailing_bytes_after_handshake_rejected", func(t *testing.T) {
-		raw := buildTestClientHelloRecord("db.internal.example.com", false)
-		// Increase record length by 4 bytes to simulate a second smuggled handshake message in the same record.
-		recLen := int(binary.BigEndian.Uint16(raw[3:5])) + 4
-		binary.BigEndian.PutUint16(raw[3:5], uint16(recLen))
-		raw = append(raw, 0x01, 0x00, 0x00, 0x00)
-		_, _, err := VerifyClientHello(bytes.NewReader(raw), "db.internal.example.com")
-		if err == nil || !strings.Contains(err.Error(), "trailing bytes or multiple handshake messages") {
-			t.Fatalf("expected trailing bytes error, got %v", err)
+	t.Run("plain_http_non_handshake_record_rejected", func(t *testing.T) {
+		var inspectErr error
+		client := &http.Client{
+			Transport: interceptingTransport(ts.Listener.Addr().String(), "db.internal.example.com", nil, func(_ string, err error) {
+				inspectErr = err
+			}),
 		}
-	})
-
-	t.Run("non_handshake_record_rejected", func(t *testing.T) {
-		raw := []byte{0x17, 0x03, 0x03, 0x00, 0x02, 0xaa, 0xbb}
-		_, _, err := VerifyClientHello(bytes.NewReader(raw), "db.internal.example.com")
-		if err == nil || !strings.Contains(err.Error(), "expected TLS Handshake record") {
-			t.Fatalf("expected non-handshake record error, got %v", err)
+		_, err := client.Get("http://db.internal.example.com/healthz")
+		if err == nil {
+			t.Fatal("expected plain HTTP request on TLS tunnel to fail")
+		}
+		if inspectErr == nil || !strings.Contains(inspectErr.Error(), "expected TLS Handshake record") {
+			t.Fatalf("expected non-handshake record error from VerifyClientHello, got %v", inspectErr)
 		}
 	})
 }
