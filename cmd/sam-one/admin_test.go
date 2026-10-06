@@ -15,7 +15,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,8 +26,9 @@ import (
 	"time"
 
 	"github.com/google/sam/api"
-	"github.com/google/sam/internal/storage"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func newFakeAdminAPI(t *testing.T) *httptest.Server {
@@ -43,31 +43,34 @@ func newFakeAdminAPI(t *testing.T) *httptest.Server {
 		case http.MethodPost:
 			// Decode into the shared wire type, as the control plane does, so a
 			// client that drifts from it fails here.
-			var req api.BootstrapTokenRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			body, _ := io.ReadAll(r.Body)
+			req := &api.BootstrapTokenCreateRequest{}
+			if err := protojson.Unmarshal(body, req); err != nil {
 				http.Error(w, "bad body", http.StatusBadRequest)
 				return
 			}
-			if !req.AutonomousRecovery || req.MaxUsages != 1 || req.TTLHours != 24 || req.Description != "note" {
+			if !req.GetAutonomousRecovery() || req.GetMaxUsages() != 1 || req.GetTtlHours() != 24 || req.GetDescription() != "note" {
 				http.Error(w, fmt.Sprintf("unexpected request %+v", req), http.StatusBadRequest)
 				return
 			}
 			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(api.BootstrapTokenResponse{
-				ID:        "abcdef123456",
-				Token:     "sam-bt-fresh",
-				Role:      req.Role,
-				ExpiresAt: "2026-12-31T00:00:00Z",
+			out, _ := protojson.MarshalOptions{UseProtoNames: true}.Marshal(&api.BootstrapTokenCreateResponse{
+				Id:         "abcdef123456",
+				Token:      "sam-bt-fresh",
+				Role:       req.GetRole(),
+				ExpireTime: timestamppb.New(time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)),
 			})
+			_, _ = w.Write(out)
 		case http.MethodGet:
-			_ = json.NewEncoder(w).Encode([]storage.BootstrapToken{{
-				ID:          "abcdef123456",
+			out, _ := protojson.MarshalOptions{UseProtoNames: true}.Marshal(&api.BootstrapTokenListResponse{Tokens: []*api.BootstrapToken{{
+				Id:          "abcdef123456",
 				Role:        api.RoleNode,
 				MaxUsages:   3,
 				UsagesCount: 1,
 				Description: "seeded",
-				ExpiresAt:   time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC),
-			}})
+				ExpireTime:  timestamppb.New(time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)),
+			}}})
+			_, _ = w.Write(out)
 		default:
 			http.Error(w, "method", http.StatusMethodNotAllowed)
 		}
@@ -109,7 +112,7 @@ func TestAdminClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("createToken failed: %v", err)
 	}
-	if created.Token != "sam-bt-fresh" || created.Role != api.RoleNode {
+	if created.GetToken() != "sam-bt-fresh" || created.GetRole() != api.RoleNode {
 		t.Errorf("unexpected created token: %+v", created)
 	}
 
@@ -117,7 +120,7 @@ func TestAdminClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listTokens failed: %v", err)
 	}
-	if len(list) != 1 || list[0].Description != "seeded" || list[0].UsagesCount != 1 {
+	if len(list) != 1 || list[0].GetDescription() != "seeded" || list[0].GetUsagesCount() != 1 {
 		t.Errorf("unexpected token list: %+v", list)
 	}
 

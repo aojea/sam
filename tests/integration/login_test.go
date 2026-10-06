@@ -16,6 +16,7 @@ package integration_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/google/sam/api"
 	"github.com/google/sam/internal/node"
+	"github.com/google/sam/internal/storage"
 )
 
 // These tests cover how a node comes to hold, keep and lose its mesh
@@ -60,8 +62,13 @@ func startMesh(t *testing.T, dir, oidcURL string, mintToken func(map[string]inte
 	t.Helper()
 	cpPort, cleanup := startControlPlaneAndRouter(t, dir, oidcURL, mintToken, meshPolicyFile(t, dir))
 	t.Cleanup(cleanup)
+	meshDirs[cpPort] = dir
 	return cpPort, fmt.Sprintf("http://127.0.0.1:%d", cpPort)
 }
+
+// meshDirs maps a control plane started by startMesh to its directory, so a
+// test can open the control plane's store (see enrolledAs).
+var meshDirs = map[int]string{}
 
 // nodeHome is the environment of a node whose files live under home, and
 // the store that environment resolves to.
@@ -101,26 +108,42 @@ func join(t *testing.T, nodeBin string, env []string, cpURL string, extra ...str
 }
 
 // enrolledAs fails unless the control plane holds an enrollment for peerID
-// made by subject, and returns it.
+// made by subject, and returns the biscuit it issued. The operator plane
+// never carries a credential, so the biscuit comes from the control plane's
+// own store (sqlite in WAL mode, readable beside the running process).
 func enrolledAs(t *testing.T, cpPort int, peerID string, subject string) []byte {
 	t.Helper()
 	record := fetchAdminStatus(t, cpPort, testAdminToken).enrolledNode(peerID)
 	if record == nil {
 		t.Fatalf("control plane :%d has no enrollment for %s", cpPort, peerID)
 	}
-	if record.Role != api.RoleNode {
-		t.Fatalf("enrollment role = %q, want %q", record.Role, api.RoleNode)
+	if record.GetRole() != api.RoleNode {
+		t.Fatalf("enrollment role = %q, want %q", record.GetRole(), api.RoleNode)
 	}
 	var claims struct {
 		Sub string `json:"sub"`
 	}
-	if err := json.Unmarshal([]byte(record.ClaimsJSON), &claims); err != nil {
-		t.Fatalf("enrollment claims %q: %v", record.ClaimsJSON, err)
+	if err := json.Unmarshal([]byte(record.GetClaimsJson()), &claims); err != nil {
+		t.Fatalf("enrollment claims %q: %v", record.GetClaimsJson(), err)
 	}
 	if claims.Sub != subject {
 		t.Fatalf("enrolled by %q, want %q", claims.Sub, subject)
 	}
-	return record.Biscuit
+
+	dir, ok := meshDirs[cpPort]
+	if !ok {
+		t.Fatalf("control plane :%d was not started by startMesh", cpPort)
+	}
+	cpStore, err := storage.NewSQLStore("sqlite", filepath.Join(dir, "cp-keys.db"))
+	if err != nil {
+		t.Fatalf("open control plane store: %v", err)
+	}
+	defer func() { _ = cpStore.Close() }()
+	stored, err := cpStore.GetNode(context.Background(), peerID)
+	if err != nil {
+		t.Fatalf("control plane store has no node %s: %v", peerID, err)
+	}
+	return stored.Biscuit
 }
 
 func TestSamNodeJoin(t *testing.T) {

@@ -33,6 +33,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-msgio"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -193,15 +194,15 @@ func TestEnrollStatusPollingCollectsBiscuit(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
-		var enrollList []storage.EnrollmentRequest
-		if err := json.NewDecoder(listResp.Body).Decode(&enrollList); err != nil {
-			_ = listResp.Body.Close()
+		listBody, readErr := io.ReadAll(listResp.Body)
+		_ = listResp.Body.Close()
+		enrollList := &api.EnrollmentRequestListResponse{}
+		if readErr != nil || protojson.Unmarshal(listBody, enrollList) != nil {
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
-		_ = listResp.Body.Close()
-		if len(enrollList) == 1 {
-			reqID = enrollList[0].ID
+		if len(enrollList.GetRequests()) == 1 {
+			reqID = enrollList.GetRequests()[0].GetId()
 			break
 		}
 		time.Sleep(50 * time.Millisecond)

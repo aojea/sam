@@ -619,10 +619,11 @@ func TestMarshalPolicyJSONRoundTrip(t *testing.T) {
 		{Role: "ops", Members: []string{"user:root"}},
 	}
 
-	rendered, err := marshalPolicyJSON(roles, bindings, nil)
+	renderedBytes, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(&api.PolicyConfig{Roles: roles, Bindings: bindings})
 	if err != nil {
 		t.Fatalf("rendering the policy: %v", err)
 	}
+	rendered := string(renderedBytes)
 
 	// Proto names, because that is what the docs and the Helm bootstrap job use.
 	if !strings.Contains(rendered, "allowed_services") || !strings.Contains(rendered, "custom_datalog") {
@@ -712,11 +713,11 @@ func TestPoliciesAcceptConsoleJSON(t *testing.T) {
 	}
 
 	// What /status hands the console must be postable back unchanged.
-	rendered, err := marshalPolicyJSON(roles, bindings, nil)
+	rendered, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(&api.PolicyConfig{Roles: roles, Bindings: bindings})
 	if err != nil {
 		t.Fatalf("rendering the stored policy: %v", err)
 	}
-	req, _ = http.NewRequest(http.MethodPost, baseURL+"/policies", strings.NewReader(rendered))
+	req, _ = http.NewRequest(http.MethodPost, baseURL+"/policies", bytes.NewReader(rendered))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer super-secret-admin-token")
 	resp, err = client.Do(req)
@@ -1001,14 +1002,17 @@ func TestEnrollmentWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var enrollList []storage.EnrollmentRequest
-	_ = json.NewDecoder(resp.Body).Decode(&enrollList)
+	enrollListBody, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
+	enrollList := &api.EnrollmentRequestListResponse{}
+	if err := protojson.Unmarshal(enrollListBody, enrollList); err != nil {
+		t.Fatalf("decode /admin/enrollments: %v", err)
+	}
 
-	if len(enrollList) != 1 || enrollList[0].PeerID != pID.String() {
+	if len(enrollList.GetRequests()) != 1 || enrollList.GetRequests()[0].GetPeerId() != pID.String() {
 		t.Fatalf("unexpected enrollments list: %+v", enrollList)
 	}
-	reqID := enrollList[0].ID
+	reqID := enrollList.GetRequests()[0].GetId()
 
 	// Approve
 	req, _ = http.NewRequest("POST", baseURL+"/admin/enrollments/"+reqID+"/approve", nil)
@@ -2208,29 +2212,20 @@ func TestAdminPanelAndUI(t *testing.T) {
 		t.Errorf("expected 200 status for authenticated status query, got: %d", resp.StatusCode)
 	}
 
-	var statusData map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&statusData); err != nil {
-		t.Fatalf("failed to decode admin status response: %v", err)
+	statusBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read admin status response: %v", err)
 	}
 	_ = resp.Body.Close()
+	statusData := &api.AdminStatusResponse{}
+	if err := protojson.Unmarshal(statusBody, statusData); err != nil {
+		t.Fatalf("failed to decode admin status response: %v", err)
+	}
 
-	if _, ok := statusData["active_routers"]; !ok {
-		t.Error("status response missing active_routers")
+	if len(statusData.GetUsers()) != 1 {
+		t.Fatalf("expected 1 user in status response, got: %v", statusData.GetUsers())
 	}
-	if _, ok := statusData["enrolled_nodes"]; !ok {
-		t.Error("status response missing enrolled_nodes")
-	}
-	if _, ok := statusData["enrollment_requests"]; !ok {
-		t.Error("status response missing enrollment_requests")
-	}
-	if _, ok := statusData["bootstrap_tokens"]; !ok {
-		t.Error("status response missing bootstrap_tokens")
-	}
-	users, ok := statusData["users"].([]any)
-	if !ok || len(users) != 1 {
-		t.Fatalf("expected 1 user in status response, got: %v", statusData["users"])
-	}
-	if got := users[0].(map[string]any)["ID"]; got != testUser.ID {
+	if got := statusData.GetUsers()[0].GetId(); got != testUser.ID {
 		t.Errorf("expected user ID %q, got %v", testUser.ID, got)
 	}
 
@@ -2341,20 +2336,19 @@ func TestUserStatusAndTenancy(t *testing.T) {
 		t.Fatalf("expected 200, got: %d", resp.StatusCode)
 	}
 
-	var data map[string]interface{}
-	_ = json.NewDecoder(resp.Body).Decode(&data)
+	statusBody, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
-
-	enrolledNodes, ok := data["enrolled_nodes"].([]interface{})
-	if !ok {
-		t.Fatal("enrolled_nodes is not an array")
+	data := &api.UserStatusResponse{}
+	if err := protojson.Unmarshal(statusBody, data); err != nil {
+		t.Fatalf("decode /user/status: %v", err)
 	}
+
+	enrolledNodes := data.GetEnrolledNodes()
 	if len(enrolledNodes) != 1 {
 		t.Fatalf("expected 1 node for User A, got: %d", len(enrolledNodes))
 	}
-	nodeMap := enrolledNodes[0].(map[string]interface{})
-	if nodeMap["PeerID"] != peerA.String() {
-		t.Errorf("expected node %q, got: %s", peerA.String(), nodeMap["PeerID"])
+	if enrolledNodes[0].GetPeerId() != peerA.String() {
+		t.Errorf("expected node %q, got: %s", peerA.String(), enrolledNodes[0].GetPeerId())
 	}
 
 	reqRevoke, _ := http.NewRequest("POST", baseURL+"/user/revoke?id="+peerB.String(), nil)
@@ -3184,16 +3178,20 @@ func TestAdminBootstrapTokensList(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /admin/bootstrap-tokens status = %s, want 200", resp.Status)
 	}
-	var list []storage.BootstrapToken
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-		t.Fatalf("failed to decode token list: %v", err)
+	listBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read token list: %v", err)
 	}
 	_ = resp.Body.Close()
-	if len(list) != 1 {
-		t.Fatalf("token list length = %d, want 1", len(list))
+	list := &api.BootstrapTokenListResponse{}
+	if err := protojson.Unmarshal(listBody, list); err != nil {
+		t.Fatalf("failed to decode token list: %v", err)
 	}
-	if list[0].Role != "sam:role:node" || list[0].MaxUsages != 3 || list[0].Description != "cli test" {
-		t.Errorf("unexpected token record: %+v", list[0])
+	if len(list.GetTokens()) != 1 {
+		t.Fatalf("token list length = %d, want 1", len(list.GetTokens()))
+	}
+	if tok := list.GetTokens()[0]; tok.GetRole() != "sam:role:node" || tok.GetMaxUsages() != 3 || tok.GetDescription() != "cli test" {
+		t.Errorf("unexpected token record: %+v", tok)
 	}
 
 	// GET without credentials is refused.
@@ -3672,17 +3670,19 @@ func TestAdminRevokeBootstrapToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var listed []struct {
-		ID string
-	}
-	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+	listedBody, err := io.ReadAll(listResp.Body)
+	if err != nil {
 		t.Fatal(err)
 	}
 	_ = listResp.Body.Close()
-	if len(listed) != 1 {
-		t.Fatalf("GET /admin/bootstrap-tokens returned %d tokens, want 1", len(listed))
+	listed := &api.BootstrapTokenListResponse{}
+	if err := protojson.Unmarshal(listedBody, listed); err != nil {
+		t.Fatal(err)
 	}
-	tokenID := listed[0].ID
+	if len(listed.GetTokens()) != 1 {
+		t.Fatalf("GET /admin/bootstrap-tokens returned %d tokens, want 1", len(listed.GetTokens()))
+	}
+	tokenID := listed.GetTokens()[0].GetId()
 
 	priv, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	if err != nil {

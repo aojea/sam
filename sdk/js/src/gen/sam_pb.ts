@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file sam.proto.
  */
 export const file_sam: GenFile = /*@__PURE__*/
-  fileDesc("CglzYW0ucHJvdG8SBnNhbS52MSI0CglBdXRoRnJhbWUSDwoHYmlzY3VpdBgBIAEoDBIWCg50YXJnZXRfc2VydmljZRgCIAEoCSI/CgxBdXRoUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBINCgVlcnJvchgCIAEoCRIPCgdiaXNjdWl0GAMgASgMItYBCglNZXNoRXZlbnQSJAoEdHlwZRgBIAEoDjIWLnNhbS52MS5NZXNoRXZlbnQuVHlwZRIPCgdwZWVyX2lkGAIgASgJEi4KCmV2ZW50X3RpbWUYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhYKDm5ld19wdWJsaWNfa2V5GAQgASgMEhEKCXNpZ25hdHVyZRgFIAEoDCI3CgRUeXBlEgoKBkJBTk5FRBAAEhAKDEtFWV9ST1RBVElPThABEhEKDVBPTElDWV9VUERBVEUQAiLzAQoNRW5yb2xsUmVxdWVzdBILCgNqd3QYASABKAkSDwoHcGVlcl9pZBgCIAEoCRISCgpwdWJsaWNfa2V5GAMgASgMEhYKDnJlcXVlc3RlZF9yb2xlGAQgASgJEjEKBmxhYmVscxgFIAMoCzIhLnNhbS52MS5FbnJvbGxSZXF1ZXN0LkxhYmVsc0VudHJ5EhkKEWNoYWxsZW5nZV91bml4X21zGAYgASgDEhsKE2NoYWxsZW5nZV9zaWduYXR1cmUYByABKAwaLQoLTGFiZWxzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASKrAQoORW5yb2xsUmVzcG9uc2USFQoNYmlzY3VpdF90b2tlbhgBIAEoDBIVCg1lcnJvcl9tZXNzYWdlGAIgASgJEiAKGGNvbnRyb2xfcGxhbmVfcHVibGljX2tleRgDIAEoDBIYChByb3V0ZXJfYWRkcmVzc2VzGAQgAygJEi8KC2V4cGlyZV90aW1lGAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKRAgoWQm9vdHN0cmFwRW5yb2xsUmVxdWVzdBIXCg9ib290c3RyYXBfdG9rZW4YASABKAkSDwoHcGVlcl9pZBgCIAEoCRISCgpwdWJsaWNfa2V5GAMgASgMEhYKDnJlcXVlc3RlZF9yb2xlGAQgASgJEjoKBmxhYmVscxgFIAMoCzIqLnNhbS52MS5Cb290c3RyYXBFbnJvbGxSZXF1ZXN0LkxhYmVsc0VudHJ5EhkKEWNoYWxsZW5nZV91bml4X21zGAYgASgDEhsKE2NoYWxsZW5nZV9zaWduYXR1cmUYByABKAwaLQoLTGFiZWxzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASL9AQoXQm9vdHN0cmFwRW5yb2xsUmVzcG9uc2USKAoGc3RhdHVzGAEgASgOMhguc2FtLnYxLkVucm9sbG1lbnRTdGF0dXMSFQoNYmlzY3VpdF90b2tlbhgCIAEoDBIdChVwb2xsX2ludGVydmFsX3NlY29uZHMYAyABKAUSFQoNZXJyb3JfbWVzc2FnZRgEIAEoCRIgChhjb250cm9sX3BsYW5lX3B1YmxpY19rZXkYBSABKAwSGAoQcm91dGVyX2FkZHJlc3NlcxgGIAMoCRIvCgtleHBpcmVfdGltZRgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiUwoLU2VydmljZUluZm8SIQoEdHlwZRgBIAEoDjITLnNhbS52MS5TZXJ2aWNlVHlwZRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJInsKDkNvbW1hbmRCYWNrZW5kEg8KB2NvbW1hbmQYASADKAkSLAoDZW52GAIgAygLMh8uc2FtLnYxLkNvbW1hbmRCYWNrZW5kLkVudkVudHJ5GioKCEVudkVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiigEKFlJlZ2lzdGVyU2VydmljZVJlcXVlc3QSJAoHc2VydmljZRgBIAEoCzITLnNhbS52MS5TZXJ2aWNlSW5mbxIUCgp0YXJnZXRfdXJsGAIgASgJSAASKQoHY29tbWFuZBgDIAEoCzIWLnNhbS52MS5Db21tYW5kQmFja2VuZEgAQgkKB2JhY2tlbmQiaQoSRGlzY292ZXJlZFByb3ZpZGVyEg8KB3BlZXJfaWQYASABKAkSFwoPbG9jYWxfcHJveHlfdXJsGAIgASgJEhAKCHNydl9uYW1lGAMgASgJEhcKD3Nydl9kZXNjcmlwdGlvbhgEIAEoCSKyAgoPU2VydmljZUFubm91bmNlEg8KB3BlZXJfaWQYASABKAkSIQoEdHlwZRgCIAEoDjITLnNhbS52MS5TZXJ2aWNlVHlwZRIUCgxzZXJ2aWNlX25hbWUYAyABKAkSDAoEa2V5cxgEIAMoCRIzCgZsYWJlbHMYBSADKAsyIy5zYW0udjEuU2VydmljZUFubm91bmNlLkxhYmVsc0VudHJ5EhcKD2FjdGl2ZV9yZXF1ZXN0cxgGIAEoDRIXCg9sYXRlbmN5X2V3bWFfbXMYByABKAESMQoNYW5ub3VuY2VfdGltZRgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAaLQoLTGFiZWxzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASKHAQoYQ29udHJvbFBsYW5lSW5mb1Jlc3BvbnNlEhMKC29pZGNfaXNzdWVyGAEgASgJEhEKCWNsaWVudF9pZBgCIAEoCRIQCghhdWRpZW5jZRgDIAEoCRIYChByb3V0ZXJfYWRkcmVzc2VzGAQgAygJEhcKD2Jhbm5lZF9wZWVyX2lkcxgFIAMoCSKsAQoSUm91dGVyTGVhc2VSZXF1ZXN0Eg8KB3BlZXJfaWQYASABKAkSEQoJYWRkcmVzc2VzGAIgAygJEg8KB2Jpc2N1aXQYAyABKAwSFwoPY29ubmVjdGVkX3BlZXJzGAQgAygJEhAKCGRodF9zaXplGAUgASgFEhkKEWNoYWxsZW5nZV91bml4X21zGAYgASgDEhsKE2NoYWxsZW5nZV9zaWduYXR1cmUYByABKAwiZgoTUm91dGVyTGVhc2VSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg0KBWVycm9yGAIgASgJEi8KC2V4cGlyZV90aW1lGAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKeAQoKUG9saWN5Um9sZRIMCgRuYW1lGAEgASgJEhcKD2FsbG93ZWRfdGFyZ2V0cxgCIAMoCRIYChBhbGxvd2VkX3NlcnZpY2VzGAMgAygJEhYKDmN1c3RvbV9kYXRhbG9nGAQgAygJEhYKDmFsbG93ZWRfbGFiZWxzGAUgAygJEh8KBGh0dHAYBiADKAsyES5zYW0udjEuSFRUUEdyYW50IjwKCUhUVFBHcmFudBIPCgdzZXJ2aWNlGAEgASgJEg8KB21ldGhvZHMYAiADKAkSDQoFcGF0aHMYAyADKAkijwIKEUVncmVzc0Rlc3RpbmF0aW9uEgwKBG5hbWUYASABKAkSEgoKdGFyZ2V0X3VybBgCIAEoCRISCgpjcmVkZW50aWFsGAMgASgJEhEKCXNlcnZlZF9ieRgEIAMoCRIoCgZicm9rZXIYBSABKAsyGC5zYW0udjEuQ3JlZGVudGlhbEJyb2tlchImCgppbnNwZWN0aW9uGAYgASgLMhIuc2FtLnYxLkluc3BlY3Rpb24SIAoEbW9kZRgHIAEoDjISLnNhbS52MS5FZ3Jlc3NNb2RlEg0KBXBvcnRzGAggAygNEhUKDXByZXNlcnZlX2hvc3QYCSABKAgSFwoPZm9yd2FyZF9jb250ZXh0GAogASgIIjMKCkluc3BlY3Rpb24SJQoKaW5zcGVjdG9ycxgBIAMoCzIRLnNhbS52MS5JbnNwZWN0b3IiYwoJSW5zcGVjdG9yEikKC21vZGVsX2FybW9yGAEgASgLMhIuc2FtLnYxLk1vZGVsQXJtb3JIABIjCghleHRfcHJvYxgCIAEoCzIPLnNhbS52MS5FeHRQcm9jSABCBgoEa2luZCKLAQoKTW9kZWxBcm1vchIQCgh0ZW1wbGF0ZRgBIAEoCRIsCghyZXNwb25zZRgCIAEoDjIaLnNhbS52MS5SZXNwb25zZUluc3BlY3Rpb24SEQoJZmFpbF9vcGVuGAMgASgIEioKB3RpbWVvdXQYBCABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24iggIKB0V4dFByb2MSDgoGdGFyZ2V0GAEgASgJEgoKAmNhGAIgASgJEhoKEmNsaWVudF9jZXJ0aWZpY2F0ZRgDIAEoCRI2Cg9wcm9jZXNzaW5nX21vZGUYBCABKAsyHS5zYW0udjEuRXh0UHJvY1Byb2Nlc3NpbmdNb2RlEhsKE2FsbG93X21vZGVfb3ZlcnJpZGUYBSABKAgSMgoPbWVzc2FnZV90aW1lb3V0GAYgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uEhoKEmZhaWx1cmVfbW9kZV9hbGxvdxgHIAEoCBIaChJtYXhfYnVmZmVyZWRfYnl0ZXMYCCABKA0i2wQKFUV4dFByb2NQcm9jZXNzaW5nTW9kZRJFChNyZXF1ZXN0X2hlYWRlcl9tb2RlGAEgASgOMiguc2FtLnYxLkV4dFByb2NQcm9jZXNzaW5nTW9kZS5IZWFkZXJNb2RlEkYKFHJlc3BvbnNlX2hlYWRlcl9tb2RlGAIgASgOMiguc2FtLnYxLkV4dFByb2NQcm9jZXNzaW5nTW9kZS5IZWFkZXJNb2RlEkEKEXJlcXVlc3RfYm9keV9tb2RlGAMgASgOMiYuc2FtLnYxLkV4dFByb2NQcm9jZXNzaW5nTW9kZS5Cb2R5TW9kZRJCChJyZXNwb25zZV9ib2R5X21vZGUYBCABKA4yJi5zYW0udjEuRXh0UHJvY1Byb2Nlc3NpbmdNb2RlLkJvZHlNb2RlEkYKFHJlcXVlc3RfdHJhaWxlcl9tb2RlGAUgASgOMiguc2FtLnYxLkV4dFByb2NQcm9jZXNzaW5nTW9kZS5IZWFkZXJNb2RlEkcKFXJlc3BvbnNlX3RyYWlsZXJfbW9kZRgGIAEoDjIoLnNhbS52MS5FeHRQcm9jUHJvY2Vzc2luZ01vZGUuSGVhZGVyTW9kZSI5CgpIZWFkZXJNb2RlEhcKE0hFQURFUl9NT0RFX0RFRkFVTFQQABIICgRTRU5EEAESCAoEU0tJUBACImAKCEJvZHlNb2RlEggKBE5PTkUQABIMCghTVFJFQU1FRBABEgwKCEJVRkZFUkVEEAISFAoQQlVGRkVSRURfUEFSVElBTBADEhgKFEZVTExfRFVQTEVYX1NUUkVBTUVEEAQizwEKEENyZWRlbnRpYWxCcm9rZXISFwoNc3RhdGljX3NlY3JldBgBIAEoCUgAEjEKD29pZGNfZmVkZXJhdGlvbhgCIAEoCzIWLnNhbS52MS5PSURDRmVkZXJhdGlvbkgAEjAKD2F3c19hc3N1bWVfcm9sZRgDIAEoCzIVLnNhbS52MS5BV1NBc3N1bWVSb2xlSAASNQoRcGxhdGZvcm1faWRlbnRpdHkYBCABKAsyGC5zYW0udjEuUGxhdGZvcm1JZGVudGl0eUgAQgYKBGtpbmQiXwoOT0lEQ0ZlZGVyYXRpb24SFgoOdG9rZW5fZW5kcG9pbnQYASABKAkSEAoIYXVkaWVuY2UYAiABKAkSEwoLaW1wZXJzb25hdGUYAyABKAkSDgoGc2NvcGVzGAQgAygJIjkKDUFXU0Fzc3VtZVJvbGUSEAoIcm9sZV9hcm4YASABKAkSFgoOc2Vzc2lvbl9wb2xpY3kYAiABKAkiIgoQUGxhdGZvcm1JZGVudGl0eRIOCgZzY29wZXMYASADKAkiLgoNUG9saWN5QmluZGluZxIMCgRyb2xlGAEgASgJEg8KB21lbWJlcnMYAiADKAkihQEKDFBvbGljeUNvbmZpZxIhCgVyb2xlcxgBIAMoCzISLnNhbS52MS5Qb2xpY3lSb2xlEicKCGJpbmRpbmdzGAIgAygLMhUuc2FtLnYxLlBvbGljeUJpbmRpbmcSKQoGZWdyZXNzGAMgAygLMhkuc2FtLnYxLkVncmVzc0Rlc3RpbmF0aW9uIhgKFlBvbGljeUNvbmZpZ0dldFJlcXVlc3QiMAoXUG9saWN5Q29uZmlnR2V0UmVzcG9uc2USFQoNZGF0YWxvZ19ydWxlcxgBIAMoCSI8ChpQb2xpY3lDb25maWdVcGRhdGVSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg0KBWVycm9yGAIgASgJIhoKGEVncmVzc0Fzc2lnbm1lbnRzUmVxdWVzdCJGChlFZ3Jlc3NBc3NpZ25tZW50c1Jlc3BvbnNlEikKBmVncmVzcxgBIAMoCzIZLnNhbS52MS5FZ3Jlc3NEZXN0aW5hdGlvbiJmCgxLZXlzUmVzcG9uc2USEwoLcHVibGljX2tleXMYASADKAwSLQoJc2lnbl90aW1lGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgpzaWduYXR1cmVzGAMgAygMImsKE1Rva2VuUmVmcmVzaFJlcXVlc3QSGwoTY2hhbGxlbmdlX3NpZ25hdHVyZRgBIAEoDBIZChFjaGFsbGVuZ2VfdW5peF9tcxgCIAEoAxIPCgdwZWVyX2lkGAMgASgJEgsKA2p3dBgEIAEoCSJ1ChRUb2tlblJlZnJlc2hSZXNwb25zZRIVCg1iaXNjdWl0X3Rva2VuGAEgASgMEi8KC2V4cGlyZV90aW1lGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1lcnJvcl9tZXNzYWdlGAMgASgJIjoKEU5vZGVDYXRhbG9nUmVwb3J0EiUKCHNlcnZpY2VzGAEgAygLMhMuc2FtLnYxLlNlcnZpY2VJbmZvIiUKElRva2VuUmV2b2tlUmVxdWVzdBIPCgdwZWVyX2lkGAEgASgJIjUKE1Rva2VuUmV2b2tlUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBINCgVlcnJvchgCIAEoCSLkAQoYSWRlbnRpdHlFdmlkZW5jZVJlc3BvbnNlEg8KB3BlZXJfaWQYASABKAkSDwoHYmlzY3VpdBgCIAEoDBI3ChNiaXNjdWl0X2V4cGlyZV90aW1lGAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIZChFjb250cm9sX3BsYW5lX3VybBgEIAEoCRIiChp0cnVzdGVkX2NvbnRyb2xfcGxhbmVfa2V5cxgFIAMoDBIuCgpjaGVja190aW1lGAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCLAAgoUUGVlckV2aWRlbmNlUmVzcG9uc2USDwoHcGVlcl9pZBgBIAEoCRIPCgdiaXNjdWl0GAIgASgMEhUKDXZlcmlmeWluZ19rZXkYAyABKAwSDQoFcm9sZXMYBCADKAkSOAoGbGFiZWxzGAUgAygLMiguc2FtLnYxLlBlZXJFdmlkZW5jZVJlc3BvbnNlLkxhYmVsc0VudHJ5Ei8KC2V4cGlyZV90aW1lGAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIWCg5yZXZvY2F0aW9uX2lkcxgHIAMoCRIuCgpjaGVja190aW1lGAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBotCgtMYWJlbHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIoACChBNZW1iZXJDcmVkZW50aWFsEhkKEWNvbnRyb2xfcGxhbmVfdXJsGAEgASgJEg8KB2Jpc2N1aXQYAiABKAwSLwoLZXhwaXJlX3RpbWUYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KDHRydXN0ZWRfa2V5cxgEIAMoCzIZLnNhbS52MS5UcnVzdGVkU2lnbmluZ0tleRIZChFpc3N1ZWRfdW5kZXJfa2V5cxgFIAMoDBIYChByb3V0ZXJfYWRkcmVzc2VzGAYgAygJEikKDG9pZGNfc2Vzc2lvbhgHIAEoCzITLnNhbS52MS5PSURDU2Vzc2lvbiJZChFUcnVzdGVkU2lnbmluZ0tleRISCgpwdWJsaWNfa2V5GAEgASgMEjAKDHJlY2VpdmVfdGltZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiWQoLT0lEQ1Nlc3Npb24SDgoGaXNzdWVyGAEgASgJEhEKCWNsaWVudF9pZBgCIAEoCRIQCghhdWRpZW5jZRgDIAEoCRIVCg1yZWZyZXNoX3Rva2VuGAQgASgJIo0BChVUYXNrQXV0aG9yaXphdGlvblJ1bGUSDAoEbmFtZRgBIAEoCRIUCgxkaXNwbGF5X25hbWUYAiABKAkSHwoFcnVsZXMYAyADKAsyEC5zYW0udjEuVGFza1J1bGUSLwoLZXhwaXJlX3RpbWUYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIn4KCFRhc2tSdWxlEhMKC2Rlc2NyaXB0aW9uGAEgASgJEhgKEGFsbG93ZWRfc2VydmljZXMYAiADKAkSKAoJb3BlcmF0aW9uGAMgASgLMhUuc2FtLnYxLlRhc2tPcGVyYXRpb24SGQoRYWxsb3dlZF9yZXNvdXJjZXMYBCADKAkicwoNVGFza09wZXJhdGlvbhIVCg1hbGxvd2VkX3Rvb2xzGAEgAygJEhcKD2FsbG93ZWRfbWV0aG9kcxgCIAMoCRIVCg1hbGxvd2VkX3BhdGhzGAMgAygJEhsKE2FsbG93ZWRfcGVybWlzc2lvbnMYBCADKAkipQEKFFRva2VuRXhjaGFuZ2VSZXF1ZXN0EhUKDXN1YmplY3RfdG9rZW4YASABKAkSMAoJdGFza19ydWxlGAIgASgLMh0uc2FtLnYxLlRhc2tBdXRob3JpemF0aW9uUnVsZRIMCgRzZWFsGAMgASgIEhkKEWNoYWxsZW5nZV91bml4X21zGAQgASgDEhsKE2NoYWxsZW5nZV9zaWduYXR1cmUYBSABKAwifwoVVG9rZW5FeGNoYW5nZVJlc3BvbnNlEhUKDWJpc2N1aXRfdG9rZW4YASABKAwSLwoLZXhwaXJlX3RpbWUYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg0KBXJvbGVzGAMgAygJEg8KB3N1YmplY3QYBCABKAkigQEKD1NUU1Rva2VuUmVxdWVzdBIPCgdiaXNjdWl0GAEgASgMEhMKC2Rlc3RpbmF0aW9uGAIgASgJEhAKCGF1ZGllbmNlGAMgASgJEhkKEWNoYWxsZW5nZV91bml4X21zGAQgASgDEhsKE2NoYWxsZW5nZV9zaWduYXR1cmUYBSABKAwigwEKEFNUU1Rva2VuUmVzcG9uc2USCwoDand0GAEgASgJEi8KC2V4cGlyZV90aW1lGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIPCgdzdWJqZWN0GAMgASgJEg0KBXJvbGVzGAQgAygJEhEKCXRhc2tfbmFtZRgFIAEoCSJGChNSZXZvY2F0aW9uc1Jlc3BvbnNlEhYKDnJldm9jYXRpb25faWRzGAEgAygJEhcKD2Jhbm5lZF9wZWVyX2lkcxgCIAMoCSqUAQoQRW5yb2xsbWVudFN0YXR1cxIhCh1FTlJPTExNRU5UX1NUQVRVU19VTlNQRUNJRklFRBAAEh0KGUVOUk9MTE1FTlRfU1RBVFVTX1BFTkRJTkcQARIeChpFTlJPTExNRU5UX1NUQVRVU19BUFBST1ZFRBACEh4KGkVOUk9MTE1FTlRfU1RBVFVTX1JFSkVDVEVEEAMqjAEKC1NlcnZpY2VUeXBlEhwKGFNFUlZJQ0VfVFlQRV9VTlNQRUNJRklFRBAAEhQKEFNFUlZJQ0VfVFlQRV9NQ1AQARIaChZTRVJWSUNFX1RZUEVfSU5GRVJFTkNFEAISFAoQU0VSVklDRV9UWVBFX0EyQRADEhcKE1NFUlZJQ0VfVFlQRV9FR1JFU1MQBCo3CgpFZ3Jlc3NNb2RlEhQKEEVHUkVTU19NT0RFX0hUVFAQABITCg9FR1JFU1NfTU9ERV9UQ1AQASpcChJSZXNwb25zZUluc3BlY3Rpb24SIAocUkVTUE9OU0VfSU5TUEVDVElPTl9CVUZGRVJFRBAAEiQKIFJFU1BPTlNFX0lOU1BFQ1RJT05fUkVRVUVTVF9PTkxZEAFCG1oZZ2l0aHViLmNvbS9nb29nbGUvc2FtL2FwaWIGcHJvdG8z", [file_google_protobuf_duration, file_google_protobuf_timestamp]);
+  fileDesc("CglzYW0ucHJvdG8SBnNhbS52MSI0CglBdXRoRnJhbWUSDwoHYmlzY3VpdBgBIAEoDBIWCg50YXJnZXRfc2VydmljZRgCIAEoCSI/CgxBdXRoUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBINCgVlcnJvchgCIAEoCRIPCgdiaXNjdWl0GAMgASgMItYBCglNZXNoRXZlbnQSJAoEdHlwZRgBIAEoDjIWLnNhbS52MS5NZXNoRXZlbnQuVHlwZRIPCgdwZWVyX2lkGAIgASgJEi4KCmV2ZW50X3RpbWUYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhYKDm5ld19wdWJsaWNfa2V5GAQgASgMEhEKCXNpZ25hdHVyZRgFIAEoDCI3CgRUeXBlEgoKBkJBTk5FRBAAEhAKDEtFWV9ST1RBVElPThABEhEKDVBPTElDWV9VUERBVEUQAiLzAQoNRW5yb2xsUmVxdWVzdBILCgNqd3QYASABKAkSDwoHcGVlcl9pZBgCIAEoCRISCgpwdWJsaWNfa2V5GAMgASgMEhYKDnJlcXVlc3RlZF9yb2xlGAQgASgJEjEKBmxhYmVscxgFIAMoCzIhLnNhbS52MS5FbnJvbGxSZXF1ZXN0LkxhYmVsc0VudHJ5EhkKEWNoYWxsZW5nZV91bml4X21zGAYgASgDEhsKE2NoYWxsZW5nZV9zaWduYXR1cmUYByABKAwaLQoLTGFiZWxzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASKrAQoORW5yb2xsUmVzcG9uc2USFQoNYmlzY3VpdF90b2tlbhgBIAEoDBIVCg1lcnJvcl9tZXNzYWdlGAIgASgJEiAKGGNvbnRyb2xfcGxhbmVfcHVibGljX2tleRgDIAEoDBIYChByb3V0ZXJfYWRkcmVzc2VzGAQgAygJEi8KC2V4cGlyZV90aW1lGAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKRAgoWQm9vdHN0cmFwRW5yb2xsUmVxdWVzdBIXCg9ib290c3RyYXBfdG9rZW4YASABKAkSDwoHcGVlcl9pZBgCIAEoCRISCgpwdWJsaWNfa2V5GAMgASgMEhYKDnJlcXVlc3RlZF9yb2xlGAQgASgJEjoKBmxhYmVscxgFIAMoCzIqLnNhbS52MS5Cb290c3RyYXBFbnJvbGxSZXF1ZXN0LkxhYmVsc0VudHJ5EhkKEWNoYWxsZW5nZV91bml4X21zGAYgASgDEhsKE2NoYWxsZW5nZV9zaWduYXR1cmUYByABKAwaLQoLTGFiZWxzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASL9AQoXQm9vdHN0cmFwRW5yb2xsUmVzcG9uc2USKAoGc3RhdHVzGAEgASgOMhguc2FtLnYxLkVucm9sbG1lbnRTdGF0dXMSFQoNYmlzY3VpdF90b2tlbhgCIAEoDBIdChVwb2xsX2ludGVydmFsX3NlY29uZHMYAyABKAUSFQoNZXJyb3JfbWVzc2FnZRgEIAEoCRIgChhjb250cm9sX3BsYW5lX3B1YmxpY19rZXkYBSABKAwSGAoQcm91dGVyX2FkZHJlc3NlcxgGIAMoCRIvCgtleHBpcmVfdGltZRgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiUwoLU2VydmljZUluZm8SIQoEdHlwZRgBIAEoDjITLnNhbS52MS5TZXJ2aWNlVHlwZRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJInsKDkNvbW1hbmRCYWNrZW5kEg8KB2NvbW1hbmQYASADKAkSLAoDZW52GAIgAygLMh8uc2FtLnYxLkNvbW1hbmRCYWNrZW5kLkVudkVudHJ5GioKCEVudkVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiigEKFlJlZ2lzdGVyU2VydmljZVJlcXVlc3QSJAoHc2VydmljZRgBIAEoCzITLnNhbS52MS5TZXJ2aWNlSW5mbxIUCgp0YXJnZXRfdXJsGAIgASgJSAASKQoHY29tbWFuZBgDIAEoCzIWLnNhbS52MS5Db21tYW5kQmFja2VuZEgAQgkKB2JhY2tlbmQiaQoSRGlzY292ZXJlZFByb3ZpZGVyEg8KB3BlZXJfaWQYASABKAkSFwoPbG9jYWxfcHJveHlfdXJsGAIgASgJEhAKCHNydl9uYW1lGAMgASgJEhcKD3Nydl9kZXNjcmlwdGlvbhgEIAEoCSKyAgoPU2VydmljZUFubm91bmNlEg8KB3BlZXJfaWQYASABKAkSIQoEdHlwZRgCIAEoDjITLnNhbS52MS5TZXJ2aWNlVHlwZRIUCgxzZXJ2aWNlX25hbWUYAyABKAkSDAoEa2V5cxgEIAMoCRIzCgZsYWJlbHMYBSADKAsyIy5zYW0udjEuU2VydmljZUFubm91bmNlLkxhYmVsc0VudHJ5EhcKD2FjdGl2ZV9yZXF1ZXN0cxgGIAEoDRIXCg9sYXRlbmN5X2V3bWFfbXMYByABKAESMQoNYW5ub3VuY2VfdGltZRgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAaLQoLTGFiZWxzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASKHAQoYQ29udHJvbFBsYW5lSW5mb1Jlc3BvbnNlEhMKC29pZGNfaXNzdWVyGAEgASgJEhEKCWNsaWVudF9pZBgCIAEoCRIQCghhdWRpZW5jZRgDIAEoCRIYChByb3V0ZXJfYWRkcmVzc2VzGAQgAygJEhcKD2Jhbm5lZF9wZWVyX2lkcxgFIAMoCSKsAQoSUm91dGVyTGVhc2VSZXF1ZXN0Eg8KB3BlZXJfaWQYASABKAkSEQoJYWRkcmVzc2VzGAIgAygJEg8KB2Jpc2N1aXQYAyABKAwSFwoPY29ubmVjdGVkX3BlZXJzGAQgAygJEhAKCGRodF9zaXplGAUgASgFEhkKEWNoYWxsZW5nZV91bml4X21zGAYgASgDEhsKE2NoYWxsZW5nZV9zaWduYXR1cmUYByABKAwiZgoTUm91dGVyTGVhc2VSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg0KBWVycm9yGAIgASgJEi8KC2V4cGlyZV90aW1lGAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKeAQoKUG9saWN5Um9sZRIMCgRuYW1lGAEgASgJEhcKD2FsbG93ZWRfdGFyZ2V0cxgCIAMoCRIYChBhbGxvd2VkX3NlcnZpY2VzGAMgAygJEhYKDmN1c3RvbV9kYXRhbG9nGAQgAygJEhYKDmFsbG93ZWRfbGFiZWxzGAUgAygJEh8KBGh0dHAYBiADKAsyES5zYW0udjEuSFRUUEdyYW50IjwKCUhUVFBHcmFudBIPCgdzZXJ2aWNlGAEgASgJEg8KB21ldGhvZHMYAiADKAkSDQoFcGF0aHMYAyADKAkijwIKEUVncmVzc0Rlc3RpbmF0aW9uEgwKBG5hbWUYASABKAkSEgoKdGFyZ2V0X3VybBgCIAEoCRISCgpjcmVkZW50aWFsGAMgASgJEhEKCXNlcnZlZF9ieRgEIAMoCRIoCgZicm9rZXIYBSABKAsyGC5zYW0udjEuQ3JlZGVudGlhbEJyb2tlchImCgppbnNwZWN0aW9uGAYgASgLMhIuc2FtLnYxLkluc3BlY3Rpb24SIAoEbW9kZRgHIAEoDjISLnNhbS52MS5FZ3Jlc3NNb2RlEg0KBXBvcnRzGAggAygNEhUKDXByZXNlcnZlX2hvc3QYCSABKAgSFwoPZm9yd2FyZF9jb250ZXh0GAogASgIIjMKCkluc3BlY3Rpb24SJQoKaW5zcGVjdG9ycxgBIAMoCzIRLnNhbS52MS5JbnNwZWN0b3IiYwoJSW5zcGVjdG9yEikKC21vZGVsX2FybW9yGAEgASgLMhIuc2FtLnYxLk1vZGVsQXJtb3JIABIjCghleHRfcHJvYxgCIAEoCzIPLnNhbS52MS5FeHRQcm9jSABCBgoEa2luZCKLAQoKTW9kZWxBcm1vchIQCgh0ZW1wbGF0ZRgBIAEoCRIsCghyZXNwb25zZRgCIAEoDjIaLnNhbS52MS5SZXNwb25zZUluc3BlY3Rpb24SEQoJZmFpbF9vcGVuGAMgASgIEioKB3RpbWVvdXQYBCABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24iggIKB0V4dFByb2MSDgoGdGFyZ2V0GAEgASgJEgoKAmNhGAIgASgJEhoKEmNsaWVudF9jZXJ0aWZpY2F0ZRgDIAEoCRI2Cg9wcm9jZXNzaW5nX21vZGUYBCABKAsyHS5zYW0udjEuRXh0UHJvY1Byb2Nlc3NpbmdNb2RlEhsKE2FsbG93X21vZGVfb3ZlcnJpZGUYBSABKAgSMgoPbWVzc2FnZV90aW1lb3V0GAYgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uEhoKEmZhaWx1cmVfbW9kZV9hbGxvdxgHIAEoCBIaChJtYXhfYnVmZmVyZWRfYnl0ZXMYCCABKA0i2wQKFUV4dFByb2NQcm9jZXNzaW5nTW9kZRJFChNyZXF1ZXN0X2hlYWRlcl9tb2RlGAEgASgOMiguc2FtLnYxLkV4dFByb2NQcm9jZXNzaW5nTW9kZS5IZWFkZXJNb2RlEkYKFHJlc3BvbnNlX2hlYWRlcl9tb2RlGAIgASgOMiguc2FtLnYxLkV4dFByb2NQcm9jZXNzaW5nTW9kZS5IZWFkZXJNb2RlEkEKEXJlcXVlc3RfYm9keV9tb2RlGAMgASgOMiYuc2FtLnYxLkV4dFByb2NQcm9jZXNzaW5nTW9kZS5Cb2R5TW9kZRJCChJyZXNwb25zZV9ib2R5X21vZGUYBCABKA4yJi5zYW0udjEuRXh0UHJvY1Byb2Nlc3NpbmdNb2RlLkJvZHlNb2RlEkYKFHJlcXVlc3RfdHJhaWxlcl9tb2RlGAUgASgOMiguc2FtLnYxLkV4dFByb2NQcm9jZXNzaW5nTW9kZS5IZWFkZXJNb2RlEkcKFXJlc3BvbnNlX3RyYWlsZXJfbW9kZRgGIAEoDjIoLnNhbS52MS5FeHRQcm9jUHJvY2Vzc2luZ01vZGUuSGVhZGVyTW9kZSI5CgpIZWFkZXJNb2RlEhcKE0hFQURFUl9NT0RFX0RFRkFVTFQQABIICgRTRU5EEAESCAoEU0tJUBACImAKCEJvZHlNb2RlEggKBE5PTkUQABIMCghTVFJFQU1FRBABEgwKCEJVRkZFUkVEEAISFAoQQlVGRkVSRURfUEFSVElBTBADEhgKFEZVTExfRFVQTEVYX1NUUkVBTUVEEAQizwEKEENyZWRlbnRpYWxCcm9rZXISFwoNc3RhdGljX3NlY3JldBgBIAEoCUgAEjEKD29pZGNfZmVkZXJhdGlvbhgCIAEoCzIWLnNhbS52MS5PSURDRmVkZXJhdGlvbkgAEjAKD2F3c19hc3N1bWVfcm9sZRgDIAEoCzIVLnNhbS52MS5BV1NBc3N1bWVSb2xlSAASNQoRcGxhdGZvcm1faWRlbnRpdHkYBCABKAsyGC5zYW0udjEuUGxhdGZvcm1JZGVudGl0eUgAQgYKBGtpbmQiXwoOT0lEQ0ZlZGVyYXRpb24SFgoOdG9rZW5fZW5kcG9pbnQYASABKAkSEAoIYXVkaWVuY2UYAiABKAkSEwoLaW1wZXJzb25hdGUYAyABKAkSDgoGc2NvcGVzGAQgAygJIjkKDUFXU0Fzc3VtZVJvbGUSEAoIcm9sZV9hcm4YASABKAkSFgoOc2Vzc2lvbl9wb2xpY3kYAiABKAkiIgoQUGxhdGZvcm1JZGVudGl0eRIOCgZzY29wZXMYASADKAkiLgoNUG9saWN5QmluZGluZxIMCgRyb2xlGAEgASgJEg8KB21lbWJlcnMYAiADKAkihQEKDFBvbGljeUNvbmZpZxIhCgVyb2xlcxgBIAMoCzISLnNhbS52MS5Qb2xpY3lSb2xlEicKCGJpbmRpbmdzGAIgAygLMhUuc2FtLnYxLlBvbGljeUJpbmRpbmcSKQoGZWdyZXNzGAMgAygLMhkuc2FtLnYxLkVncmVzc0Rlc3RpbmF0aW9uIhgKFlBvbGljeUNvbmZpZ0dldFJlcXVlc3QiMAoXUG9saWN5Q29uZmlnR2V0UmVzcG9uc2USFQoNZGF0YWxvZ19ydWxlcxgBIAMoCSI8ChpQb2xpY3lDb25maWdVcGRhdGVSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg0KBWVycm9yGAIgASgJIhoKGEVncmVzc0Fzc2lnbm1lbnRzUmVxdWVzdCJGChlFZ3Jlc3NBc3NpZ25tZW50c1Jlc3BvbnNlEikKBmVncmVzcxgBIAMoCzIZLnNhbS52MS5FZ3Jlc3NEZXN0aW5hdGlvbiJmCgxLZXlzUmVzcG9uc2USEwoLcHVibGljX2tleXMYASADKAwSLQoJc2lnbl90aW1lGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgpzaWduYXR1cmVzGAMgAygMImsKE1Rva2VuUmVmcmVzaFJlcXVlc3QSGwoTY2hhbGxlbmdlX3NpZ25hdHVyZRgBIAEoDBIZChFjaGFsbGVuZ2VfdW5peF9tcxgCIAEoAxIPCgdwZWVyX2lkGAMgASgJEgsKA2p3dBgEIAEoCSJ1ChRUb2tlblJlZnJlc2hSZXNwb25zZRIVCg1iaXNjdWl0X3Rva2VuGAEgASgMEi8KC2V4cGlyZV90aW1lGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1lcnJvcl9tZXNzYWdlGAMgASgJIjoKEU5vZGVDYXRhbG9nUmVwb3J0EiUKCHNlcnZpY2VzGAEgAygLMhMuc2FtLnYxLlNlcnZpY2VJbmZvIiUKElRva2VuUmV2b2tlUmVxdWVzdBIPCgdwZWVyX2lkGAEgASgJIjUKE1Rva2VuUmV2b2tlUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBINCgVlcnJvchgCIAEoCSKWAQobQm9vdHN0cmFwVG9rZW5DcmVhdGVSZXF1ZXN0EgwKBHJvbGUYASABKAkSEAoIb3duZXJfaWQYAiABKAkSEQoJdHRsX2hvdXJzGAMgASgFEhIKCm1heF91c2FnZXMYBCABKAUSEwoLZGVzY3JpcHRpb24YBSABKAkSGwoTYXV0b25vbW91c19yZWNvdmVyeRgGIAEoCCKKAQocQm9vdHN0cmFwVG9rZW5DcmVhdGVSZXNwb25zZRIKCgJpZBgBIAEoCRINCgV0b2tlbhgCIAEoCRIMCgRyb2xlGAMgASgJEhAKCG93bmVyX2lkGAQgASgJEi8KC2V4cGlyZV90aW1lGAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKrAgoOQm9vdHN0cmFwVG9rZW4SCgoCaWQYASABKAkSDAoEcm9sZRgCIAEoCRIQCghvd25lcl9pZBgDIAEoCRISCgptYXhfdXNhZ2VzGAQgASgFEhQKDHVzYWdlc19jb3VudBgFIAEoBRITCgtkZXNjcmlwdGlvbhgGIAEoCRIvCgtjcmVhdGVfdGltZRgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLZXhwaXJlX3RpbWUYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC3Jldm9rZV90aW1lGAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIbChNhdXRvbm9tb3VzX3JlY292ZXJ5GAogASgIIkQKGkJvb3RzdHJhcFRva2VuTGlzdFJlc3BvbnNlEiYKBnRva2VucxgBIAMoCzIWLnNhbS52MS5Cb290c3RyYXBUb2tlbiLKAgoRRW5yb2xsbWVudFJlcXVlc3QSCgoCaWQYASABKAkSDwoHcGVlcl9pZBgCIAEoCRIQCgh0b2tlbl9pZBgDIAEoCRIoCgZzdGF0dXMYBCABKA4yGC5zYW0udjEuRW5yb2xsbWVudFN0YXR1cxI1CgZsYWJlbHMYBSADKAsyJS5zYW0udjEuRW5yb2xsbWVudFJlcXVlc3QuTGFiZWxzRW50cnkSLwoLY3JlYXRlX3RpbWUYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjAKDHJlc29sdmVfdGltZRgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEwoLcmVzb2x2ZWRfYnkYCCABKAkaLQoLTGFiZWxzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASJMCh1FbnJvbGxtZW50UmVxdWVzdExpc3RSZXNwb25zZRIrCghyZXF1ZXN0cxgBIAMoCzIZLnNhbS52MS5FbnJvbGxtZW50UmVxdWVzdCJwCgRVc2VyEgoKAmlkGAEgASgJEg4KBmlzc3VlchgCIAEoCRINCgVlbWFpbBgDIAEoCRIMCgRyb2xlGAQgASgJEi8KC2NyZWF0ZV90aW1lGAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCLdAgoMRW5yb2xsZWROb2RlEg8KB3BlZXJfaWQYASABKAkSDAoEcm9sZRgCIAEoCRIXCg9lbnJvbGxtZW50X3R5cGUYAyABKAkSEwoLY2xhaW1zX2pzb24YBCABKAkSEAoIb3duZXJfaWQYBSABKAkSMAoGbGFiZWxzGAYgAygLMiAuc2FtLnYxLkVucm9sbGVkTm9kZS5MYWJlbHNFbnRyeRIvCgtlbnJvbGxfdGltZRgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLZXhwaXJlX3RpbWUYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg4KBmJhbm5lZBgJIAEoCBIbChNhdXRvbm9tb3VzX3JlY292ZXJ5GAogASgIGi0KC0xhYmVsc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEixAEKC1JvdXRlckxlYXNlEg8KB3BlZXJfaWQYASABKAkSEQoJYWRkcmVzc2VzGAIgAygJEjUKEWxhc3RfcmVuZXdhbF90aW1lGAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIvCgtleHBpcmVfdGltZRgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFwoPY29ubmVjdGVkX3BlZXJzGAUgAygJEhAKCGRodF9zaXplGAYgASgFImYKDE5vZGVTZXJ2aWNlcxIlCghzZXJ2aWNlcxgBIAMoCzITLnNhbS52MS5TZXJ2aWNlSW5mbxIvCgtyZXBvcnRfdGltZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiqwMKE0FkbWluU3RhdHVzUmVzcG9uc2USGwoFdXNlcnMYASADKAsyDC5zYW0udjEuVXNlchIrCg5hY3RpdmVfcm91dGVycxgCIAMoCzITLnNhbS52MS5Sb3V0ZXJMZWFzZRIsCg5lbnJvbGxlZF9ub2RlcxgDIAMoCzIULnNhbS52MS5FbnJvbGxlZE5vZGUSNgoTZW5yb2xsbWVudF9yZXF1ZXN0cxgEIAMoCzIZLnNhbS52MS5FbnJvbGxtZW50UmVxdWVzdBIwChBib290c3RyYXBfdG9rZW5zGAUgAygLMhYuc2FtLnYxLkJvb3RzdHJhcFRva2VuEiQKBnBvbGljeRgGIAEoCzIULnNhbS52MS5Qb2xpY3lDb25maWcSQgoMbm9kZV9jYXRhbG9nGAcgAygLMiwuc2FtLnYxLkFkbWluU3RhdHVzUmVzcG9uc2UuTm9kZUNhdGFsb2dFbnRyeRpIChBOb2RlQ2F0YWxvZ0VudHJ5EgsKA2tleRgBIAEoCRIjCgV2YWx1ZRgCIAEoCzIULnNhbS52MS5Ob2RlU2VydmljZXM6AjgBIuMBChJVc2VyU3RhdHVzUmVzcG9uc2USGgoEdXNlchgBIAEoCzIMLnNhbS52MS5Vc2VyEiwKDmVucm9sbGVkX25vZGVzGAIgAygLMhQuc2FtLnYxLkVucm9sbGVkTm9kZRIwChBib290c3RyYXBfdG9rZW5zGAMgAygLMhYuc2FtLnYxLkJvb3RzdHJhcFRva2VuEisKDmFjdGl2ZV9yb3V0ZXJzGAQgAygLMhMuc2FtLnYxLlJvdXRlckxlYXNlEiQKBnBvbGljeRgFIAEoCzIULnNhbS52MS5Qb2xpY3lDb25maWci5AEKGElkZW50aXR5RXZpZGVuY2VSZXNwb25zZRIPCgdwZWVyX2lkGAEgASgJEg8KB2Jpc2N1aXQYAiABKAwSNwoTYmlzY3VpdF9leHBpcmVfdGltZRgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASGQoRY29udHJvbF9wbGFuZV91cmwYBCABKAkSIgoadHJ1c3RlZF9jb250cm9sX3BsYW5lX2tleXMYBSADKAwSLgoKY2hlY2tfdGltZRgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiwAIKFFBlZXJFdmlkZW5jZVJlc3BvbnNlEg8KB3BlZXJfaWQYASABKAkSDwoHYmlzY3VpdBgCIAEoDBIVCg12ZXJpZnlpbmdfa2V5GAMgASgMEg0KBXJvbGVzGAQgAygJEjgKBmxhYmVscxgFIAMoCzIoLnNhbS52MS5QZWVyRXZpZGVuY2VSZXNwb25zZS5MYWJlbHNFbnRyeRIvCgtleHBpcmVfdGltZRgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFgoOcmV2b2NhdGlvbl9pZHMYByADKAkSLgoKY2hlY2tfdGltZRgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAaLQoLTGFiZWxzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASKAAgoQTWVtYmVyQ3JlZGVudGlhbBIZChFjb250cm9sX3BsYW5lX3VybBgBIAEoCRIPCgdiaXNjdWl0GAIgASgMEi8KC2V4cGlyZV90aW1lGAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIvCgx0cnVzdGVkX2tleXMYBCADKAsyGS5zYW0udjEuVHJ1c3RlZFNpZ25pbmdLZXkSGQoRaXNzdWVkX3VuZGVyX2tleXMYBSADKAwSGAoQcm91dGVyX2FkZHJlc3NlcxgGIAMoCRIpCgxvaWRjX3Nlc3Npb24YByABKAsyEy5zYW0udjEuT0lEQ1Nlc3Npb24iWQoRVHJ1c3RlZFNpZ25pbmdLZXkSEgoKcHVibGljX2tleRgBIAEoDBIwCgxyZWNlaXZlX3RpbWUYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIlkKC09JRENTZXNzaW9uEg4KBmlzc3VlchgBIAEoCRIRCgljbGllbnRfaWQYAiABKAkSEAoIYXVkaWVuY2UYAyABKAkSFQoNcmVmcmVzaF90b2tlbhgEIAEoCSKNAQoVVGFza0F1dGhvcml6YXRpb25SdWxlEgwKBG5hbWUYASABKAkSFAoMZGlzcGxheV9uYW1lGAIgASgJEh8KBXJ1bGVzGAMgAygLMhAuc2FtLnYxLlRhc2tSdWxlEi8KC2V4cGlyZV90aW1lGAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJ+CghUYXNrUnVsZRITCgtkZXNjcmlwdGlvbhgBIAEoCRIYChBhbGxvd2VkX3NlcnZpY2VzGAIgAygJEigKCW9wZXJhdGlvbhgDIAEoCzIVLnNhbS52MS5UYXNrT3BlcmF0aW9uEhkKEWFsbG93ZWRfcmVzb3VyY2VzGAQgAygJInMKDVRhc2tPcGVyYXRpb24SFQoNYWxsb3dlZF90b29scxgBIAMoCRIXCg9hbGxvd2VkX21ldGhvZHMYAiADKAkSFQoNYWxsb3dlZF9wYXRocxgDIAMoCRIbChNhbGxvd2VkX3Blcm1pc3Npb25zGAQgAygJIqUBChRUb2tlbkV4Y2hhbmdlUmVxdWVzdBIVCg1zdWJqZWN0X3Rva2VuGAEgASgJEjAKCXRhc2tfcnVsZRgCIAEoCzIdLnNhbS52MS5UYXNrQXV0aG9yaXphdGlvblJ1bGUSDAoEc2VhbBgDIAEoCBIZChFjaGFsbGVuZ2VfdW5peF9tcxgEIAEoAxIbChNjaGFsbGVuZ2Vfc2lnbmF0dXJlGAUgASgMIn8KFVRva2VuRXhjaGFuZ2VSZXNwb25zZRIVCg1iaXNjdWl0X3Rva2VuGAEgASgMEi8KC2V4cGlyZV90aW1lGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBINCgVyb2xlcxgDIAMoCRIPCgdzdWJqZWN0GAQgASgJIoEBCg9TVFNUb2tlblJlcXVlc3QSDwoHYmlzY3VpdBgBIAEoDBITCgtkZXN0aW5hdGlvbhgCIAEoCRIQCghhdWRpZW5jZRgDIAEoCRIZChFjaGFsbGVuZ2VfdW5peF9tcxgEIAEoAxIbChNjaGFsbGVuZ2Vfc2lnbmF0dXJlGAUgASgMIoMBChBTVFNUb2tlblJlc3BvbnNlEgsKA2p3dBgBIAEoCRIvCgtleHBpcmVfdGltZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDwoHc3ViamVjdBgDIAEoCRINCgVyb2xlcxgEIAMoCRIRCgl0YXNrX25hbWUYBSABKAkiRgoTUmV2b2NhdGlvbnNSZXNwb25zZRIWCg5yZXZvY2F0aW9uX2lkcxgBIAMoCRIXCg9iYW5uZWRfcGVlcl9pZHMYAiADKAkqlAEKEEVucm9sbG1lbnRTdGF0dXMSIQodRU5ST0xMTUVOVF9TVEFUVVNfVU5TUEVDSUZJRUQQABIdChlFTlJPTExNRU5UX1NUQVRVU19QRU5ESU5HEAESHgoaRU5ST0xMTUVOVF9TVEFUVVNfQVBQUk9WRUQQAhIeChpFTlJPTExNRU5UX1NUQVRVU19SRUpFQ1RFRBADKowBCgtTZXJ2aWNlVHlwZRIcChhTRVJWSUNFX1RZUEVfVU5TUEVDSUZJRUQQABIUChBTRVJWSUNFX1RZUEVfTUNQEAESGgoWU0VSVklDRV9UWVBFX0lORkVSRU5DRRACEhQKEFNFUlZJQ0VfVFlQRV9BMkEQAxIXChNTRVJWSUNFX1RZUEVfRUdSRVNTEAQqNwoKRWdyZXNzTW9kZRIUChBFR1JFU1NfTU9ERV9IVFRQEAASEwoPRUdSRVNTX01PREVfVENQEAEqXAoSUmVzcG9uc2VJbnNwZWN0aW9uEiAKHFJFU1BPTlNFX0lOU1BFQ1RJT05fQlVGRkVSRUQQABIkCiBSRVNQT05TRV9JTlNQRUNUSU9OX1JFUVVFU1RfT05MWRABQhtaGWdpdGh1Yi5jb20vZ29vZ2xlL3NhbS9hcGliBnByb3RvMw", [file_google_protobuf_duration, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message sam.v1.AuthFrame
@@ -1587,6 +1587,549 @@ export const TokenRevokeResponseSchema: GenMessage<TokenRevokeResponse> = /*@__P
   messageDesc(file_sam, 39);
 
 /**
+ * BootstrapTokenCreateRequest is the body of POST /admin/bootstrap-tokens
+ * (admin bearer) and POST /user/bootstrap-tokens (mesh user).
+ *
+ * @generated from message sam.v1.BootstrapTokenCreateRequest
+ */
+export type BootstrapTokenCreateRequest = Message<"sam.v1.BootstrapTokenCreateRequest"> & {
+  /**
+   * Role the token enrolls into, e.g. "sam:role:node". Required on the admin
+   * endpoint; the user endpoint defaults it to "sam:role:node".
+   *
+   * @generated from field: string role = 1;
+   */
+  role: string;
+
+  /**
+   * User the token is issued on behalf of. Honored by the user endpoint
+   * only, and only for admins; defaults to the caller.
+   *
+   * @generated from field: string owner_id = 2;
+   */
+  ownerId: string;
+
+  /**
+   * How long the token stays valid; unset or non-positive means 24.
+   *
+   * @generated from field: int32 ttl_hours = 3;
+   */
+  ttlHours: number;
+
+  /**
+   * How many enrollments the token admits; unset or non-positive means 1.
+   *
+   * @generated from field: int32 max_usages = 4;
+   */
+  maxUsages: number;
+
+  /**
+   * Free-form operator note stored with the token.
+   *
+   * @generated from field: string description = 5;
+   */
+  description: string;
+
+  /**
+   * Copied onto every node the token enrolls: such a node may still refresh
+   * its credential after the control plane's signing key rotated past its
+   * grace period, on proof of possession of its own key alone. Admin-only,
+   * because a node that can always recover holds a credential that never
+   * expires.
+   *
+   * @generated from field: bool autonomous_recovery = 6;
+   */
+  autonomousRecovery: boolean;
+};
+
+/**
+ * Describes the message sam.v1.BootstrapTokenCreateRequest.
+ * Use `create(BootstrapTokenCreateRequestSchema)` to create a new message.
+ */
+export const BootstrapTokenCreateRequestSchema: GenMessage<BootstrapTokenCreateRequest> = /*@__PURE__*/
+  messageDesc(file_sam, 40);
+
+/**
+ * BootstrapTokenCreateResponse is returned (201) when a token is minted.
+ * token is the plaintext and is shown exactly once; the control plane keeps
+ * only its hash, which is also the id.
+ *
+ * @generated from message sam.v1.BootstrapTokenCreateResponse
+ */
+export type BootstrapTokenCreateResponse = Message<"sam.v1.BootstrapTokenCreateResponse"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string token = 2;
+   */
+  token: string;
+
+  /**
+   * @generated from field: string role = 3;
+   */
+  role: string;
+
+  /**
+   * @generated from field: string owner_id = 4;
+   */
+  ownerId: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp expire_time = 5;
+   */
+  expireTime?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message sam.v1.BootstrapTokenCreateResponse.
+ * Use `create(BootstrapTokenCreateResponseSchema)` to create a new message.
+ */
+export const BootstrapTokenCreateResponseSchema: GenMessage<BootstrapTokenCreateResponse> = /*@__PURE__*/
+  messageDesc(file_sam, 41);
+
+/**
+ * BootstrapToken is a minted token as operators list it.
+ *
+ * @generated from message sam.v1.BootstrapToken
+ */
+export type BootstrapToken = Message<"sam.v1.BootstrapToken"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string role = 2;
+   */
+  role: string;
+
+  /**
+   * @generated from field: string owner_id = 3;
+   */
+  ownerId: string;
+
+  /**
+   * @generated from field: int32 max_usages = 4;
+   */
+  maxUsages: number;
+
+  /**
+   * @generated from field: int32 usages_count = 5;
+   */
+  usagesCount: number;
+
+  /**
+   * @generated from field: string description = 6;
+   */
+  description: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp create_time = 7;
+   */
+  createTime?: Timestamp | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp expire_time = 8;
+   */
+  expireTime?: Timestamp | undefined;
+
+  /**
+   * Set when an operator revoked the token, which is distinct from expiry
+   * or exhausted usages. Unset means never revoked.
+   *
+   * @generated from field: google.protobuf.Timestamp revoke_time = 9;
+   */
+  revokeTime?: Timestamp | undefined;
+
+  /**
+   * @generated from field: bool autonomous_recovery = 10;
+   */
+  autonomousRecovery: boolean;
+};
+
+/**
+ * Describes the message sam.v1.BootstrapToken.
+ * Use `create(BootstrapTokenSchema)` to create a new message.
+ */
+export const BootstrapTokenSchema: GenMessage<BootstrapToken> = /*@__PURE__*/
+  messageDesc(file_sam, 42);
+
+/**
+ * @generated from message sam.v1.BootstrapTokenListResponse
+ */
+export type BootstrapTokenListResponse = Message<"sam.v1.BootstrapTokenListResponse"> & {
+  /**
+   * @generated from field: repeated sam.v1.BootstrapToken tokens = 1;
+   */
+  tokens: BootstrapToken[];
+};
+
+/**
+ * Describes the message sam.v1.BootstrapTokenListResponse.
+ * Use `create(BootstrapTokenListResponseSchema)` to create a new message.
+ */
+export const BootstrapTokenListResponseSchema: GenMessage<BootstrapTokenListResponse> = /*@__PURE__*/
+  messageDesc(file_sam, 43);
+
+/**
+ * EnrollmentRequest is a bootstrap enrollment awaiting or past an operator
+ * decision (see BootstrapEnrollRequest).
+ *
+ * @generated from message sam.v1.EnrollmentRequest
+ */
+export type EnrollmentRequest = Message<"sam.v1.EnrollmentRequest"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string peer_id = 2;
+   */
+  peerId: string;
+
+  /**
+   * The bootstrap token the request was made with.
+   *
+   * @generated from field: string token_id = 3;
+   */
+  tokenId: string;
+
+  /**
+   * @generated from field: sam.v1.EnrollmentStatus status = 4;
+   */
+  status: EnrollmentStatus;
+
+  /**
+   * Labels the node declared; approval attests them into its biscuit.
+   *
+   * @generated from field: map<string, string> labels = 5;
+   */
+  labels: { [key: string]: string };
+
+  /**
+   * @generated from field: google.protobuf.Timestamp create_time = 6;
+   */
+  createTime?: Timestamp | undefined;
+
+  /**
+   * Unset while the request is pending.
+   *
+   * @generated from field: google.protobuf.Timestamp resolve_time = 7;
+   */
+  resolveTime?: Timestamp | undefined;
+
+  /**
+   * @generated from field: string resolved_by = 8;
+   */
+  resolvedBy: string;
+};
+
+/**
+ * Describes the message sam.v1.EnrollmentRequest.
+ * Use `create(EnrollmentRequestSchema)` to create a new message.
+ */
+export const EnrollmentRequestSchema: GenMessage<EnrollmentRequest> = /*@__PURE__*/
+  messageDesc(file_sam, 44);
+
+/**
+ * @generated from message sam.v1.EnrollmentRequestListResponse
+ */
+export type EnrollmentRequestListResponse = Message<"sam.v1.EnrollmentRequestListResponse"> & {
+  /**
+   * @generated from field: repeated sam.v1.EnrollmentRequest requests = 1;
+   */
+  requests: EnrollmentRequest[];
+};
+
+/**
+ * Describes the message sam.v1.EnrollmentRequestListResponse.
+ * Use `create(EnrollmentRequestListResponseSchema)` to create a new message.
+ */
+export const EnrollmentRequestListResponseSchema: GenMessage<EnrollmentRequestListResponse> = /*@__PURE__*/
+  messageDesc(file_sam, 45);
+
+/**
+ * User is a human identity known to the mesh.
+ *
+ * @generated from message sam.v1.User
+ */
+export type User = Message<"sam.v1.User"> & {
+  /**
+   * The identity provider's subject.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string issuer = 2;
+   */
+  issuer: string;
+
+  /**
+   * @generated from field: string email = 3;
+   */
+  email: string;
+
+  /**
+   * "admin" or "user".
+   *
+   * @generated from field: string role = 4;
+   */
+  role: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp create_time = 5;
+   */
+  createTime?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message sam.v1.User.
+ * Use `create(UserSchema)` to create a new message.
+ */
+export const UserSchema: GenMessage<User> = /*@__PURE__*/
+  messageDesc(file_sam, 46);
+
+/**
+ * EnrolledNode is a member's enrollment record without its credential.
+ *
+ * @generated from message sam.v1.EnrolledNode
+ */
+export type EnrolledNode = Message<"sam.v1.EnrolledNode"> & {
+  /**
+   * @generated from field: string peer_id = 1;
+   */
+  peerId: string;
+
+  /**
+   * @generated from field: string role = 2;
+   */
+  role: string;
+
+  /**
+   * How the node enrolled, e.g. "oidc" or "bootstrap".
+   *
+   * @generated from field: string enrollment_type = 3;
+   */
+  enrollmentType: string;
+
+  /**
+   * The identity provider's claims as stored at enrollment. Admin-only.
+   *
+   * @generated from field: string claims_json = 4;
+   */
+  claimsJson: string;
+
+  /**
+   * @generated from field: string owner_id = 5;
+   */
+  ownerId: string;
+
+  /**
+   * @generated from field: map<string, string> labels = 6;
+   */
+  labels: { [key: string]: string };
+
+  /**
+   * @generated from field: google.protobuf.Timestamp enroll_time = 7;
+   */
+  enrollTime?: Timestamp | undefined;
+
+  /**
+   * When the enrollment session ends; unset means it does not expire.
+   *
+   * @generated from field: google.protobuf.Timestamp expire_time = 8;
+   */
+  expireTime?: Timestamp | undefined;
+
+  /**
+   * @generated from field: bool banned = 9;
+   */
+  banned: boolean;
+
+  /**
+   * @generated from field: bool autonomous_recovery = 10;
+   */
+  autonomousRecovery: boolean;
+};
+
+/**
+ * Describes the message sam.v1.EnrolledNode.
+ * Use `create(EnrolledNodeSchema)` to create a new message.
+ */
+export const EnrolledNodeSchema: GenMessage<EnrolledNode> = /*@__PURE__*/
+  messageDesc(file_sam, 47);
+
+/**
+ * RouterLease is a router's current registration with the control plane.
+ *
+ * @generated from message sam.v1.RouterLease
+ */
+export type RouterLease = Message<"sam.v1.RouterLease"> & {
+  /**
+   * @generated from field: string peer_id = 1;
+   */
+  peerId: string;
+
+  /**
+   * Multiaddrs, `/p2p/<peer id>` suffixed.
+   *
+   * @generated from field: repeated string addresses = 2;
+   */
+  addresses: string[];
+
+  /**
+   * @generated from field: google.protobuf.Timestamp last_renewal_time = 3;
+   */
+  lastRenewalTime?: Timestamp | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp expire_time = 4;
+   */
+  expireTime?: Timestamp | undefined;
+
+  /**
+   * @generated from field: repeated string connected_peers = 5;
+   */
+  connectedPeers: string[];
+
+  /**
+   * @generated from field: int32 dht_size = 6;
+   */
+  dhtSize: number;
+};
+
+/**
+ * Describes the message sam.v1.RouterLease.
+ * Use `create(RouterLeaseSchema)` to create a new message.
+ */
+export const RouterLeaseSchema: GenMessage<RouterLease> = /*@__PURE__*/
+  messageDesc(file_sam, 48);
+
+/**
+ * NodeServices is the services one node last reported (see
+ * NodeCatalogReport).
+ *
+ * @generated from message sam.v1.NodeServices
+ */
+export type NodeServices = Message<"sam.v1.NodeServices"> & {
+  /**
+   * @generated from field: repeated sam.v1.ServiceInfo services = 1;
+   */
+  services: ServiceInfo[];
+
+  /**
+   * @generated from field: google.protobuf.Timestamp report_time = 2;
+   */
+  reportTime?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message sam.v1.NodeServices.
+ * Use `create(NodeServicesSchema)` to create a new message.
+ */
+export const NodeServicesSchema: GenMessage<NodeServices> = /*@__PURE__*/
+  messageDesc(file_sam, 49);
+
+/**
+ * AdminStatusResponse answers GET /admin/status: everything the console
+ * shows an administrator.
+ *
+ * @generated from message sam.v1.AdminStatusResponse
+ */
+export type AdminStatusResponse = Message<"sam.v1.AdminStatusResponse"> & {
+  /**
+   * @generated from field: repeated sam.v1.User users = 1;
+   */
+  users: User[];
+
+  /**
+   * @generated from field: repeated sam.v1.RouterLease active_routers = 2;
+   */
+  activeRouters: RouterLease[];
+
+  /**
+   * @generated from field: repeated sam.v1.EnrolledNode enrolled_nodes = 3;
+   */
+  enrolledNodes: EnrolledNode[];
+
+  /**
+   * @generated from field: repeated sam.v1.EnrollmentRequest enrollment_requests = 4;
+   */
+  enrollmentRequests: EnrollmentRequest[];
+
+  /**
+   * @generated from field: repeated sam.v1.BootstrapToken bootstrap_tokens = 5;
+   */
+  bootstrapTokens: BootstrapToken[];
+
+  /**
+   * @generated from field: sam.v1.PolicyConfig policy = 6;
+   */
+  policy?: PolicyConfig | undefined;
+
+  /**
+   * Keyed by the reporting node's peer ID; admitted nodes only.
+   *
+   * @generated from field: map<string, sam.v1.NodeServices> node_catalog = 7;
+   */
+  nodeCatalog: { [key: string]: NodeServices };
+};
+
+/**
+ * Describes the message sam.v1.AdminStatusResponse.
+ * Use `create(AdminStatusResponseSchema)` to create a new message.
+ */
+export const AdminStatusResponseSchema: GenMessage<AdminStatusResponse> = /*@__PURE__*/
+  messageDesc(file_sam, 50);
+
+/**
+ * UserStatusResponse answers GET /user/status: the caller and what it owns.
+ * The router fleet and the mesh policy describe the whole mesh and are set
+ * for an administrator only.
+ *
+ * @generated from message sam.v1.UserStatusResponse
+ */
+export type UserStatusResponse = Message<"sam.v1.UserStatusResponse"> & {
+  /**
+   * @generated from field: sam.v1.User user = 1;
+   */
+  user?: User | undefined;
+
+  /**
+   * @generated from field: repeated sam.v1.EnrolledNode enrolled_nodes = 2;
+   */
+  enrolledNodes: EnrolledNode[];
+
+  /**
+   * @generated from field: repeated sam.v1.BootstrapToken bootstrap_tokens = 3;
+   */
+  bootstrapTokens: BootstrapToken[];
+
+  /**
+   * @generated from field: repeated sam.v1.RouterLease active_routers = 4;
+   */
+  activeRouters: RouterLease[];
+
+  /**
+   * @generated from field: sam.v1.PolicyConfig policy = 5;
+   */
+  policy?: PolicyConfig | undefined;
+};
+
+/**
+ * Describes the message sam.v1.UserStatusResponse.
+ * Use `create(UserStatusResponseSchema)` to create a new message.
+ */
+export const UserStatusResponseSchema: GenMessage<UserStatusResponse> = /*@__PURE__*/
+  messageDesc(file_sam, 51);
+
+/**
  * @generated from message sam.v1.IdentityEvidenceResponse
  */
 export type IdentityEvidenceResponse = Message<"sam.v1.IdentityEvidenceResponse"> & {
@@ -1628,7 +2171,7 @@ export type IdentityEvidenceResponse = Message<"sam.v1.IdentityEvidenceResponse"
  * Use `create(IdentityEvidenceResponseSchema)` to create a new message.
  */
 export const IdentityEvidenceResponseSchema: GenMessage<IdentityEvidenceResponse> = /*@__PURE__*/
-  messageDesc(file_sam, 40);
+  messageDesc(file_sam, 52);
 
 /**
  * @generated from message sam.v1.PeerEvidenceResponse
@@ -1684,7 +2227,7 @@ export type PeerEvidenceResponse = Message<"sam.v1.PeerEvidenceResponse"> & {
  * Use `create(PeerEvidenceResponseSchema)` to create a new message.
  */
 export const PeerEvidenceResponseSchema: GenMessage<PeerEvidenceResponse> = /*@__PURE__*/
-  messageDesc(file_sam, 41);
+  messageDesc(file_sam, 53);
 
 /**
  * @generated from message sam.v1.MemberCredential
@@ -1749,7 +2292,7 @@ export type MemberCredential = Message<"sam.v1.MemberCredential"> & {
  * Use `create(MemberCredentialSchema)` to create a new message.
  */
 export const MemberCredentialSchema: GenMessage<MemberCredential> = /*@__PURE__*/
-  messageDesc(file_sam, 42);
+  messageDesc(file_sam, 54);
 
 /**
  * @generated from message sam.v1.TrustedSigningKey
@@ -1776,7 +2319,7 @@ export type TrustedSigningKey = Message<"sam.v1.TrustedSigningKey"> & {
  * Use `create(TrustedSigningKeySchema)` to create a new message.
  */
 export const TrustedSigningKeySchema: GenMessage<TrustedSigningKey> = /*@__PURE__*/
-  messageDesc(file_sam, 43);
+  messageDesc(file_sam, 55);
 
 /**
  * @generated from message sam.v1.OIDCSession
@@ -1808,7 +2351,7 @@ export type OIDCSession = Message<"sam.v1.OIDCSession"> & {
  * Use `create(OIDCSessionSchema)` to create a new message.
  */
 export const OIDCSessionSchema: GenMessage<OIDCSession> = /*@__PURE__*/
-  messageDesc(file_sam, 44);
+  messageDesc(file_sam, 56);
 
 /**
  * TaskAuthorizationRule narrows a credential's authority for a specific task or
@@ -1852,7 +2395,7 @@ export type TaskAuthorizationRule = Message<"sam.v1.TaskAuthorizationRule"> & {
  * Use `create(TaskAuthorizationRuleSchema)` to create a new message.
  */
 export const TaskAuthorizationRuleSchema: GenMessage<TaskAuthorizationRule> = /*@__PURE__*/
-  messageDesc(file_sam, 45);
+  messageDesc(file_sam, 57);
 
 /**
  * @generated from message sam.v1.TaskRule
@@ -1896,7 +2439,7 @@ export type TaskRule = Message<"sam.v1.TaskRule"> & {
  * Use `create(TaskRuleSchema)` to create a new message.
  */
 export const TaskRuleSchema: GenMessage<TaskRule> = /*@__PURE__*/
-  messageDesc(file_sam, 46);
+  messageDesc(file_sam, 58);
 
 /**
  * @generated from message sam.v1.TaskOperation
@@ -1938,7 +2481,7 @@ export type TaskOperation = Message<"sam.v1.TaskOperation"> & {
  * Use `create(TaskOperationSchema)` to create a new message.
  */
 export const TaskOperationSchema: GenMessage<TaskOperation> = /*@__PURE__*/
-  messageDesc(file_sam, 47);
+  messageDesc(file_sam, 59);
 
 /**
  * TokenExchangeRequest is the body of POST /token/exchange on the control
@@ -1996,7 +2539,7 @@ export type TokenExchangeRequest = Message<"sam.v1.TokenExchangeRequest"> & {
  * Use `create(TokenExchangeRequestSchema)` to create a new message.
  */
 export const TokenExchangeRequestSchema: GenMessage<TokenExchangeRequest> = /*@__PURE__*/
-  messageDesc(file_sam, 48);
+  messageDesc(file_sam, 60);
 
 /**
  * @generated from message sam.v1.TokenExchangeResponse
@@ -2028,7 +2571,7 @@ export type TokenExchangeResponse = Message<"sam.v1.TokenExchangeResponse"> & {
  * Use `create(TokenExchangeResponseSchema)` to create a new message.
  */
 export const TokenExchangeResponseSchema: GenMessage<TokenExchangeResponse> = /*@__PURE__*/
-  messageDesc(file_sam, 49);
+  messageDesc(file_sam, 61);
 
 /**
  * STSTokenRequest is the body of POST /sts/token on the control plane: an
@@ -2082,7 +2625,7 @@ export type STSTokenRequest = Message<"sam.v1.STSTokenRequest"> & {
  * Use `create(STSTokenRequestSchema)` to create a new message.
  */
 export const STSTokenRequestSchema: GenMessage<STSTokenRequest> = /*@__PURE__*/
-  messageDesc(file_sam, 50);
+  messageDesc(file_sam, 62);
 
 /**
  * @generated from message sam.v1.STSTokenResponse
@@ -2119,7 +2662,7 @@ export type STSTokenResponse = Message<"sam.v1.STSTokenResponse"> & {
  * Use `create(STSTokenResponseSchema)` to create a new message.
  */
 export const STSTokenResponseSchema: GenMessage<STSTokenResponse> = /*@__PURE__*/
-  messageDesc(file_sam, 51);
+  messageDesc(file_sam, 63);
 
 /**
  * RevocationsResponse answers GET /revocations on the control plane: the set of
@@ -2145,7 +2688,7 @@ export type RevocationsResponse = Message<"sam.v1.RevocationsResponse"> & {
  * Use `create(RevocationsResponseSchema)` to create a new message.
  */
 export const RevocationsResponseSchema: GenMessage<RevocationsResponse> = /*@__PURE__*/
-  messageDesc(file_sam, 52);
+  messageDesc(file_sam, 64);
 
 /**
  * @generated from enum sam.v1.EnrollmentStatus

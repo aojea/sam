@@ -221,7 +221,7 @@ async function loadData() {
         
         // A revoked node is banned, not deleted: the record survives for unban
         // and audit, but it is out of the mesh, so no view may list it.
-        const enrolledNodes = (data.enrolled_nodes || []).filter(node => !node.Banned);
+        const enrolledNodes = (data.enrolled_nodes || []).filter(node => !node.banned);
 
         // Update Stats
         const usersCount = (data.users && data.users.length) || 0;
@@ -234,7 +234,7 @@ async function loadData() {
         document.getElementById('stat-routers').innerText = routersCount;
         
         // Count pending
-        const pendingCount = (data.enrollment_requests || []).filter(r => r.Status === 0 || r.Status === 'ENROLLMENT_STATUS_PENDING').length;
+        const pendingCount = (data.enrollment_requests || []).filter(r => r.status === 'ENROLLMENT_STATUS_PENDING').length;
         document.getElementById('stat-pending').innerText = pendingCount;
 
         // Render Tables & Grid
@@ -254,8 +254,8 @@ async function loadData() {
         renderBootstrapTokensTable(data.bootstrap_tokens || []);
 
         const policyArea = document.getElementById('policy-yaml');
-        if (policyArea && data.policy_json !== undefined && !policyIsDirty()) {
-            policyArea.value = renderPolicyYAML(data.policy_json);
+        if (policyArea && role === 'admin' && !policyIsDirty()) {
+            policyArea.value = renderPolicyYAML(data.policy || {});
             policyBaseline = policyArea.value;
             validatePolicyEditor();
         }
@@ -329,10 +329,10 @@ function renderUsersTable(users) {
     
     tbody.innerHTML = users.map(user => `
         <tr>
-            <td><code>${escapeHTML(user.ID)}</code></td>
-            <td>${escapeHTML(user.Role)}</td>
-            <td>${escapeHTML(user.Email)}</td>
-            <td>${new Date(user.CreatedAt).toLocaleString()}</td>
+            <td><code>${escapeHTML(user.id)}</code></td>
+            <td>${escapeHTML(user.role)}</td>
+            <td>${escapeHTML(user.email)}</td>
+            <td>${user.create_time ? new Date(user.create_time).toLocaleString() : '-'}</td>
         </tr>
     `).join('');
 }
@@ -365,7 +365,7 @@ function peerCell(peerID, labels) {
 function buildLabelsByPeer(nodes) {
     const byPeer = {};
     for (const node of nodes || []) {
-        byPeer[node.PeerID] = node.Labels || {};
+        byPeer[node.peer_id] = node.labels || {};
     }
     return byPeer;
 }
@@ -378,25 +378,25 @@ function renderNodesTable(nodes, role) {
     }
 
     tbody.innerHTML = nodes.map(node => {
-        const recovery = !!node.AutonomousRecovery;
+        const recovery = !!node.autonomous_recovery;
         const recoveryBadge = recovery
             ? `<span class="badge badge-approved" title="May refresh its credential after the signing key that issued it is retired">Autonomous</span>`
             : `<span class="badge badge-pending" title="Needs a new bootstrap token if offline past the key grace period">Manual</span>`;
         // The flag decides whether a lost device can rejoin on its own key, so
         // only admins get the toggle; owners just see the state.
         const toggle = role === 'admin'
-            ? `<button class="btn btn-sm" onclick="setAutonomousRecovery('${escapeHTML(node.PeerID)}', ${recovery ? 'false' : 'true'})">${recovery ? 'Disable recovery' : 'Enable recovery'}</button>`
+            ? `<button class="btn btn-sm" onclick="setAutonomousRecovery('${escapeHTML(node.peer_id)}', ${recovery ? 'false' : 'true'})">${recovery ? 'Disable recovery' : 'Enable recovery'}</button>`
             : '';
         return `
         <tr>
-            <td>${peerCell(node.PeerID, node.Labels)}</td>
-            <td>${escapeHTML(node.Role)}</td>
-            <td>${escapeHTML(node.OwnerID)}</td>
+            <td>${peerCell(node.peer_id, node.labels)}</td>
+            <td>${escapeHTML(node.role)}</td>
+            <td>${escapeHTML(node.owner_id || '')}</td>
             <td>${recoveryBadge}</td>
             <td>
                 <div class="actions-cell">
                     ${toggle}
-                    <button class="btn btn-sm btn-danger" onclick="revokeDevice('${escapeHTML(node.PeerID)}')">Revoke</button>
+                    <button class="btn btn-sm btn-danger" onclick="revokeDevice('${escapeHTML(node.peer_id)}')">Revoke</button>
                 </div>
             </td>
         </tr>
@@ -413,9 +413,13 @@ window.setAutonomousRecovery = function(peerID, enabled) {
     }
 };
 
-// node_catalog is {peerID: {services: [{name, type, description}], reported_at}},
+// node_catalog is {peerID: {services: [{name, type, description}], report_time}},
 // already restricted server-side to nodes that are still admitted; type is
-// the short name ("mcp", "inference", "a2a") rendered by the control plane.
+// the ServiceType enum name ("SERVICE_TYPE_MCP"), shown as its short form.
+function serviceTypeLabel(type) {
+    return String(type || '').replace(/^SERVICE_TYPE_/, '').toLowerCase() || 'unknown';
+}
+
 function renderServicesTable(nodeCatalog, labelsByPeer) {
     const tbody = document.getElementById('table-services');
     const peerIDs = Object.keys(nodeCatalog || {});
@@ -425,7 +429,7 @@ function renderServicesTable(nodeCatalog, labelsByPeer) {
         const services = entry.services || [];
         for (const svc of services) {
             if (svc) {
-                rows.push({ peerID, reportedAt: entry.reported_at, svc });
+                rows.push({ peerID, reportedAt: entry.report_time, svc });
             }
         }
     }
@@ -438,7 +442,7 @@ function renderServicesTable(nodeCatalog, labelsByPeer) {
     tbody.innerHTML = rows.map(({ peerID, reportedAt, svc }) => `
         <tr>
             <td>${escapeHTML(svc.name || '')}</td>
-            <td>${escapeHTML(svc.type || 'unknown')}</td>
+            <td>${escapeHTML(serviceTypeLabel(svc.type))}</td>
             <td>${escapeHTML(svc.description || '')}</td>
             <td>${peerCell(peerID, (labelsByPeer || {})[peerID])}</td>
             <td>${reportedAt ? escapeHTML(new Date(reportedAt).toLocaleString()) : '-'}</td>
@@ -447,11 +451,11 @@ function renderServicesTable(nodeCatalog, labelsByPeer) {
 }
 
 function getStatusBadge(status) {
-    if (status === 0 || status === 'ENROLLMENT_STATUS_PENDING') {
+    if (status === 'ENROLLMENT_STATUS_PENDING') {
         return `<span class="badge badge-pending">Pending</span>`;
-    } else if (status === 1 || status === 'ENROLLMENT_STATUS_APPROVED') {
+    } else if (status === 'ENROLLMENT_STATUS_APPROVED') {
         return `<span class="badge badge-approved">Approved</span>`;
-    } else if (status === 2 || status === 'ENROLLMENT_STATUS_REJECTED') {
+    } else if (status === 'ENROLLMENT_STATUS_REJECTED') {
         return `<span class="badge badge-rejected">Rejected</span>`;
     }
     return `<span class="badge">Unknown</span>`;
@@ -465,21 +469,21 @@ function renderEnrollmentsTable(reqs) {
     }
     
     tbody.innerHTML = reqs.map(req => {
-        const isPending = req.Status === 0 || req.Status === 'ENROLLMENT_STATUS_PENDING';
+        const isPending = req.status === 'ENROLLMENT_STATUS_PENDING';
         let actions = '';
         if (isPending) {
             actions = `
                 <div class="actions-cell">
-                    <button class="btn btn-sm btn-success" onclick="approveEnrollment('${escapeHTML(req.ID)}')">Approve</button>
-                    <button class="btn btn-sm btn-danger" onclick="rejectEnrollment('${escapeHTML(req.ID)}')">Reject</button>
+                    <button class="btn btn-sm btn-success" onclick="approveEnrollment('${escapeHTML(req.id)}')">Approve</button>
+                    <button class="btn btn-sm btn-danger" onclick="rejectEnrollment('${escapeHTML(req.id)}')">Reject</button>
                 </div>
             `;
         }
         return `
         <tr>
-            <td><code>${escapeHTML(req.ID)}</code></td>
-            <td>${getStatusBadge(req.Status)}</td>
-            <td>${escapeHTML(req.CreatedAt)}</td>
+            <td><code>${escapeHTML(req.id)}</code></td>
+            <td>${getStatusBadge(req.status)}</td>
+            <td>${escapeHTML(req.create_time || '')}</td>
             <td>${actions}</td>
         </tr>
         `;
@@ -495,9 +499,9 @@ function renderRoutersTable(routers) {
     
     tbody.innerHTML = routers.map(router => `
         <tr>
-            <td><code>${escapeHTML(router.PeerID)}</code></td>
-            <td>${router.Addresses ? router.Addresses.map(addr => escapeHTML(addr)).join('<br>') : '-'}</td>
-            <td>${escapeHTML(router.ExpiresAt)}</td>
+            <td><code>${escapeHTML(router.peer_id)}</code></td>
+            <td>${router.addresses ? router.addresses.map(addr => escapeHTML(addr)).join('<br>') : '-'}</td>
+            <td>${escapeHTML(router.expire_time || '')}</td>
         </tr>
     `).join('');
 }
@@ -630,15 +634,15 @@ function policyIsDirty() {
 
 // The control plane sends the policy as protojson. Showing it as YAML keeps the
 // document readable without either side hand-maintaining a second field list.
-function renderPolicyYAML(policyJSON) {
-    if (!policyJSON) {
+function renderPolicyYAML(policy) {
+    if (!policy) {
         return '';
     }
     try {
-        return jsyaml.dump(JSON.parse(policyJSON), { indent: 2, lineWidth: -1, noRefs: true });
+        return jsyaml.dump(policy, { indent: 2, lineWidth: -1, noRefs: true });
     } catch (err) {
         // Better to show the operator the raw document than an empty editor.
-        return policyJSON;
+        return JSON.stringify(policy, null, 2);
     }
 }
 
@@ -692,13 +696,13 @@ function renderRouterTopography(routers) {
     }
 
     topoList.innerHTML = routers.map(r => {
-        const conns = r.ConnectedPeers || [];
-        const dhtSize = r.DHTSize || 0;
-        const peerID = String(r.PeerID || '');
+        const conns = r.connected_peers || [];
+        const dhtSize = r.dht_size || 0;
+        const peerID = String(r.peer_id || '');
 
         let remaining = 0;
-        if (r.ExpiresAt) {
-            remaining = Math.max(0, Math.floor((new Date(r.ExpiresAt) - new Date()) / 1000));
+        if (r.expire_time) {
+            remaining = Math.max(0, Math.floor((new Date(r.expire_time) - new Date()) / 1000));
         }
         const leaseClass = remaining === 0 ? 'badge-rejected' : 'badge-approved';
         const leaseLabel = remaining === 0 ? 'Lease expired' : `Lease: ${formatDuration(remaining)}`;
@@ -738,21 +742,21 @@ function renderBootstrapTokensTable(tokens) {
     }
 
     tbody.innerHTML = tokens.map(token => {
-        const expiresAt = token.ExpiresAt && !token.ExpiresAt.startsWith('0001') ? new Date(token.ExpiresAt).toLocaleString() : 'Never';
-        const revoked = !!token.RevokedAt;
+        const expiresAt = token.expire_time ? new Date(token.expire_time).toLocaleString() : 'Never';
+        const revoked = !!token.revoke_time;
         const status = revoked
             ? `<span class="badge badge-rejected">Revoked</span>`
             : `<span class="badge badge-approved">Active</span>`;
-        const recovery = token.AutonomousRecovery ? 'Autonomous' : 'Manual';
+        const recovery = token.autonomous_recovery ? 'Autonomous' : 'Manual';
         const action = revoked
             ? '-'
-            : `<button class="btn btn-sm btn-danger" onclick="revokeBootstrapToken('${escapeHTML(token.ID)}')">Revoke</button>`;
+            : `<button class="btn btn-sm btn-danger" onclick="revokeBootstrapToken('${escapeHTML(token.id)}')">Revoke</button>`;
         return `
             <tr>
-                <td><code>${escapeHTML(String(token.ID || '').substring(0, 8))}...</code></td>
-                <td>${escapeHTML(token.Role)}</td>
-                <td><code>${escapeHTML(token.OwnerID || '-')}</code></td>
-                <td>${escapeHTML(String(token.UsagesCount))} / ${escapeHTML(String(token.MaxUsages))}</td>
+                <td><code>${escapeHTML(String(token.id || '').substring(0, 8))}...</code></td>
+                <td>${escapeHTML(token.role)}</td>
+                <td><code>${escapeHTML(token.owner_id || '-')}</code></td>
+                <td>${escapeHTML(String(token.usages_count || 0))} / ${escapeHTML(String(token.max_usages || 0))}</td>
                 <td>${escapeHTML(expiresAt)}</td>
                 <td>${recovery}</td>
                 <td>${status}</td>

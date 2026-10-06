@@ -124,7 +124,7 @@ curl -fsS -X POST https://mesh.example.com/admin/bootstrap-tokens \
 ```
 
 ```json
-{"id":"62e92ffca…","token":"sam-bt-72fb0175788dee0…","role":"sam:role:node","expires_at":"2026-09-20T15:00:00Z"}
+{"id":"62e92ffca…","token":"sam-bt-72fb0175788dee0…","role":"sam:role:node","expire_time":"2026-09-20T15:00:00Z"}
 ```
 
 The plaintext `token` is shown once. The control plane keeps only its hash.

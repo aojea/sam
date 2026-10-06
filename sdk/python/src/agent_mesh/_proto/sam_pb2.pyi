@@ -29,6 +29,31 @@ class AWSAssumeRole(_message.Message):
     session_policy: str
     def __init__(self, role_arn: _Optional[str] = ..., session_policy: _Optional[str] = ...) -> None: ...
 
+class AdminStatusResponse(_message.Message):
+    __slots__ = ["active_routers", "bootstrap_tokens", "enrolled_nodes", "enrollment_requests", "node_catalog", "policy", "users"]
+    class NodeCatalogEntry(_message.Message):
+        __slots__ = ["key", "value"]
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: NodeServices
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[_Union[NodeServices, _Mapping]] = ...) -> None: ...
+    ACTIVE_ROUTERS_FIELD_NUMBER: _ClassVar[int]
+    BOOTSTRAP_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    ENROLLED_NODES_FIELD_NUMBER: _ClassVar[int]
+    ENROLLMENT_REQUESTS_FIELD_NUMBER: _ClassVar[int]
+    NODE_CATALOG_FIELD_NUMBER: _ClassVar[int]
+    POLICY_FIELD_NUMBER: _ClassVar[int]
+    USERS_FIELD_NUMBER: _ClassVar[int]
+    active_routers: _containers.RepeatedCompositeFieldContainer[RouterLease]
+    bootstrap_tokens: _containers.RepeatedCompositeFieldContainer[BootstrapToken]
+    enrolled_nodes: _containers.RepeatedCompositeFieldContainer[EnrolledNode]
+    enrollment_requests: _containers.RepeatedCompositeFieldContainer[EnrollmentRequest]
+    node_catalog: _containers.MessageMap[str, NodeServices]
+    policy: PolicyConfig
+    users: _containers.RepeatedCompositeFieldContainer[User]
+    def __init__(self, users: _Optional[_Iterable[_Union[User, _Mapping]]] = ..., active_routers: _Optional[_Iterable[_Union[RouterLease, _Mapping]]] = ..., enrolled_nodes: _Optional[_Iterable[_Union[EnrolledNode, _Mapping]]] = ..., enrollment_requests: _Optional[_Iterable[_Union[EnrollmentRequest, _Mapping]]] = ..., bootstrap_tokens: _Optional[_Iterable[_Union[BootstrapToken, _Mapping]]] = ..., policy: _Optional[_Union[PolicyConfig, _Mapping]] = ..., node_catalog: _Optional[_Mapping[str, NodeServices]] = ...) -> None: ...
+
 class AuthFrame(_message.Message):
     __slots__ = ["biscuit", "target_service"]
     BISCUIT_FIELD_NUMBER: _ClassVar[int]
@@ -89,6 +114,66 @@ class BootstrapEnrollResponse(_message.Message):
     router_addresses: _containers.RepeatedScalarFieldContainer[str]
     status: EnrollmentStatus
     def __init__(self, status: _Optional[_Union[EnrollmentStatus, str]] = ..., biscuit_token: _Optional[bytes] = ..., poll_interval_seconds: _Optional[int] = ..., error_message: _Optional[str] = ..., control_plane_public_key: _Optional[bytes] = ..., router_addresses: _Optional[_Iterable[str]] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class BootstrapToken(_message.Message):
+    __slots__ = ["autonomous_recovery", "create_time", "description", "expire_time", "id", "max_usages", "owner_id", "revoke_time", "role", "usages_count"]
+    AUTONOMOUS_RECOVERY_FIELD_NUMBER: _ClassVar[int]
+    CREATE_TIME_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    EXPIRE_TIME_FIELD_NUMBER: _ClassVar[int]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    MAX_USAGES_FIELD_NUMBER: _ClassVar[int]
+    OWNER_ID_FIELD_NUMBER: _ClassVar[int]
+    REVOKE_TIME_FIELD_NUMBER: _ClassVar[int]
+    ROLE_FIELD_NUMBER: _ClassVar[int]
+    USAGES_COUNT_FIELD_NUMBER: _ClassVar[int]
+    autonomous_recovery: bool
+    create_time: _timestamp_pb2.Timestamp
+    description: str
+    expire_time: _timestamp_pb2.Timestamp
+    id: str
+    max_usages: int
+    owner_id: str
+    revoke_time: _timestamp_pb2.Timestamp
+    role: str
+    usages_count: int
+    def __init__(self, id: _Optional[str] = ..., role: _Optional[str] = ..., owner_id: _Optional[str] = ..., max_usages: _Optional[int] = ..., usages_count: _Optional[int] = ..., description: _Optional[str] = ..., create_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., revoke_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., autonomous_recovery: bool = ...) -> None: ...
+
+class BootstrapTokenCreateRequest(_message.Message):
+    __slots__ = ["autonomous_recovery", "description", "max_usages", "owner_id", "role", "ttl_hours"]
+    AUTONOMOUS_RECOVERY_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    MAX_USAGES_FIELD_NUMBER: _ClassVar[int]
+    OWNER_ID_FIELD_NUMBER: _ClassVar[int]
+    ROLE_FIELD_NUMBER: _ClassVar[int]
+    TTL_HOURS_FIELD_NUMBER: _ClassVar[int]
+    autonomous_recovery: bool
+    description: str
+    max_usages: int
+    owner_id: str
+    role: str
+    ttl_hours: int
+    def __init__(self, role: _Optional[str] = ..., owner_id: _Optional[str] = ..., ttl_hours: _Optional[int] = ..., max_usages: _Optional[int] = ..., description: _Optional[str] = ..., autonomous_recovery: bool = ...) -> None: ...
+
+class BootstrapTokenCreateResponse(_message.Message):
+    __slots__ = ["expire_time", "id", "owner_id", "role", "token"]
+    EXPIRE_TIME_FIELD_NUMBER: _ClassVar[int]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    OWNER_ID_FIELD_NUMBER: _ClassVar[int]
+    ROLE_FIELD_NUMBER: _ClassVar[int]
+    TOKEN_FIELD_NUMBER: _ClassVar[int]
+    expire_time: _timestamp_pb2.Timestamp
+    id: str
+    owner_id: str
+    role: str
+    token: str
+    def __init__(self, id: _Optional[str] = ..., token: _Optional[str] = ..., role: _Optional[str] = ..., owner_id: _Optional[str] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class BootstrapTokenListResponse(_message.Message):
+    __slots__ = ["tokens"]
+    TOKENS_FIELD_NUMBER: _ClassVar[int]
+    tokens: _containers.RepeatedCompositeFieldContainer[BootstrapToken]
+    def __init__(self, tokens: _Optional[_Iterable[_Union[BootstrapToken, _Mapping]]] = ...) -> None: ...
 
 class CommandBackend(_message.Message):
     __slots__ = ["command", "env"]
@@ -215,6 +300,70 @@ class EnrollResponse(_message.Message):
     expire_time: _timestamp_pb2.Timestamp
     router_addresses: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, biscuit_token: _Optional[bytes] = ..., error_message: _Optional[str] = ..., control_plane_public_key: _Optional[bytes] = ..., router_addresses: _Optional[_Iterable[str]] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class EnrolledNode(_message.Message):
+    __slots__ = ["autonomous_recovery", "banned", "claims_json", "enroll_time", "enrollment_type", "expire_time", "labels", "owner_id", "peer_id", "role"]
+    class LabelsEntry(_message.Message):
+        __slots__ = ["key", "value"]
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    AUTONOMOUS_RECOVERY_FIELD_NUMBER: _ClassVar[int]
+    BANNED_FIELD_NUMBER: _ClassVar[int]
+    CLAIMS_JSON_FIELD_NUMBER: _ClassVar[int]
+    ENROLLMENT_TYPE_FIELD_NUMBER: _ClassVar[int]
+    ENROLL_TIME_FIELD_NUMBER: _ClassVar[int]
+    EXPIRE_TIME_FIELD_NUMBER: _ClassVar[int]
+    LABELS_FIELD_NUMBER: _ClassVar[int]
+    OWNER_ID_FIELD_NUMBER: _ClassVar[int]
+    PEER_ID_FIELD_NUMBER: _ClassVar[int]
+    ROLE_FIELD_NUMBER: _ClassVar[int]
+    autonomous_recovery: bool
+    banned: bool
+    claims_json: str
+    enroll_time: _timestamp_pb2.Timestamp
+    enrollment_type: str
+    expire_time: _timestamp_pb2.Timestamp
+    labels: _containers.ScalarMap[str, str]
+    owner_id: str
+    peer_id: str
+    role: str
+    def __init__(self, peer_id: _Optional[str] = ..., role: _Optional[str] = ..., enrollment_type: _Optional[str] = ..., claims_json: _Optional[str] = ..., owner_id: _Optional[str] = ..., labels: _Optional[_Mapping[str, str]] = ..., enroll_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., banned: bool = ..., autonomous_recovery: bool = ...) -> None: ...
+
+class EnrollmentRequest(_message.Message):
+    __slots__ = ["create_time", "id", "labels", "peer_id", "resolve_time", "resolved_by", "status", "token_id"]
+    class LabelsEntry(_message.Message):
+        __slots__ = ["key", "value"]
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    CREATE_TIME_FIELD_NUMBER: _ClassVar[int]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    LABELS_FIELD_NUMBER: _ClassVar[int]
+    PEER_ID_FIELD_NUMBER: _ClassVar[int]
+    RESOLVED_BY_FIELD_NUMBER: _ClassVar[int]
+    RESOLVE_TIME_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    TOKEN_ID_FIELD_NUMBER: _ClassVar[int]
+    create_time: _timestamp_pb2.Timestamp
+    id: str
+    labels: _containers.ScalarMap[str, str]
+    peer_id: str
+    resolve_time: _timestamp_pb2.Timestamp
+    resolved_by: str
+    status: EnrollmentStatus
+    token_id: str
+    def __init__(self, id: _Optional[str] = ..., peer_id: _Optional[str] = ..., token_id: _Optional[str] = ..., status: _Optional[_Union[EnrollmentStatus, str]] = ..., labels: _Optional[_Mapping[str, str]] = ..., create_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., resolve_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., resolved_by: _Optional[str] = ...) -> None: ...
+
+class EnrollmentRequestListResponse(_message.Message):
+    __slots__ = ["requests"]
+    REQUESTS_FIELD_NUMBER: _ClassVar[int]
+    requests: _containers.RepeatedCompositeFieldContainer[EnrollmentRequest]
+    def __init__(self, requests: _Optional[_Iterable[_Union[EnrollmentRequest, _Mapping]]] = ...) -> None: ...
 
 class ExtProc(_message.Message):
     __slots__ = ["allow_mode_override", "ca", "client_certificate", "failure_mode_allow", "max_buffered_bytes", "message_timeout", "processing_mode", "target"]
@@ -369,6 +518,14 @@ class NodeCatalogReport(_message.Message):
     services: _containers.RepeatedCompositeFieldContainer[ServiceInfo]
     def __init__(self, services: _Optional[_Iterable[_Union[ServiceInfo, _Mapping]]] = ...) -> None: ...
 
+class NodeServices(_message.Message):
+    __slots__ = ["report_time", "services"]
+    REPORT_TIME_FIELD_NUMBER: _ClassVar[int]
+    SERVICES_FIELD_NUMBER: _ClassVar[int]
+    report_time: _timestamp_pb2.Timestamp
+    services: _containers.RepeatedCompositeFieldContainer[ServiceInfo]
+    def __init__(self, services: _Optional[_Iterable[_Union[ServiceInfo, _Mapping]]] = ..., report_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
 class OIDCFederation(_message.Message):
     __slots__ = ["audience", "impersonate", "scopes", "token_endpoint"]
     AUDIENCE_FIELD_NUMBER: _ClassVar[int]
@@ -495,6 +652,22 @@ class RevocationsResponse(_message.Message):
     banned_peer_ids: _containers.RepeatedScalarFieldContainer[str]
     revocation_ids: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, revocation_ids: _Optional[_Iterable[str]] = ..., banned_peer_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class RouterLease(_message.Message):
+    __slots__ = ["addresses", "connected_peers", "dht_size", "expire_time", "last_renewal_time", "peer_id"]
+    ADDRESSES_FIELD_NUMBER: _ClassVar[int]
+    CONNECTED_PEERS_FIELD_NUMBER: _ClassVar[int]
+    DHT_SIZE_FIELD_NUMBER: _ClassVar[int]
+    EXPIRE_TIME_FIELD_NUMBER: _ClassVar[int]
+    LAST_RENEWAL_TIME_FIELD_NUMBER: _ClassVar[int]
+    PEER_ID_FIELD_NUMBER: _ClassVar[int]
+    addresses: _containers.RepeatedScalarFieldContainer[str]
+    connected_peers: _containers.RepeatedScalarFieldContainer[str]
+    dht_size: int
+    expire_time: _timestamp_pb2.Timestamp
+    last_renewal_time: _timestamp_pb2.Timestamp
+    peer_id: str
+    def __init__(self, peer_id: _Optional[str] = ..., addresses: _Optional[_Iterable[str]] = ..., last_renewal_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., connected_peers: _Optional[_Iterable[str]] = ..., dht_size: _Optional[int] = ...) -> None: ...
 
 class RouterLeaseRequest(_message.Message):
     __slots__ = ["addresses", "biscuit", "challenge_signature", "challenge_unix_ms", "connected_peers", "dht_size", "peer_id"]
@@ -694,6 +867,34 @@ class TrustedSigningKey(_message.Message):
     public_key: bytes
     receive_time: _timestamp_pb2.Timestamp
     def __init__(self, public_key: _Optional[bytes] = ..., receive_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class User(_message.Message):
+    __slots__ = ["create_time", "email", "id", "issuer", "role"]
+    CREATE_TIME_FIELD_NUMBER: _ClassVar[int]
+    EMAIL_FIELD_NUMBER: _ClassVar[int]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    ISSUER_FIELD_NUMBER: _ClassVar[int]
+    ROLE_FIELD_NUMBER: _ClassVar[int]
+    create_time: _timestamp_pb2.Timestamp
+    email: str
+    id: str
+    issuer: str
+    role: str
+    def __init__(self, id: _Optional[str] = ..., issuer: _Optional[str] = ..., email: _Optional[str] = ..., role: _Optional[str] = ..., create_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class UserStatusResponse(_message.Message):
+    __slots__ = ["active_routers", "bootstrap_tokens", "enrolled_nodes", "policy", "user"]
+    ACTIVE_ROUTERS_FIELD_NUMBER: _ClassVar[int]
+    BOOTSTRAP_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    ENROLLED_NODES_FIELD_NUMBER: _ClassVar[int]
+    POLICY_FIELD_NUMBER: _ClassVar[int]
+    USER_FIELD_NUMBER: _ClassVar[int]
+    active_routers: _containers.RepeatedCompositeFieldContainer[RouterLease]
+    bootstrap_tokens: _containers.RepeatedCompositeFieldContainer[BootstrapToken]
+    enrolled_nodes: _containers.RepeatedCompositeFieldContainer[EnrolledNode]
+    policy: PolicyConfig
+    user: User
+    def __init__(self, user: _Optional[_Union[User, _Mapping]] = ..., enrolled_nodes: _Optional[_Iterable[_Union[EnrolledNode, _Mapping]]] = ..., bootstrap_tokens: _Optional[_Iterable[_Union[BootstrapToken, _Mapping]]] = ..., active_routers: _Optional[_Iterable[_Union[RouterLease, _Mapping]]] = ..., policy: _Optional[_Union[PolicyConfig, _Mapping]] = ...) -> None: ...
 
 class EnrollmentStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = []

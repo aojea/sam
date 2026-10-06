@@ -34,6 +34,7 @@ import (
 	"github.com/google/sam/internal/storage"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -446,33 +447,40 @@ func TestUserStatusTrimsCredentialsAndMeshState(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("/user/status: %d %s", status, body)
 	}
-	for _, leaked := range []string{`"Biscuit"`, `"PublicKey"`, `"ClaimsJSON"`, `"policy_json"`, `"active_routers"`} {
+	for _, leaked := range []string{`"biscuit"`, `"public_key"`, `"claims_json"`, `"policy"`, `"active_routers"`} {
 		if bytes.Contains(body, []byte(leaked)) {
 			t.Errorf("non-admin /user/status carries %s", leaked)
 		}
 	}
-	var resp struct {
-		Nodes []map[string]any `json:"enrolled_nodes"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
+	resp := &api.UserStatusResponse{}
+	if err := protojson.Unmarshal(body, resp); err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Nodes) != 0 {
+	if len(resp.GetEnrolledNodes()) != 0 {
 		// The node was OIDC-enrolled with no owner; a user sees only nodes it
 		// owns. What matters is the shape when present, checked as admin.
-		t.Errorf("non-owner sees %d nodes", len(resp.Nodes))
+		t.Errorf("non-owner sees %d nodes", len(resp.GetEnrolledNodes()))
 	}
 
+	// protojson omits an empty list, so give the admin view a router to show.
+	if err := h.store.UpsertRouterLease(context.Background(), &storage.RouterLease{
+		PeerID:      "12D3KooWStatusRouter000000000000000000000000000000",
+		Addresses:   []string{"/dns4/router.example/tcp/4501"},
+		LastRenewal: time.Now(),
+		ExpiresAt:   time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	status, body = h.do(http.MethodGet, "/user/status", "super-secret-admin-token", nil, "")
 	if status != http.StatusOK {
 		t.Fatalf("admin /user/status: %d %s", status, body)
 	}
-	for _, leaked := range []string{`"Biscuit"`, `"PublicKey"`} {
+	for _, leaked := range []string{`"biscuit"`, `"public_key"`} {
 		if bytes.Contains(body, []byte(leaked)) {
 			t.Errorf("admin /user/status carries %s", leaked)
 		}
 	}
-	for _, wanted := range []string{`"policy_json"`, `"active_routers"`, `"ClaimsJSON"`, `"PeerID"`} {
+	for _, wanted := range []string{`"policy"`, `"active_routers"`, `"claims_json"`, `"peer_id"`} {
 		if !bytes.Contains(body, []byte(wanted)) {
 			t.Errorf("admin /user/status lacks %s", wanted)
 		}

@@ -352,20 +352,20 @@ test('reported services render with type, labels and report time', async ({ page
     const response = await route.fetch();
     const status = await response.json();
     status.enrolled_nodes = [...(status.enrolled_nodes || []), {
-      PeerID: PEER,
-      Role: 'sam:role:node',
-      OwnerID: 'root-admin',
-      Labels: { component: 'stvv', region: 'eu-west' },
+      peer_id: PEER,
+      role: 'sam:role:node',
+      owner_id: 'root-admin',
+      labels: { component: 'stvv', region: 'eu-west' },
     }];
     status.node_catalog = {
       [PEER]: {
         services: [
-          { name: 'compliance-docs', type: 'mcp', description: 'doc lookup' },
+          { name: 'compliance-docs', type: 'SERVICE_TYPE_MCP', description: 'doc lookup' },
           // Reported names and descriptions are node-controlled input to an
           // admin page; markup in them must render inert.
-          { name: 'llama', type: 'inference', description: '<img src=x onerror="window.svcXSS=1">' },
+          { name: 'llama', type: 'SERVICE_TYPE_INFERENCE', description: '<img src=x onerror="window.svcXSS=1">' },
         ],
-        reported_at: '2026-09-15T08:00:00Z',
+        report_time: '2026-09-15T08:00:00Z',
       },
     };
     await route.fulfill({ response, json: status });
@@ -384,7 +384,7 @@ test('reported services render with type, labels and report time', async ({ page
   await expect(first).toContainText(PEER);
   // The node's labels ride along as the mnemonic under the peer ID.
   await expect(first.locator('.cell-subtext')).toHaveText('component=stvv, region=eu-west');
-  // reported_at renders as a local time, not the raw RFC 3339 string.
+  // report_time renders as a local time, not the raw RFC 3339 string.
   await expect(first.locator('td').nth(4)).not.toHaveText(/2026-09-15T08:00:00Z|-/);
 
   await expect(rows.nth(1)).toContainText('inference');
@@ -408,8 +408,8 @@ test('revoked nodes disappear from the Nodes view and the node count', async ({ 
     const response = await route.fetch();
     const status = await response.json();
     status.enrolled_nodes = [
-      { PeerID: LIVE, Role: 'sam:role:node', OwnerID: 'root-admin', Banned: false },
-      { PeerID: REVOKED, Role: 'sam:role:node', OwnerID: 'root-admin', Banned: true },
+      { peer_id: LIVE, role: 'sam:role:node', owner_id: 'root-admin' },
+      { peer_id: REVOKED, role: 'sam:role:node', owner_id: 'root-admin', banned: true },
     ];
     await route.fulfill({ response, json: status });
   });

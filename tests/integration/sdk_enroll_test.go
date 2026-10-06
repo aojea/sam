@@ -36,6 +36,7 @@ import (
 	"github.com/google/sam/internal/storage"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -304,9 +305,9 @@ func verifySDKReport(t *testing.T, ctx context.Context, store storage.Store, cpP
 
 func mintBootstrapToken(t *testing.T, baseURL, adminToken string) string {
 	t.Helper()
-	body, err := json.Marshal(api.BootstrapTokenRequest{
+	body, err := protojson.Marshal(&api.BootstrapTokenCreateRequest{
 		Role:        api.RoleNode,
-		TTLHours:    1,
+		TtlHours:    1,
 		MaxUsages:   1,
 		Description: "native sdk conformance",
 	})
@@ -357,18 +358,18 @@ func approvePendingEnrollment(t *testing.T, baseURL, adminToken string, done <-c
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
-		var pending []storage.EnrollmentRequest
-		decodeErr := json.NewDecoder(resp.Body).Decode(&pending)
+		body, readErr := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		if decodeErr != nil || resp.StatusCode != http.StatusOK {
+		pending := &api.EnrollmentRequestListResponse{}
+		if readErr != nil || resp.StatusCode != http.StatusOK || protojson.Unmarshal(body, pending) != nil {
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
-		for _, e := range pending {
-			if e.Status != api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING {
+		for _, e := range pending.GetRequests() {
+			if e.GetStatus() != api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING {
 				continue
 			}
-			approve, _ := http.NewRequest(http.MethodPost, baseURL+"/admin/enrollments/"+e.ID+"/approve", nil)
+			approve, _ := http.NewRequest(http.MethodPost, baseURL+"/admin/enrollments/"+e.GetId()+"/approve", nil)
 			approve.Header.Set("Authorization", "Bearer "+adminToken)
 			approveResp, err := client.Do(approve)
 			if err != nil {
@@ -379,9 +380,9 @@ func approvePendingEnrollment(t *testing.T, baseURL, adminToken string, done <-c
 			if approveResp.StatusCode != http.StatusOK {
 				t.Fatalf("failed to approve enrollment: %s body %s", approveResp.Status, msg)
 			}
-			pid, err := peer.Decode(e.PeerID)
+			pid, err := peer.Decode(e.GetPeerId())
 			if err != nil {
-				t.Fatalf("control plane recorded an undecodable peer ID %q: %v", e.PeerID, err)
+				t.Fatalf("control plane recorded an undecodable peer ID %q: %v", e.GetPeerId(), err)
 			}
 			return pid
 		}

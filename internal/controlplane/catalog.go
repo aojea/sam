@@ -24,6 +24,7 @@ import (
 	"github.com/google/sam/internal/storage"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // maxCatalogServices bounds one report so a single admitted node cannot grow
@@ -34,21 +35,6 @@ const maxCatalogServices = 512
 type nodeCatalogEntry struct {
 	Services   []*api.ServiceInfo
 	ReportedAt time.Time
-}
-
-// catalogService is the console-facing shape of one reported service: a plain
-// struct so the JSON the console reads does not depend on protoc-gen-go's
-// struct layout or tags.
-type catalogService struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Description string `json:"description"`
-}
-
-// catalogView is HandleAdminStatus's node_catalog value for one peer.
-type catalogView struct {
-	Services   []catalogService `json:"services"`
-	ReportedAt time.Time        `json:"reported_at"`
 }
 
 // catalogSnapshot returns a stable copy of the current node service catalog
@@ -66,9 +52,9 @@ func (s *Server) catalogSnapshot() map[string]nodeCatalogEntry {
 // catalogViewFor renders the cache for the console, restricted to nodes that
 // are still admitted so a banned or expired node's last report disappears
 // with its enrollment instead of lingering until the next restart.
-func (s *Server) catalogViewFor(nodes []storage.EnrolledNode, now time.Time) map[string]catalogView {
+func (s *Server) catalogViewFor(nodes []storage.EnrolledNode, now time.Time) map[string]*api.NodeServices {
 	snap := s.catalogSnapshot()
-	view := make(map[string]catalogView, len(snap))
+	view := make(map[string]*api.NodeServices, len(snap))
 	for i := range nodes {
 		node := &nodes[i]
 		// The cache is keyed by the canonical base58 form from the verified
@@ -83,22 +69,14 @@ func (s *Server) catalogViewFor(nodes []storage.EnrolledNode, now time.Time) map
 		if !ok || node.CheckAdmission(now) != nil {
 			continue
 		}
-		services := make([]catalogService, 0, len(entry.Services))
+		services := make([]*api.ServiceInfo, 0, len(entry.Services))
 		for _, svc := range entry.Services {
 			if svc == nil {
 				continue
 			}
-			typeName, err := api.ServiceTypeToString(svc.GetType())
-			if err != nil {
-				typeName = "unknown"
-			}
-			services = append(services, catalogService{
-				Name:        svc.GetName(),
-				Type:        typeName,
-				Description: svc.GetDescription(),
-			})
+			services = append(services, svc)
 		}
-		view[node.PeerID] = catalogView{Services: services, ReportedAt: entry.ReportedAt}
+		view[node.PeerID] = &api.NodeServices{Services: services, ReportTime: timestamppb.New(entry.ReportedAt)}
 	}
 	return view
 }

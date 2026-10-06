@@ -284,7 +284,7 @@ func waitForLeaseRenewedAfter(t *testing.T, cpPort int, after time.Time) {
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		for _, lease := range fetchAdminStatus(t, cpPort, "test-admin-token").ActiveRouters {
-			if lease.LastRenewal.After(after) {
+			if lease.GetLastRenewalTime().AsTime().After(after) {
 				return
 			}
 		}

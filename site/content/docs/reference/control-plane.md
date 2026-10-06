@@ -89,16 +89,19 @@ names. Every instant in a response (`expire_time` and the like) is a
 
 ### Admin
 
-All routes require `Authorization: Bearer <admin-token>` and use JSON.
+All routes require `Authorization: Bearer <admin-token>`. Request and
+response bodies are protojson of the messages named below, with proto field
+names; unknown fields are rejected.
 
 | Route | Purpose |
 |---|---|
-| `GET /admin/status` | Everything the console shows: routers, nodes, enrollment requests, tokens, users, and the policy as JSON. |
-| `GET /admin/policy` | The mesh policy as protojson of `PolicyConfig`, the same document `POST /policies` takes. |
-| `POST /policies`, `PUT /policies` | Replace the mesh policy. The JSON body is protojson of `PolicyConfig`. Unknown fields are rejected, so a misspelt grant fails instead of being dropped. |
-| `POST /admin/bootstrap-tokens` | Mint a token. Body: `role` (required), `ttl_hours` (default 24), `max_usages` (default 1), `description`, `autonomous_recovery` (default false). Returns `201` with `id`, `token` (shown once), `role`, `expires_at`. |
-| `DELETE /admin/bootstrap-tokens/{id}` | Revoke a token. Can be repeated. The token stays in the list, marked as revoked. |
-| `GET /admin/enrollments` | Pending bootstrap enrollment requests. |
+| `GET /admin/status` | `AdminStatusResponse`: everything the console shows: routers, nodes, enrollment requests, tokens, users, the policy and the node service catalog. |
+| `GET /admin/policy` | The mesh policy as `PolicyConfig`, the same document `POST /policies` takes. |
+| `POST /policies`, `PUT /policies` | Replace the mesh policy. The body is `PolicyConfig`, so a misspelt grant fails instead of being dropped. |
+| `GET /admin/bootstrap-tokens` | `BootstrapTokenListResponse`: every token, including revoked and expired ones. |
+| `POST /admin/bootstrap-tokens` | Mint a token. Body `BootstrapTokenCreateRequest`: `role` (required), `ttl_hours` (default 24), `max_usages` (default 1), `description`, `autonomous_recovery` (default false). Returns `201` with `BootstrapTokenCreateResponse`: `id`, `token` (shown once), `role`, `expire_time`. |
+| `DELETE /admin/bootstrap-tokens/{id}` | Revoke a token. Can be repeated. The token stays in the list with `revoke_time` set. |
+| `GET /admin/enrollments` | `EnrollmentRequestListResponse`: bootstrap enrollment requests, pending and decided. |
 | `POST /admin/enrollments/{id}/approve` | Approve. Spends a token usage. Checks the token again, and checks the labels against the role's `allowed_labels`. |
 | `POST /admin/enrollments/{id}/reject` | Reject. |
 | `POST /admin/revoke` | Body `{"peer_id": "..."}`. Ban the node and, for an OIDC enrollment, the identity behind it. |
@@ -113,8 +116,8 @@ with `403`). The console uses these routes.
 
 | Route | Purpose |
 |---|---|
-| `GET /user/status` | The caller's enrolled nodes and tokens. |
-| `POST /user/bootstrap-tokens` | Mint a token owned by the caller. `role` defaults to `sam:role:node`. Banning the owner disables the tokens they minted. |
+| `GET /user/status` | `UserStatusResponse`: the caller, their enrolled nodes and tokens. For an administrator it also carries the routers and the policy. |
+| `POST /user/bootstrap-tokens` | Mint a token owned by the caller; body and response as on the admin route. `role` defaults to `sam:role:node`. Banning the owner disables the tokens they minted. |
 | `POST /user/revoke` | Ban one of the caller's own nodes. |
 
 ## Notes

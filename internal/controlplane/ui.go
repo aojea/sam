@@ -15,14 +15,14 @@
 package controlplane
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 
-	"github.com/google/sam/internal/storage"
+	"github.com/google/sam/api"
 )
 
-// HandleAdminStatus returns a consolidated JSON state of the control plane.
+// HandleAdminStatus HTTP GET `/admin/status`: the whole mesh as the console
+// shows it, protojson of AdminStatusResponse.
 func (s *Server) HandleAdminStatus(w http.ResponseWriter, r *http.Request) {
 	if !s.checkAdminAuth(w, r) {
 		return
@@ -55,10 +55,6 @@ func (s *Server) HandleAdminStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	for i := range reqs {
-		reqs[i].BiscuitToken = nil
-		reqs[i].PublicKey = nil
-	}
 
 	tokens, err := s.store.ListBootstrapTokens(ctx)
 	if err != nil {
@@ -74,37 +70,25 @@ func (s *Server) HandleAdminStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	roles, bindings, err := s.store.GetMeshPolicy(r.Context())
-	if err != nil && err != storage.ErrNotFound {
+	policy, err := s.loadPolicyConfig(ctx)
+	if err != nil {
 		logger.Errorf("Failed to list policy: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	egress, err := s.store.GetEgressDestinations(r.Context())
-	if err != nil && err != storage.ErrNotFound {
-		logger.Errorf("Failed to list egress destinations: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+
+	enrolled := make([]*api.EnrolledNode, 0, len(nodes))
+	for i := range nodes {
+		enrolled = append(enrolled, enrolledNodeView(&nodes[i], true))
 	}
 
-	policyJSON, err := marshalPolicyJSON(roles, bindings, egress)
-	if err != nil {
-		logger.Errorf("Failed to render policy: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	resp := map[string]any{
-		"users":               users,
-		"active_routers":      routers,
-		"enrolled_nodes":      nodes,
-		"enrollment_requests": reqs,
-		"bootstrap_tokens":    tokens,
-		"policy_json":         policyJSON,
-		"node_catalog":        s.catalogViewFor(nodes, time.Now()),
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
+	writeProtoJSON(w, &api.AdminStatusResponse{
+		Users:              userViews(users),
+		ActiveRouters:      routerLeaseViews(routers),
+		EnrolledNodes:      enrolled,
+		EnrollmentRequests: enrollmentRequestViews(reqs),
+		BootstrapTokens:    bootstrapTokenViews(tokens),
+		Policy:             policy,
+		NodeCatalog:        s.catalogViewFor(nodes, time.Now()),
+	})
 }

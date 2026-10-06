@@ -1716,24 +1716,22 @@ func (s *Server) HandleAdminPolicy(w http.ResponseWriter, r *http.Request) {
 	if !s.checkAdminAuth(w, r) {
 		return
 	}
-	roles, bindings, err := s.store.GetMeshPolicy(r.Context())
-	if err != nil && err != storage.ErrNotFound {
+	policy, err := s.loadPolicyConfig(r.Context())
+	if err != nil {
 		logger.Errorf("Failed to load policy: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	egress, err := s.store.GetEgressDestinations(r.Context())
-	if err != nil && err != storage.ErrNotFound {
-		logger.Errorf("Failed to load egress destinations: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	writeProtoJSON(w, &api.PolicyConfig{Roles: roles, Bindings: bindings, Egress: egress})
+	writeProtoJSON(w, policy)
 }
 
 // writeProtoJSON answers an operator-plane request with protojson of msg,
 // using the proto field names the console and the docs show.
 func writeProtoJSON(w http.ResponseWriter, msg proto.Message) {
+	writeProtoJSONStatus(w, http.StatusOK, msg)
+}
+
+func writeProtoJSONStatus(w http.ResponseWriter, status int, msg proto.Message) {
 	out, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(msg)
 	if err != nil {
 		logger.Errorf("Failed to render %T: %v", msg, err)
@@ -1741,8 +1739,26 @@ func writeProtoJSON(w http.ResponseWriter, msg proto.Message) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(status)
 	_, _ = w.Write(out)
+}
+
+// readProtoJSON decodes an operator-plane request body into msg. Unknown
+// fields are an error: a misspelled field would otherwise silently become
+// the default. Writes the 400 itself and reports false on failure.
+func readProtoJSON(w http.ResponseWriter, r *http.Request, msg proto.Message) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	defer func() { _ = r.Body.Close() }()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read body", http.StatusBadRequest)
+		return false
+	}
+	if err := protojson.Unmarshal(body, msg); err != nil {
+		http.Error(w, "Invalid JSON body: "+err.Error(), http.StatusBadRequest)
+		return false
+	}
+	return true
 }
 
 // Close shuts down background loops and HTTP server.
@@ -2362,9 +2378,7 @@ func (s *Server) HandleAdminBootstrapTokens(w http.ResponseWriter, r *http.Reque
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(list)
+		writeProtoJSON(w, &api.BootstrapTokenListResponse{Tokens: bootstrapTokenViews(list)})
 		return
 	}
 
@@ -2373,24 +2387,21 @@ func (s *Server) HandleAdminBootstrapTokens(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	var req api.BootstrapTokenRequest
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+	req := &api.BootstrapTokenCreateRequest{}
+	if !readProtoJSON(w, r, req) {
 		return
 	}
-	defer func() { _ = r.Body.Close() }()
 
-	if req.Role == "" {
+	if req.GetRole() == "" {
 		// No silent default: the old one was router, the most privileged
 		// role a token can carry.
 		http.Error(w, "role is required (e.g. \"sam:role:node\")", http.StatusBadRequest)
 		return
 	}
-	if req.TTLHours <= 0 {
-		req.TTLHours = 24
+	if req.GetTtlHours() <= 0 {
+		req.TtlHours = 24
 	}
-	if req.MaxUsages <= 0 {
+	if req.GetMaxUsages() <= 0 {
 		req.MaxUsages = 1
 	}
 
@@ -2405,13 +2416,13 @@ func (s *Server) HandleAdminBootstrapTokens(w http.ResponseWriter, r *http.Reque
 	tokenRecord := &storage.BootstrapToken{
 		ID:                 tokenID,
 		TokenHash:          tokenID,
-		Role:               req.Role,
-		MaxUsages:          req.MaxUsages,
+		Role:               req.GetRole(),
+		MaxUsages:          int(req.GetMaxUsages()),
 		UsagesCount:        0,
-		Description:        req.Description,
+		Description:        req.GetDescription(),
 		CreatedAt:          time.Now(),
-		ExpiresAt:          time.Now().Add(time.Duration(req.TTLHours) * time.Hour),
-		AutonomousRecovery: req.AutonomousRecovery,
+		ExpiresAt:          time.Now().Add(time.Duration(req.GetTtlHours()) * time.Hour),
+		AutonomousRecovery: req.GetAutonomousRecovery(),
 	}
 
 	if err := s.store.SaveBootstrapToken(r.Context(), tokenRecord); err != nil {
@@ -2420,13 +2431,11 @@ func (s *Server) HandleAdminBootstrapTokens(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(api.BootstrapTokenResponse{
-		ID:        tokenRecord.ID,
-		Token:     tokenVal,
-		Role:      tokenRecord.Role,
-		ExpiresAt: tokenRecord.ExpiresAt.Format(time.RFC3339),
+	writeProtoJSONStatus(w, http.StatusCreated, &api.BootstrapTokenCreateResponse{
+		Id:         tokenRecord.ID,
+		Token:      tokenVal,
+		Role:       tokenRecord.Role,
+		ExpireTime: timestamppb.New(tokenRecord.ExpiresAt),
 	})
 }
 
@@ -2484,14 +2493,7 @@ func (s *Server) HandleAdminEnrollments(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	for i := range list {
-		list[i].BiscuitToken = nil
-		list[i].PublicKey = nil
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(list)
+	writeProtoJSON(w, &api.EnrollmentRequestListResponse{Requests: enrollmentRequestViews(list)})
 }
 
 // HandleAdminEnrollmentAction HTTP POST `/admin/enrollments/{id}/approve` or `/admin/enrollments/{id}/reject`
@@ -2969,10 +2971,10 @@ func (s *Server) HandleUserStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	nodes := []enrolledNodeView{}
-	for _, n := range allNodes {
-		if isAdmin || n.OwnerID == user.ID {
-			nodes = append(nodes, viewEnrolledNode(n, isAdmin))
+	nodes := []*api.EnrolledNode{}
+	for i := range allNodes {
+		if isAdmin || allNodes[i].OwnerID == user.ID {
+			nodes = append(nodes, enrolledNodeView(&allNodes[i], isAdmin))
 		}
 	}
 
@@ -2982,21 +2984,17 @@ func (s *Server) HandleUserStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	tokens := []storage.BootstrapToken{}
-	for _, t := range allTokens {
-		if isAdmin || t.OwnerID == user.ID {
-			tokens = append(tokens, t)
+	tokens := []*api.BootstrapToken{}
+	for i := range allTokens {
+		if isAdmin || allTokens[i].OwnerID == user.ID {
+			tokens = append(tokens, bootstrapTokenView(&allTokens[i]))
 		}
 	}
 
-	resp := map[string]any{
-		"user": map[string]any{
-			"id":    user.ID,
-			"email": user.Email,
-			"role":  user.Role,
-		},
-		"enrolled_nodes":   nodes,
-		"bootstrap_tokens": tokens,
+	resp := &api.UserStatusResponse{
+		User:            userView(user),
+		EnrolledNodes:   nodes,
+		BootstrapTokens: tokens,
 	}
 
 	// The mesh policy and the router fleet describe the whole mesh, not the
@@ -3008,65 +3006,32 @@ func (s *Server) HandleUserStatus(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
-		resp["active_routers"] = routers
+		resp.ActiveRouters = routerLeaseViews(routers)
 
-		roles, bindings, err := s.store.GetMeshPolicy(ctx)
-		if err != nil && err != storage.ErrNotFound {
+		policy, err := s.loadPolicyConfig(ctx)
+		if err != nil {
 			logger.Errorf("Failed to list policy: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
-		egress, err := s.store.GetEgressDestinations(ctx)
-		if err != nil && err != storage.ErrNotFound {
-			logger.Errorf("Failed to list egress destinations: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
-		rendered, err := marshalPolicyJSON(roles, bindings, egress)
-		if err != nil {
-			logger.Errorf("Failed to render policy: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
-		resp["policy_json"] = rendered
+		resp.Policy = policy
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
+	writeProtoJSON(w, resp)
 }
 
-// enrolledNodeView is what status endpoints return for a node: the record
-// minus its live credential and key material. ClaimsJSON is admin-only.
-type enrolledNodeView struct {
-	PeerID             string            `json:"PeerID"`
-	Role               string            `json:"Role"`
-	EnrollmentType     string            `json:"EnrollmentType"`
-	ClaimsJSON         string            `json:"ClaimsJSON,omitempty"`
-	OwnerID            string            `json:"OwnerID"`
-	Labels             map[string]string `json:"Labels"`
-	EnrolledAt         time.Time         `json:"EnrolledAt"`
-	ExpiresAt          time.Time         `json:"ExpiresAt"`
-	Banned             bool              `json:"Banned"`
-	AutonomousRecovery bool              `json:"AutonomousRecovery"`
-}
-
-func viewEnrolledNode(n storage.EnrolledNode, withClaims bool) enrolledNodeView {
-	v := enrolledNodeView{
-		PeerID:             n.PeerID,
-		Role:               n.Role,
-		EnrollmentType:     n.EnrollmentType,
-		OwnerID:            n.OwnerID,
-		Labels:             n.Labels,
-		EnrolledAt:         n.EnrolledAt,
-		ExpiresAt:          n.ExpiresAt,
-		Banned:             n.Banned,
-		AutonomousRecovery: n.AutonomousRecovery,
+// loadPolicyConfig reads the stored mesh policy as the message POST /policies
+// accepts; an empty store yields an empty policy.
+func (s *Server) loadPolicyConfig(ctx context.Context) (*api.PolicyConfig, error) {
+	roles, bindings, err := s.store.GetMeshPolicy(ctx)
+	if err != nil && err != storage.ErrNotFound {
+		return nil, err
 	}
-	if withClaims {
-		v.ClaimsJSON = n.ClaimsJSON
+	egress, err := s.store.GetEgressDestinations(ctx)
+	if err != nil && err != storage.ErrNotFound {
+		return nil, err
 	}
-	return v
+	return &api.PolicyConfig{Roles: roles, Bindings: bindings, Egress: egress}, nil
 }
 
 // Ceilings on what a non-admin may mint for itself: a token is a standing
@@ -3090,45 +3055,42 @@ func (s *Server) HandleUserBootstrapTokens(w http.ResponseWriter, r *http.Reques
 
 	// AutonomousRecovery is admin-only here: it decides whether a lost device
 	// can rejoin the mesh on its own.
-	var req api.BootstrapTokenRequest
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+	req := &api.BootstrapTokenCreateRequest{}
+	if !readProtoJSON(w, r, req) {
 		return
 	}
-	defer func() { _ = r.Body.Close() }()
 
-	if req.Role == "" {
+	if req.GetRole() == "" {
 		req.Role = api.RoleNode
 	}
 
-	if user.Role != "admin" && req.Role != api.RoleNode {
+	if user.Role != "admin" && req.GetRole() != api.RoleNode {
 		http.Error(w, "Forbidden: Standard users can only generate tokens for node role", http.StatusForbidden)
 		return
 	}
-	if user.Role != "admin" && req.AutonomousRecovery {
+	if user.Role != "admin" && req.GetAutonomousRecovery() {
 		http.Error(w, "Forbidden: only admins can issue tokens with autonomous_recovery", http.StatusForbidden)
 		return
 	}
 
-	ownerID, status, err := s.resolveTokenOwner(r.Context(), user, req.OwnerID)
+	ownerID, status, err := s.resolveTokenOwner(r.Context(), user, req.GetOwnerId())
 	if err != nil {
 		http.Error(w, err.Error(), status)
 		return
 	}
 
-	if req.TTLHours <= 0 {
-		req.TTLHours = 24
+	if req.GetTtlHours() <= 0 {
+		req.TtlHours = 24
 	}
-	if req.MaxUsages <= 0 {
+	if req.GetMaxUsages() <= 0 {
 		req.MaxUsages = 1
 	}
 	if user.Role != "admin" {
-		if req.TTLHours > userTokenMaxTTLHours {
+		if req.GetTtlHours() > userTokenMaxTTLHours {
 			http.Error(w, fmt.Sprintf("ttl_hours may not exceed %d for non-admin users", userTokenMaxTTLHours), http.StatusBadRequest)
 			return
 		}
-		if req.MaxUsages > userTokenMaxUsages {
+		if req.GetMaxUsages() > userTokenMaxUsages {
 			http.Error(w, fmt.Sprintf("max_usages may not exceed %d for non-admin users", userTokenMaxUsages), http.StatusBadRequest)
 			return
 		}
@@ -3145,14 +3107,14 @@ func (s *Server) HandleUserBootstrapTokens(w http.ResponseWriter, r *http.Reques
 	tokenRecord := &storage.BootstrapToken{
 		ID:                 tokenID,
 		TokenHash:          tokenID,
-		Role:               req.Role,
+		Role:               req.GetRole(),
 		OwnerID:            ownerID,
-		MaxUsages:          req.MaxUsages,
+		MaxUsages:          int(req.GetMaxUsages()),
 		UsagesCount:        0,
-		Description:        req.Description,
+		Description:        req.GetDescription(),
 		CreatedAt:          time.Now(),
-		ExpiresAt:          time.Now().Add(time.Duration(req.TTLHours) * time.Hour),
-		AutonomousRecovery: req.AutonomousRecovery,
+		ExpiresAt:          time.Now().Add(time.Duration(req.GetTtlHours()) * time.Hour),
+		AutonomousRecovery: req.GetAutonomousRecovery(),
 	}
 
 	if err := s.store.SaveBootstrapToken(r.Context(), tokenRecord); err != nil {
@@ -3161,14 +3123,12 @@ func (s *Server) HandleUserBootstrapTokens(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(api.BootstrapTokenResponse{
-		ID:        tokenRecord.ID,
-		Token:     tokenVal,
-		Role:      tokenRecord.Role,
-		OwnerID:   tokenRecord.OwnerID,
-		ExpiresAt: tokenRecord.ExpiresAt.Format(time.RFC3339),
+	writeProtoJSONStatus(w, http.StatusCreated, &api.BootstrapTokenCreateResponse{
+		Id:         tokenRecord.ID,
+		Token:      tokenVal,
+		Role:       tokenRecord.Role,
+		OwnerId:    tokenRecord.OwnerID,
+		ExpireTime: timestamppb.New(tokenRecord.ExpiresAt),
 	})
 }
 
@@ -3399,20 +3359,6 @@ func toStringSlice(val any) []string {
 		return res
 	}
 	return nil
-}
-
-// marshalPolicyJSON renders the stored mesh policy as protojson using the proto
-// field names. Generated marshalling is the point: a hand-maintained mirror of
-// PolicyRole silently drops any field it forgets, which is how custom_datalog
-// went missing from the console for so long.
-func marshalPolicyJSON(roles []*api.PolicyRole, bindings []*api.PolicyBinding, egress []*api.EgressDestination) (string, error) {
-	resp := &api.PolicyConfig{Roles: roles, Bindings: bindings, Egress: egress}
-	marshaler := protojson.MarshalOptions{UseProtoNames: true, Multiline: true, Indent: "  "}
-	out, err := marshaler.Marshal(resp)
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
 }
 
 // maxIdentityFactBudget bounds the worst-case number of Datalog facts a policy

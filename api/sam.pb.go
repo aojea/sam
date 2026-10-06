@@ -3263,6 +3263,1008 @@ func (x *TokenRevokeResponse) GetError() string {
 	return ""
 }
 
+// BootstrapTokenCreateRequest is the body of POST /admin/bootstrap-tokens
+// (admin bearer) and POST /user/bootstrap-tokens (mesh user).
+type BootstrapTokenCreateRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Role the token enrolls into, e.g. "sam:role:node". Required on the admin
+	// endpoint; the user endpoint defaults it to "sam:role:node".
+	Role string `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`
+	// User the token is issued on behalf of. Honored by the user endpoint
+	// only, and only for admins; defaults to the caller.
+	OwnerId string `protobuf:"bytes,2,opt,name=owner_id,json=ownerId,proto3" json:"owner_id,omitempty"`
+	// How long the token stays valid; unset or non-positive means 24.
+	TtlHours int32 `protobuf:"varint,3,opt,name=ttl_hours,json=ttlHours,proto3" json:"ttl_hours,omitempty"`
+	// How many enrollments the token admits; unset or non-positive means 1.
+	MaxUsages int32 `protobuf:"varint,4,opt,name=max_usages,json=maxUsages,proto3" json:"max_usages,omitempty"`
+	// Free-form operator note stored with the token.
+	Description string `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	// Copied onto every node the token enrolls: such a node may still refresh
+	// its credential after the control plane's signing key rotated past its
+	// grace period, on proof of possession of its own key alone. Admin-only,
+	// because a node that can always recover holds a credential that never
+	// expires.
+	AutonomousRecovery bool `protobuf:"varint,6,opt,name=autonomous_recovery,json=autonomousRecovery,proto3" json:"autonomous_recovery,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *BootstrapTokenCreateRequest) Reset() {
+	*x = BootstrapTokenCreateRequest{}
+	mi := &file_api_sam_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BootstrapTokenCreateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BootstrapTokenCreateRequest) ProtoMessage() {}
+
+func (x *BootstrapTokenCreateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BootstrapTokenCreateRequest.ProtoReflect.Descriptor instead.
+func (*BootstrapTokenCreateRequest) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *BootstrapTokenCreateRequest) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *BootstrapTokenCreateRequest) GetOwnerId() string {
+	if x != nil {
+		return x.OwnerId
+	}
+	return ""
+}
+
+func (x *BootstrapTokenCreateRequest) GetTtlHours() int32 {
+	if x != nil {
+		return x.TtlHours
+	}
+	return 0
+}
+
+func (x *BootstrapTokenCreateRequest) GetMaxUsages() int32 {
+	if x != nil {
+		return x.MaxUsages
+	}
+	return 0
+}
+
+func (x *BootstrapTokenCreateRequest) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *BootstrapTokenCreateRequest) GetAutonomousRecovery() bool {
+	if x != nil {
+		return x.AutonomousRecovery
+	}
+	return false
+}
+
+// BootstrapTokenCreateResponse is returned (201) when a token is minted.
+// token is the plaintext and is shown exactly once; the control plane keeps
+// only its hash, which is also the id.
+type BootstrapTokenCreateResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Token         string                 `protobuf:"bytes,2,opt,name=token,proto3" json:"token,omitempty"`
+	Role          string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`
+	OwnerId       string                 `protobuf:"bytes,4,opt,name=owner_id,json=ownerId,proto3" json:"owner_id,omitempty"`
+	ExpireTime    *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=expire_time,json=expireTime,proto3" json:"expire_time,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BootstrapTokenCreateResponse) Reset() {
+	*x = BootstrapTokenCreateResponse{}
+	mi := &file_api_sam_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BootstrapTokenCreateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BootstrapTokenCreateResponse) ProtoMessage() {}
+
+func (x *BootstrapTokenCreateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BootstrapTokenCreateResponse.ProtoReflect.Descriptor instead.
+func (*BootstrapTokenCreateResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *BootstrapTokenCreateResponse) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *BootstrapTokenCreateResponse) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+func (x *BootstrapTokenCreateResponse) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *BootstrapTokenCreateResponse) GetOwnerId() string {
+	if x != nil {
+		return x.OwnerId
+	}
+	return ""
+}
+
+func (x *BootstrapTokenCreateResponse) GetExpireTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpireTime
+	}
+	return nil
+}
+
+// BootstrapToken is a minted token as operators list it.
+type BootstrapToken struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Role        string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
+	OwnerId     string                 `protobuf:"bytes,3,opt,name=owner_id,json=ownerId,proto3" json:"owner_id,omitempty"`
+	MaxUsages   int32                  `protobuf:"varint,4,opt,name=max_usages,json=maxUsages,proto3" json:"max_usages,omitempty"`
+	UsagesCount int32                  `protobuf:"varint,5,opt,name=usages_count,json=usagesCount,proto3" json:"usages_count,omitempty"`
+	Description string                 `protobuf:"bytes,6,opt,name=description,proto3" json:"description,omitempty"`
+	CreateTime  *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
+	ExpireTime  *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=expire_time,json=expireTime,proto3" json:"expire_time,omitempty"`
+	// Set when an operator revoked the token, which is distinct from expiry
+	// or exhausted usages. Unset means never revoked.
+	RevokeTime         *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=revoke_time,json=revokeTime,proto3" json:"revoke_time,omitempty"`
+	AutonomousRecovery bool                   `protobuf:"varint,10,opt,name=autonomous_recovery,json=autonomousRecovery,proto3" json:"autonomous_recovery,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *BootstrapToken) Reset() {
+	*x = BootstrapToken{}
+	mi := &file_api_sam_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BootstrapToken) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BootstrapToken) ProtoMessage() {}
+
+func (x *BootstrapToken) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BootstrapToken.ProtoReflect.Descriptor instead.
+func (*BootstrapToken) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *BootstrapToken) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *BootstrapToken) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *BootstrapToken) GetOwnerId() string {
+	if x != nil {
+		return x.OwnerId
+	}
+	return ""
+}
+
+func (x *BootstrapToken) GetMaxUsages() int32 {
+	if x != nil {
+		return x.MaxUsages
+	}
+	return 0
+}
+
+func (x *BootstrapToken) GetUsagesCount() int32 {
+	if x != nil {
+		return x.UsagesCount
+	}
+	return 0
+}
+
+func (x *BootstrapToken) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *BootstrapToken) GetCreateTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreateTime
+	}
+	return nil
+}
+
+func (x *BootstrapToken) GetExpireTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpireTime
+	}
+	return nil
+}
+
+func (x *BootstrapToken) GetRevokeTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.RevokeTime
+	}
+	return nil
+}
+
+func (x *BootstrapToken) GetAutonomousRecovery() bool {
+	if x != nil {
+		return x.AutonomousRecovery
+	}
+	return false
+}
+
+type BootstrapTokenListResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Tokens        []*BootstrapToken      `protobuf:"bytes,1,rep,name=tokens,proto3" json:"tokens,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BootstrapTokenListResponse) Reset() {
+	*x = BootstrapTokenListResponse{}
+	mi := &file_api_sam_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BootstrapTokenListResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BootstrapTokenListResponse) ProtoMessage() {}
+
+func (x *BootstrapTokenListResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BootstrapTokenListResponse.ProtoReflect.Descriptor instead.
+func (*BootstrapTokenListResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *BootstrapTokenListResponse) GetTokens() []*BootstrapToken {
+	if x != nil {
+		return x.Tokens
+	}
+	return nil
+}
+
+// EnrollmentRequest is a bootstrap enrollment awaiting or past an operator
+// decision (see BootstrapEnrollRequest).
+type EnrollmentRequest struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Id     string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	PeerId string                 `protobuf:"bytes,2,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	// The bootstrap token the request was made with.
+	TokenId string           `protobuf:"bytes,3,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
+	Status  EnrollmentStatus `protobuf:"varint,4,opt,name=status,proto3,enum=sam.v1.EnrollmentStatus" json:"status,omitempty"`
+	// Labels the node declared; approval attests them into its biscuit.
+	Labels     map[string]string      `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	CreateTime *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
+	// Unset while the request is pending.
+	ResolveTime   *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=resolve_time,json=resolveTime,proto3" json:"resolve_time,omitempty"`
+	ResolvedBy    string                 `protobuf:"bytes,8,opt,name=resolved_by,json=resolvedBy,proto3" json:"resolved_by,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnrollmentRequest) Reset() {
+	*x = EnrollmentRequest{}
+	mi := &file_api_sam_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnrollmentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnrollmentRequest) ProtoMessage() {}
+
+func (x *EnrollmentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnrollmentRequest.ProtoReflect.Descriptor instead.
+func (*EnrollmentRequest) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *EnrollmentRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *EnrollmentRequest) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+func (x *EnrollmentRequest) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+func (x *EnrollmentRequest) GetStatus() EnrollmentStatus {
+	if x != nil {
+		return x.Status
+	}
+	return EnrollmentStatus_ENROLLMENT_STATUS_UNSPECIFIED
+}
+
+func (x *EnrollmentRequest) GetLabels() map[string]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
+func (x *EnrollmentRequest) GetCreateTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreateTime
+	}
+	return nil
+}
+
+func (x *EnrollmentRequest) GetResolveTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ResolveTime
+	}
+	return nil
+}
+
+func (x *EnrollmentRequest) GetResolvedBy() string {
+	if x != nil {
+		return x.ResolvedBy
+	}
+	return ""
+}
+
+type EnrollmentRequestListResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Requests      []*EnrollmentRequest   `protobuf:"bytes,1,rep,name=requests,proto3" json:"requests,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnrollmentRequestListResponse) Reset() {
+	*x = EnrollmentRequestListResponse{}
+	mi := &file_api_sam_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnrollmentRequestListResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnrollmentRequestListResponse) ProtoMessage() {}
+
+func (x *EnrollmentRequestListResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnrollmentRequestListResponse.ProtoReflect.Descriptor instead.
+func (*EnrollmentRequestListResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *EnrollmentRequestListResponse) GetRequests() []*EnrollmentRequest {
+	if x != nil {
+		return x.Requests
+	}
+	return nil
+}
+
+// User is a human identity known to the mesh.
+type User struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The identity provider's subject.
+	Id     string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Issuer string `protobuf:"bytes,2,opt,name=issuer,proto3" json:"issuer,omitempty"`
+	Email  string `protobuf:"bytes,3,opt,name=email,proto3" json:"email,omitempty"`
+	// "admin" or "user".
+	Role          string                 `protobuf:"bytes,4,opt,name=role,proto3" json:"role,omitempty"`
+	CreateTime    *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *User) Reset() {
+	*x = User{}
+	mi := &file_api_sam_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *User) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*User) ProtoMessage() {}
+
+func (x *User) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use User.ProtoReflect.Descriptor instead.
+func (*User) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *User) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *User) GetIssuer() string {
+	if x != nil {
+		return x.Issuer
+	}
+	return ""
+}
+
+func (x *User) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *User) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *User) GetCreateTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreateTime
+	}
+	return nil
+}
+
+// EnrolledNode is a member's enrollment record without its credential.
+type EnrolledNode struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	PeerId string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	Role   string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
+	// How the node enrolled, e.g. "oidc" or "bootstrap".
+	EnrollmentType string `protobuf:"bytes,3,opt,name=enrollment_type,json=enrollmentType,proto3" json:"enrollment_type,omitempty"`
+	// The identity provider's claims as stored at enrollment. Admin-only.
+	ClaimsJson string                 `protobuf:"bytes,4,opt,name=claims_json,json=claimsJson,proto3" json:"claims_json,omitempty"`
+	OwnerId    string                 `protobuf:"bytes,5,opt,name=owner_id,json=ownerId,proto3" json:"owner_id,omitempty"`
+	Labels     map[string]string      `protobuf:"bytes,6,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	EnrollTime *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=enroll_time,json=enrollTime,proto3" json:"enroll_time,omitempty"`
+	// When the enrollment session ends; unset means it does not expire.
+	ExpireTime         *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=expire_time,json=expireTime,proto3" json:"expire_time,omitempty"`
+	Banned             bool                   `protobuf:"varint,9,opt,name=banned,proto3" json:"banned,omitempty"`
+	AutonomousRecovery bool                   `protobuf:"varint,10,opt,name=autonomous_recovery,json=autonomousRecovery,proto3" json:"autonomous_recovery,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *EnrolledNode) Reset() {
+	*x = EnrolledNode{}
+	mi := &file_api_sam_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnrolledNode) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnrolledNode) ProtoMessage() {}
+
+func (x *EnrolledNode) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnrolledNode.ProtoReflect.Descriptor instead.
+func (*EnrolledNode) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *EnrolledNode) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+func (x *EnrolledNode) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *EnrolledNode) GetEnrollmentType() string {
+	if x != nil {
+		return x.EnrollmentType
+	}
+	return ""
+}
+
+func (x *EnrolledNode) GetClaimsJson() string {
+	if x != nil {
+		return x.ClaimsJson
+	}
+	return ""
+}
+
+func (x *EnrolledNode) GetOwnerId() string {
+	if x != nil {
+		return x.OwnerId
+	}
+	return ""
+}
+
+func (x *EnrolledNode) GetLabels() map[string]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
+func (x *EnrolledNode) GetEnrollTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EnrollTime
+	}
+	return nil
+}
+
+func (x *EnrolledNode) GetExpireTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpireTime
+	}
+	return nil
+}
+
+func (x *EnrolledNode) GetBanned() bool {
+	if x != nil {
+		return x.Banned
+	}
+	return false
+}
+
+func (x *EnrolledNode) GetAutonomousRecovery() bool {
+	if x != nil {
+		return x.AutonomousRecovery
+	}
+	return false
+}
+
+// RouterLease is a router's current registration with the control plane.
+type RouterLease struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	PeerId string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	// Multiaddrs, `/p2p/<peer id>` suffixed.
+	Addresses       []string               `protobuf:"bytes,2,rep,name=addresses,proto3" json:"addresses,omitempty"`
+	LastRenewalTime *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=last_renewal_time,json=lastRenewalTime,proto3" json:"last_renewal_time,omitempty"`
+	ExpireTime      *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=expire_time,json=expireTime,proto3" json:"expire_time,omitempty"`
+	ConnectedPeers  []string               `protobuf:"bytes,5,rep,name=connected_peers,json=connectedPeers,proto3" json:"connected_peers,omitempty"`
+	DhtSize         int32                  `protobuf:"varint,6,opt,name=dht_size,json=dhtSize,proto3" json:"dht_size,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *RouterLease) Reset() {
+	*x = RouterLease{}
+	mi := &file_api_sam_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RouterLease) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RouterLease) ProtoMessage() {}
+
+func (x *RouterLease) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RouterLease.ProtoReflect.Descriptor instead.
+func (*RouterLease) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *RouterLease) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+func (x *RouterLease) GetAddresses() []string {
+	if x != nil {
+		return x.Addresses
+	}
+	return nil
+}
+
+func (x *RouterLease) GetLastRenewalTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastRenewalTime
+	}
+	return nil
+}
+
+func (x *RouterLease) GetExpireTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpireTime
+	}
+	return nil
+}
+
+func (x *RouterLease) GetConnectedPeers() []string {
+	if x != nil {
+		return x.ConnectedPeers
+	}
+	return nil
+}
+
+func (x *RouterLease) GetDhtSize() int32 {
+	if x != nil {
+		return x.DhtSize
+	}
+	return 0
+}
+
+// NodeServices is the services one node last reported (see
+// NodeCatalogReport).
+type NodeServices struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Services      []*ServiceInfo         `protobuf:"bytes,1,rep,name=services,proto3" json:"services,omitempty"`
+	ReportTime    *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=report_time,json=reportTime,proto3" json:"report_time,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NodeServices) Reset() {
+	*x = NodeServices{}
+	mi := &file_api_sam_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NodeServices) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeServices) ProtoMessage() {}
+
+func (x *NodeServices) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeServices.ProtoReflect.Descriptor instead.
+func (*NodeServices) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *NodeServices) GetServices() []*ServiceInfo {
+	if x != nil {
+		return x.Services
+	}
+	return nil
+}
+
+func (x *NodeServices) GetReportTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ReportTime
+	}
+	return nil
+}
+
+// AdminStatusResponse answers GET /admin/status: everything the console
+// shows an administrator.
+type AdminStatusResponse struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Users              []*User                `protobuf:"bytes,1,rep,name=users,proto3" json:"users,omitempty"`
+	ActiveRouters      []*RouterLease         `protobuf:"bytes,2,rep,name=active_routers,json=activeRouters,proto3" json:"active_routers,omitempty"`
+	EnrolledNodes      []*EnrolledNode        `protobuf:"bytes,3,rep,name=enrolled_nodes,json=enrolledNodes,proto3" json:"enrolled_nodes,omitempty"`
+	EnrollmentRequests []*EnrollmentRequest   `protobuf:"bytes,4,rep,name=enrollment_requests,json=enrollmentRequests,proto3" json:"enrollment_requests,omitempty"`
+	BootstrapTokens    []*BootstrapToken      `protobuf:"bytes,5,rep,name=bootstrap_tokens,json=bootstrapTokens,proto3" json:"bootstrap_tokens,omitempty"`
+	Policy             *PolicyConfig          `protobuf:"bytes,6,opt,name=policy,proto3" json:"policy,omitempty"`
+	// Keyed by the reporting node's peer ID; admitted nodes only.
+	NodeCatalog   map[string]*NodeServices `protobuf:"bytes,7,rep,name=node_catalog,json=nodeCatalog,proto3" json:"node_catalog,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminStatusResponse) Reset() {
+	*x = AdminStatusResponse{}
+	mi := &file_api_sam_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminStatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminStatusResponse) ProtoMessage() {}
+
+func (x *AdminStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminStatusResponse.ProtoReflect.Descriptor instead.
+func (*AdminStatusResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *AdminStatusResponse) GetUsers() []*User {
+	if x != nil {
+		return x.Users
+	}
+	return nil
+}
+
+func (x *AdminStatusResponse) GetActiveRouters() []*RouterLease {
+	if x != nil {
+		return x.ActiveRouters
+	}
+	return nil
+}
+
+func (x *AdminStatusResponse) GetEnrolledNodes() []*EnrolledNode {
+	if x != nil {
+		return x.EnrolledNodes
+	}
+	return nil
+}
+
+func (x *AdminStatusResponse) GetEnrollmentRequests() []*EnrollmentRequest {
+	if x != nil {
+		return x.EnrollmentRequests
+	}
+	return nil
+}
+
+func (x *AdminStatusResponse) GetBootstrapTokens() []*BootstrapToken {
+	if x != nil {
+		return x.BootstrapTokens
+	}
+	return nil
+}
+
+func (x *AdminStatusResponse) GetPolicy() *PolicyConfig {
+	if x != nil {
+		return x.Policy
+	}
+	return nil
+}
+
+func (x *AdminStatusResponse) GetNodeCatalog() map[string]*NodeServices {
+	if x != nil {
+		return x.NodeCatalog
+	}
+	return nil
+}
+
+// UserStatusResponse answers GET /user/status: the caller and what it owns.
+// The router fleet and the mesh policy describe the whole mesh and are set
+// for an administrator only.
+type UserStatusResponse struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	User            *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	EnrolledNodes   []*EnrolledNode        `protobuf:"bytes,2,rep,name=enrolled_nodes,json=enrolledNodes,proto3" json:"enrolled_nodes,omitempty"`
+	BootstrapTokens []*BootstrapToken      `protobuf:"bytes,3,rep,name=bootstrap_tokens,json=bootstrapTokens,proto3" json:"bootstrap_tokens,omitempty"`
+	ActiveRouters   []*RouterLease         `protobuf:"bytes,4,rep,name=active_routers,json=activeRouters,proto3" json:"active_routers,omitempty"`
+	Policy          *PolicyConfig          `protobuf:"bytes,5,opt,name=policy,proto3" json:"policy,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *UserStatusResponse) Reset() {
+	*x = UserStatusResponse{}
+	mi := &file_api_sam_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserStatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserStatusResponse) ProtoMessage() {}
+
+func (x *UserStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserStatusResponse.ProtoReflect.Descriptor instead.
+func (*UserStatusResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *UserStatusResponse) GetUser() *User {
+	if x != nil {
+		return x.User
+	}
+	return nil
+}
+
+func (x *UserStatusResponse) GetEnrolledNodes() []*EnrolledNode {
+	if x != nil {
+		return x.EnrolledNodes
+	}
+	return nil
+}
+
+func (x *UserStatusResponse) GetBootstrapTokens() []*BootstrapToken {
+	if x != nil {
+		return x.BootstrapTokens
+	}
+	return nil
+}
+
+func (x *UserStatusResponse) GetActiveRouters() []*RouterLease {
+	if x != nil {
+		return x.ActiveRouters
+	}
+	return nil
+}
+
+func (x *UserStatusResponse) GetPolicy() *PolicyConfig {
+	if x != nil {
+		return x.Policy
+	}
+	return nil
+}
+
 type IdentityEvidenceResponse struct {
 	state                   protoimpl.MessageState `protogen:"open.v1"`
 	PeerId                  string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
@@ -3277,7 +4279,7 @@ type IdentityEvidenceResponse struct {
 
 func (x *IdentityEvidenceResponse) Reset() {
 	*x = IdentityEvidenceResponse{}
-	mi := &file_api_sam_proto_msgTypes[40]
+	mi := &file_api_sam_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3289,7 +4291,7 @@ func (x *IdentityEvidenceResponse) String() string {
 func (*IdentityEvidenceResponse) ProtoMessage() {}
 
 func (x *IdentityEvidenceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[40]
+	mi := &file_api_sam_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3302,7 +4304,7 @@ func (x *IdentityEvidenceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdentityEvidenceResponse.ProtoReflect.Descriptor instead.
 func (*IdentityEvidenceResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{40}
+	return file_api_sam_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *IdentityEvidenceResponse) GetPeerId() string {
@@ -3363,7 +4365,7 @@ type PeerEvidenceResponse struct {
 
 func (x *PeerEvidenceResponse) Reset() {
 	*x = PeerEvidenceResponse{}
-	mi := &file_api_sam_proto_msgTypes[41]
+	mi := &file_api_sam_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3375,7 +4377,7 @@ func (x *PeerEvidenceResponse) String() string {
 func (*PeerEvidenceResponse) ProtoMessage() {}
 
 func (x *PeerEvidenceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[41]
+	mi := &file_api_sam_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3388,7 +4390,7 @@ func (x *PeerEvidenceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerEvidenceResponse.ProtoReflect.Descriptor instead.
 func (*PeerEvidenceResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{41}
+	return file_api_sam_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *PeerEvidenceResponse) GetPeerId() string {
@@ -3473,7 +4475,7 @@ type MemberCredential struct {
 
 func (x *MemberCredential) Reset() {
 	*x = MemberCredential{}
-	mi := &file_api_sam_proto_msgTypes[42]
+	mi := &file_api_sam_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3485,7 +4487,7 @@ func (x *MemberCredential) String() string {
 func (*MemberCredential) ProtoMessage() {}
 
 func (x *MemberCredential) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[42]
+	mi := &file_api_sam_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3498,7 +4500,7 @@ func (x *MemberCredential) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemberCredential.ProtoReflect.Descriptor instead.
 func (*MemberCredential) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{42}
+	return file_api_sam_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *MemberCredential) GetControlPlaneUrl() string {
@@ -3563,7 +4565,7 @@ type TrustedSigningKey struct {
 
 func (x *TrustedSigningKey) Reset() {
 	*x = TrustedSigningKey{}
-	mi := &file_api_sam_proto_msgTypes[43]
+	mi := &file_api_sam_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3575,7 +4577,7 @@ func (x *TrustedSigningKey) String() string {
 func (*TrustedSigningKey) ProtoMessage() {}
 
 func (x *TrustedSigningKey) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[43]
+	mi := &file_api_sam_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3588,7 +4590,7 @@ func (x *TrustedSigningKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TrustedSigningKey.ProtoReflect.Descriptor instead.
 func (*TrustedSigningKey) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{43}
+	return file_api_sam_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *TrustedSigningKey) GetPublicKey() []byte {
@@ -3617,7 +4619,7 @@ type OIDCSession struct {
 
 func (x *OIDCSession) Reset() {
 	*x = OIDCSession{}
-	mi := &file_api_sam_proto_msgTypes[44]
+	mi := &file_api_sam_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3629,7 +4631,7 @@ func (x *OIDCSession) String() string {
 func (*OIDCSession) ProtoMessage() {}
 
 func (x *OIDCSession) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[44]
+	mi := &file_api_sam_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3642,7 +4644,7 @@ func (x *OIDCSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OIDCSession.ProtoReflect.Descriptor instead.
 func (*OIDCSession) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{44}
+	return file_api_sam_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *OIDCSession) GetIssuer() string {
@@ -3694,7 +4696,7 @@ type TaskAuthorizationRule struct {
 
 func (x *TaskAuthorizationRule) Reset() {
 	*x = TaskAuthorizationRule{}
-	mi := &file_api_sam_proto_msgTypes[45]
+	mi := &file_api_sam_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3706,7 +4708,7 @@ func (x *TaskAuthorizationRule) String() string {
 func (*TaskAuthorizationRule) ProtoMessage() {}
 
 func (x *TaskAuthorizationRule) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[45]
+	mi := &file_api_sam_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3719,7 +4721,7 @@ func (x *TaskAuthorizationRule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskAuthorizationRule.ProtoReflect.Descriptor instead.
 func (*TaskAuthorizationRule) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{45}
+	return file_api_sam_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *TaskAuthorizationRule) GetName() string {
@@ -3771,7 +4773,7 @@ type TaskRule struct {
 
 func (x *TaskRule) Reset() {
 	*x = TaskRule{}
-	mi := &file_api_sam_proto_msgTypes[46]
+	mi := &file_api_sam_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3783,7 +4785,7 @@ func (x *TaskRule) String() string {
 func (*TaskRule) ProtoMessage() {}
 
 func (x *TaskRule) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[46]
+	mi := &file_api_sam_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3796,7 +4798,7 @@ func (x *TaskRule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskRule.ProtoReflect.Descriptor instead.
 func (*TaskRule) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{46}
+	return file_api_sam_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *TaskRule) GetDescription() string {
@@ -3845,7 +4847,7 @@ type TaskOperation struct {
 
 func (x *TaskOperation) Reset() {
 	*x = TaskOperation{}
-	mi := &file_api_sam_proto_msgTypes[47]
+	mi := &file_api_sam_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3857,7 +4859,7 @@ func (x *TaskOperation) String() string {
 func (*TaskOperation) ProtoMessage() {}
 
 func (x *TaskOperation) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[47]
+	mi := &file_api_sam_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3870,7 +4872,7 @@ func (x *TaskOperation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskOperation.ProtoReflect.Descriptor instead.
 func (*TaskOperation) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{47}
+	return file_api_sam_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *TaskOperation) GetAllowedTools() []string {
@@ -3930,7 +4932,7 @@ type TokenExchangeRequest struct {
 
 func (x *TokenExchangeRequest) Reset() {
 	*x = TokenExchangeRequest{}
-	mi := &file_api_sam_proto_msgTypes[48]
+	mi := &file_api_sam_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3942,7 +4944,7 @@ func (x *TokenExchangeRequest) String() string {
 func (*TokenExchangeRequest) ProtoMessage() {}
 
 func (x *TokenExchangeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[48]
+	mi := &file_api_sam_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3955,7 +4957,7 @@ func (x *TokenExchangeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenExchangeRequest.ProtoReflect.Descriptor instead.
 func (*TokenExchangeRequest) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{48}
+	return file_api_sam_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *TokenExchangeRequest) GetSubjectToken() string {
@@ -4005,7 +5007,7 @@ type TokenExchangeResponse struct {
 
 func (x *TokenExchangeResponse) Reset() {
 	*x = TokenExchangeResponse{}
-	mi := &file_api_sam_proto_msgTypes[49]
+	mi := &file_api_sam_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4017,7 +5019,7 @@ func (x *TokenExchangeResponse) String() string {
 func (*TokenExchangeResponse) ProtoMessage() {}
 
 func (x *TokenExchangeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[49]
+	mi := &file_api_sam_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4030,7 +5032,7 @@ func (x *TokenExchangeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenExchangeResponse.ProtoReflect.Descriptor instead.
 func (*TokenExchangeResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{49}
+	return file_api_sam_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *TokenExchangeResponse) GetBiscuitToken() []byte {
@@ -4086,7 +5088,7 @@ type STSTokenRequest struct {
 
 func (x *STSTokenRequest) Reset() {
 	*x = STSTokenRequest{}
-	mi := &file_api_sam_proto_msgTypes[50]
+	mi := &file_api_sam_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4098,7 +5100,7 @@ func (x *STSTokenRequest) String() string {
 func (*STSTokenRequest) ProtoMessage() {}
 
 func (x *STSTokenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[50]
+	mi := &file_api_sam_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4111,7 +5113,7 @@ func (x *STSTokenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use STSTokenRequest.ProtoReflect.Descriptor instead.
 func (*STSTokenRequest) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{50}
+	return file_api_sam_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *STSTokenRequest) GetBiscuit() []byte {
@@ -4162,7 +5164,7 @@ type STSTokenResponse struct {
 
 func (x *STSTokenResponse) Reset() {
 	*x = STSTokenResponse{}
-	mi := &file_api_sam_proto_msgTypes[51]
+	mi := &file_api_sam_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4174,7 +5176,7 @@ func (x *STSTokenResponse) String() string {
 func (*STSTokenResponse) ProtoMessage() {}
 
 func (x *STSTokenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[51]
+	mi := &file_api_sam_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4187,7 +5189,7 @@ func (x *STSTokenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use STSTokenResponse.ProtoReflect.Descriptor instead.
 func (*STSTokenResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{51}
+	return file_api_sam_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *STSTokenResponse) GetJwt() string {
@@ -4238,7 +5240,7 @@ type RevocationsResponse struct {
 
 func (x *RevocationsResponse) Reset() {
 	*x = RevocationsResponse{}
-	mi := &file_api_sam_proto_msgTypes[52]
+	mi := &file_api_sam_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4250,7 +5252,7 @@ func (x *RevocationsResponse) String() string {
 func (*RevocationsResponse) ProtoMessage() {}
 
 func (x *RevocationsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[52]
+	mi := &file_api_sam_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4263,7 +5265,7 @@ func (x *RevocationsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevocationsResponse.ProtoReflect.Descriptor instead.
 func (*RevocationsResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{52}
+	return file_api_sam_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *RevocationsResponse) GetRevocationIds() []string {
@@ -4524,7 +5526,110 @@ const file_api_sam_proto_rawDesc = "" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\"E\n" +
 	"\x13TokenRevokeResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\xbd\x02\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\xdb\x01\n" +
+	"\x1bBootstrapTokenCreateRequest\x12\x12\n" +
+	"\x04role\x18\x01 \x01(\tR\x04role\x12\x19\n" +
+	"\bowner_id\x18\x02 \x01(\tR\aownerId\x12\x1b\n" +
+	"\tttl_hours\x18\x03 \x01(\x05R\bttlHours\x12\x1d\n" +
+	"\n" +
+	"max_usages\x18\x04 \x01(\x05R\tmaxUsages\x12 \n" +
+	"\vdescription\x18\x05 \x01(\tR\vdescription\x12/\n" +
+	"\x13autonomous_recovery\x18\x06 \x01(\bR\x12autonomousRecovery\"\xb0\x01\n" +
+	"\x1cBootstrapTokenCreateResponse\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
+	"\x05token\x18\x02 \x01(\tR\x05token\x12\x12\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\x12\x19\n" +
+	"\bowner_id\x18\x04 \x01(\tR\aownerId\x12;\n" +
+	"\vexpire_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"expireTime\"\x9b\x03\n" +
+	"\x0eBootstrapToken\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04role\x18\x02 \x01(\tR\x04role\x12\x19\n" +
+	"\bowner_id\x18\x03 \x01(\tR\aownerId\x12\x1d\n" +
+	"\n" +
+	"max_usages\x18\x04 \x01(\x05R\tmaxUsages\x12!\n" +
+	"\fusages_count\x18\x05 \x01(\x05R\vusagesCount\x12 \n" +
+	"\vdescription\x18\x06 \x01(\tR\vdescription\x12;\n" +
+	"\vcreate_time\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"createTime\x12;\n" +
+	"\vexpire_time\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"expireTime\x12;\n" +
+	"\vrevoke_time\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"revokeTime\x12/\n" +
+	"\x13autonomous_recovery\x18\n" +
+	" \x01(\bR\x12autonomousRecovery\"L\n" +
+	"\x1aBootstrapTokenListResponse\x12.\n" +
+	"\x06tokens\x18\x01 \x03(\v2\x16.sam.v1.BootstrapTokenR\x06tokens\"\xa0\x03\n" +
+	"\x11EnrollmentRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
+	"\apeer_id\x18\x02 \x01(\tR\x06peerId\x12\x19\n" +
+	"\btoken_id\x18\x03 \x01(\tR\atokenId\x120\n" +
+	"\x06status\x18\x04 \x01(\x0e2\x18.sam.v1.EnrollmentStatusR\x06status\x12=\n" +
+	"\x06labels\x18\x05 \x03(\v2%.sam.v1.EnrollmentRequest.LabelsEntryR\x06labels\x12;\n" +
+	"\vcreate_time\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"createTime\x12=\n" +
+	"\fresolve_time\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\vresolveTime\x12\x1f\n" +
+	"\vresolved_by\x18\b \x01(\tR\n" +
+	"resolvedBy\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"V\n" +
+	"\x1dEnrollmentRequestListResponse\x125\n" +
+	"\brequests\x18\x01 \x03(\v2\x19.sam.v1.EnrollmentRequestR\brequests\"\x95\x01\n" +
+	"\x04User\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
+	"\x06issuer\x18\x02 \x01(\tR\x06issuer\x12\x14\n" +
+	"\x05email\x18\x03 \x01(\tR\x05email\x12\x12\n" +
+	"\x04role\x18\x04 \x01(\tR\x04role\x12;\n" +
+	"\vcreate_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"createTime\"\xd8\x03\n" +
+	"\fEnrolledNode\x12\x17\n" +
+	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x12\n" +
+	"\x04role\x18\x02 \x01(\tR\x04role\x12'\n" +
+	"\x0fenrollment_type\x18\x03 \x01(\tR\x0eenrollmentType\x12\x1f\n" +
+	"\vclaims_json\x18\x04 \x01(\tR\n" +
+	"claimsJson\x12\x19\n" +
+	"\bowner_id\x18\x05 \x01(\tR\aownerId\x128\n" +
+	"\x06labels\x18\x06 \x03(\v2 .sam.v1.EnrolledNode.LabelsEntryR\x06labels\x12;\n" +
+	"\venroll_time\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"enrollTime\x12;\n" +
+	"\vexpire_time\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"expireTime\x12\x16\n" +
+	"\x06banned\x18\t \x01(\bR\x06banned\x12/\n" +
+	"\x13autonomous_recovery\x18\n" +
+	" \x01(\bR\x12autonomousRecovery\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8d\x02\n" +
+	"\vRouterLease\x12\x17\n" +
+	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x1c\n" +
+	"\taddresses\x18\x02 \x03(\tR\taddresses\x12F\n" +
+	"\x11last_renewal_time\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x0flastRenewalTime\x12;\n" +
+	"\vexpire_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"expireTime\x12'\n" +
+	"\x0fconnected_peers\x18\x05 \x03(\tR\x0econnectedPeers\x12\x19\n" +
+	"\bdht_size\x18\x06 \x01(\x05R\adhtSize\"|\n" +
+	"\fNodeServices\x12/\n" +
+	"\bservices\x18\x01 \x03(\v2\x13.sam.v1.ServiceInfoR\bservices\x12;\n" +
+	"\vreport_time\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"reportTime\"\x96\x04\n" +
+	"\x13AdminStatusResponse\x12\"\n" +
+	"\x05users\x18\x01 \x03(\v2\f.sam.v1.UserR\x05users\x12:\n" +
+	"\x0eactive_routers\x18\x02 \x03(\v2\x13.sam.v1.RouterLeaseR\ractiveRouters\x12;\n" +
+	"\x0eenrolled_nodes\x18\x03 \x03(\v2\x14.sam.v1.EnrolledNodeR\renrolledNodes\x12J\n" +
+	"\x13enrollment_requests\x18\x04 \x03(\v2\x19.sam.v1.EnrollmentRequestR\x12enrollmentRequests\x12A\n" +
+	"\x10bootstrap_tokens\x18\x05 \x03(\v2\x16.sam.v1.BootstrapTokenR\x0fbootstrapTokens\x12,\n" +
+	"\x06policy\x18\x06 \x01(\v2\x14.sam.v1.PolicyConfigR\x06policy\x12O\n" +
+	"\fnode_catalog\x18\a \x03(\v2,.sam.v1.AdminStatusResponse.NodeCatalogEntryR\vnodeCatalog\x1aT\n" +
+	"\x10NodeCatalogEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12*\n" +
+	"\x05value\x18\x02 \x01(\v2\x14.sam.v1.NodeServicesR\x05value:\x028\x01\"\xa0\x02\n" +
+	"\x12UserStatusResponse\x12 \n" +
+	"\x04user\x18\x01 \x01(\v2\f.sam.v1.UserR\x04user\x12;\n" +
+	"\x0eenrolled_nodes\x18\x02 \x03(\v2\x14.sam.v1.EnrolledNodeR\renrolledNodes\x12A\n" +
+	"\x10bootstrap_tokens\x18\x03 \x03(\v2\x16.sam.v1.BootstrapTokenR\x0fbootstrapTokens\x12:\n" +
+	"\x0eactive_routers\x18\x04 \x03(\v2\x13.sam.v1.RouterLeaseR\ractiveRouters\x12,\n" +
+	"\x06policy\x18\x05 \x01(\v2\x14.sam.v1.PolicyConfigR\x06policy\"\xbd\x02\n" +
 	"\x18IdentityEvidenceResponse\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x18\n" +
 	"\abiscuit\x18\x02 \x01(\fR\abiscuit\x12J\n" +
@@ -4641,7 +5746,7 @@ func file_api_sam_proto_rawDescGZIP() []byte {
 }
 
 var file_api_sam_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
-var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 58)
+var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 73)
 var file_api_sam_proto_goTypes = []any{
 	(EnrollmentStatus)(0),                 // 0: sam.v1.EnrollmentStatus
 	(ServiceType)(0),                      // 1: sam.v1.ServiceType
@@ -4690,43 +5795,58 @@ var file_api_sam_proto_goTypes = []any{
 	(*NodeCatalogReport)(nil),             // 44: sam.v1.NodeCatalogReport
 	(*TokenRevokeRequest)(nil),            // 45: sam.v1.TokenRevokeRequest
 	(*TokenRevokeResponse)(nil),           // 46: sam.v1.TokenRevokeResponse
-	(*IdentityEvidenceResponse)(nil),      // 47: sam.v1.IdentityEvidenceResponse
-	(*PeerEvidenceResponse)(nil),          // 48: sam.v1.PeerEvidenceResponse
-	(*MemberCredential)(nil),              // 49: sam.v1.MemberCredential
-	(*TrustedSigningKey)(nil),             // 50: sam.v1.TrustedSigningKey
-	(*OIDCSession)(nil),                   // 51: sam.v1.OIDCSession
-	(*TaskAuthorizationRule)(nil),         // 52: sam.v1.TaskAuthorizationRule
-	(*TaskRule)(nil),                      // 53: sam.v1.TaskRule
-	(*TaskOperation)(nil),                 // 54: sam.v1.TaskOperation
-	(*TokenExchangeRequest)(nil),          // 55: sam.v1.TokenExchangeRequest
-	(*TokenExchangeResponse)(nil),         // 56: sam.v1.TokenExchangeResponse
-	(*STSTokenRequest)(nil),               // 57: sam.v1.STSTokenRequest
-	(*STSTokenResponse)(nil),              // 58: sam.v1.STSTokenResponse
-	(*RevocationsResponse)(nil),           // 59: sam.v1.RevocationsResponse
-	nil,                                   // 60: sam.v1.EnrollRequest.LabelsEntry
-	nil,                                   // 61: sam.v1.BootstrapEnrollRequest.LabelsEntry
-	nil,                                   // 62: sam.v1.CommandBackend.EnvEntry
-	nil,                                   // 63: sam.v1.ServiceAnnounce.LabelsEntry
-	nil,                                   // 64: sam.v1.PeerEvidenceResponse.LabelsEntry
-	(*timestamppb.Timestamp)(nil),         // 65: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),           // 66: google.protobuf.Duration
+	(*BootstrapTokenCreateRequest)(nil),   // 47: sam.v1.BootstrapTokenCreateRequest
+	(*BootstrapTokenCreateResponse)(nil),  // 48: sam.v1.BootstrapTokenCreateResponse
+	(*BootstrapToken)(nil),                // 49: sam.v1.BootstrapToken
+	(*BootstrapTokenListResponse)(nil),    // 50: sam.v1.BootstrapTokenListResponse
+	(*EnrollmentRequest)(nil),             // 51: sam.v1.EnrollmentRequest
+	(*EnrollmentRequestListResponse)(nil), // 52: sam.v1.EnrollmentRequestListResponse
+	(*User)(nil),                          // 53: sam.v1.User
+	(*EnrolledNode)(nil),                  // 54: sam.v1.EnrolledNode
+	(*RouterLease)(nil),                   // 55: sam.v1.RouterLease
+	(*NodeServices)(nil),                  // 56: sam.v1.NodeServices
+	(*AdminStatusResponse)(nil),           // 57: sam.v1.AdminStatusResponse
+	(*UserStatusResponse)(nil),            // 58: sam.v1.UserStatusResponse
+	(*IdentityEvidenceResponse)(nil),      // 59: sam.v1.IdentityEvidenceResponse
+	(*PeerEvidenceResponse)(nil),          // 60: sam.v1.PeerEvidenceResponse
+	(*MemberCredential)(nil),              // 61: sam.v1.MemberCredential
+	(*TrustedSigningKey)(nil),             // 62: sam.v1.TrustedSigningKey
+	(*OIDCSession)(nil),                   // 63: sam.v1.OIDCSession
+	(*TaskAuthorizationRule)(nil),         // 64: sam.v1.TaskAuthorizationRule
+	(*TaskRule)(nil),                      // 65: sam.v1.TaskRule
+	(*TaskOperation)(nil),                 // 66: sam.v1.TaskOperation
+	(*TokenExchangeRequest)(nil),          // 67: sam.v1.TokenExchangeRequest
+	(*TokenExchangeResponse)(nil),         // 68: sam.v1.TokenExchangeResponse
+	(*STSTokenRequest)(nil),               // 69: sam.v1.STSTokenRequest
+	(*STSTokenResponse)(nil),              // 70: sam.v1.STSTokenResponse
+	(*RevocationsResponse)(nil),           // 71: sam.v1.RevocationsResponse
+	nil,                                   // 72: sam.v1.EnrollRequest.LabelsEntry
+	nil,                                   // 73: sam.v1.BootstrapEnrollRequest.LabelsEntry
+	nil,                                   // 74: sam.v1.CommandBackend.EnvEntry
+	nil,                                   // 75: sam.v1.ServiceAnnounce.LabelsEntry
+	nil,                                   // 76: sam.v1.EnrollmentRequest.LabelsEntry
+	nil,                                   // 77: sam.v1.EnrolledNode.LabelsEntry
+	nil,                                   // 78: sam.v1.AdminStatusResponse.NodeCatalogEntry
+	nil,                                   // 79: sam.v1.PeerEvidenceResponse.LabelsEntry
+	(*timestamppb.Timestamp)(nil),         // 80: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),           // 81: google.protobuf.Duration
 }
 var file_api_sam_proto_depIdxs = []int32{
 	4,  // 0: sam.v1.MeshEvent.type:type_name -> sam.v1.MeshEvent.Type
-	65, // 1: sam.v1.MeshEvent.event_time:type_name -> google.protobuf.Timestamp
-	60, // 2: sam.v1.EnrollRequest.labels:type_name -> sam.v1.EnrollRequest.LabelsEntry
-	65, // 3: sam.v1.EnrollResponse.expire_time:type_name -> google.protobuf.Timestamp
-	61, // 4: sam.v1.BootstrapEnrollRequest.labels:type_name -> sam.v1.BootstrapEnrollRequest.LabelsEntry
+	80, // 1: sam.v1.MeshEvent.event_time:type_name -> google.protobuf.Timestamp
+	72, // 2: sam.v1.EnrollRequest.labels:type_name -> sam.v1.EnrollRequest.LabelsEntry
+	80, // 3: sam.v1.EnrollResponse.expire_time:type_name -> google.protobuf.Timestamp
+	73, // 4: sam.v1.BootstrapEnrollRequest.labels:type_name -> sam.v1.BootstrapEnrollRequest.LabelsEntry
 	0,  // 5: sam.v1.BootstrapEnrollResponse.status:type_name -> sam.v1.EnrollmentStatus
-	65, // 6: sam.v1.BootstrapEnrollResponse.expire_time:type_name -> google.protobuf.Timestamp
+	80, // 6: sam.v1.BootstrapEnrollResponse.expire_time:type_name -> google.protobuf.Timestamp
 	1,  // 7: sam.v1.ServiceInfo.type:type_name -> sam.v1.ServiceType
-	62, // 8: sam.v1.CommandBackend.env:type_name -> sam.v1.CommandBackend.EnvEntry
+	74, // 8: sam.v1.CommandBackend.env:type_name -> sam.v1.CommandBackend.EnvEntry
 	14, // 9: sam.v1.RegisterServiceRequest.service:type_name -> sam.v1.ServiceInfo
 	15, // 10: sam.v1.RegisterServiceRequest.command:type_name -> sam.v1.CommandBackend
 	1,  // 11: sam.v1.ServiceAnnounce.type:type_name -> sam.v1.ServiceType
-	63, // 12: sam.v1.ServiceAnnounce.labels:type_name -> sam.v1.ServiceAnnounce.LabelsEntry
-	65, // 13: sam.v1.ServiceAnnounce.announce_time:type_name -> google.protobuf.Timestamp
-	65, // 14: sam.v1.RouterLeaseResponse.expire_time:type_name -> google.protobuf.Timestamp
+	75, // 12: sam.v1.ServiceAnnounce.labels:type_name -> sam.v1.ServiceAnnounce.LabelsEntry
+	80, // 13: sam.v1.ServiceAnnounce.announce_time:type_name -> google.protobuf.Timestamp
+	80, // 14: sam.v1.RouterLeaseResponse.expire_time:type_name -> google.protobuf.Timestamp
 	23, // 15: sam.v1.PolicyRole.http:type_name -> sam.v1.HTTPGrant
 	30, // 16: sam.v1.EgressDestination.broker:type_name -> sam.v1.CredentialBroker
 	25, // 17: sam.v1.EgressDestination.inspection:type_name -> sam.v1.Inspection
@@ -4735,9 +5855,9 @@ var file_api_sam_proto_depIdxs = []int32{
 	27, // 20: sam.v1.Inspector.model_armor:type_name -> sam.v1.ModelArmor
 	28, // 21: sam.v1.Inspector.ext_proc:type_name -> sam.v1.ExtProc
 	3,  // 22: sam.v1.ModelArmor.response:type_name -> sam.v1.ResponseInspection
-	66, // 23: sam.v1.ModelArmor.timeout:type_name -> google.protobuf.Duration
+	81, // 23: sam.v1.ModelArmor.timeout:type_name -> google.protobuf.Duration
 	29, // 24: sam.v1.ExtProc.processing_mode:type_name -> sam.v1.ExtProcProcessingMode
-	66, // 25: sam.v1.ExtProc.message_timeout:type_name -> google.protobuf.Duration
+	81, // 25: sam.v1.ExtProc.message_timeout:type_name -> google.protobuf.Duration
 	5,  // 26: sam.v1.ExtProcProcessingMode.request_header_mode:type_name -> sam.v1.ExtProcProcessingMode.HeaderMode
 	5,  // 27: sam.v1.ExtProcProcessingMode.response_header_mode:type_name -> sam.v1.ExtProcProcessingMode.HeaderMode
 	6,  // 28: sam.v1.ExtProcProcessingMode.request_body_mode:type_name -> sam.v1.ExtProcProcessingMode.BodyMode
@@ -4751,29 +5871,60 @@ var file_api_sam_proto_depIdxs = []int32{
 	34, // 36: sam.v1.PolicyConfig.bindings:type_name -> sam.v1.PolicyBinding
 	24, // 37: sam.v1.PolicyConfig.egress:type_name -> sam.v1.EgressDestination
 	24, // 38: sam.v1.EgressAssignmentsResponse.egress:type_name -> sam.v1.EgressDestination
-	65, // 39: sam.v1.KeysResponse.sign_time:type_name -> google.protobuf.Timestamp
-	65, // 40: sam.v1.TokenRefreshResponse.expire_time:type_name -> google.protobuf.Timestamp
+	80, // 39: sam.v1.KeysResponse.sign_time:type_name -> google.protobuf.Timestamp
+	80, // 40: sam.v1.TokenRefreshResponse.expire_time:type_name -> google.protobuf.Timestamp
 	14, // 41: sam.v1.NodeCatalogReport.services:type_name -> sam.v1.ServiceInfo
-	65, // 42: sam.v1.IdentityEvidenceResponse.biscuit_expire_time:type_name -> google.protobuf.Timestamp
-	65, // 43: sam.v1.IdentityEvidenceResponse.check_time:type_name -> google.protobuf.Timestamp
-	64, // 44: sam.v1.PeerEvidenceResponse.labels:type_name -> sam.v1.PeerEvidenceResponse.LabelsEntry
-	65, // 45: sam.v1.PeerEvidenceResponse.expire_time:type_name -> google.protobuf.Timestamp
-	65, // 46: sam.v1.PeerEvidenceResponse.check_time:type_name -> google.protobuf.Timestamp
-	65, // 47: sam.v1.MemberCredential.expire_time:type_name -> google.protobuf.Timestamp
-	50, // 48: sam.v1.MemberCredential.trusted_keys:type_name -> sam.v1.TrustedSigningKey
-	51, // 49: sam.v1.MemberCredential.oidc_session:type_name -> sam.v1.OIDCSession
-	65, // 50: sam.v1.TrustedSigningKey.receive_time:type_name -> google.protobuf.Timestamp
-	53, // 51: sam.v1.TaskAuthorizationRule.rules:type_name -> sam.v1.TaskRule
-	65, // 52: sam.v1.TaskAuthorizationRule.expire_time:type_name -> google.protobuf.Timestamp
-	54, // 53: sam.v1.TaskRule.operation:type_name -> sam.v1.TaskOperation
-	52, // 54: sam.v1.TokenExchangeRequest.task_rule:type_name -> sam.v1.TaskAuthorizationRule
-	65, // 55: sam.v1.TokenExchangeResponse.expire_time:type_name -> google.protobuf.Timestamp
-	65, // 56: sam.v1.STSTokenResponse.expire_time:type_name -> google.protobuf.Timestamp
-	57, // [57:57] is the sub-list for method output_type
-	57, // [57:57] is the sub-list for method input_type
-	57, // [57:57] is the sub-list for extension type_name
-	57, // [57:57] is the sub-list for extension extendee
-	0,  // [0:57] is the sub-list for field type_name
+	80, // 42: sam.v1.BootstrapTokenCreateResponse.expire_time:type_name -> google.protobuf.Timestamp
+	80, // 43: sam.v1.BootstrapToken.create_time:type_name -> google.protobuf.Timestamp
+	80, // 44: sam.v1.BootstrapToken.expire_time:type_name -> google.protobuf.Timestamp
+	80, // 45: sam.v1.BootstrapToken.revoke_time:type_name -> google.protobuf.Timestamp
+	49, // 46: sam.v1.BootstrapTokenListResponse.tokens:type_name -> sam.v1.BootstrapToken
+	0,  // 47: sam.v1.EnrollmentRequest.status:type_name -> sam.v1.EnrollmentStatus
+	76, // 48: sam.v1.EnrollmentRequest.labels:type_name -> sam.v1.EnrollmentRequest.LabelsEntry
+	80, // 49: sam.v1.EnrollmentRequest.create_time:type_name -> google.protobuf.Timestamp
+	80, // 50: sam.v1.EnrollmentRequest.resolve_time:type_name -> google.protobuf.Timestamp
+	51, // 51: sam.v1.EnrollmentRequestListResponse.requests:type_name -> sam.v1.EnrollmentRequest
+	80, // 52: sam.v1.User.create_time:type_name -> google.protobuf.Timestamp
+	77, // 53: sam.v1.EnrolledNode.labels:type_name -> sam.v1.EnrolledNode.LabelsEntry
+	80, // 54: sam.v1.EnrolledNode.enroll_time:type_name -> google.protobuf.Timestamp
+	80, // 55: sam.v1.EnrolledNode.expire_time:type_name -> google.protobuf.Timestamp
+	80, // 56: sam.v1.RouterLease.last_renewal_time:type_name -> google.protobuf.Timestamp
+	80, // 57: sam.v1.RouterLease.expire_time:type_name -> google.protobuf.Timestamp
+	14, // 58: sam.v1.NodeServices.services:type_name -> sam.v1.ServiceInfo
+	80, // 59: sam.v1.NodeServices.report_time:type_name -> google.protobuf.Timestamp
+	53, // 60: sam.v1.AdminStatusResponse.users:type_name -> sam.v1.User
+	55, // 61: sam.v1.AdminStatusResponse.active_routers:type_name -> sam.v1.RouterLease
+	54, // 62: sam.v1.AdminStatusResponse.enrolled_nodes:type_name -> sam.v1.EnrolledNode
+	51, // 63: sam.v1.AdminStatusResponse.enrollment_requests:type_name -> sam.v1.EnrollmentRequest
+	49, // 64: sam.v1.AdminStatusResponse.bootstrap_tokens:type_name -> sam.v1.BootstrapToken
+	35, // 65: sam.v1.AdminStatusResponse.policy:type_name -> sam.v1.PolicyConfig
+	78, // 66: sam.v1.AdminStatusResponse.node_catalog:type_name -> sam.v1.AdminStatusResponse.NodeCatalogEntry
+	53, // 67: sam.v1.UserStatusResponse.user:type_name -> sam.v1.User
+	54, // 68: sam.v1.UserStatusResponse.enrolled_nodes:type_name -> sam.v1.EnrolledNode
+	49, // 69: sam.v1.UserStatusResponse.bootstrap_tokens:type_name -> sam.v1.BootstrapToken
+	55, // 70: sam.v1.UserStatusResponse.active_routers:type_name -> sam.v1.RouterLease
+	35, // 71: sam.v1.UserStatusResponse.policy:type_name -> sam.v1.PolicyConfig
+	80, // 72: sam.v1.IdentityEvidenceResponse.biscuit_expire_time:type_name -> google.protobuf.Timestamp
+	80, // 73: sam.v1.IdentityEvidenceResponse.check_time:type_name -> google.protobuf.Timestamp
+	79, // 74: sam.v1.PeerEvidenceResponse.labels:type_name -> sam.v1.PeerEvidenceResponse.LabelsEntry
+	80, // 75: sam.v1.PeerEvidenceResponse.expire_time:type_name -> google.protobuf.Timestamp
+	80, // 76: sam.v1.PeerEvidenceResponse.check_time:type_name -> google.protobuf.Timestamp
+	80, // 77: sam.v1.MemberCredential.expire_time:type_name -> google.protobuf.Timestamp
+	62, // 78: sam.v1.MemberCredential.trusted_keys:type_name -> sam.v1.TrustedSigningKey
+	63, // 79: sam.v1.MemberCredential.oidc_session:type_name -> sam.v1.OIDCSession
+	80, // 80: sam.v1.TrustedSigningKey.receive_time:type_name -> google.protobuf.Timestamp
+	65, // 81: sam.v1.TaskAuthorizationRule.rules:type_name -> sam.v1.TaskRule
+	80, // 82: sam.v1.TaskAuthorizationRule.expire_time:type_name -> google.protobuf.Timestamp
+	66, // 83: sam.v1.TaskRule.operation:type_name -> sam.v1.TaskOperation
+	64, // 84: sam.v1.TokenExchangeRequest.task_rule:type_name -> sam.v1.TaskAuthorizationRule
+	80, // 85: sam.v1.TokenExchangeResponse.expire_time:type_name -> google.protobuf.Timestamp
+	80, // 86: sam.v1.STSTokenResponse.expire_time:type_name -> google.protobuf.Timestamp
+	56, // 87: sam.v1.AdminStatusResponse.NodeCatalogEntry.value:type_name -> sam.v1.NodeServices
+	88, // [88:88] is the sub-list for method output_type
+	88, // [88:88] is the sub-list for method input_type
+	88, // [88:88] is the sub-list for extension type_name
+	88, // [88:88] is the sub-list for extension extendee
+	0,  // [0:88] is the sub-list for field type_name
 }
 
 func init() { file_api_sam_proto_init() }
@@ -4801,7 +5952,7 @@ func file_api_sam_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_sam_proto_rawDesc), len(file_api_sam_proto_rawDesc)),
 			NumEnums:      7,
-			NumMessages:   58,
+			NumMessages:   73,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

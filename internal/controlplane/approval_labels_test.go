@@ -24,9 +24,9 @@ import (
 	"time"
 
 	"github.com/google/sam/api"
-	"github.com/google/sam/internal/storage"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -132,14 +132,15 @@ func TestApprovalRefusesLabelsTheRoleDoesNotGrant(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET /admin/enrollments: %v", err)
 		}
-		var pending []storage.EnrollmentRequest
-		_ = json.NewDecoder(resp.Body).Decode(&pending)
+		listBody, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
+		pending := &api.EnrollmentRequestListResponse{}
+		_ = protojson.Unmarshal(listBody, pending)
 
 		var reqID string
-		for _, p := range pending {
-			if p.PeerID == pID.String() {
-				reqID = p.ID
+		for _, p := range pending.GetRequests() {
+			if p.GetPeerId() == pID.String() {
+				reqID = p.GetId()
 			}
 		}
 		if reqID == "" {

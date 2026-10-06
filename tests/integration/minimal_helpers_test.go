@@ -41,13 +41,13 @@ import (
 
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/google/sam/api"
-	"github.com/google/sam/internal/storage"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -543,11 +543,10 @@ func getFreePort(t *testing.T) int {
 	return 0
 }
 
-// adminStatus is the control plane's view of the mesh, in the types it
-// serializes on /admin/status.
+// adminStatus is the control plane's view of the mesh as /admin/status
+// serves it.
 type adminStatus struct {
-	EnrolledNodes []storage.EnrolledNode `json:"enrolled_nodes"`
-	ActiveRouters []storage.RouterLease  `json:"active_routers"`
+	*api.AdminStatusResponse
 }
 
 func fetchAdminStatus(t *testing.T, cpPort int, adminToken string) adminStatus {
@@ -566,29 +565,33 @@ func fetchAdminStatus(t *testing.T, cpPort int, adminToken string) adminStatus {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /admin/status: %s", resp.Status)
 	}
-	var status adminStatus
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read /admin/status: %v", err)
+	}
+	status := &api.AdminStatusResponse{}
+	if err := protojson.Unmarshal(body, status); err != nil {
 		t.Fatalf("decode /admin/status: %v", err)
 	}
-	return status
+	return adminStatus{status}
 }
 
 // enrolledNode is the control plane's record of peerID, or nil.
-func (s adminStatus) enrolledNode(peerID string) *storage.EnrolledNode {
-	for i := range s.EnrolledNodes {
-		if s.EnrolledNodes[i].PeerID == peerID {
-			return &s.EnrolledNodes[i]
+func (s adminStatus) enrolledNode(peerID string) *api.EnrolledNode {
+	for _, n := range s.GetEnrolledNodes() {
+		if n.GetPeerId() == peerID {
+			return n
 		}
 	}
 	return nil
 }
 
 // routerWith is the lease of a router that reports peerID connected, or nil.
-func (s adminStatus) routerWith(peerID string) *storage.RouterLease {
-	for i := range s.ActiveRouters {
-		for _, p := range s.ActiveRouters[i].ConnectedPeers {
+func (s adminStatus) routerWith(peerID string) *api.RouterLease {
+	for _, lease := range s.GetActiveRouters() {
+		for _, p := range lease.GetConnectedPeers() {
 			if p == peerID {
-				return &s.ActiveRouters[i]
+				return lease
 			}
 		}
 	}
@@ -597,7 +600,7 @@ func (s adminStatus) routerWith(peerID string) *storage.RouterLease {
 
 // waitForPeerOnRouter returns the lease of the router peerID is connected
 // to, as the control plane learns it from the router's lease renewals.
-func waitForPeerOnRouter(t *testing.T, cpPort int, adminToken string, peerID string, timeout time.Duration) *storage.RouterLease {
+func waitForPeerOnRouter(t *testing.T, cpPort int, adminToken string, peerID string, timeout time.Duration) *api.RouterLease {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {

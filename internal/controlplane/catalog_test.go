@@ -19,7 +19,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
-	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"testing"
@@ -29,6 +29,7 @@ import (
 	"github.com/google/sam/internal/identity"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -82,7 +83,7 @@ func catalogBody(t *testing.T, services ...*api.ServiceInfo) []byte {
 }
 
 // adminNodeCatalog fetches /admin/status and returns its node_catalog value.
-func adminNodeCatalog(t *testing.T, cpURL, adminToken string) map[string]catalogView {
+func adminNodeCatalog(t *testing.T, cpURL, adminToken string) map[string]*api.NodeServices {
 	t.Helper()
 
 	req, err := http.NewRequest(http.MethodGet, cpURL+"/admin/status", nil)
@@ -98,13 +99,15 @@ func adminNodeCatalog(t *testing.T, cpURL, adminToken string) map[string]catalog
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /admin/status: status %d", resp.StatusCode)
 	}
-	var status struct {
-		NodeCatalog map[string]catalogView `json:"node_catalog"`
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read /admin/status: %v", err)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+	status := &api.AdminStatusResponse{}
+	if err := protojson.Unmarshal(body, status); err != nil {
 		t.Fatalf("decode /admin/status: %v", err)
 	}
-	return status.NodeCatalog
+	return status.GetNodeCatalog()
 }
 
 func TestHandleNodeCatalog(t *testing.T) {
@@ -151,14 +154,14 @@ func TestHandleNodeCatalog(t *testing.T) {
 		t.Fatalf("second report must replace the first, got %+v", entry.Services)
 	}
 
-	// The console sees the plain view with the type rendered as a name.
+	// The console sees the reported services with the report time.
 	view := adminNodeCatalog(t, cpURL, srv.config.AdminToken)
 	got, ok := view[nodePeer.String()]
 	if !ok || len(view) != 1 {
 		t.Fatalf("expected the reporting peer in node_catalog, got %v", view)
 	}
-	want := []catalogService{{Name: "planner", Type: "a2a", Description: ""}}
-	if len(got.Services) != 1 || got.Services[0] != want[0] || got.ReportedAt.IsZero() {
+	want := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_A2A, Name: "planner"}
+	if len(got.GetServices()) != 1 || !proto.Equal(got.GetServices()[0], want) || got.GetReportTime() == nil {
 		t.Fatalf("node_catalog view = %+v, want services %+v", got, want)
 	}
 
@@ -166,7 +169,7 @@ func TestHandleNodeCatalog(t *testing.T) {
 	if got := postCatalog(t, cpURL, bearer(biscuitBytes), priv, catalogBody(t)); got != http.StatusNoContent {
 		t.Fatalf("empty report: got status %d, want %d", got, http.StatusNoContent)
 	}
-	if view := adminNodeCatalog(t, cpURL, srv.config.AdminToken); len(view[nodePeer.String()].Services) != 0 {
+	if view := adminNodeCatalog(t, cpURL, srv.config.AdminToken); len(view[nodePeer.String()].GetServices()) != 0 {
 		t.Fatalf("empty report must clear services, got %+v", view)
 	}
 }
@@ -357,7 +360,7 @@ func TestCatalogPeerIDCanonicalization(t *testing.T) {
 	// The view must join the CIDv1 record with the canonically-keyed entry,
 	// displayed under the record's own spelling.
 	view := adminNodeCatalog(t, cpURL, srv.config.AdminToken)
-	if _, ok := view[cidForm]; !ok || len(view[cidForm].Services) != 1 {
+	if _, ok := view[cidForm]; !ok || len(view[cidForm].GetServices()) != 1 {
 		t.Fatalf("CIDv1-enrolled node's report missing from node_catalog, got %v", view)
 	}
 

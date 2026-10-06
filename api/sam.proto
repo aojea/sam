@@ -505,6 +505,160 @@ message TokenRevokeResponse {
 }
 
 // ============================================================================
+// Operator plane
+// ============================================================================
+//
+// What the console and admin CLIs exchange with the control plane on
+// /admin/* and /user/*: protojson of these messages with proto field names,
+// unknown fields rejected. Credentials and key material never appear here:
+// an enrollment request's public key and minted biscuit, an enrolled node's
+// biscuit and a token's hash stay in the store.
+
+// BootstrapTokenCreateRequest is the body of POST /admin/bootstrap-tokens
+// (admin bearer) and POST /user/bootstrap-tokens (mesh user).
+message BootstrapTokenCreateRequest {
+  // Role the token enrolls into, e.g. "sam:role:node". Required on the admin
+  // endpoint; the user endpoint defaults it to "sam:role:node".
+  string role = 1;
+  // User the token is issued on behalf of. Honored by the user endpoint
+  // only, and only for admins; defaults to the caller.
+  string owner_id = 2;
+  // How long the token stays valid; unset or non-positive means 24.
+  int32 ttl_hours = 3;
+  // How many enrollments the token admits; unset or non-positive means 1.
+  int32 max_usages = 4;
+  // Free-form operator note stored with the token.
+  string description = 5;
+  // Copied onto every node the token enrolls: such a node may still refresh
+  // its credential after the control plane's signing key rotated past its
+  // grace period, on proof of possession of its own key alone. Admin-only,
+  // because a node that can always recover holds a credential that never
+  // expires.
+  bool autonomous_recovery = 6;
+}
+
+// BootstrapTokenCreateResponse is returned (201) when a token is minted.
+// token is the plaintext and is shown exactly once; the control plane keeps
+// only its hash, which is also the id.
+message BootstrapTokenCreateResponse {
+  string id = 1;
+  string token = 2;
+  string role = 3;
+  string owner_id = 4;
+  google.protobuf.Timestamp expire_time = 5;
+}
+
+// BootstrapToken is a minted token as operators list it.
+message BootstrapToken {
+  string id = 1;
+  string role = 2;
+  string owner_id = 3;
+  int32 max_usages = 4;
+  int32 usages_count = 5;
+  string description = 6;
+  google.protobuf.Timestamp create_time = 7;
+  google.protobuf.Timestamp expire_time = 8;
+  // Set when an operator revoked the token, which is distinct from expiry
+  // or exhausted usages. Unset means never revoked.
+  google.protobuf.Timestamp revoke_time = 9;
+  bool autonomous_recovery = 10;
+}
+
+message BootstrapTokenListResponse {
+  repeated BootstrapToken tokens = 1;
+}
+
+// EnrollmentRequest is a bootstrap enrollment awaiting or past an operator
+// decision (see BootstrapEnrollRequest).
+message EnrollmentRequest {
+  string id = 1;
+  string peer_id = 2;
+  // The bootstrap token the request was made with.
+  string token_id = 3;
+  EnrollmentStatus status = 4;
+  // Labels the node declared; approval attests them into its biscuit.
+  map<string, string> labels = 5;
+  google.protobuf.Timestamp create_time = 6;
+  // Unset while the request is pending.
+  google.protobuf.Timestamp resolve_time = 7;
+  string resolved_by = 8;
+}
+
+message EnrollmentRequestListResponse {
+  repeated EnrollmentRequest requests = 1;
+}
+
+// User is a human identity known to the mesh.
+message User {
+  // The identity provider's subject.
+  string id = 1;
+  string issuer = 2;
+  string email = 3;
+  // "admin" or "user".
+  string role = 4;
+  google.protobuf.Timestamp create_time = 5;
+}
+
+// EnrolledNode is a member's enrollment record without its credential.
+message EnrolledNode {
+  string peer_id = 1;
+  string role = 2;
+  // How the node enrolled, e.g. "oidc" or "bootstrap".
+  string enrollment_type = 3;
+  // The identity provider's claims as stored at enrollment. Admin-only.
+  string claims_json = 4;
+  string owner_id = 5;
+  map<string, string> labels = 6;
+  google.protobuf.Timestamp enroll_time = 7;
+  // When the enrollment session ends; unset means it does not expire.
+  google.protobuf.Timestamp expire_time = 8;
+  bool banned = 9;
+  bool autonomous_recovery = 10;
+}
+
+// RouterLease is a router's current registration with the control plane.
+message RouterLease {
+  string peer_id = 1;
+  // Multiaddrs, `/p2p/<peer id>` suffixed.
+  repeated string addresses = 2;
+  google.protobuf.Timestamp last_renewal_time = 3;
+  google.protobuf.Timestamp expire_time = 4;
+  repeated string connected_peers = 5;
+  int32 dht_size = 6;
+}
+
+// NodeServices is the services one node last reported (see
+// NodeCatalogReport).
+message NodeServices {
+  repeated ServiceInfo services = 1;
+  google.protobuf.Timestamp report_time = 2;
+}
+
+// AdminStatusResponse answers GET /admin/status: everything the console
+// shows an administrator.
+message AdminStatusResponse {
+  repeated User users = 1;
+  repeated RouterLease active_routers = 2;
+  repeated EnrolledNode enrolled_nodes = 3;
+  repeated EnrollmentRequest enrollment_requests = 4;
+  repeated BootstrapToken bootstrap_tokens = 5;
+  PolicyConfig policy = 6;
+  // Keyed by the reporting node's peer ID; admitted nodes only.
+  map<string, NodeServices> node_catalog = 7;
+}
+
+// UserStatusResponse answers GET /user/status: the caller and what it owns.
+// The router fleet and the mesh policy describe the whole mesh and are set
+// for an administrator only.
+message UserStatusResponse {
+  User user = 1;
+  repeated EnrolledNode enrolled_nodes = 2;
+  repeated BootstrapToken bootstrap_tokens = 3;
+  repeated RouterLease active_routers = 4;
+  PolicyConfig policy = 5;
+}
+
+// ============================================================================
 // Identity Evidence API
 // ============================================================================
 //

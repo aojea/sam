@@ -16,7 +16,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,8 +26,8 @@ import (
 
 	"github.com/google/sam/api"
 	"github.com/google/sam/internal/standalone"
-	"github.com/google/sam/internal/storage"
 	"github.com/spf13/cobra"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -85,11 +84,11 @@ func (c *adminClient) do(method, path, contentType string, body []byte) ([]byte,
 // control plane's signing key rotated past its grace period, which is what
 // a device that spends days offline needs and what a stolen device should
 // not get.
-func (c *adminClient) createToken(role string, ttlHours, maxUsages int, description string, autonomousRecovery bool) (*api.BootstrapTokenResponse, error) {
-	payload, err := json.Marshal(api.BootstrapTokenRequest{
+func (c *adminClient) createToken(role string, ttlHours, maxUsages int, description string, autonomousRecovery bool) (*api.BootstrapTokenCreateResponse, error) {
+	payload, err := protojson.Marshal(&api.BootstrapTokenCreateRequest{
 		Role:               role,
-		TTLHours:           ttlHours,
-		MaxUsages:          maxUsages,
+		TtlHours:           int32(ttlHours),
+		MaxUsages:          int32(maxUsages),
 		Description:        description,
 		AutonomousRecovery: autonomousRecovery,
 	})
@@ -100,23 +99,23 @@ func (c *adminClient) createToken(role string, ttlHours, maxUsages int, descript
 	if err != nil {
 		return nil, err
 	}
-	var created api.BootstrapTokenResponse
-	if err := json.Unmarshal(body, &created); err != nil {
+	created := &api.BootstrapTokenCreateResponse{}
+	if err := protojson.Unmarshal(body, created); err != nil {
 		return nil, fmt.Errorf("failed to decode response %q: %w", body, err)
 	}
-	return &created, nil
+	return created, nil
 }
 
-func (c *adminClient) listTokens() ([]storage.BootstrapToken, error) {
+func (c *adminClient) listTokens() ([]*api.BootstrapToken, error) {
 	body, err := c.do(http.MethodGet, "/admin/bootstrap-tokens", "", nil)
 	if err != nil {
 		return nil, err
 	}
-	var list []storage.BootstrapToken
-	if err := json.Unmarshal(body, &list); err != nil {
+	list := &api.BootstrapTokenListResponse{}
+	if err := protojson.Unmarshal(body, list); err != nil {
 		return nil, fmt.Errorf("failed to decode response %q: %w", body, err)
 	}
-	return list, nil
+	return list.GetTokens(), nil
 }
 
 func (c *adminClient) banPeer(peerID string) error {
@@ -149,8 +148,8 @@ func (c *adminClient) resolveTokenID(idOrPrefix string) (string, error) {
 	}
 	var matches []string
 	for _, tok := range list {
-		if strings.HasPrefix(tok.ID, idOrPrefix) {
-			matches = append(matches, tok.ID)
+		if strings.HasPrefix(tok.GetId(), idOrPrefix) {
+			matches = append(matches, tok.GetId())
 		}
 	}
 	switch len(matches) {
@@ -211,9 +210,9 @@ func newAdminSubcommands() []*cobra.Command {
 			if err != nil {
 				return err
 			}
-			cmd.Printf("Token:    %s\n", created.Token)
-			cmd.Printf("Role:     %s\n", created.Role)
-			cmd.Printf("Expires:  %s\n", created.ExpiresAt)
+			cmd.Printf("Token:    %s\n", created.GetToken())
+			cmd.Printf("Role:     %s\n", created.GetRole())
+			cmd.Printf("Expires:  %s\n", created.GetExpireTime().AsTime().Format(time.RFC3339))
 			cmd.PrintErrln("The plain token is shown only once; store it now.")
 			return nil
 		},
@@ -240,13 +239,13 @@ func newAdminSubcommands() []*cobra.Command {
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 2, 4, 2, ' ', 0)
 			_, _ = fmt.Fprintln(tw, "ID\tROLE\tUSAGES\tSTATUS\tEXPIRES\tDESCRIPTION")
 			for _, tok := range list {
-				id := tok.ID
+				id := tok.GetId()
 				if len(id) > 12 {
 					id = id[:12]
 				}
 				_, _ = fmt.Fprintf(tw, "%s\t%s\t%d/%d\t%s\t%s\t%s\n",
-					id, tok.Role, tok.UsagesCount, tok.MaxUsages, tokenStatus(&tok, now),
-					tok.ExpiresAt.Format(time.RFC3339), tok.Description)
+					id, tok.GetRole(), tok.GetUsagesCount(), tok.GetMaxUsages(), tokenStatus(tok, now),
+					tok.GetExpireTime().AsTime().Format(time.RFC3339), tok.GetDescription())
 			}
 			return tw.Flush()
 		},
@@ -303,13 +302,13 @@ func newAdminSubcommands() []*cobra.Command {
 
 // tokenStatus mirrors the control plane's usability check (/enroll and
 // ConsumeBootstrapTokenUsage) for display.
-func tokenStatus(tok *storage.BootstrapToken, now time.Time) string {
+func tokenStatus(tok *api.BootstrapToken, now time.Time) string {
 	switch {
-	case tok.IsRevoked():
+	case tok.GetRevokeTime() != nil:
 		return "revoked"
-	case !tok.ExpiresAt.IsZero() && now.After(tok.ExpiresAt):
+	case tok.GetExpireTime() != nil && now.After(tok.GetExpireTime().AsTime()):
 		return "expired"
-	case tok.UsagesCount >= tok.MaxUsages:
+	case tok.GetUsagesCount() >= tok.GetMaxUsages():
 		return "exhausted"
 	default:
 		return "active"
