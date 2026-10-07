@@ -577,7 +577,10 @@ func (s *EgressService) callModelArmorAPI(ctx context.Context, cfg *api.ModelArm
 
 	client := s.modelArmorClient
 	if client == nil {
-		client = &http.Client{Timeout: timeout}
+		client = &http.Client{
+			Timeout:   timeout,
+			Transport: s.newSafeModelArmorTransport(),
+		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -634,6 +637,18 @@ func (s *EgressService) callModelArmorAPI(ctx context.Context, cfg *api.ModelArm
 	return false, replacement, nil
 }
 
+func (s *EgressService) newSafeModelArmorTransport() http.RoundTripper {
+	dial := func(ctx context.Context, _, addr string) (net.Conn, error) {
+		return dialSafeEgressTCP(ctx, addr, s.allowsLocalTarget() || s.modelArmorBaseURL != "")
+	}
+	if dt, ok := http.DefaultTransport.(*http.Transport); ok {
+		cloned := dt.Clone()
+		cloned.DialContext = dial
+		return cloned
+	}
+	return &http.Transport{DialContext: dial}
+}
+
 func (s *EgressService) resolveModelArmorEndpoint(ctx context.Context, template string) (string, string, error) {
 	tmpl := strings.TrimSpace(template)
 	if tmpl == "" {
@@ -647,19 +662,15 @@ func (s *EgressService) resolveModelArmorEndpoint(ctx context.Context, template 
 		if err != nil || u.Hostname() == "" {
 			return "", "", fmt.Errorf("invalid model_armor.template URL %q", tmpl)
 		}
-		if ip, pErr := netip.ParseAddr(u.Hostname()); pErr == nil {
+		host := strings.TrimSpace(u.Hostname())
+		if !s.allowsLocalTarget() && (strings.EqualFold(host, "localhost") || strings.HasSuffix(strings.ToLower(host), ".localhost")) {
+			return "", "", fmt.Errorf("model_armor.template URL host %q is in a forbidden local domain", host)
+		}
+		// Connect-time DNS resolution and IP validation against DNS rebinding
+		// are enforced by dialSafeEgressTCP in newSafeModelArmorTransport().
+		if ip, pErr := netip.ParseAddr(host); pErr == nil {
 			if isForbiddenEgressAddr(ip, s.allowsLocalTarget()) {
-				return "", "", fmt.Errorf("model_armor.template URL host %q is in a forbidden IP range", u.Hostname())
-			}
-		} else {
-			ips, lErr := net.DefaultResolver.LookupNetIP(ctx, "ip", u.Hostname())
-			if lErr != nil {
-				return "", "", fmt.Errorf("failed to resolve model_armor.template URL host %q: %w", u.Hostname(), lErr)
-			}
-			for _, resolvedIP := range ips {
-				if isForbiddenEgressAddr(resolvedIP, s.allowsLocalTarget()) {
-					return "", "", fmt.Errorf("model_armor.template URL host %q resolves to forbidden IP %s", u.Hostname(), resolvedIP)
-				}
+				return "", "", fmt.Errorf("model_armor.template URL host %q is in a forbidden IP range", host)
 			}
 		}
 		return tmpl, "", nil
@@ -758,6 +769,9 @@ func replaceInspectableText(body []byte, original, replacement string) ([]byte, 
 	if original == replacement {
 		return body, nil
 	}
+	if original == "" {
+		return nil, errors.New("cannot replace empty original inspectable text")
+	}
 	var doc map[string]any
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return bytes.ReplaceAll(body, []byte(original), []byte(replacement)), nil
@@ -802,7 +816,7 @@ func replaceInspectableText(body []byte, original, replacement string) ([]byte, 
 	if modified {
 		return json.Marshal(updated)
 	}
-	if bytes.Contains(body, []byte(original)) {
+	if original != "" && bytes.Contains(body, []byte(original)) {
 		return bytes.ReplaceAll(body, []byte(original), []byte(replacement)), nil
 	}
 	return nil, errors.New("failed to map inspection replacement back into structured JSON payload")
@@ -814,7 +828,7 @@ func replaceStringInJSONValue(v any, original, replacement string) (any, bool) {
 		if val == original {
 			return replacement, true
 		}
-		if strings.Contains(val, original) {
+		if original != "" && strings.Contains(val, original) {
 			return strings.ReplaceAll(val, original, replacement), true
 		}
 		return val, false

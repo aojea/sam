@@ -701,6 +701,11 @@ func TestReplaceInspectableTextMultiMessageNewlineAndFailClosed(t *testing.T) {
 	if _, err := replaceInspectableText(body, extracted, "single-line-summary [REDACTED]"); err == nil {
 		t.Fatal("expected error when replacement cannot be mapped back into multi-message JSON")
 	}
+
+	// Empty original search pattern with non-empty replacement must fail-closed rather than corrupting JSON.
+	if _, err := replaceInspectableText([]byte(`{"other":"value"}`), "", "[REDACTED]"); err == nil {
+		t.Fatal("expected error when original inspectable text is empty and replacement is non-empty")
+	}
 }
 
 func TestResolveModelArmorEndpointSSRF(t *testing.T) {
@@ -723,6 +728,17 @@ func TestResolveModelArmorEndpointSSRF(t *testing.T) {
 		}
 	}
 
+	// Connect-time DialContext via newSafeModelArmorTransport must also block
+	// connections to loopback/forbidden IPs even if hostname resolution happens at dial time.
+	tr, ok := remoteSvc.newSafeModelArmorTransport().(*http.Transport)
+	if !ok || tr.DialContext == nil {
+		t.Fatal("expected newSafeModelArmorTransport to return *http.Transport with custom DialContext")
+	}
+	if conn, err := tr.DialContext(ctx, "tcp", "localhost:8080"); err == nil {
+		_ = conn.Close()
+		t.Fatal("expected connect-time DialContext to reject localhost:8080 when local target is not allowed")
+	}
+
 	localSvc, err := newEgressService(&api.EgressDestination{
 		Name:      "api.openai.com",
 		TargetUrl: "http://127.0.0.1:8080",
@@ -738,3 +754,4 @@ func TestResolveModelArmorEndpointSSRF(t *testing.T) {
 		t.Fatal("expected link-local metadata IP to be rejected even when local target is allowed")
 	}
 }
+

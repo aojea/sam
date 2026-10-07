@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 
@@ -119,16 +120,16 @@ class SamDartMcpServer {
       return;
     }
 
-    final chunks = <int>[];
+    final builder = BytesBuilder(copy: false);
     await for (final chunk in request) {
-      if (chunks.length + chunk.length > _maxRequestBodyBytes) {
+      if (builder.length + chunk.length > _maxRequestBodyBytes) {
         request.response.statusCode = HttpStatus.requestEntityTooLarge;
         await request.response.close();
         return;
       }
-      chunks.addAll(chunk);
+      builder.add(chunk);
     }
-    final body = utf8.decode(chunks, allowMalformed: true);
+    final body = utf8.decode(builder.takeBytes(), allowMalformed: true);
     
     try {
       final jsonRpc = jsonDecode(body);
