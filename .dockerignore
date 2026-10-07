@@ -26,11 +26,11 @@ mobile/logcat.txt
 # Build outputs and caches
 bin/
 dist/
-node_modules/
-__pycache__/
-.pytest_cache/
+**/node_modules/
+**/__pycache__/
+**/.pytest_cache/
 .worktrees/
-.venv/
+**/.venv/
 *.test
 *.out
 coverage.*

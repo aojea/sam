@@ -1,11 +1,15 @@
 # Stage 1: Build
-FROM golang:1.27.1@sha256:3680233e3204827fbdc66088528ae6d4b3d034f51d03a99d454f6de034888244 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.1@sha256:3680233e3204827fbdc66088528ae6d4b3d034f51d03a99d454f6de034888244 AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 ARG VERSION=devel
-RUN CGO_ENABLED=0 GOOS=linux go build -buildvcs=false -ldflags="-X github.com/google/sam/internal/version.Version=${VERSION}" -o sam-node ./cmd/sam-node
+ARG TARGETOS=linux
+ARG TARGETARCH
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -buildvcs=false -ldflags="-X github.com/google/sam/internal/version.Version=${VERSION}" -o sam-node ./cmd/sam-node
 # Pre-create the default data dir owned by the nonroot UID so that a fresh
 # named/anonymous volume mounted over it inherits writable ownership instead
 # of defaulting to root.
