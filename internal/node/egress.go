@@ -477,6 +477,13 @@ func handleLocalEgress(node *SamNode, w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
+	requiredLabels, err := parseRequiredLabels(r.Header.Get(api.HeaderSamRequiredLabels))
+	if err != nil {
+		refuse(w, http.StatusBadRequest, fmt.Sprintf("Invalid %s header: %v", api.HeaderSamRequiredLabels, err), proxyStatusDenied)
+		return
+	}
+	r.Header.Del(api.HeaderSamRequiredLabels)
+
 	host, upstreamPath, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/egress/"), "/")
 	host = api.NormalizeMeshHost(host)
 	if host == "" {
@@ -487,6 +494,16 @@ func handleLocalEgress(node *SamNode, w http.ResponseWriter, r *http.Request) {
 	if !ok || svc.Handler() == nil {
 		recordEgressDecision(host, egressOutcomeNotAssigned)
 		refuse(w, http.StatusNotFound, fmt.Sprintf("no egress destination %q is assigned to this node", host), proxyStatusDestinationNotFound)
+		return
+	}
+	if outsideLabels(requiredLabels, node.labels(), true) {
+		recordEgressDecision(host, egressOutcomeDeny)
+		refuse(w, http.StatusForbidden, "Required labels not attested by provider", proxyStatusDenied)
+		return
+	}
+	if outsideLabels(node.egressFloor(), node.labels(), true) {
+		recordEgressDecision(host, egressOutcomeDeny)
+		refuse(w, http.StatusForbidden, "Forbidden: provider does not attest the egress floor", proxyStatusDenied)
 		return
 	}
 	identity := node.GetRequestIdentity(r.Context())

@@ -90,6 +90,7 @@ func TestValidateEgressDestination(t *testing.T) {
 		{"path", &EgressDestination{Name: "api.github.com/v3", ServedBy: []string{"pep"}}, "one hostname"},
 		{"target_url with credential", &EgressDestination{Name: "api.github.com", TargetUrl: "https://:tok@api.github.com", ServedBy: []string{"pep"}}, "must not carry a credential"},
 		{"target_url scheme", &EgressDestination{Name: "api.github.com", TargetUrl: "ftp://api.github.com", ServedBy: []string{"pep"}}, "http or https"},
+		{"target_url empty hostname", &EgressDestination{Name: "api.github.com", TargetUrl: "https://:443", ServedBy: []string{"pep"}}, "no host"},
 		{"credential is a path", &EgressDestination{Name: "api.github.com", Credential: "/etc/passwd", ServedBy: []string{"pep"}}, "not a path"},
 		{"no served_by", &EgressDestination{Name: "api.github.com"}, "served_by"},
 		{"unknown role", &EgressDestination{Name: "api.github.com", ServedBy: []string{"nobody"}}, "neither a role"},
@@ -133,9 +134,10 @@ func TestEgressServedBy(t *testing.T) {
 
 func TestBuildEgressServingRules(t *testing.T) {
 	rules := BuildEgressServingRules([]*EgressDestination{
-		{Name: "api.github.com", ServedBy: []string{"pep", "site=eu"}},
+		{Name: "api.github.com", ServedBy: []string{"pep", "site=eu", `bad"role`, `site=bad"val`}},
 		nil,
 		{Name: "", ServedBy: []string{"pep"}},
+		{Name: `bad"name.example.com`, ServedBy: []string{"pep"}},
 	})
 	texts := PolicyRuleTexts(rules)
 	want := []string{

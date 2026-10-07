@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -61,7 +62,11 @@ func (c *Codespaces) Open(ctx context.Context, target string) (Tunnel, error) {
 	if name == "" || domain == "" {
 		return nil, fmt.Errorf("not running in GitHub Codespaces (%s and %s are unset); behind another proxy pass --external-url", codespaceNameEnv, codespaceDomainEnv)
 	}
-	t, err := url.Parse(target)
+	rawTarget := target
+	if !strings.Contains(rawTarget, "://") {
+		rawTarget = "http://" + rawTarget
+	}
+	t, err := url.Parse(rawTarget)
 	if err != nil || t.Port() == "" {
 		return nil, fmt.Errorf("tunnel target %q has no port", target)
 	}

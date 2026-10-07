@@ -83,7 +83,7 @@ jobs:
           IMG="${AR_LOCATION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPO}/sam-one:${GITHUB_SHA}"
           echo "IMG=${IMG}" >> "$GITHUB_ENV"
           gcloud auth configure-docker "${AR_LOCATION}-docker.pkg.dev" --quiet
-          docker build -f Dockerfile.sam-one -t "${IMG}" .
+          docker build --build-arg VERSION="${GITHUB_SHA}" -f Dockerfile.sam-one -t "${IMG}" .
           docker push "${IMG}"
 
       - name: Deploy to Cloud Run

@@ -89,6 +89,8 @@ class SamDartMcpServer {
     debugPrint('SAM Dart MCP Server stopped');
   }
 
+  static const int _maxRequestBodyBytes = 1024 * 1024;
+
   /// Handles SSE (Server-Sent Events) for MCP stream
   void _handleSse(HttpRequest request) async {
     request.response.headers.contentType = ContentType('text', 'event-stream');
@@ -100,14 +102,33 @@ class SamDartMcpServer {
       _sseClients.remove(request.response);
     });
     
-    // Initial connection event
-    request.response.write('event: connected\ndata: {}\n\n');
-    await request.response.flush();
+    try {
+      // Initial connection event
+      request.response.write('event: connected\ndata: {}\n\n');
+      await request.response.flush();
+    } catch (_) {
+      _sseClients.remove(request.response);
+    }
   }
 
   /// Handles MCP JSON-RPC Requests
   void _handlePost(HttpRequest request) async {
-    final body = await utf8.decoder.bind(request).join();
+    if (request.contentLength > _maxRequestBodyBytes) {
+      request.response.statusCode = HttpStatus.requestEntityTooLarge;
+      await request.response.close();
+      return;
+    }
+
+    final chunks = <int>[];
+    await for (final chunk in request) {
+      if (chunks.length + chunk.length > _maxRequestBodyBytes) {
+        request.response.statusCode = HttpStatus.requestEntityTooLarge;
+        await request.response.close();
+        return;
+      }
+      chunks.addAll(chunk);
+    }
+    final body = utf8.decode(chunks, allowMalformed: true);
     
     try {
       final jsonRpc = jsonDecode(body);

@@ -21,7 +21,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -43,6 +42,8 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	records "github.com/libp2p/go-libp2p-kad-dht/records"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	coreconnmgr "github.com/libp2p/go-libp2p/core/connmgr"
+	"github.com/libp2p/go-libp2p/core/control"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -73,6 +74,38 @@ const (
 	ConnGracePeriod      = 1 * time.Minute
 )
 
+var _ coreconnmgr.ConnectionGater = (*routerConnGate)(nil)
+
+type routerConnGate struct {
+	r *Router
+}
+
+func (g *routerConnGate) InterceptPeerDial(p peer.ID) bool {
+	if _, banned := g.r.bannedPeers.Load(p); banned {
+		return false
+	}
+	return true
+}
+
+func (g *routerConnGate) InterceptAddrDial(peer.ID, multiaddr.Multiaddr) bool {
+	return true
+}
+
+func (g *routerConnGate) InterceptAccept(network.ConnMultiaddrs) bool {
+	return true
+}
+
+func (g *routerConnGate) InterceptSecured(_ network.Direction, p peer.ID, _ network.ConnMultiaddrs) bool {
+	if _, banned := g.r.bannedPeers.Load(p); banned {
+		return false
+	}
+	return true
+}
+
+func (g *routerConnGate) InterceptUpgraded(network.Conn) (bool, control.DisconnectReason) {
+	return true, 0
+}
+
 type relayACL struct {
 	r *Router
 }
@@ -82,7 +115,7 @@ func (a *relayACL) AllowReserve(p peer.ID, addr multiaddr.Multiaddr) bool {
 		logger.Debugf("[Relay] Rejecting reservation for %s: peer is banned", p)
 		return false
 	}
-	_, ok := a.r.authenticatedPeers.Load(p)
+	ok := a.r.isPeerAuthenticated(p)
 	if !ok {
 		logger.Debugf("[Relay] Rejecting reservation for %s: not authenticated", p)
 	}
@@ -100,15 +133,36 @@ func (a *relayACL) AllowConnect(src peer.ID, srcAddr multiaddr.Multiaddr, dest p
 	}
 	// Both ends must have authenticated: every node authenticates to the
 	// router on connect, so a source that has not is not a mesh member.
-	if _, ok := a.r.authenticatedPeers.Load(src); !ok {
+	if !a.r.isPeerAuthenticated(src) {
 		logger.Debugf("[Relay] Rejecting connect from %s to %s: src not authenticated", src, dest)
 		return false
 	}
-	_, ok := a.r.authenticatedPeers.Load(dest)
+	ok := a.r.isPeerAuthenticated(dest)
 	if !ok {
 		logger.Debugf("[Relay] Rejecting connect from %s to %s: dest not authenticated", src, dest)
 	}
 	return ok
+}
+
+// isPeerAuthenticated reports whether p completed the auth handshake and its
+// verified biscuit has not lapsed since.
+func (r *Router) isPeerAuthenticated(p peer.ID) bool {
+	v, ok := r.authenticatedPeers.Load(p)
+	if !ok {
+		return false
+	}
+	switch exp := v.(type) {
+	case time.Time:
+		if !time.Now().Before(exp) {
+			r.authenticatedPeers.Delete(p)
+			return false
+		}
+		return true
+	case bool:
+		return exp
+	default:
+		return false
+	}
 }
 
 // credential is the router's own mesh identity as the control plane issued
@@ -197,7 +251,7 @@ type Router struct {
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 	isReady  atomic.Bool
-	shutdown bool
+	shutdown atomic.Bool
 
 	metricsServer *http.Server
 	metricsAddr   net.Addr
@@ -261,16 +315,17 @@ func perIPConnResourceManager(limit int) (network.ResourceManager, error) {
 	libp2p.SetDefaultServiceLimits(&limits)
 	scaled := limits.AutoScale()
 
+	sysBase := max(limit, DefaultHighWaterMark)
 	overrides := rcmgr.PartialLimitConfig{
 		System: rcmgr.ResourceLimits{
-			Conns:        rcmgr.LimitVal(2 * limit),
-			ConnsInbound: rcmgr.LimitVal(limit),
-			FD:           rcmgr.LimitVal(2 * limit),
+			Conns:        rcmgr.LimitVal(2 * sysBase),
+			ConnsInbound: rcmgr.LimitVal(sysBase),
+			FD:           rcmgr.LimitVal(2 * sysBase),
 		},
 		Transient: rcmgr.ResourceLimits{
-			Conns:        rcmgr.LimitVal(limit),
-			ConnsInbound: rcmgr.LimitVal(limit),
-			FD:           rcmgr.LimitVal(limit),
+			Conns:        rcmgr.LimitVal(sysBase),
+			ConnsInbound: rcmgr.LimitVal(sysBase),
+			FD:           rcmgr.LimitVal(sysBase),
 		},
 	}
 
@@ -313,7 +368,13 @@ func defaultResourceManager() (network.ResourceManager, error) {
 }
 
 // Start performs enrollment, syncs keys, launches libp2p host, and starts tasks.
-func (r *Router) Start() error {
+func (r *Router) Start() (retErr error) {
+	defer func() {
+		if retErr != nil {
+			_ = r.Close()
+		}
+	}()
+
 	// The operator listener comes up first so /healthz answers while
 	// enrollment is still in flight; /readyz turns 200 at the end.
 	if r.config.MetricsAddr != "" {
@@ -370,6 +431,7 @@ func (r *Router) Start() error {
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
 		libp2p.Security(noise.ID, noise.New),
 		libp2p.ConnectionManager(cm),
+		libp2p.ConnectionGater(&routerConnGate{r: r}),
 		libp2p.EnableAutoNATv2(),
 		libp2p.EnableNATService(),
 		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
@@ -425,13 +487,11 @@ func (r *Router) Start() error {
 	}
 	kadDHT, err := dht.New(hostNode, dhtOpts...)
 	if err != nil {
-		_ = hostNode.Close()
 		return err
 	}
 	r.DHT = kadDHT
 
 	if err = kadDHT.Bootstrap(r.ctx); err != nil {
-		_ = hostNode.Close()
 		return err
 	}
 
@@ -439,7 +499,6 @@ func (r *Router) Start() error {
 	_, err = relay.New(hostNode, relay.WithACL(&relayACL{r: r}),
 		relay.WithLimit(relayLimit(r.config.RelayLimitDuration, r.config.RelayLimitData)))
 	if err != nil {
-		_ = hostNode.Close()
 		return err
 	}
 
@@ -447,7 +506,6 @@ func (r *Router) Start() error {
 	// validator trusts msg.GetFrom().
 	ps, err := pubsub.NewGossipSub(r.ctx, hostNode, pubsub.WithMessageSignaturePolicy(pubsub.StrictSign))
 	if err != nil {
-		_ = hostNode.Close()
 		return err
 	}
 	r.PubSub = ps
@@ -455,13 +513,11 @@ func (r *Router) Start() error {
 	// stops a junk event at the first hop instead of fanning it out to every
 	// attached node, each of which would spend a verify on it.
 	if err := ps.RegisterTopicValidator(api.GossipEvents, r.validateMeshEvent); err != nil {
-		_ = hostNode.Close()
 		return fmt.Errorf("register mesh event validator: %w", err)
 	}
 
 	topic, err := ps.Join(api.GossipEvents)
 	if err != nil {
-		_ = hostNode.Close()
 		return err
 	}
 	r.EventTopic = topic
@@ -530,7 +586,7 @@ func (r *Router) enroll(peerID peer.ID) error {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := cpclient.ReadBody(resp.Body)
 		return fmt.Errorf("enrollment response status %s: %s", resp.Status, string(body))
 	}
 
@@ -594,7 +650,7 @@ func (r *Router) enrollBootstrap(peerID peer.ID) error {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := cpclient.ReadBody(resp.Body)
 		return fmt.Errorf("bootstrap enrollment request response status %s: %s", resp.Status, string(body))
 	}
 
@@ -651,7 +707,7 @@ func (r *Router) enrollBootstrap(peerID peer.ID) error {
 				}
 
 				if statusResp.StatusCode != http.StatusOK {
-					body, _ := io.ReadAll(statusResp.Body)
+					body, _ := cpclient.ReadBody(statusResp.Body)
 					_ = statusResp.Body.Close()
 					logger.Warnf("status poll returned code %s: %s", statusResp.Status, string(body))
 					continue
@@ -1294,8 +1350,8 @@ func (r *Router) HandleAuthHandshake(s network.Stream) {
 		return
 	}
 
-	// Verify Biscuit
-	_, err = identity.VerifyBiscuit(exchange.Biscuit, remotePeer, r.getTrustedPublicKeys(), r.config.BiscuitTimeout)
+	// Verify Biscuit and record its expiration so relayACL drops the session on time.
+	expiry, err := identity.VerifyBiscuitAndGetExpiry(exchange.Biscuit, remotePeer, r.getTrustedPublicKeys(), r.config.BiscuitTimeout)
 	if err != nil {
 		// A peer stuck on a bad credential retries every few seconds for
 		// days; one line a minute per peer keeps the log readable and the
@@ -1308,7 +1364,7 @@ func (r *Router) HandleAuthHandshake(s network.Stream) {
 		return
 	}
 
-	r.authenticatedPeers.Store(remotePeer, true)
+	r.authenticatedPeers.Store(remotePeer, expiry)
 	authHandshakesTotal.WithLabelValues(handshakeOK).Inc()
 	logger.Infof("[AuthN] Successfully authenticated peer %s", remotePeer)
 
@@ -1380,20 +1436,29 @@ func (r *Router) performMutualAuth(s network.Stream) error {
 		return fmt.Errorf("remote peer lacks router authorization role: %w", err)
 	}
 
-	r.authenticatedPeers.Store(remotePeer, true)
+	expiry, err := identity.VerifyBiscuitAndGetExpiry(resp.Biscuit, remotePeer, []ed25519.PublicKey{verifyingKey}, r.config.BiscuitTimeout)
+	if err != nil {
+		return fmt.Errorf("failed to extract peer router biscuit expiry: %w", err)
+	}
+
+	r.authenticatedPeers.Store(remotePeer, expiry)
 	return nil
 }
 
 // Close closes the underlying p2p host and keyring db.
 func (r *Router) Close() error {
-	r.shutdown = true
+	r.isReady.Store(false)
+	r.shutdown.Store(true)
 	r.cancel()
 
 	var errs []error
 	if r.metricsServer != nil {
-		if err := r.metricsServer.Close(); err != nil {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := r.metricsServer.Shutdown(shutdownCtx); err != nil {
+			_ = r.metricsServer.Close()
 			errs = append(errs, err)
 		}
+		shutdownCancel()
 	}
 	if r.DHT != nil {
 		if err := r.DHT.Close(); err != nil {
@@ -1533,7 +1598,7 @@ func (r *Router) RefreshEnrollment(ctx context.Context) error {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := cpclient.ReadBody(resp.Body)
 		logger.Warnf("Proactive biscuit refresh rejected (401 Unauthorized: %s), attempting re-enrollment...", string(body))
 		return r.reEnroll()
 	}
@@ -1542,12 +1607,12 @@ func (r *Router) RefreshEnrollment(ctx context.Context) error {
 		// A 403 is a claim by whoever answered; only a verified
 		// MeshEvent_BANNED is the control plane's word. Keep serving on the
 		// current biscuit until it expires.
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := cpclient.ReadBody(resp.Body)
 		return fmt.Errorf("refresh refused (403 Forbidden): %s", string(body))
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := cpclient.ReadBody(resp.Body)
 		return fmt.Errorf("refresh failed with status %s: %s", resp.Status, string(body))
 	}
 

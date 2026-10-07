@@ -57,8 +57,11 @@ tests:
       database.postgres.deployInternal: false
       database.postgres.host: ext-db
     asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[1].name
+          value: SAM_DB_DSN
       - matchRegex:
-          path: spec.template.spec.containers[0].args[2]
+          path: spec.template.spec.containers[0].env[1].value
           pattern: "@ext-db:5432"
 
   - it: scheduling knobs pass through to the pod spec

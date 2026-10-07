@@ -564,13 +564,18 @@ jobs:
           # COS drops inbound traffic on the host by default; the VPC rule alone does not open the port.
           iptables -w -I INPUT -p tcp --dport 4501 -j ACCEPT
           iptables -w -I INPUT -p udp --dport 4501 -j ACCEPT
+          install -d -m 0755 /etc/sam-router
+          printf "%s" "'"${BOOTSTRAP_TOKEN}"'" > /etc/sam-router/bootstrap-token
+          chown 65532:65532 /etc/sam-router/bootstrap-token
+          chmod 0600 /etc/sam-router/bootstrap-token
           docker run -d \
             --name sam-router \
             --network host \
             --restart always \
+            -v /etc/sam-router/bootstrap-token:/run/secrets/bootstrap-token:ro \
             ghcr.io/google/sam-router:'"${IMAGE_TAG}"' \
             --control-plane=https://'"${ENV_NAME}"'.sam-mesh.dev \
-            --bootstrap-token='"${BOOTSTRAP_TOKEN}"' \
+            --bootstrap-token-path=/run/secrets/bootstrap-token \
             --listen=/ip4/0.0.0.0/tcp/4501 \
             --listen=/ip4/0.0.0.0/udp/4501/quic-v1 \
             --external-addr=/ip4/${EXTERNAL_IP}/tcp/4501 \

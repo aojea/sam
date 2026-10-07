@@ -567,4 +567,14 @@ func TestGetDefaultDataDir(t *testing.T) {
 	if dir == "" {
 		t.Error("Expected non-empty directory path")
 	}
+
+	custom := filepath.Join(t.TempDir(), "custom-sam-dir")
+	t.Setenv("SAM_DATA_DIR", custom)
+	got, err := GetDefaultDataDir()
+	if err != nil {
+		t.Fatalf("GetDefaultDataDir with SAM_DATA_DIR failed: %v", err)
+	}
+	if got != custom {
+		t.Fatalf("GetDefaultDataDir = %q, want %q", got, custom)
+	}
 }

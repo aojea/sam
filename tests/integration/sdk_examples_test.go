@@ -57,15 +57,9 @@ var sdkExampleLaunchers = []sdkExampleLauncher{
 	{
 		name: "python",
 		cmd: func(ctx context.Context, root, example string, args ...string) (*exec.Cmd, string) {
-			python := filepath.Join(root, "sdk", "python", ".venv", "bin", "python")
-			if _, err := os.Stat(python); err != nil {
-				var lookErr error
-				if python, lookErr = exec.LookPath("python3"); lookErr != nil {
-					return nil, "python3 is not installed"
-				}
-			}
-			if err := exec.Command(python, "-c", "import agent_mesh.session").Run(); err != nil {
-				return nil, "agent_mesh is not importable with libp2p (pip install -e sdk/python)"
+			python, skip := resolvePythonSession(root)
+			if skip != "" {
+				return nil, skip
 			}
 			// Python names its files with underscores: a2a-agent is a2a_agent.py.
 			entry := filepath.Join(root, "sdk", "python", "examples", strings.ReplaceAll(example, "-", "_")+".py")
@@ -315,6 +309,7 @@ func startExampleAgent(t *testing.T, name string, cmd *exec.Cmd) (*sdkExampleAge
 				return
 			}
 		}
+		_ = scanner.Err()
 		close(lines)
 	}()
 	select {

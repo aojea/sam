@@ -198,8 +198,27 @@ egress:
 	// Two routers, as the testnets run several: a member authenticates with
 	// every one and reserves a relay slot on the first the control plane
 	// lists for it, a different one from member to member.
-	routerA, _ := startRouter(t, t.TempDir(), cpPort, mintToken, "router-a")
-	routerB, _ := startRouter(t, t.TempDir(), cpPort, mintToken, "router-b")
+	dirA, dirB := t.TempDir(), t.TempDir()
+	var routerA, routerB, nodeBin string
+	var rwg sync.WaitGroup
+	rwg.Add(4)
+	go func() {
+		defer rwg.Done()
+		routerA, _ = startRouter(t, dirA, cpPort, mintToken, "router-a")
+	}()
+	go func() {
+		defer rwg.Done()
+		routerB, _ = startRouter(t, dirB, cpPort, mintToken, "router-b")
+	}()
+	go func() {
+		defer rwg.Done()
+		nodeBin = buildBinary(t, "./cmd/sam-node")
+	}()
+	go func() {
+		defer rwg.Done()
+		_, _ = resolvePythonSession(root)
+	}()
+	rwg.Wait()
 	routerAddrs := []string{routerA, routerB}
 	routerAddr := routerA
 
@@ -222,7 +241,6 @@ egress:
 		_, _ = io.WriteString(w, sdkMeshStockAgentCard)
 	}))
 	t.Cleanup(agentCard.Close)
-	nodeBin := buildBinary(t, "./cmd/sam-node")
 	nodeHome := filepath.Join(t.TempDir(), "node")
 	if err := os.MkdirAll(nodeHome, 0o755); err != nil {
 		t.Fatal(err)
@@ -317,6 +335,31 @@ type sdkAuthResult struct {
 	Expiration int64             `json:"expiration"`
 }
 
+var (
+	pythonSessionOnce sync.Once
+	pythonSessionBin  string
+	pythonSessionSkip string
+)
+
+func resolvePythonSession(root string) (string, string) {
+	pythonSessionOnce.Do(func() {
+		python := filepath.Join(root, "sdk", "python", ".venv", "bin", "python")
+		if _, err := os.Stat(python); err != nil {
+			var lookErr error
+			if python, lookErr = exec.LookPath("python3"); lookErr != nil {
+				pythonSessionSkip = "python3 is not installed"
+				return
+			}
+		}
+		if err := exec.Command(python, "-c", "import agent_mesh.session").Run(); err != nil {
+			pythonSessionSkip = "agent_mesh is not importable with libp2p (pip install -e sdk/python)"
+			return
+		}
+		pythonSessionBin = python
+	})
+	return pythonSessionBin, pythonSessionSkip
+}
+
 var sdkMemberLaunchers = []sdkRunner{
 	{
 		name: "js",
@@ -334,15 +377,9 @@ var sdkMemberLaunchers = []sdkRunner{
 	{
 		name: "python",
 		cmd: func(root string) (*exec.Cmd, string) {
-			python := filepath.Join(root, "sdk", "python", ".venv", "bin", "python")
-			if _, err := os.Stat(python); err != nil {
-				var lookErr error
-				if python, lookErr = exec.LookPath("python3"); lookErr != nil {
-					return nil, "python3 is not installed"
-				}
-			}
-			if err := exec.Command(python, "-c", "import agent_mesh.session").Run(); err != nil {
-				return nil, "agent_mesh is not importable with libp2p (pip install -e sdk/python)"
+			python, skip := resolvePythonSession(root)
+			if skip != "" {
+				return nil, skip
 			}
 			return exec.Command(python, "-m", "agent_mesh.conformance_join"), ""
 		},
@@ -382,18 +419,33 @@ func TestNativeSDKsMesh(t *testing.T) {
 
 	// One member per SDK, each listening directly on loopback too so both
 	// the direct and the relayed path can be walked.
-	var members []*sdkMember
+	type memberSlot struct {
+		launcher sdkRunner
+		cmd      *exec.Cmd
+	}
+	var slots []memberSlot
 	for _, launcher := range sdkMemberLaunchers {
 		cmd, skip := launcher.cmd(root)
 		if skip != "" {
 			t.Logf("%s SDK skipped: %s", launcher.name, skip)
 			continue
 		}
-		members = append(members, startSDKMember(t, launcher.name, cmd, root, baseURL, adminToken, mesh.routerAddrs))
+		slots = append(slots, memberSlot{launcher: launcher, cmd: cmd})
 	}
-	if len(members) == 0 {
+	if len(slots) == 0 {
 		t.Skip("no SDK toolchain available; see sdk/README.md")
 	}
+	members := make([]*sdkMember, len(slots))
+	var mwg sync.WaitGroup
+	for i := range slots {
+		i := i
+		mwg.Add(1)
+		go func() {
+			defer mwg.Done()
+			members[i] = startSDKMember(t, slots[i].launcher.name, slots[i].cmd, root, baseURL, adminToken, mesh.routerAddrs)
+		}()
+	}
+	mwg.Wait()
 
 	// The router reports every member connected to the control plane.
 	waitForPeerOnRouter(t, cpPort, adminToken, samNode.peerID.String(), 5*time.Second)
@@ -555,30 +607,34 @@ func TestNativeSDKsMesh(t *testing.T) {
 	// satisfy (launchSDKMember). MCP to an SDK member fails before the floor: no /sam/mcp.
 	t.Run("egress-floor", func(t *testing.T) {
 		for _, launcher := range sdkMemberLaunchers {
+			launcher := launcher
 			cmd, skip := launcher.cmd(root)
 			if skip != "" {
 				continue
 			}
-			floored := launchSDKMember(t, launcher.name+"-floored", cmd, root, baseURL, adminToken, "SAM_SDK_EGRESS_REQUIRE_LABELS=team=nobody")
-			byFloor := func(what, target, err string) {
-				if !strings.Contains(err, "LabelsNotSatisfied") {
-					t.Errorf("%s %s to %s was not refused by the floor: %q", floored.name, what, target, err)
+			t.Run(launcher.name, func(t *testing.T) {
+				t.Parallel()
+				floored := launchSDKMember(t, launcher.name+"-floored", cmd, root, baseURL, adminToken, "SAM_SDK_EGRESS_REQUIRE_LABELS=team=nobody")
+				byFloor := func(what, target, err string) {
+					if !strings.Contains(err, "LabelsNotSatisfied") {
+						t.Errorf("%s %s to %s was not refused by the floor: %q", floored.name, what, target, err)
+					}
 				}
-			}
-			nodeRelayAddr := samNode.peerID.String()
-			byFloor("tools", "the node", floored.toolsRequiring(t, nodeRelayAddr, "mcp://"+serviceName, nil).Error)
-			byFloor("call", "the node", floored.callRaw(t, nodeRelayAddr, "mcp://"+serviceName, "add", nil).Error)
-			byFloor("http", "the node", floored.httpRaw(t, nodeRelayAddr, "egress://"+sdkMeshEgressHost, "/").Error)
-			for _, m := range members {
-				byFloor("http", m.name, floored.httpRaw(t, m.report.PeerID, "a2a://agent", "/card").Error)
-				if res := floored.toolsRequiring(t, m.report.PeerID, "mcp://"+serviceName, nil); res.OK {
-					t.Errorf("%s listed tools of %s, an SDK member: %v", floored.name, m.name, res.Tools)
+				nodeRelayAddr := samNode.peerID.String()
+				byFloor("tools", "the node", floored.toolsRequiring(t, nodeRelayAddr, "mcp://"+serviceName, nil).Error)
+				byFloor("call", "the node", floored.callRaw(t, nodeRelayAddr, "mcp://"+serviceName, "add", nil).Error)
+				byFloor("http", "the node", floored.httpRaw(t, nodeRelayAddr, "egress://"+sdkMeshEgressHost, "/").Error)
+				for _, m := range members {
+					byFloor("http", m.name, floored.httpRaw(t, m.report.PeerID, "a2a://agent", "/card").Error)
+					if res := floored.toolsRequiring(t, m.report.PeerID, "mcp://"+serviceName, nil); res.OK {
+						t.Errorf("%s listed tools of %s, an SDK member: %v", floored.name, m.name, res.Tools)
+					}
+					if res := floored.callRaw(t, m.report.PeerID, "mcp://"+serviceName, "add", nil); res.OK {
+						t.Errorf("%s called a tool of %s, an SDK member: %+v", floored.name, m.name, res)
+					}
 				}
-				if res := floored.callRaw(t, m.report.PeerID, "mcp://"+serviceName, "add", nil); res.OK {
-					t.Errorf("%s called a tool of %s, an SDK member: %+v", floored.name, m.name, res)
-				}
-			}
-			floored.quit(t)
+				floored.quit(t)
+			})
 		}
 	})
 
@@ -591,7 +647,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 		relayAddr, released := startStalledRelay(t)
 		stranger := "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB"
 		for _, m := range members {
-			m.write(t, map[string]string{"cmd": "auth", "addr": relayAddr + "/p2p-circuit/p2p/" + stranger})
+			m.write(t, map[string]string{"cmd": "auth", "addr": relayAddr + "/p2p-circuit/p2p/" + stranger, "timeout_ms": "400"})
 		}
 		for _, m := range members {
 			var res sdkAuthResult
@@ -850,9 +906,16 @@ func TestNativeSDKsAcrossRouters(t *testing.T) {
 
 	type placed struct {
 		*sdkMember
-		router string
+		router     string
+		routerAddr string
 	}
-	var members []placed
+	type launchSpec struct {
+		launcher   sdkRunner
+		cmd        *exec.Cmd
+		router     string
+		routerAddr string
+	}
+	var specs []launchSpec
 	for _, launcher := range sdkMemberLaunchers {
 		for _, routerAddr := range mesh.routerAddrs {
 			cmd, skip := launcher.cmd(mesh.root)
@@ -860,27 +923,42 @@ func TestNativeSDKsAcrossRouters(t *testing.T) {
 				t.Logf("%s SDK skipped: %s", launcher.name, skip)
 				break
 			}
-			router := extractPeerID(routerAddr)
-			m := launchSDKMember(t, launcher.name+"@"+router[len(router)-6:], cmd, mesh.root, mesh.baseURL, mesh.adminToken, "SAM_SDK_ROUTERS="+router)
-			if got := routerIDs(m.report); !reflect.DeepEqual(got, []string{router}) {
-				t.Fatalf("%s joined through %v, want %s only", m.name, got, router)
-			}
-			for _, a := range m.report.RelayAddresses {
-				if !strings.HasPrefix(a, routerAddr) {
-					t.Fatalf("%s reserved on %s, want %s", m.name, a, routerAddr)
-				}
-			}
-			if len(m.report.DirectAddresses) != 0 {
-				t.Fatalf("%s listens on %v, want the relayed path to be the only one", m.name, m.report.DirectAddresses)
-			}
-			m.accept(t, "agent")
-			members = append(members, placed{m, router})
+			specs = append(specs, launchSpec{
+				launcher:   launcher,
+				cmd:        cmd,
+				router:     extractPeerID(routerAddr),
+				routerAddr: routerAddr,
+			})
 		}
 	}
-	if len(members) == 0 {
+	if len(specs) == 0 {
 		t.Skip("no SDK toolchain available; see sdk/README.md")
 	}
+	members := make([]placed, len(specs))
+	var wg sync.WaitGroup
+	for i, sp := range specs {
+		i, sp := i, sp
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			m := launchSDKMember(t, sp.launcher.name+"@"+sp.router[len(sp.router)-6:], sp.cmd, mesh.root, mesh.baseURL, mesh.adminToken, "SAM_SDK_ROUTERS="+sp.router)
+			m.accept(t, "agent")
+			members[i] = placed{m, sp.router, sp.routerAddr}
+		}()
+	}
+	wg.Wait()
 	for _, m := range members {
+		if got := routerIDs(m.report); !reflect.DeepEqual(got, []string{m.router}) {
+			t.Fatalf("%s joined through %v, want %s only", m.name, got, m.router)
+		}
+		for _, a := range m.report.RelayAddresses {
+			if !strings.HasPrefix(a, m.routerAddr) {
+				t.Fatalf("%s reserved on %s, want %s", m.name, a, m.routerAddr)
+			}
+		}
+		if len(m.report.DirectAddresses) != 0 {
+			t.Fatalf("%s listens on %v, want the relayed path to be the only one", m.name, m.report.DirectAddresses)
+		}
 		waitForPeerOnRouter(t, mesh.cpPort, mesh.adminToken, m.report.PeerID, 5*time.Second)
 	}
 

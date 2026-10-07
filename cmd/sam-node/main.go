@@ -610,7 +610,7 @@ func main() {
 
 			// Register static services from config
 			if nodeConfig != nil && len(nodeConfig.Services) > 0 {
-				if err := meshNode.RegisterStaticServices(context.Background(), nodeConfig.Services); err != nil {
+				if err := meshNode.RegisterStaticServices(ctx, nodeConfig.Services); err != nil {
 					logger.Fatalf("Failed to register static services: %v", err)
 				}
 			}
@@ -629,7 +629,9 @@ func main() {
 				logger.Fatalf("Failed to start sidecar server: %v", err)
 			}
 			defer func() {
-				_ = sidecarSrv.Close()
+				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer shutdownCancel()
+				_ = sidecarSrv.Shutdown(shutdownCtx)
 				if err := meshNode.Teardown(); err != nil {
 					logger.Warnf("Error during mesh node teardown: %v", err)
 				}
@@ -640,7 +642,11 @@ func main() {
 				if err != nil {
 					logger.Fatalf("Failed to start metrics server: %v", err)
 				}
-				defer func() { _ = metricsSrv.Close() }()
+				defer func() {
+					shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer shutdownCancel()
+					_ = metricsSrv.Shutdown(shutdownCtx)
+				}()
 			}
 
 			fmt.Printf("SAM Node Online.\nPeerID: %s\nListening on: %v\n", meshNode.Host.ID(), meshNode.Host.Addrs())
@@ -752,6 +758,11 @@ func main() {
 			if err := meshNode.Start(ctx); err != nil {
 				logger.Fatalf("Failed to start node for enrollment: %v", err)
 			}
+			defer func() {
+				if err := meshNode.Teardown(); err != nil {
+					logger.Warnf("Error during mesh node teardown: %v", err)
+				}
+			}()
 
 			if bootstrapTokenFlag != "" {
 				err = meshNode.EnrollBootstrap(ctx, targetControlPlane, bootstrapTokenFlag)
@@ -909,6 +920,8 @@ func resolveDataDir() string {
 	var dir string
 	if dataDirFlag != "" {
 		dir = dataDirFlag
+	} else if envDir := strings.TrimSpace(os.Getenv("SAM_DATA_DIR")); envDir != "" {
+		dir = envDir
 	} else {
 		d, err := node.GetDefaultDataDir()
 		if err != nil {

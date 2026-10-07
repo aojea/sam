@@ -42,6 +42,30 @@ tests:
             path:
               type: Exact
               value: /nodes/catalog
+      - contains:
+          path: spec.rules[0].matches
+          content:
+            path:
+              type: Exact
+              value: /egress
+      - contains:
+          path: spec.rules[0].matches
+          content:
+            path:
+              type: Exact
+              value: /revocations
+      - contains:
+          path: spec.rules[0].matches
+          content:
+            path:
+              type: Exact
+              value: /token/exchange
+      - contains:
+          path: spec.rules[0].matches
+          content:
+            path:
+              type: Exact
+              value: /sts/token
 
   - it: empty consolePath leaves the console unrouted
     set:

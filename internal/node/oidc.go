@@ -441,7 +441,7 @@ func (n *SamNode) DeviceLogin(ctx context.Context, deviceAuthURL, tokenURL, clie
 			Error            string `json:"error"`
 			ErrorDescription string `json:"error_description"`
 		}
-		_ = json.NewDecoder(resp.Body).Decode(&errResp)
+		_ = json.NewDecoder(io.LimitReader(resp.Body, maxControlPlaneBodyBytes)).Decode(&errResp)
 		return "", fmt.Errorf("device authorization failed: %s - %s", errResp.Error, errResp.ErrorDescription)
 	}
 
@@ -454,7 +454,7 @@ func (n *SamNode) DeviceLogin(ctx context.Context, deviceAuthURL, tokenURL, clie
 		Interval                int    `json:"interval"`
 		Message                 string `json:"message"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&deviceResp); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxControlPlaneBodyBytes)).Decode(&deviceResp); err != nil {
 		return "", fmt.Errorf("failed to decode device authorization response: %w", err)
 	}
 	if deviceResp.DeviceCode == "" {
@@ -768,7 +768,7 @@ func (n *SamNode) RefreshJWT(ctx context.Context, tokenURL, clientID, clientSecr
 			Error            string `json:"error"`
 			ErrorDescription string `json:"error_description"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&errResp); err == nil && errResp.Error != "" {
+		if err := json.NewDecoder(io.LimitReader(resp.Body, maxControlPlaneBodyBytes)).Decode(&errResp); err == nil && errResp.Error != "" {
 			return "", "", fmt.Errorf("refresh token request failed (status %s): %s - %s", resp.Status, errResp.Error, errResp.ErrorDescription)
 		}
 		return "", "", fmt.Errorf("refresh token request failed with status: %s", resp.Status)
@@ -779,7 +779,7 @@ func (n *SamNode) RefreshJWT(ctx context.Context, tokenURL, clientID, clientSecr
 		IdToken      string `json:"id_token"`
 		RefreshToken string `json:"refresh_token"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxControlPlaneBodyBytes)).Decode(&tokenResp); err != nil {
 		return "", "", err
 	}
 

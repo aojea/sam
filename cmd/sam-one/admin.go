@@ -28,7 +28,6 @@ import (
 	"github.com/google/sam/internal/standalone"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
 )
 
 // adminClient talks to a running sam-one's admin API; subcommands never open
@@ -85,7 +84,7 @@ func (c *adminClient) do(method, path, contentType string, body []byte) ([]byte,
 // a device that spends days offline needs and what a stolen device should
 // not get.
 func (c *adminClient) createToken(role string, ttlHours, maxUsages int, description string, autonomousRecovery bool) (*api.BootstrapTokenCreateResponse, error) {
-	payload, err := protojson.Marshal(&api.BootstrapTokenCreateRequest{
+	payload, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(&api.BootstrapTokenCreateRequest{
 		Role:               role,
 		TtlHours:           int32(ttlHours),
 		MaxUsages:          int32(maxUsages),
@@ -119,11 +118,11 @@ func (c *adminClient) listTokens() ([]*api.BootstrapToken, error) {
 }
 
 func (c *adminClient) banPeer(peerID string) error {
-	payload, err := proto.Marshal(&api.TokenRevokeRequest{PeerId: peerID})
+	payload, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(&api.TokenRevokeRequest{PeerId: peerID})
 	if err != nil {
 		return err
 	}
-	_, err = c.do(http.MethodPost, "/admin/revoke", "application/x-protobuf", payload)
+	_, err = c.do(http.MethodPost, "/admin/revoke", "application/json", payload)
 	return err
 }
 

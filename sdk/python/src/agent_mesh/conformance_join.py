@@ -94,7 +94,9 @@ async def _handle(session: MeshSession, command: dict) -> dict:
     cmd = command.get("cmd")
     try:
         if cmd == "auth":
-            verified = await session.authenticate(command["addr"])
+            timeout_s = float(command["timeout_ms"]) / 1000.0 if "timeout_ms" in command else 15.0
+            with trio.fail_after(timeout_s):
+                verified = await session.authenticate(command["addr"])
             return {
                 "cmd": cmd,
                 "ok": True,

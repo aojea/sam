@@ -397,7 +397,7 @@ func NewSamNode(cfg Options) (*SamNode, error) {
 	}
 
 	var err error
-	node.rateLimiter, err = ratelimit.NewPeerRateLimiter(RateLimiterSize)
+	node.rateLimiter, err = ratelimit.NewPeerRateLimiterWithRate(RateLimiterSize, 20, 30)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create rate limiter: %w", err)
 	}
@@ -795,8 +795,14 @@ func (n *SamNode) triggerReprovide() {
 
 func (n *SamNode) startReprovideLoop(ctx context.Context, interval time.Duration) {
 	go func() {
+		initialDelay := 5 * time.Second
+		if n.config.DiscoveryInterval != "" {
+			if d, err := time.ParseDuration(n.config.DiscoveryInterval); err == nil && d > 0 && d < initialDelay {
+				initialDelay = d
+			}
+		}
 		// Initial delay lets DHT bootstrap stabilize.
-		timer := time.NewTimer(5 * time.Second)
+		timer := time.NewTimer(initialDelay)
 		defer timer.Stop()
 
 		retry := reprovideRetryInterval
@@ -2264,6 +2270,11 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 				http.Error(w, "Invalid remote peer", http.StatusBadRequest)
 				return
 			}
+			if n.rateLimiter != nil && !n.rateLimiter.Allow(remotePeer.String()) {
+				logger.Warnf("[Ingress] Rate limit exceeded for %s", remotePeer)
+				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+				return
+			}
 
 			target = strings.ToLower(serviceTypeStr) + "://" + serviceName
 			reqCtx := RequestContext{
@@ -2286,6 +2297,13 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 				}
 			}
 			if serviceType == api.ServiceType_SERVICE_TYPE_MCP {
+				preCtx := reqCtx
+				preCtx.AllowMCPStreamInit = true
+				if err := n.VerifyBiscuitToken(biscuitBytes, preCtx); err != nil {
+					logger.Warnf("[Ingress] AuthZ Denied for %s: %v", remotePeer, err)
+					refuse(w, http.StatusForbidden, "Authorization failed", proxyStatusDenied)
+					return
+				}
 				mcpTool, allowInit, err := inspectMCPHTTPRequestBody(r)
 				if err != nil {
 					refuse(w, http.StatusRequestEntityTooLarge, err.Error(), proxyStatusDenied)

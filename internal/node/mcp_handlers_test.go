@@ -381,9 +381,6 @@ func TestHandleFindRemoteTools_MeshWide(t *testing.T) {
 }
 
 func TestHandleFindRemoteTools_PartialFailure(t *testing.T) {
-	if testing.Short() {
-		t.Skip("network/dial: skipped in -short")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

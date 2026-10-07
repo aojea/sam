@@ -418,4 +418,34 @@ func TestBuildTARFromOAuthParamsHardening(t *testing.T) {
 	if MatchHTTPPath("/repos/acme/*", "/repos/acme/%2e%2e/secret") {
 		t.Fatal("expected MatchHTTPPath to reject URL-encoded traversal")
 	}
+
+	// Nested unknown protobuf fields on TaskRule must be rejected by DecodeTARBlockPayload.
+	validRule := &TaskAuthorizationRule{
+		Name:  "nested-unk",
+		Rules: []*TaskRule{{AllowedServices: []string{"mcp://weather"}}},
+	}
+	validRule.Rules[0].ProtoReflect().SetUnknown([]byte{0x98, 0x06, 0x01}) // field 99 = 1
+	rawWithNestedUnknown, err := proto.Marshal(validRule)
+	if err != nil {
+		t.Fatalf("proto.Marshal: %v", err)
+	}
+	if _, err := DecodeTARBlockPayload(base64.RawURLEncoding.EncodeToString(rawWithNestedUnknown)); err == nil {
+		t.Fatal("expected DecodeTARBlockPayload to reject unknown fields on nested TaskRule")
+	}
+
+	// Epoch / pre-epoch expire_time must be rejected by EvaluateTaskRules and EvaluateTaskRulesForDestination.
+	epochTAR := []*TaskAuthorizationRule{{
+		Name:       "epoch",
+		ExpireTime: &timestamppb.Timestamp{Seconds: 0},
+		Rules:      []*TaskRule{{AllowedServices: []string{"mcp://weather"}}},
+	}}
+	if err := EvaluateTaskRules(epochTAR, TaskRequestContext{ServiceType: "mcp", ServiceName: "weather"}, now); err == nil {
+		t.Fatal("expected EvaluateTaskRules to reject epoch expire_time")
+	}
+	if err := EvaluateTaskRulesForDestination(epochTAR, "mcp", "weather", now); err == nil {
+		t.Fatal("expected EvaluateTaskRulesForDestination to reject epoch expire_time")
+	}
+	if got := EffectiveTARExpiration(now, epochTAR); !got.Equal(now) {
+		t.Fatalf("EffectiveTARExpiration with epoch expire_time = %v, want %v", got, now)
+	}
 }

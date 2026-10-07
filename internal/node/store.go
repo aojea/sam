@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/sam/api"
@@ -73,6 +74,12 @@ type Store struct {
 var ErrStoreLocked = errors.New("another sam-node instance is using this data directory")
 
 func GetDefaultDataDir() (string, error) {
+	if envDir := strings.TrimSpace(os.Getenv("SAM_DATA_DIR")); envDir != "" {
+		if err := os.MkdirAll(envDir, 0700); err != nil {
+			return "", err
+		}
+		return envDir, nil
+	}
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err

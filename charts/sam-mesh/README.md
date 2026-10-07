@@ -86,9 +86,10 @@ with no default, because the right GatewayClass is provider-specific
 (`cloud-provider-kind` in kind, `gke-l7-global-external-managed` on GKE,
 `istio`, `envoy-gateway`, …).
 
-The route exposes only the control plane's enrollment surface (`/register`,
-`/info`, `/keys`, `/routers/lease`, `/policies`, `/enroll`, `/enroll/status`,
-`/refresh`, `/nodes/catalog`) and the console under `gateway.consolePath`; everything else,
+The route exposes only the control plane's enrollment and runtime surface (`/register`,
+`/info`, `/keys`, `/routers/lease`, `/policies`, `/egress`, `/revocations`,
+`/token/exchange`, `/sts/token`, `/enroll`, `/enroll/status`, `/refresh`,
+`/nodes/catalog`, `/.well-known/*`, `/jwks`, `/oauth/authorize`, `/oauth/token`) and the console under `gateway.consolePath`; everything else,
 including `/admin` and `/user`, is unrouted. `gateway.adminRoute: true`
 additionally routes `/admin` — a dev convenience, leave it off in production.
 

@@ -132,6 +132,9 @@ func ValidateTargetFormat(target string) error {
 	if val == "" {
 		return fmt.Errorf("invalid target format %q: value cannot be empty", target)
 	}
+	if err := validateBindingMemberCharset(val); err != nil {
+		return fmt.Errorf("invalid target format %q: %w", target, err)
+	}
 	// "*" as the fact matches every target_fact (granted_target_all_facts).
 	if fact != "*" && !slices.Contains(TargetFactNames(), fact) {
 		return fmt.Errorf("invalid target %q: %q is not a target fact, so nothing would ever match it (want %s or \"*\")", target, fact, strings.Join(TargetFactNames(), ", "))

@@ -29,7 +29,7 @@ import biscuit_auth as ba
 
 from .biscuit import BiscuitVerificationError, VerifiedBiscuit, _extract_tar_chain, _limits, verify_peer_biscuit
 from .discovery import parse_service_target
-from .tar import TaskRequestContext, evaluate_task_rules
+from .tar import TaskRequestContext, evaluate_task_rules, is_safe_request_http_path
 
 BASELINE_DATALOG: dict = json.loads(resources.files("agent_mesh._gen").joinpath("datalog.json").read_text())
 
@@ -114,6 +114,8 @@ def authorize_caller(req: AuthorizeRequest, options: ProviderAuthorizerOptions) 
 
     # The request as the wire carried it, never as the caller describes it.
     if req.method is not None:
+        if req.method != "CONNECT" and req.path and not is_safe_request_http_path(req.path):
+            raise AuthorizationError(req.peer_id, f"invalid HTTP path {req.path!r}")
         b.add_fact(ba.Fact(BASELINE_DATALOG["fact_method"] + "({m})", {"m": req.method}))
         b.add_fact(ba.Fact(BASELINE_DATALOG["fact_path"] + "({p})", {"p": req.path}))
 

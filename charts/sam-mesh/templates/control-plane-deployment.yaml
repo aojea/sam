@@ -55,6 +55,14 @@ spec:
             secretKeyRef:
               name: {{ include "sam-mesh.fullname" . }}-secrets
               key: db-password
+        {{- if eq .Values.database.type "postgres" }}
+        {{- $dbHost := printf "%s-db" (include "sam-mesh.fullname" .) }}
+        {{- if not .Values.database.postgres.deployInternal }}
+          {{- $dbHost = .Values.database.postgres.host }}
+        {{- end }}
+        - name: SAM_DB_DSN
+          value: "postgres://{{ .Values.database.postgres.user }}:$(DB_PASSWORD)@{{ $dbHost }}:{{ .Values.database.postgres.port | default 5432 }}/{{ .Values.database.postgres.database }}?sslmode={{ .Values.database.postgres.sslmode | default "disable" }}"
+        {{- end }}
         - name: SAM_ADMIN_TOKEN
           valueFrom:
             secretKeyRef:
@@ -83,11 +91,6 @@ spec:
         - "--bind-address=0.0.0.0:8080"
         {{- if eq .Values.database.type "postgres" }}
         - "--db-driver=postgres"
-        {{- $dbHost := printf "%s-db" (include "sam-mesh.fullname" .) }}
-        {{- if not .Values.database.postgres.deployInternal }}
-          {{- $dbHost = .Values.database.postgres.host }}
-        {{- end }}
-        - "--db-dsn=postgres://{{ .Values.database.postgres.user }}:$(DB_PASSWORD)@{{ $dbHost }}:{{ .Values.database.postgres.port | default 5432 }}/{{ .Values.database.postgres.database }}?sslmode={{ .Values.database.postgres.sslmode | default "disable" }}"
         {{- else }}
         - "--db-driver=sqlite"
         - "--db-dsn=/data/control-plane.db"

@@ -33,7 +33,7 @@ spec:
     {{- toYaml . | nindent 2 }}
   {{- end }}
   rules:
-  # The enrollment surface, matching the cloud's allow-list exactly.
+  # The enrollment and mesh runtime surface, matching the cloud's allow-list exactly.
   - matches:
     - path:
         type: Exact
@@ -52,6 +52,18 @@ spec:
         value: /policies
     - path:
         type: Exact
+        value: /egress
+    - path:
+        type: Exact
+        value: /revocations
+    - path:
+        type: Exact
+        value: /token/exchange
+    - path:
+        type: Exact
+        value: /sts/token
+    - path:
+        type: Exact
         value: /enroll
     - path:
         type: Exact
@@ -62,6 +74,21 @@ spec:
     - path:
         type: Exact
         value: /nodes/catalog
+    - path:
+        type: Exact
+        value: /.well-known/openid-configuration
+    - path:
+        type: Exact
+        value: /.well-known/oauth-authorization-server
+    - path:
+        type: Exact
+        value: /jwks
+    - path:
+        type: Exact
+        value: /oauth/authorize
+    - path:
+        type: Exact
+        value: /oauth/token
     backendRefs:
     - name: {{ $fullName }}-control-plane
       port: {{ .Values.controlPlane.service.port }}

@@ -43,7 +43,7 @@ func TestValidateLabelValue(t *testing.T) {
 		}
 	}
 
-	invalid := []string{"", "has,comma", "has=equals", "has\ttab", strings.Repeat("a", maxLabelValueLen+1)}
+	invalid := []string{"", "has,comma", "has=equals", "has\ttab", `has"quote`, `has\slash`, "has\x00null", strings.Repeat("a", maxLabelValueLen+1)}
 	for _, v := range invalid {
 		if err := ValidateLabelValue(v); err == nil {
 			t.Errorf("ValidateLabelValue(%q): expected error, got nil", v)

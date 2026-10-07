@@ -14,9 +14,10 @@ spec:
       labels:
         {{- include "sam-node.selectorLabels" . | nindent 8 }}
       annotations:
-        # A config-only change must roll the pods: the node reads its config
-        # file once at startup and never reloads it.
+        # A config-only or secret change must roll the pods: the node reads its
+        # config and API token once at startup and never reloads them.
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
     spec:
       serviceAccountName: {{ default (include "sam-node.fullname" .) .Values.serviceAccount.name }}
       # The node reads the projected token below; the default SA token would

@@ -35,9 +35,27 @@ if [[ ! -x "${PROTOC_GEN_ES}" ]]; then
   exit 1
 fi
 
+resolve_protoc() {
+  if [[ -n "${PROTOC:-}" ]]; then
+    echo "${PROTOC}"
+    return
+  fi
+  local p base
+  while IFS= read -r p; do
+    base=$(dirname "$(dirname "${p}")")
+    if [[ -f "${base}/include/google/protobuf/timestamp.proto" ]]; then
+      echo "${p}"
+      return
+    fi
+  done < <(type -ap protoc 2>/dev/null || true)
+  command -v protoc
+}
+
+PROTOC_BIN=$(resolve_protoc)
+
 echo "Generating JavaScript protobuf code..."
 mkdir -p "${JS_GEN_DIR}"
-protoc -I api \
+"${PROTOC_BIN}" -I api \
   --plugin="protoc-gen-es=${PROTOC_GEN_ES}" \
   --es_out="${JS_GEN_DIR}" \
   --es_opt=target=ts \
@@ -45,13 +63,13 @@ protoc -I api \
 
 echo "Generating Python protobuf code..."
 mkdir -p "${PY_GEN_DIR}"
-protoc -I api \
+"${PROTOC_BIN}" -I api \
   --python_out="${PY_GEN_DIR}" \
   --pyi_out="${PY_GEN_DIR}" \
   api/sam.proto
 # The relay v2 client speaks go-libp2p's circuit.proto directly; see the
 # proto's header for why the SDK carries a copy.
-protoc -I sdk/python/proto \
+"${PROTOC_BIN}" -I sdk/python/proto \
   --python_out="${PY_GEN_DIR}" \
   --pyi_out="${PY_GEN_DIR}" \
   sdk/python/proto/circuit.proto

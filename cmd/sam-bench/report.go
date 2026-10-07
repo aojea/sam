@@ -131,10 +131,10 @@ func render(observations []observation, by string, metrics, gauges []string) str
 	}
 
 	var b strings.Builder
-	b.WriteString("| " + strings.Join(header, " | ") + " |\n")
-	b.WriteString("|" + strings.Repeat(" --- |", len(header)) + "\n")
+	fmt.Fprintf(&b, "| %s |\n", strings.Join(header, " | "))
+	fmt.Fprintf(&b, "|%s\n", strings.Repeat(" --- |", len(header)))
 	for _, row := range rows {
-		b.WriteString("| " + strings.Join(row, " | ") + " |\n")
+		fmt.Fprintf(&b, "| %s |\n", strings.Join(row, " | "))
 	}
 	return b.String()
 }

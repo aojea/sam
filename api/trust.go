@@ -41,6 +41,9 @@ func ValidateControlPlaneTransport(rawURL string, allowInsecure bool) error {
 	if err != nil {
 		return fmt.Errorf("invalid control plane URL %q: %w", rawURL, err)
 	}
+	if u.Hostname() == "" {
+		return fmt.Errorf("control plane URL %q has no host", rawURL)
+	}
 	switch u.Scheme {
 	case "https":
 		return nil

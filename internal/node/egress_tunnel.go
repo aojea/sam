@@ -89,14 +89,53 @@ func isForbiddenEgressAddr(addr netip.Addr, allowLocal bool) bool {
 		return true
 	}
 	if !allowLocal {
-		if ip.IsLoopback() || ip.IsPrivate() {
+		if ip.IsLoopback() || ip.IsPrivate() || !ip.IsGlobalUnicast() {
 			return true
 		}
 		if ip.Is4() {
 			b := ip.As4()
+			// RFC 1122 "This" network (0.0.0.0/8)
+			if b[0] == 0 {
+				return true
+			}
 			// RFC 6598 Carrier-Grade NAT (100.64.0.0/10)
 			if b[0] == 100 && b[1] >= 64 && b[1] <= 127 {
 				return true
+			}
+			// RFC 6890 IETF Protocol Assignments (192.0.0.0/24) & TEST-NET-1 (192.0.2.0/24)
+			if b[0] == 192 && b[1] == 0 && (b[2] == 0 || b[2] == 2) {
+				return true
+			}
+			// RFC 2544 Benchmarking (198.18.0.0/15)
+			if b[0] == 198 && (b[1] == 18 || b[1] == 19) {
+				return true
+			}
+			// RFC 5737 TEST-NET-2 (198.51.100.0/24) & TEST-NET-3 (203.0.113.0/24)
+			if (b[0] == 198 && b[1] == 51 && b[2] == 100) || (b[0] == 203 && b[1] == 0 && b[2] == 113) {
+				return true
+			}
+			// RFC 1112 Reserved for Future Use / Class E (240.0.0.0/4)
+			if b[0] >= 240 {
+				return true
+			}
+		} else if ip.Is6() {
+			b := ip.As16()
+			// RFC 6052 Well-Known Prefix NAT64 (64:ff9b::/96)
+			if b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b &&
+				b[4] == 0 && b[5] == 0 && b[6] == 0 && b[7] == 0 &&
+				b[8] == 0 && b[9] == 0 && b[10] == 0 && b[11] == 0 {
+				return true
+			}
+			// RFC 3849 Documentation (2001:db8::/32)
+			if b[0] == 0x20 && b[1] == 0x01 && b[2] == 0x0d && b[3] == 0xb8 {
+				return true
+			}
+			// RFC 3056 6to4 (2002::/16) — check embedded IPv4
+			if b[0] == 0x20 && b[1] == 0x02 {
+				v4 := netip.AddrFrom4([4]byte{b[2], b[3], b[4], b[5]})
+				if isForbiddenEgressAddr(v4, false) {
+					return true
+				}
 			}
 		}
 	}
@@ -306,6 +345,13 @@ func handleConnectTunnel(node *SamNode, w http.ResponseWriter, r *http.Request) 
 		refuse(w, http.StatusBadRequest, err.Error(), proxyStatusDenied)
 		return
 	}
+	requiredLabels, err := parseRequiredLabels(r.Header.Get(api.HeaderSamRequiredLabels))
+	if err != nil {
+		refuse(w, http.StatusBadRequest, fmt.Sprintf("Invalid %s header: %v", api.HeaderSamRequiredLabels, err), proxyStatusDenied)
+		return
+	}
+	r.Header.Del(api.HeaderSamRequiredLabels)
+
 	if node == nil {
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 		return
@@ -316,7 +362,9 @@ func handleConnectTunnel(node *SamNode, w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 1. If this node serves egress://<host> locally, authorize and serve directly.
+	// 1. If this node serves egress://<host> locally and satisfies any caller
+	// label requirement and the operator's egress floor, authorize and serve directly.
+	var localLabelFailed bool
 	if node.services != nil {
 		if svc, ok := node.services.GetTyped(api.ServiceType_SERVICE_TYPE_EGRESS, host); ok {
 			es, ok := svc.(*EgressService)
@@ -324,45 +372,67 @@ func handleConnectTunnel(node *SamNode, w http.ResponseWriter, r *http.Request) 
 				refuse(w, http.StatusNotFound, "invalid egress service", proxyStatusDestinationNotFound)
 				return
 			}
-			var localPID peer.ID
-			if pid, pErr := node.localPeerID(); pErr == nil {
-				localPID = pid
-			}
-			reqCtx := RequestContext{
-				PeerID:   localPID,
-				Protocol: "local-api",
-				Target:   api.EgressServicePrefix + host,
-				HTTP:     &HTTPRequestFacts{Method: http.MethodConnect, Path: ""},
-				Egress:   &EgressFacts{Host: host, Port: port},
-				Local:    true,
-			}
-			if err := node.VerifyBiscuitToken(identity, reqCtx); err != nil {
-				recordEgressDecision(host, egressOutcomeDeny)
-				refuse(w, http.StatusForbidden, "Authorization failed", proxyStatusDenied)
+			if outsideLabels(requiredLabels, node.labels(), true) || outsideLabels(node.egressFloor(), node.labels(), true) {
+				localLabelFailed = true
+			} else {
+				var localPID peer.ID
+				if pid, pErr := node.localPeerID(); pErr == nil {
+					localPID = pid
+				}
+				reqCtx := RequestContext{
+					PeerID:   localPID,
+					Protocol: "local-api",
+					Target:   api.EgressServicePrefix + host,
+					HTTP:     &HTTPRequestFacts{Method: http.MethodConnect, Path: ""},
+					Egress:   &EgressFacts{Host: host, Port: port},
+					Local:    true,
+				}
+				if err := node.VerifyBiscuitToken(identity, reqCtx); err != nil {
+					recordEgressDecision(host, egressOutcomeDeny)
+					refuse(w, http.StatusForbidden, "Authorization failed", proxyStatusDenied)
+					return
+				}
+				recordEgressDecision(host, egressOutcomeAllow)
+				es.ServeTunnel(WithCallerBiscuit(r.Context(), identity), w, r, port)
 				return
 			}
-			recordEgressDecision(host, egressOutcomeAllow)
-			es.ServeTunnel(WithCallerBiscuit(r.Context(), identity), w, r, port)
-			return
 		}
 	}
 
-	// 2. Otherwise discover a remote provider in the mesh and forward the tunnel over /libp2p-http.
+	// 2. Otherwise discover a remote provider in the mesh, verify its labels, and forward the tunnel over /libp2p-http.
 	if node.Host == nil {
+		if localLabelFailed {
+			recordEgressDecision(host, egressOutcomeDeny)
+			refuse(w, http.StatusForbidden, "Required labels not attested by provider", proxyStatusDenied)
+			return
+		}
 		refuse(w, http.StatusNotFound, fmt.Sprintf("no egress destination %q is assigned to this node", host), proxyStatusDestinationNotFound)
 		return
 	}
 	providers, err := node.DiscoverRemoteServices(r.Context(), api.ServiceType_SERVICE_TYPE_EGRESS, host)
 	if err != nil || len(providers) == 0 {
+		if localLabelFailed {
+			recordEgressDecision(host, egressOutcomeDeny)
+			refuse(w, http.StatusForbidden, "Required labels not attested by provider", proxyStatusDenied)
+			return
+		}
 		refuse(w, http.StatusNotFound, fmt.Sprintf("no provider found for egress://%s", host), proxyStatusDestinationNotFound)
 		return
 	}
-	targetPeer, err := peer.Decode(providers[0].GetPeerId())
-	if err != nil {
-		refuse(w, http.StatusBadGateway, "invalid provider peer ID", proxyStatusConfigurationError)
+	for _, p := range providers {
+		targetPeer, decErr := peer.Decode(p.GetPeerId())
+		if decErr != nil {
+			continue
+		}
+		if err := node.VerifyPeerLabels(r.Context(), targetPeer, requiredLabels); err != nil {
+			logger.Warnf("[Egress] CONNECT label gate refused egress to %s: %v", targetPeer, err)
+			continue
+		}
+		forwardConnectTunnelToPeer(node, w, r, targetPeer, host, port, identity)
 		return
 	}
-	forwardConnectTunnelToPeer(node, w, r, targetPeer, host, port, identity)
+	recordEgressDecision(host, egressOutcomeDeny)
+	refuse(w, http.StatusForbidden, "Required labels not attested by provider", proxyStatusDenied)
 }
 
 func forwardConnectTunnelToPeer(node *SamNode, w http.ResponseWriter, r *http.Request, targetPeer peer.ID, host string, port int, biscuitBytes []byte) {

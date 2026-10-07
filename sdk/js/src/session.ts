@@ -497,7 +497,9 @@ export class MeshSession {
       throw new Error(`service type must be mcp, inference, a2a or egress, got ${JSON.stringify(target.type)}`);
     }
     const cid = await serviceCID(target.type, target.name);
-    const signal = AbortSignal.timeout(options.timeoutMs ?? DISCOVERY_TIMEOUT_MS);
+    const ac = new AbortController();
+    const signal = AbortSignal.any([ac.signal, AbortSignal.timeout(options.timeoutMs ?? DISCOVERY_TIMEOUT_MS)]);
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
     const found = new Map<string, DiscoveredProvider>();
     try {
       for await (const provider of this.node.contentRouting.findProviders(cid, { signal })) {
@@ -516,12 +518,18 @@ export class MeshSession {
         if (found.size >= (options.limit ?? 20)) {
           break;
         }
+        if (settleTimer === undefined) {
+          settleTimer = setTimeout(() => ac.abort(), 200);
+          settleTimer.unref?.();
+        }
       }
     } catch (err) {
       // The lookup ended on its deadline; what was found so far is the answer.
       if (!(err instanceof Error && err.name === "TimeoutError") && !signal.aborted) {
         throw err;
       }
+    } finally {
+      clearTimeout(settleTimer);
     }
     return [...found.values()];
   }

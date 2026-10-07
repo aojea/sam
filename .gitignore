@@ -48,12 +48,15 @@ node_modules/
 tests/ui/playwright-report/
 tests/ui/test-results/
 /sam-control-plane
+/sam-bench
 /mcp-client
 /nano-init
 tests/e2e/logs/
 tests/integration/logs/
 tests/integration/scratch/
 __pycache__/
+.pytest_cache/
+.worktrees/
 .venv/
 *.egg-info/
 keys.db

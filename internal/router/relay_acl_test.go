@@ -75,6 +75,55 @@ func TestRelayACLAllowConnectRequiresAuthenticatedSource(t *testing.T) {
 	}
 }
 
+func TestRelayACLExpiresAuthenticatedPeers(t *testing.T) {
+	r := &Router{}
+	acl := &relayACL{r: r}
+	src, dest := newTestPeerID(t), newTestPeerID(t)
+	addr, _ := multiaddr.NewMultiaddr("/ip4/127.0.0.1/tcp/1234")
+
+	r.authenticatedPeers.Store(src, time.Now().Add(time.Hour))
+	r.authenticatedPeers.Store(dest, time.Now().Add(time.Hour))
+	if !acl.AllowReserve(src, addr) {
+		t.Fatal("expected peer with future expiration to be allowed to reserve")
+	}
+	if !acl.AllowConnect(src, addr, dest) {
+		t.Fatal("expected peers with future expiration to be allowed to connect")
+	}
+
+	// Expire src's biscuit.
+	r.authenticatedPeers.Store(src, time.Now().Add(-time.Second))
+	if acl.AllowReserve(src, addr) {
+		t.Error("expected peer with expired biscuit to be denied reservation")
+	}
+	if _, stillPresent := r.authenticatedPeers.Load(src); stillPresent {
+		t.Error("expected expired peer to be evicted from authenticatedPeers")
+	}
+	r.authenticatedPeers.Store(src, time.Now().Add(-time.Second))
+	if acl.AllowConnect(src, addr, dest) {
+		t.Error("expected expired source peer to be denied relay connect")
+	}
+}
+
+func TestRouterConnGateRejectsBannedPeers(t *testing.T) {
+	r := &Router{}
+	gate := &routerConnGate{r: r}
+	allowedPeer, bannedPeer := newTestPeerID(t), newTestPeerID(t)
+	r.bannedPeers.Store(bannedPeer, time.Now())
+
+	if !gate.InterceptPeerDial(allowedPeer) {
+		t.Error("expected allowed peer dial to succeed")
+	}
+	if gate.InterceptPeerDial(bannedPeer) {
+		t.Error("expected banned peer dial to be rejected")
+	}
+	if !gate.InterceptSecured(0, allowedPeer, nil) {
+		t.Error("expected allowed peer secured connection to succeed")
+	}
+	if gate.InterceptSecured(0, bannedPeer, nil) {
+		t.Error("expected banned peer secured connection to be rejected")
+	}
+}
+
 // The router's GossipSub validator drops unsigned or forged events at the
 // first hop instead of fanning them out to every attached node.
 func TestRouterValidateMeshEvent(t *testing.T) {

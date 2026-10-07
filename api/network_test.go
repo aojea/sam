@@ -85,6 +85,12 @@ func TestParseServiceTarget(t *testing.T) {
 			wantType: "mcp",
 			wantName: "my_service_name",
 		},
+		{
+			name:     "Target fact with URI value",
+			target:   "user:spiffe://cluster.local/ns/default/sa/web",
+			wantType: "user",
+			wantName: "spiffe://cluster.local/ns/default/sa/web",
+		},
 	}
 
 	for _, tt := range tests {

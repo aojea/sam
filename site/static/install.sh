@@ -52,25 +52,29 @@ if ! curl -sfL -o "${TAR_NAME}" "${DOWNLOAD_URL}"; then
     exit 1
 fi
 
-if curl -sfL -o checksums.txt "${CHECKSUMS_URL}"; then
-    echo "Verifying SHA-256 checksum..."
-    EXPECTED_SUM=$(awk -v f="${TAR_NAME}" '$2 == f {print $1}' checksums.txt)
-    if [ -z "${EXPECTED_SUM}" ]; then
-        echo "Error: ${TAR_NAME} not found in checksums.txt"
-        exit 1
-    fi
-    if command -v sha256sum >/dev/null 2>&1; then
-        ACTUAL_SUM=$(sha256sum "${TAR_NAME}" | awk '{print $1}')
-    elif command -v shasum >/dev/null 2>&1; then
-        ACTUAL_SUM=$(shasum -a 256 "${TAR_NAME}" | awk '{print $1}')
-    else
-        echo "Error: Neither sha256sum nor shasum is available to verify archive integrity."
-        exit 1
-    fi
-    if [ "${EXPECTED_SUM}" != "${ACTUAL_SUM}" ]; then
-        echo "Error: SHA-256 checksum mismatch for ${TAR_NAME} (expected ${EXPECTED_SUM}, got ${ACTUAL_SUM})"
-        exit 1
-    fi
+echo "Downloading ${CHECKSUMS_URL}..."
+if ! curl -sfL -o checksums.txt "${CHECKSUMS_URL}"; then
+    echo "Error: Failed to download ${CHECKSUMS_URL}"
+    exit 1
+fi
+
+echo "Verifying SHA-256 checksum..."
+EXPECTED_SUM=$(awk -v f="${TAR_NAME}" '$2 == f {print $1}' checksums.txt)
+if [ -z "${EXPECTED_SUM}" ]; then
+    echo "Error: ${TAR_NAME} not found in checksums.txt"
+    exit 1
+fi
+if command -v sha256sum >/dev/null 2>&1; then
+    ACTUAL_SUM=$(sha256sum "${TAR_NAME}" | awk '{print $1}')
+elif command -v shasum >/dev/null 2>&1; then
+    ACTUAL_SUM=$(shasum -a 256 "${TAR_NAME}" | awk '{print $1}')
+else
+    echo "Error: Neither sha256sum nor shasum is available to verify archive integrity."
+    exit 1
+fi
+if [ "${EXPECTED_SUM}" != "${ACTUAL_SUM}" ]; then
+    echo "Error: SHA-256 checksum mismatch for ${TAR_NAME} (expected ${EXPECTED_SUM}, got ${ACTUAL_SUM})"
+    exit 1
 fi
 
 echo "Extracting..."
@@ -78,7 +82,7 @@ tar -xzf "${TAR_NAME}"
 
 echo "Installing to ${INSTALL_DIR} (may require sudo)..."
 INSTALLED_BINS=()
-for b in sam-one sam-node sam-control-plane sam-router mcp-client sam-box sam-console nano-init; do
+for b in sam-one sam-node sam-control-plane sam-router mcp-client sam-console; do
     if [ -f "$b" ]; then
         INSTALLED_BINS+=("$b")
     fi

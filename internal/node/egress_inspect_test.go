@@ -682,3 +682,23 @@ func TestBoundedResponseRecorderOverflow(t *testing.T) {
 		t.Fatalf("expected bounded buffer to cap at maxBytes+1 (17), got %d", rec.body.Len())
 	}
 }
+
+func TestReplaceInspectableTextMultiMessageNewlineAndFailClosed(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"system","content":"line1\nline2"},{"role":"user","content":"my ssn is 123-45-6789"}]}`)
+	extracted := extractInspectableText(body)
+	if extracted != "line1\nline2\nmy ssn is 123-45-6789" {
+		t.Fatalf("unexpected extracted text: %q", extracted)
+	}
+	replaced, err := replaceInspectableText(body, extracted, "line1\nline2\nmy ssn is [REDACTED]")
+	if err != nil {
+		t.Fatalf("replaceInspectableText multi-message with newline failed: %v", err)
+	}
+	if strings.Contains(string(replaced), "123-45-6789") || !strings.Contains(string(replaced), "[REDACTED]") {
+		t.Fatalf("expected redacted payload, got %s", string(replaced))
+	}
+
+	// If replacement changes line count so it cannot be mapped back to multi-message JSON, must fail-closed.
+	if _, err := replaceInspectableText(body, extracted, "single-line-summary [REDACTED]"); err == nil {
+		t.Fatal("expected error when replacement cannot be mapped back into multi-message JSON")
+	}
+}

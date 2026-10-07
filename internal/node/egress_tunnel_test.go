@@ -28,6 +28,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync/atomic"
@@ -222,4 +223,53 @@ func TestEgressTCPTunnelEndToEnd(t *testing.T) {
 			t.Fatalf("got reply %q, want PONG\\n", reply)
 		}
 	})
+}
+
+func TestIsForbiddenEgressAddrRanges(t *testing.T) {
+	forbidden := []string{
+		"127.0.0.1",
+		"10.0.0.1",
+		"169.254.169.254",
+		"100.64.0.1",
+		"0.1.2.3",
+		"192.0.0.1",
+		"192.0.2.1",
+		"198.18.0.1",
+		"198.51.100.1",
+		"203.0.113.1",
+		"240.0.0.1",
+		"::1",
+		"fe80::1",
+		"64:ff9b::a9fe:a9fe",
+		"2001:db8::1",
+		"2002:7f00:0001::1",
+	}
+	for _, s := range forbidden {
+		ip := netip.MustParseAddr(s)
+		if !isForbiddenEgressAddr(ip, false) {
+			t.Errorf("expected %s to be forbidden when allowLocal=false", s)
+		}
+	}
+	allowed := []string{
+		"8.8.8.8",
+		"1.1.1.1",
+		"2606:4700:4700::1111",
+	}
+	for _, s := range allowed {
+		ip := netip.MustParseAddr(s)
+		if isForbiddenEgressAddr(ip, false) {
+			t.Errorf("expected %s to be allowed when allowLocal=false", s)
+		}
+	}
+}
+
+func TestHandleConnectTunnelRequiredLabels(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodConnect, "http://pg.internal.example:5432", nil)
+	req.Host = "pg.internal.example:5432"
+	req.Header.Set(api.HeaderSamRequiredLabels, ",,")
+	handleConnectTunnel(nil, rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed X-Sam-Required-Labels on CONNECT: got %d, want 400", rec.Code)
+	}
 }

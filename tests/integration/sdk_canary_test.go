@@ -133,7 +133,7 @@ func TestSDKCanaryScript(t *testing.T) {
 
 			callCmd, _ := caller.cmd(context.Background(), mesh.root, "a2a-call")
 			verdicts := runCanaryScript(t, script, dir, caller.name+"-calls-"+agent.name+"-agent", strings.Join(callCmd.Args, " "),
-				append(env, "SAM_STATE_DIR="+filepath.Join(dir, "caller"), "INTERVAL=1"))
+				append(env, "SAM_STATE_DIR="+filepath.Join(dir, "caller"), "INTERVAL=0"))
 			for i := 0; i < 2; i++ {
 				v := <-verdicts
 				if !v.OK || v.Error != "" || v.AgentPeer == "" {
@@ -208,6 +208,7 @@ func runCanaryScript(t *testing.T, script, dir, canary, call string, env []strin
 			}
 			verdicts <- v
 		}
+		_ = scanner.Err()
 	}()
 	out := make(chan canaryVerdict)
 	go func() {

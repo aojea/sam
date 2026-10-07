@@ -76,6 +76,11 @@ func daemonizeRun(socketPath string) error {
 	if err != nil {
 		return err
 	}
+	secretArgs, err := migrateSecretFlagsToFiles(dataDir)
+	if err != nil {
+		return err
+	}
+	tokenArgs = append(tokenArgs, secretArgs...)
 
 	logPath := filepath.Join(dataDir, daemonLogFile)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
@@ -334,11 +339,43 @@ func ensureNodeStopped(dataDir string) error {
 	return store.Close()
 }
 
-// withoutDaemonizeFlag drops --daemonize so the child runs in the foreground.
+// migrateSecretFlagsToFiles persists any deprecated inline --bootstrap-token
+// or --jwt flag value to a 0600 file inside dataDir and returns the
+// corresponding --*-path flags so secrets never sit in the daemon's cmdline.
+func migrateSecretFlagsToFiles(dataDir string) ([]string, error) {
+	var extra []string
+	if bootstrapTokenFlag != "" && bootstrapTokenPathFlag == "" {
+		p := filepath.Join(dataDir, "bootstrap-token")
+		if err := os.WriteFile(p, []byte(bootstrapTokenFlag), 0600); err != nil {
+			return nil, fmt.Errorf("writing %s: %w", p, err)
+		}
+		extra = append(extra, "--bootstrap-token-path", p)
+	}
+	if jwtFlag != "" && jwtPathFlag == "" {
+		p := filepath.Join(dataDir, "enrollment-jwt")
+		if err := os.WriteFile(p, []byte(jwtFlag), 0600); err != nil {
+			return nil, fmt.Errorf("writing %s: %w", p, err)
+		}
+		extra = append(extra, "--jwt-path", p)
+	}
+	return extra, nil
+}
+
+// withoutDaemonizeFlag drops --daemonize and any inline secret flags
+// (--bootstrap-token, --jwt) so the child runs in the foreground without
+// exposing credentials in ps output.
 func withoutDaemonizeFlag(args []string) []string {
 	out := make([]string, 0, len(args))
-	for _, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		if arg == "--daemonize" || strings.HasPrefix(arg, "--daemonize=") {
+			continue
+		}
+		if arg == "--bootstrap-token" || arg == "--jwt" {
+			i++ // skip value
+			continue
+		}
+		if strings.HasPrefix(arg, "--bootstrap-token=") || strings.HasPrefix(arg, "--jwt=") {
 			continue
 		}
 		out = append(out, arg)

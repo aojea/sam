@@ -177,9 +177,15 @@ func main() {
 				Router:           routerTunables,
 			})
 			if err != nil {
+				if tun != nil {
+					_ = tun.Close()
+				}
 				logger.Fatalf("Invalid configuration: %v", err)
 			}
 			if err := srv.Start(cmd.Context()); err != nil {
+				if tun != nil {
+					_ = tun.Close()
+				}
 				logger.Fatalf("Failed to start: %v", err)
 			}
 			defer func() {

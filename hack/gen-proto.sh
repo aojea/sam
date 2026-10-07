@@ -19,8 +19,26 @@ echo "Installing protobuf Go plugins..."
 # Keep in sync with the google.golang.org/protobuf version in go.mod.
 go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
 
+resolve_protoc() {
+  if [[ -n "${PROTOC:-}" ]]; then
+    echo "${PROTOC}"
+    return
+  fi
+  local p base
+  while IFS= read -r p; do
+    base=$(dirname "$(dirname "${p}")")
+    if [[ -f "${base}/include/google/protobuf/timestamp.proto" ]]; then
+      echo "${p}"
+      return
+    fi
+  done < <(type -ap protoc 2>/dev/null || true)
+  command -v protoc
+}
+
+PROTOC_BIN=$(resolve_protoc)
+
 echo "Generating Go protobuf code..."
 mkdir -p api
-protoc --go_out=paths=source_relative:. api/sam.proto
+"${PROTOC_BIN}" --go_out=paths=source_relative:. api/sam.proto
 
 echo "Protobuf generation complete."

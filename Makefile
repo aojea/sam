@@ -26,12 +26,12 @@ ANDROID_CC_X86_64=$(ANDROID_NDK_TOOLCHAIN)/x86_64-linux-android30-clang
 
 build:
 	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/sam-node" ./cmd/sam-node
-	go build -v -o "$(OUT_DIR)/sam-control-plane" ./cmd/sam-control-plane
+	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/sam-control-plane" ./cmd/sam-control-plane
 	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/sam-router" ./cmd/sam-router
 	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/sam-one" ./cmd/sam-one
-	go build -v -o "$(OUT_DIR)/mcp-client" ./cmd/mcp-client
-	go build -v -o "$(OUT_DIR)/sam-bench" ./cmd/sam-bench
-	go build -v -o "$(OUT_DIR)/sam-console" ./cmd/sam-console
+	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/mcp-client" ./cmd/mcp-client
+	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/sam-bench" ./cmd/sam-bench
+	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/sam-console" ./cmd/sam-console
 
 
 .PHONY: mobile-ffi-host mobile-ffi-android mobile-ffi-android-x86_64 mobile-ffi-ios mobile-ffi mobile-app-apk mobile-app-apk-emulator mobile-app-bundle
@@ -253,6 +253,7 @@ helm-test:
 .PHONY: verify
 verify:
 	./hack/verify-generated.sh
+	./hack/verify-sdk-generated.sh
 	./hack/verify-secrets.sh
 
 update:
@@ -267,6 +268,9 @@ docker-build-router:
 docker-build-node:
 	docker build --load --build-arg VERSION="$(VERSION)" -t sam-node:local -f Dockerfile.sam-node .
 
+docker-build-one:
+	docker build --load --build-arg VERSION="$(VERSION)" -t sam-one:local -f Dockerfile.sam-one .
+
 docker-build-mock-oidc:
 	docker build --load -t sam-mock-oidc:local -f tests/e2e/docker/Dockerfile.mock-oidc .
 
@@ -276,6 +280,6 @@ docker-build-e2e-runtime:
 docker-build-sam-console:
 	docker build --load --build-arg VERSION="$(VERSION)" -t sam-console:local -f Dockerfile.sam-console .
 
-docker-build: docker-build-control-plane docker-build-router docker-build-node docker-build-mock-oidc docker-build-e2e-runtime docker-build-sam-console
+docker-build: docker-build-control-plane docker-build-router docker-build-node docker-build-one docker-build-mock-oidc docker-build-e2e-runtime docker-build-sam-console
 
-.PHONY: docker-build-control-plane docker-build-router docker-build-node docker-build-mock-oidc docker-build-e2e-runtime docker-build-sam-console docker-build
+.PHONY: docker-build-control-plane docker-build-router docker-build-node docker-build-one docker-build-mock-oidc docker-build-e2e-runtime docker-build-sam-console docker-build

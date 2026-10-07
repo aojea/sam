@@ -467,7 +467,7 @@ func startRouter(t *testing.T, tmpDir string, cpPort int, mintToken func(map[str
 		"--oidc-token", routerJWT,
 		// Each renewal carries the router's connected peers, which is how
 		// tests see a node reach the mesh through the control plane.
-		"--lease-renew-interval", "1s",
+		"--lease-renew-interval", "250ms",
 	)
 	routerCmd.Stdout = os.Stdout
 	routerCmd.Stderr = os.Stderr
@@ -494,7 +494,7 @@ func startRouter(t *testing.T, tmpDir string, cpPort int, mintToken func(map[str
 		if time.Now().After(deadline) {
 			t.Fatalf("router %s never leased with control plane :%d", name, cpPort)
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -610,7 +610,7 @@ func waitForPeerOnRouter(t *testing.T, cpPort int, adminToken string, peerID str
 		if time.Now().After(deadline) {
 			t.Fatalf("no router on control plane :%d reported %s connected within %v", cpPort, peerID, timeout)
 		}
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

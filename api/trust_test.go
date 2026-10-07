@@ -46,6 +46,9 @@ func TestValidateControlPlaneTransport(t *testing.T) {
 		{"http://10.0.0.5:8080", false, true, ErrInsecureControlPlaneURL},
 		{"http://127.0.0.1.evil.example:8080", false, true, ErrInsecureControlPlaneURL},
 		{"http://sam-control-plane:8080", true, false, nil},
+		{"https://", false, true, nil},
+		{"https://:8443", false, true, nil},
+		{"http://", true, true, nil},
 		{"ftp://hub.sam-mesh.dev", false, true, nil},
 		{"hub.sam-mesh.dev", false, true, nil},
 	}

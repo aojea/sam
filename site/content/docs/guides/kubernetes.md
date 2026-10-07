@@ -105,8 +105,10 @@ gateway:
 ```
 
 The route exposes only the paths that nodes need (`/info`, `/register`,
-`/keys`, `/routers/lease`, `/policies`, `/enroll`, `/enroll/status`,
-`/refresh`, `/nodes/catalog`) and the console under `gateway.consolePath`.
+`/keys`, `/routers/lease`, `/policies`, `/egress`, `/revocations`,
+`/token/exchange`, `/sts/token`, `/enroll`, `/enroll/status`,
+`/refresh`, `/nodes/catalog`, `/.well-known/*`, `/jwks`, `/oauth/authorize`,
+`/oauth/token`) and the console under `gateway.consolePath`.
 `/admin` and `/user` are not routed unless you set `gateway.adminRoute`,
 which is meant for development clusters.
 

@@ -65,6 +65,9 @@ func ValidateLabelValue(value string) error {
 	if strings.ContainsAny(value, ",=\n\r\t") {
 		return fmt.Errorf("label value %q must not contain ',', '=', or control characters", value)
 	}
+	if err := validateBindingMemberCharset(value); err != nil {
+		return fmt.Errorf("label value %q %w", value, err)
+	}
 	return nil
 }
 

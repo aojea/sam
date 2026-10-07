@@ -27,7 +27,6 @@ import (
 
 	"github.com/google/sam/api"
 	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -44,6 +43,10 @@ func newFakeAdminAPI(t *testing.T) *httptest.Server {
 			// Decode into the shared wire type, as the control plane does, so a
 			// client that drifts from it fails here.
 			body, _ := io.ReadAll(r.Body)
+			if !strings.Contains(string(body), `"ttl_hours"`) || !strings.Contains(string(body), `"max_usages"`) {
+				http.Error(w, "expected proto field names (snake_case)", http.StatusBadRequest)
+				return
+			}
 			req := &api.BootstrapTokenCreateRequest{}
 			if err := protojson.Unmarshal(body, req); err != nil {
 				http.Error(w, "bad body", http.StatusBadRequest)
@@ -93,11 +96,11 @@ func newFakeAdminAPI(t *testing.T) *httptest.Server {
 		}
 		body, _ := io.ReadAll(r.Body)
 		var req api.TokenRevokeRequest
-		if err := proto.Unmarshal(body, &req); err != nil || req.PeerId != "12D3KooTestPeer" {
+		if err := protojson.Unmarshal(body, &req); err != nil || req.PeerId != "12D3KooTestPeer" || !strings.Contains(string(body), `"peer_id"`) {
 			http.Error(w, "wrong peer", http.StatusBadRequest)
 			return
 		}
-		_, _ = w.Write([]byte("ok"))
+		_, _ = w.Write([]byte(`{"success":true}`))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

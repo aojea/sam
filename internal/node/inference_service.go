@@ -240,7 +240,7 @@ func parseResponseStream(r io.Reader, peerID string, isSSE bool) {
 
 func parseJSONResponse(r io.Reader, peerID string) {
 	var resp openai.ChatCompletion
-	if err := json.NewDecoder(r).Decode(&resp); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r, maxInferenceBodyBytes)).Decode(&resp); err != nil {
 		return
 	}
 	if resp.JSON.Usage.Valid() && (resp.Usage.PromptTokens > 0 || resp.Usage.CompletionTokens > 0) {
@@ -249,7 +249,7 @@ func parseJSONResponse(r io.Reader, peerID string) {
 }
 
 func parseSSEResponse(r io.Reader, peerID string) {
-	reader := bufio.NewReader(r)
+	reader := bufio.NewReader(io.LimitReader(r, maxInferenceBodyBytes*4))
 	var model string
 	for {
 		line, err := reader.ReadString('\n')

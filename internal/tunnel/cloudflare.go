@@ -341,5 +341,6 @@ func (p *process) scan(r io.Reader, urlCh chan<- string) {
 	}
 	if err := sc.Err(); err != nil && !errors.Is(err, io.ErrClosedPipe) {
 		logger.Debugf("cloudflared output closed: %v", err)
+		_, _ = io.Copy(io.Discard, r)
 	}
 }

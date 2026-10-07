@@ -131,8 +131,16 @@ _DOT_ENCODED = re.compile("%2e", re.IGNORECASE)
 
 
 def _has_dot_segment(path: str) -> bool:
-    # A URL parser reads %2e as a dot too (WHATWG URL, path state), so the
-    # check sees what the backend will see.
+    # A URL parser reads %2e as a dot too (WHATWG URL, path state), and %2f/%5c/\
+    # as path separators on some backends, so the check rejects those and dot segments.
+    if not path.startswith("/") or "#" in path:
+        return True
+    for i, c in enumerate(path):
+        if ord(c) < 0x20 or ord(c) == 0x7F or c in ("\\", '"'):
+            return True
+        if c == "%" and i + 2 < len(path):
+            if path[i + 1 : i + 3].lower() in ("2f", "5c", "00"):
+                return True
     return any(_DOT_ENCODED.sub(".", seg) in (".", "..") for seg in path.split("/"))
 
 
@@ -219,6 +227,7 @@ async def _handle_ingress(
     # follows could resolve to a sibling path on the backend.
     if _has_dot_segment(raw_path):
         return plain(400, "Invalid path")
+    raw_path = _DOT_ENCODED.sub(".", raw_path)
     parts = raw_path.lstrip("/").split("/")
     if len(parts) < 2 or not parts[0] or not parts[1]:
         return plain(400, "Invalid path")

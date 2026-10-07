@@ -188,7 +188,7 @@ func validateEgressTargetURL(raw string) error {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("target_url %q must use http or https", raw)
 	}
-	if u.Host == "" {
+	if u.Hostname() == "" {
 		return fmt.Errorf("target_url %q has no host", raw)
 	}
 	if u.User != nil {
@@ -236,15 +236,21 @@ func EgressServedBy(d *EgressDestination, roles []string, labels map[string]stri
 func BuildEgressServingRules(egress []*EgressDestination) []PolicyRule {
 	var rules []PolicyRule
 	for _, d := range egress {
-		if d == nil || d.GetName() == "" {
+		if d == nil || ValidateEgressName(d.GetName()) != nil {
 			continue
 		}
 		head := biscuit.Predicate{Name: FactGrantedServiceExact, IDs: []biscuit.Term{biscuit.String(ServiceTypeStringEgress), biscuit.String(d.GetName())}}
 		for _, sel := range d.GetServedBy() {
 			var body biscuit.Predicate
 			if key, value, isLabel := strings.Cut(sel, "="); isLabel {
+				if ValidateLabelKey(key) != nil || ValidateLabelValue(value) != nil {
+					continue
+				}
 				body = biscuit.Predicate{Name: FactLabel, IDs: []biscuit.Term{biscuit.String(key), biscuit.String(value)}}
 			} else {
+				if ValidateRoleName(sel) != nil {
+					continue
+				}
 				body = biscuit.Predicate{Name: FactRole, IDs: []biscuit.Term{biscuit.String(sel)}}
 			}
 			r := biscuit.Rule{Head: head, Body: []biscuit.Predicate{body}}

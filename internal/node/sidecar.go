@@ -772,12 +772,21 @@ func createEgressProxy(node *SamNode) http.Handler {
 			return
 		}
 
+		var requiredLabels map[string]string
+		if labelsHeader := r.Header.Get(api.HeaderSamRequiredLabels); labelsHeader != "" {
+			r.Header.Del(api.HeaderSamRequiredLabels)
+			var err error
+			requiredLabels, err = parseRequiredLabels(labelsHeader)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Invalid %s header: %v", api.HeaderSamRequiredLabels, err), http.StatusBadRequest)
+				return
+			}
+		}
+
 		// Every egress destination must prove it is an enrolled peer: the
 		// label gate verifies the peer's control-plane-signed biscuit (cached
-		// per peer) and, when the operator set an egress floor
-		// (egress.require_labels), holds it to that too. required is nil: any
-		// caller requirement was already enforced by the surface that parsed
-		// it; the floor is what a silent caller cannot waive.
+		// per peer), any caller label requirement, and, when the operator set
+		// an egress floor (egress.require_labels), holds it to that too.
 		route, ok := parseEgressRoute(r.URL.Path)
 		if !ok {
 			http.Error(w, "Bad Request: request names no peer", http.StatusBadRequest)
@@ -798,9 +807,11 @@ func createEgressProxy(node *SamNode) http.Handler {
 				r.URL.Path = strings.Join(parts, "/")
 			}
 		}
-		if err := node.VerifyPeerLabels(r.Context(), pid, nil); err != nil {
+		if err := node.VerifyPeerLabels(r.Context(), pid, requiredLabels); err != nil {
 			logger.Warnf("[Egress] refused egress to %s: %v", pid, err)
-			if len(node.egressFloor()) > 0 {
+			if len(requiredLabels) > 0 {
+				http.Error(w, "Required labels not attested by provider", http.StatusForbidden)
+			} else if len(node.egressFloor()) > 0 {
 				http.Error(w, "Forbidden: provider does not attest the egress floor", http.StatusForbidden)
 			} else {
 				http.Error(w, "Forbidden: destination is not an enrolled peer", http.StatusForbidden)

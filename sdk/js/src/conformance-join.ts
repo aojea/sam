@@ -64,6 +64,7 @@ interface Command {
   body?: string;
   headers?: Record<string, string>;
   required_labels?: Record<string, string>;
+  timeout_ms?: string | number;
 }
 
 function requireEnv(name: string): string {
@@ -109,7 +110,8 @@ async function handle(session: MeshSession, command: Command): Promise<unknown> 
   try {
     switch (command.cmd) {
       case "auth": {
-        const verified = await session.authenticate(command.addr ?? "", AbortSignal.timeout(15_000));
+        const timeoutMs = command.timeout_ms !== undefined ? Number(command.timeout_ms) : 15_000;
+        const verified = await session.authenticate(command.addr ?? "", AbortSignal.timeout(timeoutMs));
         return {
           cmd: "auth",
           ok: true,

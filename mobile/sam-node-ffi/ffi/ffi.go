@@ -384,6 +384,13 @@ func EnrollNodeBootstrap(dataDir string, controlPlaneURL string, bootstrapToken 
 // stored (or freshly generated) key, then persists the control plane URL and
 // syncs the mesh config so the next StartNode finds everything in place.
 func enrollWith(dataDir string, controlPlaneURL string, allowLoopback bool, labels string, enroll func(context.Context, *node.SamNode, *node.Store) error) error {
+	mu.Lock()
+	isRunning := activeNode != nil || unauthSrv != nil
+	mu.Unlock()
+	if isRunning {
+		return errors.New("stop the node before enrolling")
+	}
+
 	parsedLabels, err := decodeLabels(labels)
 	if err != nil {
 		return err
@@ -414,7 +421,7 @@ func enrollWith(dataDir string, controlPlaneURL string, allowLoopback bool, labe
 		}
 	}
 
-	enrollCtx, enrollCancel := context.WithCancel(context.Background())
+	enrollCtx, enrollCancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer enrollCancel()
 
 	var listenAddrs []string
@@ -437,6 +444,7 @@ func enrollWith(dataDir string, controlPlaneURL string, allowLoopback bool, labe
 	}
 
 	if err := meshNode.Start(enrollCtx); err != nil {
+		_ = meshNode.Teardown()
 		return fmt.Errorf("failed to start node for enrollment: %w", err)
 	}
 	defer func() {
@@ -454,16 +462,26 @@ func enrollWith(dataDir string, controlPlaneURL string, allowLoopback bool, labe
 	return nil
 }
 
+func jsonError(msg string) string {
+	b, err := json.Marshal(map[string]string{"error": msg})
+	if err != nil {
+		return fmt.Sprintf(`{"error": %q}`, msg)
+	}
+	return string(b)
+}
+
 // FetchControlPlaneInfoJSON fetches control plane info and returns it as a JSON string.
 // If an error occurs, it returns a JSON object with an "error" field.
 func FetchControlPlaneInfoJSON(controlPlaneURL string) string {
-	info, err := node.FetchControlPlaneInfo(context.Background(), controlPlaneURL)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	info, err := node.FetchControlPlaneInfo(ctx, controlPlaneURL)
 	if err != nil {
-		return fmt.Sprintf(`{"error": %q}`, err.Error())
+		return jsonError(err.Error())
 	}
 	jsonBytes, err := protojson.Marshal(info)
 	if err != nil {
-		return fmt.Sprintf(`{"error": %q}`, err.Error())
+		return jsonError(err.Error())
 	}
 	return string(jsonBytes)
 }
@@ -494,10 +512,10 @@ func GetMeshInfo() string {
 	defer mu.Unlock()
 
 	if activeNode == nil {
-		return `{"error": "node not running"}`
+		return jsonError("node not running")
 	}
 	if activeNode.Host == nil {
-		return `{"error": "host not initialized"}`
+		return jsonError("host not initialized")
 	}
 
 	peers := activeNode.Host.Network().Peers()
@@ -514,7 +532,7 @@ func GetMeshInfo() string {
 
 	jsonBytes, err := json.Marshal(resData)
 	if err != nil {
-		return fmt.Sprintf(`{"error": %q}`, err.Error())
+		return jsonError(err.Error())
 	}
 	return string(jsonBytes)
 }
@@ -526,32 +544,34 @@ func CallRemoteTool(peerIDStr string, toolName string, argsJSON string) string {
 	mu.Unlock()
 
 	if n == nil {
-		return `{"error": "node not running"}`
+		return jsonError("node not running")
 	}
 	if n.Host == nil {
-		return `{"error": "host not initialized"}`
+		return jsonError("host not initialized")
 	}
 
 	targetPeer, err := peer.Decode(peerIDStr)
 	if err != nil {
-		return fmt.Sprintf(`{"error": "invalid peer ID: %s"}`, err.Error())
+		return jsonError("invalid peer ID: " + err.Error())
 	}
 
 	var params any
 	if argsJSON != "" && argsJSON != "{}" {
 		if err := json.Unmarshal([]byte(argsJSON), &params); err != nil {
-			return fmt.Sprintf(`{"error": "invalid arguments JSON: %s"}`, err.Error())
+			return jsonError("invalid arguments JSON: " + err.Error())
 		}
 	}
 
-	res, err := n.CallMCPTool(context.Background(), targetPeer, toolName, params, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	res, err := n.CallMCPTool(ctx, targetPeer, toolName, params, nil)
 	if err != nil {
-		return fmt.Sprintf(`{"error": "failed to call tool: %s"}`, err.Error())
+		return jsonError("failed to call tool: " + err.Error())
 	}
 
 	jsonBytes, err := json.Marshal(res)
 	if err != nil {
-		return fmt.Sprintf(`{"error": "failed to marshal result: %s"}`, err.Error())
+		return jsonError("failed to marshal result: " + err.Error())
 	}
 
 	return string(jsonBytes)
@@ -604,7 +624,11 @@ func ReEnrollNode(dataDir string, labels string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create node for re-enrollment: %w", err)
 	}
-	if err := meshNode.ReEnrollWithRefreshToken(context.Background()); err != nil {
+	defer func() { _ = meshNode.Teardown() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := meshNode.ReEnrollWithRefreshToken(ctx); err != nil {
 		return fmt.Errorf("re-enrollment failed: %w", err)
 	}
 	return nil

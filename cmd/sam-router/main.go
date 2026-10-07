@@ -105,6 +105,7 @@ func main() {
 			}()
 
 			if err := r.Start(); err != nil {
+				_ = r.Close()
 				logger.Fatalf("Failed to start router: %v", err)
 			}
 

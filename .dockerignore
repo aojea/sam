@@ -28,6 +28,8 @@ bin/
 dist/
 node_modules/
 __pycache__/
+.pytest_cache/
+.worktrees/
 .venv/
 *.test
 *.out

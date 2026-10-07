@@ -312,18 +312,23 @@ func (s *GatewayServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 				strings.EqualFold(capturedMethod, http.MethodPost) &&
 				capturedHeaders[strings.ToLower(HeaderSamMCPTool)] == "" &&
 				isMCPRoute {
-				pendingCheck = true
-				resp = &extprocv3.ProcessingResponse{
-					Response: &extprocv3.ProcessingResponse_RequestHeaders{
-						RequestHeaders: &extprocv3.HeadersResponse{
-							Response: &extprocv3.CommonResponse{
-								Status: extprocv3.CommonResponse_CONTINUE,
+				preResp := s.evaluateExtProcDecision(stream.Context(), capturedMethod, capturedPath, capturedHost, capturedHeaders, false, true)
+				if preResp.GetImmediateResponse() != nil {
+					resp = preResp
+				} else {
+					pendingCheck = true
+					resp = &extprocv3.ProcessingResponse{
+						Response: &extprocv3.ProcessingResponse_RequestHeaders{
+							RequestHeaders: &extprocv3.HeadersResponse{
+								Response: &extprocv3.CommonResponse{
+									Status: extprocv3.CommonResponse_CONTINUE,
+								},
 							},
 						},
-					},
-					ModeOverride: &extprocv3http.ProcessingMode{
-						RequestBodyMode: extprocv3http.ProcessingMode_BUFFERED,
-					},
+						ModeOverride: &extprocv3http.ProcessingMode{
+							RequestBodyMode: extprocv3http.ProcessingMode_BUFFERED,
+						},
+					}
 				}
 			} else {
 				resp = s.evaluateExtProcDecision(stream.Context(), capturedMethod, capturedPath, capturedHost, capturedHeaders, false, false)
@@ -354,6 +359,13 @@ func (s *GatewayServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			}
 
 		case *extprocv3.ProcessingRequest_ResponseHeaders:
+			if pendingCheck {
+				pendingCheck = false
+				if denyResp := s.evaluateExtProcDecision(stream.Context(), capturedMethod, capturedPath, capturedHost, capturedHeaders, false, false); denyResp.GetImmediateResponse() != nil {
+					resp = denyResp
+					break
+				}
+			}
 			resp = &extprocv3.ProcessingResponse{
 				Response: &extprocv3.ProcessingResponse_ResponseHeaders{
 					ResponseHeaders: &extprocv3.HeadersResponse{
@@ -376,6 +388,13 @@ func (s *GatewayServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			}
 
 		case *extprocv3.ProcessingRequest_RequestTrailers:
+			if pendingCheck {
+				pendingCheck = false
+				if denyResp := s.evaluateExtProcDecision(stream.Context(), capturedMethod, capturedPath, capturedHost, capturedHeaders, false, false); denyResp.GetImmediateResponse() != nil {
+					resp = denyResp
+					break
+				}
+			}
 			resp = &extprocv3.ProcessingResponse{
 				Response: &extprocv3.ProcessingResponse_RequestTrailers{
 					RequestTrailers: &extprocv3.TrailersResponse{},

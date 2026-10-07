@@ -62,6 +62,9 @@ export async function createMeshHost(identity: Identity, options: MeshHostOption
     transports: [...transports(), circuitRelayTransport()],
     connectionEncrypters: connectionEncrypters(),
     streamMuxers: [yamux()],
+    connectionManager: {
+      inboundConnectionThreshold: Infinity,
+    },
     connectionGater: {
       denyDialPeer: denyBanned,
       denyInboundEncryptedConnection: denyBanned,
@@ -80,7 +83,7 @@ export async function createMeshHost(identity: Identity, options: MeshHostOption
       // A client of the mesh DHT: it looks providers up and does not hold
       // records. Peers keep their private addresses; a mesh member often
       // is one, and the router relays to it.
-      dht: kadDHT({ protocol: DHT_PROTOCOL, clientMode: true, peerInfoMapper: passthroughMapper }),
+      dht: kadDHT({ protocol: DHT_PROTOCOL, clientMode: true, peerInfoMapper: passthroughMapper, initialQuerySelfInterval: 20 }),
       // The control plane's events reach members through the routers.
       // StrictSign, as every Go component pins it: the pubsub envelope is
       // signed by the author, and the event inside by the control plane.

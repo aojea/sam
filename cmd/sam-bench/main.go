@@ -40,6 +40,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/google/sam/internal/bench"
+	"github.com/google/sam/internal/version"
 )
 
 // observation is one complete, self-describing measurement.
@@ -77,8 +78,9 @@ func main() {
 	)
 
 	rootCmd := &cobra.Command{
-		Use:   "sam-bench",
-		Short: "Measure the mesh from where an agent stands",
+		Use:     "sam-bench",
+		Version: version.String(),
+		Short:   "Measure the mesh from where an agent stands",
 	}
 
 	runCmd := &cobra.Command{

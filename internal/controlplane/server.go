@@ -2796,9 +2796,18 @@ func (s *Server) HandleAdminRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req api.TokenRevokeRequest
-	if err := proto.Unmarshal(body, &req); err != nil {
-		http.Error(w, "Invalid request format", http.StatusBadRequest)
-		return
+	isJSON := strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type"))), "application/json")
+	if isJSON {
+		if err := (protojson.UnmarshalOptions{DiscardUnknown: false}).Unmarshal(body, &req); err != nil {
+			http.Error(w, "Invalid request format", http.StatusBadRequest)
+			return
+		}
+	} else if err := proto.Unmarshal(body, &req); err != nil {
+		if jsonErr := (protojson.UnmarshalOptions{DiscardUnknown: false}).Unmarshal(body, &req); jsonErr != nil {
+			http.Error(w, "Invalid request format", http.StatusBadRequest)
+			return
+		}
+		isJSON = true
 	}
 
 	if req.PeerId == "" {
@@ -2836,6 +2845,10 @@ func (s *Server) HandleAdminRevoke(w http.ResponseWriter, r *http.Request) {
 
 	resp := &api.TokenRevokeResponse{
 		Success: true,
+	}
+	if isJSON {
+		writeProtoJSON(w, resp)
+		return
 	}
 	respData, err := proto.Marshal(resp)
 	if err != nil {

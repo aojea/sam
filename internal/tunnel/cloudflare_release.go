@@ -161,15 +161,19 @@ func downloadCloudflared(ctx context.Context, client *http.Client, baseURL, dir 
 	binPath := bin.Name()
 	defer func() { _ = os.Remove(binPath) }()
 	var src io.Reader = tmp
+	var gzCloser io.Closer
 	if asset.Tarball {
-		if src, err = tarballEntry(tmp, "cloudflared"); err != nil {
+		src, gzCloser, err = tarballEntry(tmp, "cloudflared")
+		if err != nil {
 			_ = tmp.Close()
 			_ = bin.Close()
 			return "", err
 		}
+		defer func() { _ = gzCloser.Close() }()
 	}
 	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(bin, h), src); err != nil {
+	n, err := io.Copy(io.MultiWriter(bin, h), io.LimitReader(src, maxCloudflaredDownload+1))
+	if err != nil {
 		_ = tmp.Close()
 		_ = bin.Close()
 		return "", fmt.Errorf("failed to write cloudflared: %w", err)
@@ -177,6 +181,9 @@ func downloadCloudflared(ctx context.Context, client *http.Client, baseURL, dir 
 	_ = tmp.Close()
 	if err := bin.Close(); err != nil {
 		return "", err
+	}
+	if n > maxCloudflaredDownload {
+		return "", fmt.Errorf("extracted cloudflared exceeds %d bytes", maxCloudflaredDownload)
 	}
 	if got := hex.EncodeToString(h.Sum(nil)); got != asset.BinarySHA256 {
 		return "", fmt.Errorf("cloudflared binary digest mismatch: got %s, want %s", got, asset.BinarySHA256)
@@ -222,22 +229,24 @@ func fetchVerified(ctx context.Context, client *http.Client, url string, w io.Wr
 
 // tarballEntry positions a reader on the named regular file inside a
 // gzip-compressed tarball.
-func tarballEntry(r io.Reader, name string) (io.Reader, error) {
+func tarballEntry(r io.Reader, name string) (io.Reader, io.Closer, error) {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
-		return nil, fmt.Errorf("invalid cloudflared tarball: %w", err)
+		return nil, nil, fmt.Errorf("invalid cloudflared tarball: %w", err)
 	}
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
-			return nil, fmt.Errorf("cloudflared tarball has no %q entry", name)
+			_ = gz.Close()
+			return nil, nil, fmt.Errorf("cloudflared tarball has no %q entry", name)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("invalid cloudflared tarball: %w", err)
+			_ = gz.Close()
+			return nil, nil, fmt.Errorf("invalid cloudflared tarball: %w", err)
 		}
 		if hdr.Typeflag == tar.TypeReg && filepath.Base(hdr.Name) == name {
-			return tr, nil
+			return tr, gz, nil
 		}
 	}
 }

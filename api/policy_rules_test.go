@@ -209,6 +209,7 @@ func TestBuildPolicyRulesWildcardsAndInjectionDefense(t *testing.T) {
 		{
 			Name:            "payments",
 			AllowedServices: []string{"mcp:Echo"},
+			AllowedTargets:  []string{"*", `node:bad"quote`, "bad fact:val"},
 		},
 	}
 	bindings := []*PolicyBinding{
@@ -223,13 +224,15 @@ func TestBuildPolicyRulesWildcardsAndInjectionDefense(t *testing.T) {
 				"user:*",
 				"user:system:*:Invalid",
 				`user:foo")*`,
+				`user:exact"quote`,
+				`user:exact\slash`,
 			},
 		},
 	}
 
 	rules, warnings := BuildPolicyRules(roles, bindings)
-	if len(warnings) != 3 {
-		t.Fatalf("warnings = %v, want 3 warnings for rejected wildcard entries", warnings)
+	if len(warnings) != 7 {
+		t.Fatalf("warnings = %v (len %d), want 7 warnings for rejected entries", warnings, len(warnings))
 	}
 
 	texts := PolicyRuleTexts(rules)

@@ -395,7 +395,7 @@ func ParseServiceTarget(target string) (svcType, svcName string) {
 		return "*", "*"
 	}
 
-	if strings.Contains(target, "://") {
+	if idx := strings.Index(target, "://"); idx >= 0 && !strings.Contains(target[:idx], ":") {
 		matches := rfc3986URIRegex.FindStringSubmatch(target)
 		if len(matches) < 6 {
 			return "", target

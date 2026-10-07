@@ -125,9 +125,24 @@ export interface ProviderOptions extends ProviderAuthorizerOptions {
   onAuthorized?(peerId: string, verified: VerifiedBiscuit, targetService: string): void;
 }
 
-// A URL parser reads %2e as a dot too (WHATWG URL, path state), so the check
-// sees what the parser and the backend will see.
+// A URL parser reads %2e as a dot too (WHATWG URL, path state), and %2f/%5c/\
+// as path separators on some backends, so the check rejects those and dot segments.
 function hasDotSegment(path: string): boolean {
+  if (!path.startsWith("/") || path.includes("#")) {
+    return true;
+  }
+  for (let i = 0; i < path.length; i++) {
+    const code = path.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f || path[i] === "\\" || path[i] === '"') {
+      return true;
+    }
+    if (path[i] === "%" && i + 2 < path.length) {
+      const hex = path.slice(i + 1, i + 3).toLowerCase();
+      if (hex === "2f" || hex === "5c" || hex === "00") {
+        return true;
+      }
+    }
+  }
   return path.split("/").some((seg) => {
     const s = seg.replace(/%2e/gi, ".");
     return s === "." || s === "..";

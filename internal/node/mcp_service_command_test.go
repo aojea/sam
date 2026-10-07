@@ -63,6 +63,9 @@ func TestEchoHelperProcess(t *testing.T) {
 		_ = w.WriteByte('\n')
 		_ = w.Flush()
 	}
+	if err := scanner.Err(); err != nil {
+		os.Exit(1)
+	}
 	os.Exit(0)
 }
 

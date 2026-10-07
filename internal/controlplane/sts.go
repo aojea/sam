@@ -748,6 +748,10 @@ func (s *Server) HandleTokenExchange(w http.ResponseWriter, r *http.Request) {
 		writeChallengeError(w, "Unauthorized: node credential required")
 		return
 	}
+	if nodeRecord.Role == api.RoleRouter {
+		http.Error(w, "Forbidden: router credentials cannot exchange tokens", http.StatusForbidden)
+		return
+	}
 	if !s.allowNodeSTSRequest(nodeRecord.PeerID) {
 		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 		return
@@ -943,6 +947,10 @@ func (s *Server) HandleSTSToken(w http.ResponseWriter, r *http.Request) {
 	nodeRecord := s.admittedNode(r)
 	if nodeRecord == nil {
 		writeChallengeError(w, "Unauthorized: node credential required")
+		return
+	}
+	if nodeRecord.Role == api.RoleRouter {
+		http.Error(w, "Forbidden: router credentials cannot mint STS tokens", http.StatusForbidden)
 		return
 	}
 	if !s.allowNodeSTSRequest(nodeRecord.PeerID) {
@@ -1308,10 +1316,22 @@ func isValidOAuthRedirectURI(raw string) bool {
 	return false
 }
 
+func clientRateLimitKey(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil || host == "" {
+		return "oauth:" + r.RemoteAddr
+	}
+	return "oauth:" + host
+}
+
 // HandleOAuthAuthorize serves GET and POST `/oauth/authorize` (OAuth 2.1 Authorization Code + PKCE S256).
 func (s *Server) HandleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.allowNodeSTSRequest(clientRateLimitKey(r)) {
+		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
@@ -1501,6 +1521,10 @@ func (s *Server) HandleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 func (s *Server) HandleOAuthToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.allowNodeSTSRequest(clientRateLimitKey(r)) {
+		writeOAuthError(w, http.StatusTooManyRequests, "temporarily_unavailable", "rate limit exceeded")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)

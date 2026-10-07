@@ -107,7 +107,7 @@ func ValidateHTTPGrants(grants []*HTTPGrant, allowedServices []string) error {
 func hasEncodedPathTraversal(p string) bool {
 	for i := 0; i < len(p); i++ {
 		c := p[i]
-		if c < 0x20 || c == 0x7f || c == '\\' {
+		if c < 0x20 || c == 0x7f || c == '\\' || c == '"' {
 			return true
 		}
 		if c == '%' && i+2 < len(p) {

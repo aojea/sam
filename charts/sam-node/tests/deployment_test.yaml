@@ -1,8 +1,9 @@
 suite: sam-node deployment
 templates:
-  # configmap.yaml must be loaded for the checksum/config include to resolve
+  # configmap.yaml and secret.yaml must be loaded for the checksum includes to resolve
   - templates/deployment.yaml
   - templates/configmap.yaml
+  - templates/secret.yaml
 tests:
   - it: fails without controlPlaneUrl
     template: templates/deployment.yaml

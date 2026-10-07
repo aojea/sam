@@ -20,7 +20,7 @@
 import { AUTHORIZER_LIMITS, BiscuitVerificationError, loadBiscuit, verifyPeerBiscuit, withinLimits, type VerifiedBiscuit } from "./biscuit.ts";
 import { parseServiceTarget } from "./discovery.ts";
 import { BASELINE_DATALOG } from "./gen/datalog.ts";
-import { evaluateTaskRules } from "./tar.ts";
+import { evaluateTaskRules, isSafeRequestHTTPPath } from "./tar.ts";
 
 /** What a caller asks for, as sam-node's RequestContext. */
 export interface AuthorizeRequest {
@@ -133,6 +133,9 @@ export async function authorizeCaller(req: AuthorizeRequest, options: ProviderAu
 
   // The request as the wire carried it, never as the caller describes it.
   if (req.method !== undefined) {
+    if (req.method !== "CONNECT" && req.path !== undefined && req.path !== "" && !isSafeRequestHTTPPath(req.path)) {
+      throw new AuthorizationError(req.peerId, `invalid HTTP path ${JSON.stringify(req.path)}`);
+    }
     fact(`${BASELINE_DATALOG.fact_method}({m})`, { m: req.method });
     fact(`${BASELINE_DATALOG.fact_path}({p})`, { p: req.path ?? "" });
   }

@@ -149,7 +149,7 @@ roles: []
 		"--keys-path", filepath.Join(tmpDir, "router_keysA.db"),
 		"--allow-loopback",
 		"--oidc-token", routerJWT,
-		"--lease-renew-interval", "1s",
+		"--lease-renew-interval", "250ms",
 	)
 	if err := cmdRouterA.Start(); err != nil {
 		t.Fatalf("failed to start Router A: %v", err)
@@ -182,7 +182,7 @@ roles: []
 		"--keys-path", filepath.Join(tmpDir, "router_keysB.db"),
 		"--allow-loopback",
 		"--oidc-token", routerJWT,
-		"--lease-renew-interval", "1s",
+		"--lease-renew-interval", "250ms",
 	)
 	if err := cmdRouterB.Start(); err != nil {
 		t.Fatalf("failed to start Router B: %v", err)
@@ -207,10 +207,10 @@ roles: []
 		"--jwt-path", jwtPath,
 		"--api-token-path", tokenPath(t, "dummy-token"),
 		"--allow-loopback",
-		"--monitor-bootstrap", "1s",
-		"--monitor-interval", "1s",
-		"--autorelay-min-interval", "1s",
-		"--autorelay-backoff", "1s",
+		"--monitor-bootstrap", "200ms",
+		"--monitor-interval", "200ms",
+		"--autorelay-min-interval", "200ms",
+		"--autorelay-backoff", "200ms",
 		"--autorelay-boot-delay", "0s",
 	)
 	samNode.waitForAPI(t)
@@ -255,7 +255,7 @@ roles: []
 	// handshaken with Router B before it dials the circuit. A fresh host per
 	// attempt sidesteps the swarm's dial backoff.
 	var connectErr error
-	for i := 0; i < 15; i++ {
+	for i := 0; i < 25; i++ {
 		clientHost, err := libp2p.New(libp2p.NoListenAddrs, libp2p.EnableRelay())
 		if err != nil {
 			t.Fatal(err)
@@ -271,7 +271,7 @@ roles: []
 			break
 		}
 		t.Logf("attempt %d: %v", i+1, connectErr)
-		time.Sleep(1 * time.Second)
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	if connectErr != nil {

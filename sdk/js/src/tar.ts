@@ -51,7 +51,7 @@ function hasASCIIControl(s: string): boolean {
 function hasEncodedPathTraversal(p: string): boolean {
   for (let i = 0; i < p.length; i++) {
     const code = p.charCodeAt(i);
-    if (code < 0x20 || code === 0x7f || p[i] === "\\") {
+    if (code < 0x20 || code === 0x7f || p[i] === "\\" || p[i] === '"') {
       return true;
     }
     if (p[i] === "%" && i + 2 < p.length) {
@@ -128,7 +128,7 @@ export function validateHTTPGrantPath(p: string): void {
   if (stars > 1 || (stars === 1 && !p.endsWith("*"))) {
     throw new Error(`path ${JSON.stringify(p)}: '*' is only valid once, at the end`);
   }
-  for (const seg of p.slice(1).split("/")) {
+  for (const seg of p.replace(/\*$/, "").split("/")) {
     if (seg === "." || seg === "..") {
       throw new Error(`path ${JSON.stringify(p)} must not contain '.' or '..' segments`);
     }

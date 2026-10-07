@@ -47,7 +47,7 @@ def _has_ascii_control(s: str) -> bool:
 
 def _has_encoded_path_traversal(p: str) -> bool:
     for i, c in enumerate(p):
-        if ord(c) < 0x20 or ord(c) == 0x7F or c == "\\":
+        if ord(c) < 0x20 or ord(c) == 0x7F or c == "\\" or c == '"':
             return True
         if c == "%" and i + 2 < len(p):
             hx = p[i + 1 : i + 3].lower()
@@ -109,7 +109,7 @@ def validate_http_grant_path(p: str) -> None:
     stars = p.count("*")
     if stars > 1 or (stars == 1 and not p.endswith("*")):
         raise ValueError(f"path {p!r}: '*' is only valid once, at the end")
-    for seg in p[1:].split("/"):
+    for seg in p.removesuffix("*").split("/"):
         if seg in (".", ".."):
             raise ValueError(f"path {p!r} must not contain '.' or '..' segments")
 

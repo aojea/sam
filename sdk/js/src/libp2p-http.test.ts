@@ -412,7 +412,19 @@ test("a dot segment is refused however it is spelled", async () => {
   const endpoint = a2aEndpoint({ handler: () => new Response() });
   // Nothing in options is consulted before the path check.
   const options = providerOptions(new Uint8Array());
-  for (const target of ["/a2a/agent/../x", "/a2a/agent/./x", "/a2a/agent/%2e%2e/x", "/a2a/agent/%2E%2E/x", "/a2a/agent/.%2e/x", "/a2a/agent/%2e/x", "/a2a/%2e%2e/other/x?q=1"]) {
+  for (const target of [
+    "/a2a/agent/../x",
+    "/a2a/agent/./x",
+    "/a2a/agent/%2e%2e/x",
+    "/a2a/agent/%2E%2E/x",
+    "/a2a/agent/.%2e/x",
+    "/a2a/agent/%2e/x",
+    "/a2a/%2e%2e/other/x?q=1",
+    "/a2a/agent/%2f..%2fother",
+    "/a2a/agent/%5c..%5cother",
+    "/a2a/agent\\..\\other",
+    "/a2a/agent/%00/x",
+  ]) {
     assert.deepEqual(await admitIngress({ method: "GET", target, headers: new Headers(), remotePeer: "peer" }, endpoint, options), { status: 400, text: "Invalid path" }, target);
   }
   // Not dot segments: the request reaches the next check, the missing biscuit.

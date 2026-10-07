@@ -287,13 +287,34 @@ func DecodeTARBlockPayload(b64 string) (*TaskAuthorizationRule, error) {
 	if err := proto.Unmarshal(raw, &rule); err != nil {
 		return nil, fmt.Errorf("unmarshal tar_block protobuf: %w", err)
 	}
-	if len(rule.ProtoReflect().GetUnknown()) > 0 {
+	if hasUnknownTARFields(&rule) {
 		return nil, fmt.Errorf("tar_block protobuf contains unknown fields")
 	}
 	if err := ValidateTaskAuthorizationRule(&rule); err != nil {
 		return nil, fmt.Errorf("invalid tar_block: %w", err)
 	}
 	return &rule, nil
+}
+
+func hasUnknownTARFields(rule *TaskAuthorizationRule) bool {
+	if len(rule.ProtoReflect().GetUnknown()) > 0 {
+		return true
+	}
+	if exp := rule.GetExpireTime(); exp != nil && len(exp.ProtoReflect().GetUnknown()) > 0 {
+		return true
+	}
+	for _, r := range rule.GetRules() {
+		if r == nil {
+			continue
+		}
+		if len(r.ProtoReflect().GetUnknown()) > 0 {
+			return true
+		}
+		if op := r.GetOperation(); op != nil && len(op.ProtoReflect().GetUnknown()) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // ParseTARBlockSource validates that a Biscuit block's Datalog source text
@@ -473,7 +494,7 @@ func EvaluateTaskRules(blocks []*TaskAuthorizationRule, req TaskRequestContext, 
 			return fmt.Errorf("tar_block[%d] is nil", i+1)
 		}
 		if exp := block.GetExpireTime(); exp != nil {
-			if !exp.IsValid() {
+			if !exp.IsValid() || exp.AsTime().Unix() <= 0 {
 				return fmt.Errorf("tar_block[%d] has invalid expire_time", i+1)
 			}
 			if now.After(exp.AsTime()) {
@@ -506,7 +527,7 @@ func EvaluateTaskRulesForDestination(blocks []*TaskAuthorizationRule, serviceTyp
 			return fmt.Errorf("tar_block[%d] is nil", i+1)
 		}
 		if exp := block.GetExpireTime(); exp != nil {
-			if !exp.IsValid() {
+			if !exp.IsValid() || exp.AsTime().Unix() <= 0 {
 				return fmt.Errorf("tar_block[%d] has invalid expire_time", i+1)
 			}
 			if now.After(exp.AsTime()) {
@@ -544,10 +565,11 @@ func EvaluateTaskRulesForDestination(blocks []*TaskAuthorizationRule, serviceTyp
 func EffectiveTARExpiration(authorityExp time.Time, blocks []*TaskAuthorizationRule) time.Time {
 	effective := authorityExp
 	for _, block := range blocks {
-		if block == nil || block.GetExpireTime() == nil || !block.GetExpireTime().IsValid() {
+		exp := block.GetExpireTime()
+		if block == nil || exp == nil || !exp.IsValid() || exp.AsTime().Unix() <= 0 {
 			continue
 		}
-		t := block.GetExpireTime().AsTime()
+		t := exp.AsTime()
 		if effective.IsZero() || t.Before(effective) {
 			effective = t
 		}

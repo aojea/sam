@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -342,6 +344,8 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 	r.ContentLength = int64(len(reqBody))
 	if len(reqBody) > 0 {
 		r.Header.Set("Content-Length", strconv.Itoa(len(reqBody)))
+	} else {
+		r.Header.Del("Content-Length")
 	}
 
 	reqCtx := context.WithValue(r.Context(), egressAuthKey{}, auth)
@@ -638,6 +642,15 @@ func (s *EgressService) resolveModelArmorEndpoint(ctx context.Context, template 
 		return strings.TrimRight(s.modelArmorBaseURL, "/") + "/v1/" + strings.TrimLeft(tmpl, "/"), "", nil
 	}
 	if strings.HasPrefix(tmpl, "http://") || strings.HasPrefix(tmpl, "https://") {
+		u, err := url.Parse(tmpl)
+		if err != nil || u.Hostname() == "" {
+			return "", "", fmt.Errorf("invalid model_armor.template URL %q", tmpl)
+		}
+		if ip, pErr := netip.ParseAddr(u.Hostname()); pErr == nil {
+			if isForbiddenEgressAddr(ip, s.allowsLocalTarget()) {
+				return "", "", fmt.Errorf("model_armor.template URL host %q is in a forbidden IP range", u.Hostname())
+			}
+		}
 		return tmpl, "", nil
 	}
 	// Parse location from projects/P/locations/L/templates/T
@@ -731,19 +744,28 @@ func extractInspectableText(body []byte) string {
 }
 
 func replaceInspectableText(body []byte, original, replacement string) ([]byte, error) {
+	if original == replacement {
+		return body, nil
+	}
 	var doc map[string]any
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return bytes.ReplaceAll(body, []byte(original), []byte(replacement)), nil
 	}
 
 	// If messages[].content were joined by '\n' in extractInspectableText, split back
-	// when the replacement has the same number of lines; otherwise replace in-place.
+	// using each message's original line count; if the line count matches, map each
+	// message back in-place.
 	if msgs, ok := doc["messages"].([]any); ok {
 		var contentMaps []map[string]any
+		var lineCounts []int
+		totalLines := 0
 		for _, m := range msgs {
 			if mm, ok := m.(map[string]any); ok {
 				if c, ok := mm["content"].(string); ok && c != "" {
 					contentMaps = append(contentMaps, mm)
+					lc := strings.Count(c, "\n") + 1
+					lineCounts = append(lineCounts, lc)
+					totalLines += lc
 				}
 			}
 		}
@@ -753,9 +775,12 @@ func replaceInspectableText(body []byte, original, replacement string) ([]byte, 
 		}
 		if len(contentMaps) > 1 {
 			parts := strings.Split(replacement, "\n")
-			if len(parts) == len(contentMaps) {
+			if len(parts) == totalLines {
+				offset := 0
 				for i, mm := range contentMaps {
-					mm["content"] = parts[i]
+					lc := lineCounts[i]
+					mm["content"] = strings.Join(parts[offset:offset+lc], "\n")
+					offset += lc
 				}
 				return json.Marshal(doc)
 			}
@@ -766,7 +791,10 @@ func replaceInspectableText(body []byte, original, replacement string) ([]byte, 
 	if modified {
 		return json.Marshal(updated)
 	}
-	return bytes.ReplaceAll(body, []byte(original), []byte(replacement)), nil
+	if bytes.Contains(body, []byte(original)) {
+		return bytes.ReplaceAll(body, []byte(original), []byte(replacement)), nil
+	}
+	return nil, errors.New("failed to map inspection replacement back into structured JSON payload")
 }
 
 func replaceStringInJSONValue(v any, original, replacement string) (any, bool) {

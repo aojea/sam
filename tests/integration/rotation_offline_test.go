@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -57,10 +59,22 @@ func TestKeyRotationWhileMembersOffline(t *testing.T) {
 	node := members.startNode(t, false)
 	members.assertNodeBackUnderKey(t, node, mesh, newPub)
 
-	// The SDK members start again from their state directories. The token
-	// path names no file: the member resumes or fails, it cannot enroll.
-	for _, s := range members.sdk {
-		m := s.start(t, mesh, " resumed", "SAM_BOOTSTRAP_TOKEN_PATH="+filepath.Join(t.TempDir(), "no-token"))
+	// The SDK members start again from their state directories concurrently.
+	// The token path names no file: the member resumes or fails, it cannot enroll.
+	resumed := make([]*sdkMember, len(members.sdk))
+	noToken := "SAM_BOOTSTRAP_TOKEN_PATH=" + filepath.Join(t.TempDir(), "no-token")
+	var wg sync.WaitGroup
+	for i, s := range members.sdk {
+		i, s := i, s
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resumed[i] = s.start(t, mesh, " resumed", noToken)
+		}()
+	}
+	wg.Wait()
+	for i, s := range members.sdk {
+		m := resumed[i]
 		s.assertBackUnderKey(t, m, mesh, newPub, node)
 		if res := m.sync(t); !res.OK {
 			t.Fatalf("%s: pull after the resume failed: %s", m.name, res.Error)
@@ -85,7 +99,7 @@ func TestKeyRotationPastGraceWhileMembersOffline(t *testing.T) {
 	ctx := context.Background()
 	members := enrollMembersThenStop(t, mesh)
 
-	newPub := rotateSigningKey(t, ctx, mesh, time.Second)
+	newPub := rotateSigningKey(t, ctx, mesh, 250*time.Millisecond)
 	waitForKeysRetired(t, mesh.cpPort, [][]byte{mesh.cpPub})
 
 	// The node comes back with a fresh platform token on disk.
@@ -97,8 +111,19 @@ func TestKeyRotationPastGraceWhileMembersOffline(t *testing.T) {
 
 	// Each SDK member comes back with a fresh token available and enrolls
 	// again as the identity it persisted.
-	for _, s := range members.sdk {
-		m := s.start(t, mesh, " past grace")
+	resumed := make([]*sdkMember, len(members.sdk))
+	var wg sync.WaitGroup
+	for i, s := range members.sdk {
+		i, s := i, s
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resumed[i] = s.start(t, mesh, " past grace")
+		}()
+	}
+	wg.Wait()
+	for i, s := range members.sdk {
+		m := resumed[i]
 		s.assertBackUnderKey(t, m, mesh, newPub, node)
 		m.quit(t)
 	}
@@ -162,16 +187,34 @@ func enrollMembersThenStop(t *testing.T, mesh *sdkMesh) *offlineMembers {
 
 	// A token is read only to enroll, so the file can go once the member
 	// holds a credential.
+	type slot struct {
+		launcher sdkRunner
+		cmd      *exec.Cmd
+		stateDir string
+		member   *sdkMember
+	}
+	var slots []slot
 	for _, launcher := range sdkMemberLaunchers {
 		cmd, skip := launcher.cmd(mesh.root)
 		if skip != "" {
 			t.Logf("%s SDK skipped: %s", launcher.name, skip)
 			continue
 		}
-		stateDir := filepath.Join(t.TempDir(), "state")
-		m := launchSDKMember(t, launcher.name, cmd, mesh.root, mesh.baseURL, mesh.adminToken, "SAM_SDK_STATE_DIR="+stateDir)
-		members.sdk = append(members.sdk, offlineSDKMember{launcher: launcher, stateDir: stateDir, peerID: m.report.PeerID, biscuit: m.report.Biscuit})
-		m.quit(t)
+		slots = append(slots, slot{launcher: launcher, cmd: cmd, stateDir: filepath.Join(t.TempDir(), "state")})
+	}
+	var wg sync.WaitGroup
+	for i := range slots {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			slots[i].member = launchSDKMember(t, slots[i].launcher.name, slots[i].cmd, mesh.root, mesh.baseURL, mesh.adminToken, "SAM_SDK_STATE_DIR="+slots[i].stateDir)
+		}()
+	}
+	wg.Wait()
+	for _, s := range slots {
+		members.sdk = append(members.sdk, offlineSDKMember{launcher: s.launcher, stateDir: s.stateDir, peerID: s.member.report.PeerID, biscuit: s.member.report.Biscuit})
+		s.member.quit(t)
 	}
 
 	// The Go node: enrolled through a platform token on disk, its identity

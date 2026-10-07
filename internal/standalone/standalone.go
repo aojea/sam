@@ -223,6 +223,7 @@ type Server struct {
 	store      storage.Store
 	cp         *controlplane.Server
 	router     *router.Router
+	mesh       *controlplane.P2PMeshAdapter
 	adminToken string
 	joinToken  string
 	publicAddr string
@@ -240,7 +241,13 @@ func New(opts Options) (*Server, error) {
 // Start boots the store, the control plane on a loopback-only listener, and
 // the router owning the single public port. It returns once the mesh accepts
 // enrollments.
-func (s *Server) Start(ctx context.Context) error {
+func (s *Server) Start(ctx context.Context) (retErr error) {
+	defer func() {
+		if retErr != nil {
+			_ = s.Close()
+		}
+	}()
+
 	if err := os.MkdirAll(s.opts.DataDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create data dir: %w", err)
 	}
@@ -376,6 +383,7 @@ func (s *Server) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to create router: %w", err)
 	}
 	if err := rtr.Start(); err != nil {
+		_ = rtr.Close()
 		return fmt.Errorf("failed to start router: %w", err)
 	}
 	s.router = rtr
@@ -383,12 +391,11 @@ func (s *Server) Start(ctx context.Context) error {
 	// the embedded router's own topic instead of dialing itself.
 	mesh, err := controlplane.NewP2PMeshAdapter(rtr.Host, rtr.EventTopic, store)
 	if err != nil {
-		_ = rtr.Close()
 		return fmt.Errorf("failed to attach control plane to the mesh: %w", err)
 	}
+	s.mesh = mesh
 	cp.SetMeshAdapter(mesh)
 	if s.publicAddr, err = s.resolvePublicAddr(); err != nil {
-		_ = rtr.Close()
 		return err
 	}
 	return nil
@@ -397,20 +404,29 @@ func (s *Server) Start(ctx context.Context) error {
 // Close shuts down the router, control plane and store.
 func (s *Server) Close() error {
 	var errs []string
+	if s.mesh != nil {
+		if err := s.mesh.Close(); err != nil {
+			errs = append(errs, err.Error())
+		}
+		s.mesh = nil
+	}
 	if s.router != nil {
 		if err := s.router.Close(); err != nil {
 			errs = append(errs, err.Error())
 		}
+		s.router = nil
 	}
 	if s.cp != nil {
 		if err := s.cp.Close(); err != nil {
 			errs = append(errs, err.Error())
 		}
+		s.cp = nil
 	}
 	if s.store != nil {
 		if err := s.store.Close(); err != nil {
 			errs = append(errs, err.Error())
 		}
+		s.store = nil
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("standalone shutdown: %s", strings.Join(errs, "; "))

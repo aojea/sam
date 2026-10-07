@@ -39,6 +39,7 @@ import (
 	"github.com/google/sam/api"
 	"github.com/google/sam/internal/identity"
 	"github.com/google/sam/internal/node"
+	"github.com/google/sam/internal/storage"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"google.golang.org/protobuf/proto"
@@ -844,6 +845,60 @@ func TestSTSSecurityHardening(t *testing.T) {
 	_ = okResp.Body.Close()
 	if okResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 from authorized ServedBy node, got %d", okResp.StatusCode)
+	}
+
+	// 3. Router credentials (sam:role:router) must be forbidden on /token/exchange and /sts/token
+	routerPriv, routerPub, err := crypto.GenerateEd25519Key(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateEd25519Key: %v", err)
+	}
+	routerPeerID, err := peer.IDFromPrivateKey(routerPriv)
+	if err != nil {
+		t.Fatalf("IDFromPrivateKey: %v", err)
+	}
+	routerPubBytes, _ := crypto.MarshalPublicKey(routerPub)
+	cpPriv, _, err := store.GetCurrentKey(ctx)
+	if err != nil {
+		t.Fatalf("GetCurrentKey: %v", err)
+	}
+	routerBiscuit, err := identity.MintBootstrapBiscuitToken(cpPriv, routerPeerID, api.RoleRouter, time.Now().Add(time.Hour), roles, nil)
+	if err != nil {
+		t.Fatalf("MintBootstrapBiscuitToken: %v", err)
+	}
+	if err := store.EnrollNode(ctx, &storage.EnrolledNode{
+		PeerID:         routerPeerID.String(),
+		PublicKey:      routerPubBytes,
+		Biscuit:        routerBiscuit,
+		Role:           api.RoleRouter,
+		EnrollmentType: "BOOTSTRAP",
+		EnrolledAt:     time.Now(),
+	}); err != nil {
+		t.Fatalf("EnrollNode router: %v", err)
+	}
+
+	routerSTSResp := callSTS(routerPriv, routerPeerID, routerBiscuit, "sts.amazonaws.com")
+	_ = routerSTSResp.Body.Close()
+	if routerSTSResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 when router calls /sts/token, got %d", routerSTSResp.StatusCode)
+	}
+
+	exTS := time.Now().UnixMilli()
+	exSig, _ := routerPriv.Sign(api.TokenExchangeChallenge(routerPeerID.String(), exTS))
+	exReqBytes, _ := proto.Marshal(&api.TokenExchangeRequest{
+		SubjectToken:       mintOIDC(map[string]interface{}{"sub": "alice-sub"}),
+		ChallengeUnixMs:    exTS,
+		ChallengeSignature: exSig,
+	})
+	exReq, _ := http.NewRequest(http.MethodPost, baseURL+"/token/exchange", bytes.NewReader(exReqBytes))
+	exReq.Header.Set("Content-Type", "application/x-protobuf")
+	exReq.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString(routerBiscuit))
+	routerExResp, err := http.DefaultClient.Do(exReq)
+	if err != nil {
+		t.Fatalf("POST /token/exchange as router: %v", err)
+	}
+	_ = routerExResp.Body.Close()
+	if routerExResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 when router calls /token/exchange, got %d", routerExResp.StatusCode)
 	}
 }
 

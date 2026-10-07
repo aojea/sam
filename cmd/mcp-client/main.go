@@ -42,12 +42,24 @@ func main() {
 	timeoutArgs := flag.Int("timeout", 10, "Timeout in seconds")
 	listTools := flag.Bool("list", false, "List available tools and exit")
 	streamOpt := flag.Bool("stream", false, "Enable streaming mode for service discovery HTTP API")
-	tokenOpt := flag.String("token", "", "Authorization Bearer token for protected sidecar endpoints")
+	tokenOpt := flag.String("token", "", "Authorization Bearer token for protected sidecar endpoints (deprecated: prefer -token-path or SAM_API_TOKEN)")
+	tokenPathOpt := flag.String("token-path", "", "Path to file containing the Authorization Bearer token (or env SAM_API_TOKEN)")
 	showVersion := flag.Bool("version", false, "Print the version and exit")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version.String())
 		return
+	}
+
+	resolvedToken := strings.TrimSpace(*tokenOpt)
+	if *tokenPathOpt != "" {
+		data, err := os.ReadFile(*tokenPathOpt)
+		if err != nil {
+			log.Fatalf("Failed to read -token-path %s: %v", *tokenPathOpt, err)
+		}
+		resolvedToken = strings.TrimSpace(string(data))
+	} else if resolvedToken == "" {
+		resolvedToken = strings.TrimSpace(os.Getenv("SAM_API_TOKEN"))
 	}
 
 	if *serverURL == "" {
@@ -99,8 +111,8 @@ func main() {
 			log.Fatalf("Failed to create request: %v", err)
 		}
 
-		if *tokenOpt != "" {
-			req.Header.Set(api.HeaderSamAuthentication, "Bearer "+*tokenOpt)
+		if resolvedToken != "" {
+			req.Header.Set(api.HeaderSamAuthentication, "Bearer "+resolvedToken)
 		}
 
 		resp, err := http.DefaultClient.Do(req)
@@ -154,12 +166,12 @@ func main() {
 
 	// Connect to server using the URL
 	var mcpTransport mcp.Transport = &mcp.StreamableClientTransport{Endpoint: *serverURL}
-	if *tokenOpt != "" {
+	if resolvedToken != "" {
 		mcpTransport = &mcp.StreamableClientTransport{
 			Endpoint: *serverURL,
 			HTTPClient: &http.Client{
 				Transport: &authTransport{
-					token:      *tokenOpt,
+					token:      resolvedToken,
 					underlying: http.DefaultTransport,
 				},
 			},

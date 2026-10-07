@@ -172,11 +172,11 @@ func BuildPolicyRules(roles []*PolicyRole, bindings []*PolicyBinding) (rules []P
 				add(roleHead, biscuit.Predicate{Name: prefix, IDs: []biscuit.Term{biscuit.String(value)}})
 				continue
 			}
+			if err := validateBindingMemberCharset(value); err != nil {
+				warnings = append(warnings, fmt.Sprintf("Binding member %q for role %s %v and grants role to nobody", m, b.Role, err))
+				continue
+			}
 			if strings.Contains(value, "*") {
-				if err := validateBindingMemberCharset(value); err != nil {
-					warnings = append(warnings, fmt.Sprintf("Binding member %q for role %s %v and grants role to nobody", m, b.Role, err))
-					continue
-				}
 				var text string
 				roleLiteral := fmt.Sprintf("%s(%s)", FactRole, strconv.Quote(b.Role))
 				switch {
@@ -231,9 +231,17 @@ func BuildPolicyRules(roles []*PolicyRole, bindings []*PolicyBinding) (rules []P
 		for _, t := range role.AllowedTargets {
 			if t == "*" {
 				hasUnrestricted = true
-			} else {
-				nonWildcardTargets = append(nonWildcardTargets, t)
+				continue
 			}
+			if t == "" || validateBindingMemberCharset(t) != nil {
+				warnings = append(warnings, fmt.Sprintf("Role %s target %q has invalid characters and is skipped", roleName, t))
+				continue
+			}
+			if tFact, tVal := ParseServiceTarget(t); tVal == "" || (tFact != "" && ValidateLabelKey(tFact) != nil) {
+				warnings = append(warnings, fmt.Sprintf("Role %s target %q has invalid format and is skipped", roleName, t))
+				continue
+			}
+			nonWildcardTargets = append(nonWildcardTargets, t)
 		}
 		if hasUnrestricted {
 			add(MarkerFact(FactTargetUnrestricted).Predicate, fromRole)

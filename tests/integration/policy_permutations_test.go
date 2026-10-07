@@ -240,60 +240,66 @@ services:
 		},
 	}
 
-	for i, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			homeA := filepath.Join(tmpDir, fmt.Sprintf("nodeA_%d", i))
-			apiTokenA := "tokenA"
+	t.Run("cases", func(t *testing.T) {
+		for i, tt := range tests {
+			i, tt := i, tt
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+				homeA := filepath.Join(tmpDir, fmt.Sprintf("nodeA_%d", i))
+				apiTokenA := "tokenA"
 
-			// The seat comes from the sam:system:authenticated binding above,
-			// never from a roles claim naming sam:role:node.
-			jwtA := mintToken(tt.jwtClaims)
+				// The seat comes from the sam:system:authenticated binding above,
+				// never from a roles claim naming sam:role:node.
+				jwtA := mintToken(tt.jwtClaims)
 
-			nodeA := launchNode(t, nodeBin, os.Environ(), homeA, "run",
-				"--control-plane", fmt.Sprintf("http://127.0.0.1:%d", httpPortCP),
-				"--data-dir", homeA,
-				"--api-token-path", tokenPath(t, apiTokenA),
-				"--jwt", jwtA,
-				"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
-				"--allow-loopback",
-			)
-			actualApiAddrA := nodeA.waitForAPI(t)
+				nodeA := launchNode(t, nodeBin, os.Environ(), homeA, "run",
+					"--control-plane", fmt.Sprintf("http://127.0.0.1:%d", httpPortCP),
+					"--data-dir", homeA,
+					"--api-token-path", tokenPath(t, apiTokenA),
+					"--jwt", jwtA,
+					"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
+					"--allow-loopback",
+				)
+				defer nodeA.kill()
+				actualApiAddrA := nodeA.waitForAPI(t)
 
-			parts := strings.Split(addrB, "/p2p/")
-			if len(parts) != 2 {
-				t.Fatalf("unexpected addrB format: %s", addrB)
-			}
-			peerIDB := parts[1]
+				parts := strings.Split(addrB, "/p2p/")
+				if len(parts) != 2 {
+					t.Fatalf("unexpected addrB format: %s", addrB)
+				}
+				peerIDB := parts[1]
+				connectPeerWithToken(t, actualApiAddrA, apiTokenA, addrB)
 
-			// Use the local callMCPAllowError targeting Node A to hit Node B
-			resp, callErr := callMCPAllowError(t, actualApiAddrA, apiTokenA, "call_remote_tool", map[string]any{
-				"peer_id":   peerIDB,
-				"tool_name": tt.targetSvc + "/test_tool",
-				"arguments": map[string]any{},
-			})
+				// Use the local callMCPAllowError targeting Node A to hit Node B
+				resp, callErr := callMCPAllowError(t, actualApiAddrA, apiTokenA, "call_remote_tool", map[string]any{
+					"peer_id":   peerIDB,
+					"tool_name": tt.targetSvc + "/test_tool",
+					"arguments": map[string]any{},
+				})
 
-			// call_remote_tool might return a JSON error inside resp, or callErr might be non-nil.
-			failed := false
-			if callErr != nil {
-				if strings.Contains(callErr.Error(), "EOF") {
-					// EOF means the 'echo' backend started and exited, which means AuthZ succeeded!
-					failed = false
-				} else {
+				// call_remote_tool might return a JSON error inside resp, or callErr might be non-nil.
+				failed := false
+				if callErr != nil {
+					if strings.Contains(callErr.Error(), "EOF") {
+						// EOF means the 'echo' backend started and exited, which means AuthZ succeeded!
+						failed = false
+					} else {
+						failed = true
+					}
+				} else if strings.Contains(resp, "Authorization failed") || strings.Contains(resp, "failed to connect") || strings.Contains(resp, "token lacks") || strings.Contains(resp, "denied") {
 					failed = true
 				}
-			} else if strings.Contains(resp, "Authorization failed") || strings.Contains(resp, "failed to connect") || strings.Contains(resp, "token lacks") || strings.Contains(resp, "denied") {
-				failed = true
-			}
 
-			if tt.expectAllow {
-				if failed {
-					t.Errorf("expected success, got error: %v / %s", callErr, resp)
+				if tt.expectAllow {
+					if failed {
+						t.Errorf("expected success, got error: %v / %s", callErr, resp)
+					}
+				} else {
+					if !failed {
+						t.Errorf("expected failure, got success: %s", resp)
+					}
 				}
-			} else {
-				if !failed {
-					t.Errorf("expected failure, got success: %s", resp)
-				}
-			}
-		})
-	}
+			})
+		}
+	})
 }
