@@ -28,7 +28,7 @@ VERSION=$(curl -fsSL -o /dev/null -w "%{url_effective}" "https://github.com/${RE
 if [ -z "$VERSION" ] || [ "$VERSION" = "releases" ]; then
     # Only a mesh release (tag v*) carries the binaries; SDK and mobile releases
     # (sdk/js/v*, sdk/python/v*, mobile/v*) share the list.
-    VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases?per_page=30" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | grep -E '^v[0-9]' | head -n 1 || true)
+    VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases?per_page=100" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | grep -E '^v[0-9]' | head -n 1 || true)
 fi
 
 if [ -z "$VERSION" ] || [ "$VERSION" = "releases" ]; then

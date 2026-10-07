@@ -48,8 +48,11 @@ fi
 
 echo "## Changes"
 echo
-if ! git log --no-merges --format='- %s' "${range}" -- "$@" | grep .; then
+commits="$(git log --no-merges --format='- %s' "${range}" -- "$@")"
+if [[ -z "${commits}" ]]; then
   echo "- No changes under: $*"
+else
+  echo "${commits}"
 fi
 
 if [[ -n "${prev}" ]]; then
