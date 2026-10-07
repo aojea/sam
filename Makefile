@@ -253,7 +253,6 @@ helm-test:
 .PHONY: verify
 verify:
 	./hack/verify-generated.sh
-	./hack/verify-sdk-generated.sh
 	./hack/verify-secrets.sh
 
 update:

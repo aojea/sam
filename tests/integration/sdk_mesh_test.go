@@ -201,7 +201,7 @@ egress:
 	dirA, dirB := t.TempDir(), t.TempDir()
 	var routerA, routerB, nodeBin string
 	var rwg sync.WaitGroup
-	rwg.Add(4)
+	rwg.Add(3)
 	go func() {
 		defer rwg.Done()
 		routerA, _ = startRouter(t, dirA, cpPort, mintToken, "router-a")
@@ -213,10 +213,6 @@ egress:
 	go func() {
 		defer rwg.Done()
 		nodeBin = buildBinary(t, "./cmd/sam-node")
-	}()
-	go func() {
-		defer rwg.Done()
-		_, _ = resolvePythonSession(root)
 	}()
 	rwg.Wait()
 	routerAddrs := []string{routerA, routerB}
@@ -335,31 +331,6 @@ type sdkAuthResult struct {
 	Expiration int64             `json:"expiration"`
 }
 
-var (
-	pythonSessionOnce sync.Once
-	pythonSessionBin  string
-	pythonSessionSkip string
-)
-
-func resolvePythonSession(root string) (string, string) {
-	pythonSessionOnce.Do(func() {
-		python := filepath.Join(root, "sdk", "python", ".venv", "bin", "python")
-		if _, err := os.Stat(python); err != nil {
-			var lookErr error
-			if python, lookErr = exec.LookPath("python3"); lookErr != nil {
-				pythonSessionSkip = "python3 is not installed"
-				return
-			}
-		}
-		if err := exec.Command(python, "-c", "import agent_mesh.session").Run(); err != nil {
-			pythonSessionSkip = "agent_mesh is not importable with libp2p (pip install -e sdk/python)"
-			return
-		}
-		pythonSessionBin = python
-	})
-	return pythonSessionBin, pythonSessionSkip
-}
-
 var sdkMemberLaunchers = []sdkRunner{
 	{
 		name: "js",
@@ -377,9 +348,15 @@ var sdkMemberLaunchers = []sdkRunner{
 	{
 		name: "python",
 		cmd: func(root string) (*exec.Cmd, string) {
-			python, skip := resolvePythonSession(root)
-			if skip != "" {
-				return nil, skip
+			python := filepath.Join(root, "sdk", "python", ".venv", "bin", "python")
+			if _, err := os.Stat(python); err != nil {
+				var lookErr error
+				if python, lookErr = exec.LookPath("python3"); lookErr != nil {
+					return nil, "python3 is not installed"
+				}
+			}
+			if err := exec.Command(python, "-c", "import agent_mesh.session").Run(); err != nil {
+				return nil, "agent_mesh is not importable with libp2p (pip install -e sdk/python)"
 			}
 			return exec.Command(python, "-m", "agent_mesh.conformance_join"), ""
 		},
@@ -606,15 +583,12 @@ func TestNativeSDKsMesh(t *testing.T) {
 	// sent, MCP and HTTP alike; the members above carry a floor the mesh does
 	// satisfy (launchSDKMember). MCP to an SDK member fails before the floor: no /sam/mcp.
 	t.Run("egress-floor", func(t *testing.T) {
-		for _, launcher := range sdkMemberLaunchers {
-			launcher := launcher
-			cmd, skip := launcher.cmd(root)
-			if skip != "" {
-				continue
-			}
-			t.Run(launcher.name, func(t *testing.T) {
+		for _, m := range members {
+			m := m
+			t.Run(m.name, func(t *testing.T) {
 				t.Parallel()
-				floored := launchSDKMember(t, launcher.name+"-floored", cmd, root, baseURL, adminToken, "SAM_SDK_EGRESS_REQUIRE_LABELS=team=nobody")
+				cmd := exec.Command(m.cmd.Path, m.cmd.Args[1:]...)
+				floored := launchSDKMember(t, m.name+"-floored", cmd, root, baseURL, adminToken, "SAM_SDK_EGRESS_REQUIRE_LABELS=team=nobody")
 				byFloor := func(what, target, err string) {
 					if !strings.Contains(err, "LabelsNotSatisfied") {
 						t.Errorf("%s %s to %s was not refused by the floor: %q", floored.name, what, target, err)
