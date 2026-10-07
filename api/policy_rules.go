@@ -237,9 +237,18 @@ func BuildPolicyRules(roles []*PolicyRole, bindings []*PolicyBinding) (rules []P
 				warnings = append(warnings, fmt.Sprintf("Role %s target %q has invalid characters and is skipped", roleName, t))
 				continue
 			}
-			if tFact, tVal := ParseServiceTarget(t); tVal == "" || (tFact != "" && ValidateLabelKey(tFact) != nil) {
+			tFact, tVal := ParseServiceTarget(t)
+			if tVal == "" || (tFact != "" && ValidateLabelKey(tFact) != nil) {
 				warnings = append(warnings, fmt.Sprintf("Role %s target %q has invalid format and is skipped", roleName, t))
 				continue
+			}
+			if tFact == FactNode && tVal != "*" {
+				pID, err := peer.Decode(tVal)
+				if err != nil {
+					warnings = append(warnings, fmt.Sprintf("Role %s target %q has invalid Peer ID and is skipped", roleName, t))
+					continue
+				}
+				t = tFact + ":" + pID.String()
 			}
 			nonWildcardTargets = append(nonWildcardTargets, t)
 		}

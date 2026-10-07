@@ -39,7 +39,7 @@ func TestBuildPolicyRules(t *testing.T) {
 	roles := []*PolicyRole{
 		{
 			Name:            "test-role",
-			AllowedTargets:  []string{"*", "node:peer-abc", "custom-fact:custom-val", "legacy-peer"},
+			AllowedTargets:  []string{"*", "node:" + nodeCID, "node:not-a-peer-id", "custom-fact:custom-val", "legacy-peer"},
 			AllowedServices: []string{"*:*", "mcp:*", "mcp:*.suffix", "mcp:prefix.*", "mcp:exact"},
 			CustomDatalog: []string{
 				"custom_rule($x) <- fact($x), $x > 3;",
@@ -58,20 +58,20 @@ func TestBuildPolicyRules(t *testing.T) {
 	rules, warnings := BuildPolicyRules(roles, bindings)
 
 	expectedStrings := map[string]bool{
-		"role(\"test-role\") <- true":                                                          false,
-		"role(\"test-role\") <- user(\"alice\")":                                               false,
-		"role(\"test-role\") <- node(\"" + nodeID + "\")":                                      false,
-		"granted_service_all_types(true) <- role(\"test-role\")":                               false,
-		"granted_service_all(\"mcp\") <- role(\"test-role\")":                                  false,
-		"granted_service_suffix(\"mcp\", \".suffix\") <- role(\"test-role\")":                  false,
-		"granted_service_prefix(\"mcp\", \"prefix.\") <- role(\"test-role\")":                  false,
-		"granted_service_set(\"mcp\", [\"exact\"]) <- role(\"test-role\")":                     false,
-		"target_unrestricted(true) <- role(\"test-role\")":                                     false,
-		"target_restricted(true) <- role(\"test-role\")":                                       false,
-		"granted_target_set(\"node\", [\"legacy-peer\", \"peer-abc\"]) <- role(\"test-role\")": false,
-		"granted_target_set(\"custom-fact\", [\"custom-val\"]) <- role(\"test-role\")":         false,
-		"custom_rule($x) <- role(\"test-role\"), fact($x), $x > 3":                             false,
-		"custom_fact(\"hello\") <- role(\"test-role\")":                                        false,
+		"role(\"test-role\") <- true":                                                                false,
+		"role(\"test-role\") <- user(\"alice\")":                                                     false,
+		"role(\"test-role\") <- node(\"" + nodeID + "\")":                                            false,
+		"granted_service_all_types(true) <- role(\"test-role\")":                                     false,
+		"granted_service_all(\"mcp\") <- role(\"test-role\")":                                        false,
+		"granted_service_suffix(\"mcp\", \".suffix\") <- role(\"test-role\")":                        false,
+		"granted_service_prefix(\"mcp\", \"prefix.\") <- role(\"test-role\")":                        false,
+		"granted_service_set(\"mcp\", [\"exact\"]) <- role(\"test-role\")":                           false,
+		"target_unrestricted(true) <- role(\"test-role\")":                                           false,
+		"target_restricted(true) <- role(\"test-role\")":                                             false,
+		"granted_target_set(\"node\", [\"" + nodeID + "\", \"legacy-peer\"]) <- role(\"test-role\")": false,
+		"granted_target_set(\"custom-fact\", [\"custom-val\"]) <- role(\"test-role\")":               false,
+		"custom_rule($x) <- role(\"test-role\"), fact($x), $x > 3":                                   false,
+		"custom_fact(\"hello\") <- role(\"test-role\")":                                              false,
 	}
 
 	for _, rule := range rules {
@@ -92,11 +92,11 @@ func TestBuildPolicyRules(t *testing.T) {
 		}
 	}
 
-	if len(warnings) != 2 {
-		t.Fatalf("warnings = %q, want one for the unparseable entry and one for the bad peer ID", warnings)
+	if len(warnings) != 3 {
+		t.Fatalf("warnings = %q, want one for the unparseable entry and two for the bad peer IDs", warnings)
 	}
 	if !strings.Contains(strings.Join(warnings, "\n"), `"node:not-a-peer-id"`) {
-		t.Errorf("warnings = %q, want one naming the member that is not a peer ID", warnings)
+		t.Errorf("warnings = %q, want one naming the member/target that is not a peer ID", warnings)
 	}
 
 	// The text is the contract every member evaluates; it must yield the same

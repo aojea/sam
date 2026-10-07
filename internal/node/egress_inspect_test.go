@@ -702,3 +702,39 @@ func TestReplaceInspectableTextMultiMessageNewlineAndFailClosed(t *testing.T) {
 		t.Fatal("expected error when replacement cannot be mapped back into multi-message JSON")
 	}
 }
+
+func TestResolveModelArmorEndpointSSRF(t *testing.T) {
+	ctx := context.Background()
+	remoteSvc, err := newEgressService(&api.EgressDestination{
+		Name:     "api.openai.com",
+		ServedBy: []string{api.RoleNode},
+	}, t.TempDir())
+	if err != nil {
+		t.Fatalf("newEgressService: %v", err)
+	}
+
+	for _, forbiddenURL := range []string{
+		"http://127.0.0.1:8080/v1/projects/p/locations/us-central1/templates/t",
+		"http://169.254.169.254/computeMetadata/v1/",
+		"http://localhost:8080/v1/projects/p/locations/us-central1/templates/t",
+	} {
+		if _, _, err := remoteSvc.resolveModelArmorEndpoint(ctx, forbiddenURL); err == nil {
+			t.Errorf("expected resolveModelArmorEndpoint to reject %q when local target is not allowed", forbiddenURL)
+		}
+	}
+
+	localSvc, err := newEgressService(&api.EgressDestination{
+		Name:      "api.openai.com",
+		TargetUrl: "http://127.0.0.1:8080",
+		ServedBy:  []string{api.RoleNode},
+	}, t.TempDir())
+	if err != nil {
+		t.Fatalf("newEgressService (local): %v", err)
+	}
+	if _, _, err := localSvc.resolveModelArmorEndpoint(ctx, "http://localhost:8080/v1/projects/p/locations/us-central1/templates/t"); err != nil {
+		t.Fatalf("expected localhost URL to be allowed when target_url is local, got: %v", err)
+	}
+	if _, _, err := localSvc.resolveModelArmorEndpoint(ctx, "http://169.254.169.254/computeMetadata/v1/"); err == nil {
+		t.Fatal("expected link-local metadata IP to be rejected even when local target is allowed")
+	}
+}

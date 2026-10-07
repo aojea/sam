@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -649,6 +650,16 @@ func (s *EgressService) resolveModelArmorEndpoint(ctx context.Context, template 
 		if ip, pErr := netip.ParseAddr(u.Hostname()); pErr == nil {
 			if isForbiddenEgressAddr(ip, s.allowsLocalTarget()) {
 				return "", "", fmt.Errorf("model_armor.template URL host %q is in a forbidden IP range", u.Hostname())
+			}
+		} else {
+			ips, lErr := net.DefaultResolver.LookupNetIP(ctx, "ip", u.Hostname())
+			if lErr != nil {
+				return "", "", fmt.Errorf("failed to resolve model_armor.template URL host %q: %w", u.Hostname(), lErr)
+			}
+			for _, resolvedIP := range ips {
+				if isForbiddenEgressAddr(resolvedIP, s.allowsLocalTarget()) {
+					return "", "", fmt.Errorf("model_armor.template URL host %q resolves to forbidden IP %s", u.Hostname(), resolvedIP)
+				}
 			}
 		}
 		return tmpl, "", nil
