@@ -444,6 +444,8 @@ class MeshSession:
         are in the result."""
         async with self._sync_lock:
             result = await trio.to_thread.run_sync(self.mesh.sync_control_plane)
+            if result.refreshed:
+                await self._readmit_routers()
             if result.banned_peer_ids is not None:
                 newly_banned, _ = self.banned.reconcile(canonical_peer_ids(result.banned_peer_ids), result.fetched_at)
                 for peer in newly_banned:
@@ -458,6 +460,43 @@ class MeshSession:
     def trigger_sync(self) -> None:
         """Asks for a pull soon, after a random delay so a fleet told at once does not pull at once."""
         self._sync_trigger.set()
+
+    async def refresh(self) -> None:
+        """Trades the credential for a fresh one now and shows it to every
+        router this member is connected to. A router admits a peer until the
+        biscuit it was shown expires, whatever the connection does; a refreshed
+        credential it never sees leaves it refusing relay circuits to this
+        member once the old one lapses, with every connection still open."""
+        # The control plane client is synchronous; keep the loop free.
+        await trio.to_thread.run_sync(self.mesh.refresh)
+        await self._readmit_routers()
+
+    async def _readmit_routers(self) -> None:
+        """Runs the handshake again on the open connection to each admitted
+        router; the router records the expiry of the credential it is shown.
+        A router without a connection is left to the reservation loop, which
+        dials and authenticates it again."""
+        connected = self.host.get_connected_peers()
+        for i, r in enumerate(self.routers):
+            peer_id = ID.from_base58(r.peer_id)
+            if peer_id not in connected:
+                continue
+            try:
+                credential = await _authenticate_router(self.host, self.mesh, peer_id)
+            except Exception as err:  # noqa: BLE001 - the router keeps the admission it has until the old credential lapses
+                logger.warning("router %s did not accept the refreshed credential: %s", r.peer_id, err)
+                continue
+            self.routers[i] = replace(r, credential=credential)
+
+    async def _refresh_loop(self, lead: float, retry: float) -> None:
+        while True:
+            due = self.mesh.credential.expiration - lead - time.time()
+            await trio.sleep(max(MIN_REFRESH_DELAY, due))
+            try:
+                await self.refresh()
+            except Exception as err:  # noqa: BLE001 - a failed refresh is retried, the session stays up
+                logger.warning("credential refresh failed, retrying in %.0fs: %s", retry, err)
+                await trio.sleep(retry)
 
     async def _evict(self, banned_peer: str) -> None:
         """Drops a banned peer: its admission and its connections."""
@@ -615,18 +654,6 @@ class MeshSession:
                 logger.warning("mesh policy sync failed: %s", err)
 
 
-async def _refresh_loop(mesh: "AgentMesh", lead: float, retry: float) -> None:
-    while True:
-        due = mesh.credential.expiration - lead - time.time()
-        await trio.sleep(max(MIN_REFRESH_DELAY, due))
-        try:
-            # The control plane client is synchronous; keep the loop free.
-            await trio.to_thread.run_sync(mesh.refresh)
-        except Exception as err:  # noqa: BLE001 - a failed refresh is retried, the session stays up
-            logger.warning("credential refresh failed, retrying in %.0fs: %s", retry, err)
-            await trio.sleep(retry)
-
-
 def _single_cause(group: BaseException) -> BaseException:
     """trio wraps a failure inside `host.run` in one ExceptionGroup per nursery.
     A join that failed for one reason should raise that reason."""
@@ -696,7 +723,6 @@ async def join_mesh(
             await pubsub.wait_until_ready()
             admitted = await _admit(host, mesh, router_addrs, reserve)
             async with trio.open_nursery() as nursery:
-                nursery.start_soon(_refresh_loop, mesh, refresh_lead, refresh_retry)
                 session = MeshSession(
                     mesh=mesh,
                     host=host,
@@ -712,6 +738,7 @@ async def join_mesh(
                     reservation_check_interval=reservation_check_interval,
                     _nursery=nursery,
                 )
+                nursery.start_soon(session._refresh_loop, refresh_lead, refresh_retry)  # noqa: SLF001
                 nursery.start_soon(session._events_loop, pubsub)  # noqa: SLF001
                 nursery.start_soon(session._sync_loop)  # noqa: SLF001
                 nursery.start_soon(session._reservation_loop)  # noqa: SLF001

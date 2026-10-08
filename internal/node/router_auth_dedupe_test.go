@@ -15,8 +15,12 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -30,15 +34,19 @@ import (
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // fakeRouter is a libp2p host answering the SAM auth protocol. It counts
-// handshakes so a test can tell a fresh session from a reused one.
+// handshakes so a test can tell a fresh session from a reused one, and keeps
+// the last biscuit it was shown.
 type fakeRouter struct {
 	h           host.Host
 	routerAddrs []multiaddr.Multiaddr
 	handshakes  *atomic.Int32
+	lastBiscuit *atomic.Pointer[[]byte]
 	cpPub       ed25519.PublicKey
+	cpPriv      ed25519.PrivateKey
 	mint        func(peerID, role string) []byte
 }
 
@@ -77,6 +85,7 @@ func newFakeRouter(t *testing.T, listenAddrs ...string) *fakeRouter {
 	routerBiscuit := mint(h.ID().String(), api.RoleRouter)
 
 	var handshakes atomic.Int32
+	var lastBiscuit atomic.Pointer[[]byte]
 	h.SetStreamHandler(api.AuthProtocolID, func(s network.Stream) {
 		defer func() { _ = s.Close() }()
 		handshakes.Add(1)
@@ -84,6 +93,11 @@ func newFakeRouter(t *testing.T, listenAddrs ...string) *fakeRouter {
 		msg, err := reader.ReadMsg()
 		if err != nil {
 			return
+		}
+		var frame api.AuthFrame
+		if err := proto.Unmarshal(msg, &frame); err == nil {
+			shown := append([]byte(nil), frame.Biscuit...)
+			lastBiscuit.Store(&shown)
 		}
 		reader.ReleaseMsg(msg)
 		data, _ := proto.Marshal(&api.AuthResponse{Success: true, Biscuit: routerBiscuit})
@@ -99,7 +113,7 @@ func newFakeRouter(t *testing.T, listenAddrs ...string) *fakeRouter {
 		routerAddrs = append(routerAddrs, ma)
 	}
 
-	return &fakeRouter{h: h, routerAddrs: routerAddrs, handshakes: &handshakes, cpPub: cpPub, mint: mint}
+	return &fakeRouter{h: h, routerAddrs: routerAddrs, handshakes: &handshakes, lastBiscuit: &lastBiscuit, cpPub: cpPub, cpPriv: cpPriv, mint: mint}
 }
 
 // startNode brings up a node enrolled against this router and authenticated.
@@ -256,4 +270,56 @@ func TestRouterDisconnectClearsAuthenticatedSession(t *testing.T) {
 	if !node.IsConnected() {
 		t.Fatal("node does not report an authenticated router connection after re-auth")
 	}
+}
+
+// A router admits a peer until the biscuit it was shown expires, whatever
+// the connection does; once that passes it refuses relay circuits to the
+// peer. A credential refreshed with the control plane therefore has to be
+// presented to every router on the live session, or the node turns
+// unreachable an hour after it started while every connection looks fine.
+func TestRefreshEnrollmentReadmitsConnectedRouters(t *testing.T) {
+	r := newFakeRouter(t, "/ip4/127.0.0.1/tcp/0")
+
+	var refreshed []byte
+	mux := http.NewServeMux()
+	mux.HandleFunc("/refresh", func(w http.ResponseWriter, req *http.Request) {
+		var body api.TokenRefreshRequest
+		data, _ := io.ReadAll(req.Body)
+		if err := proto.Unmarshal(data, &body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		refreshed = r.mint(body.PeerId, api.RoleNode)
+		out, _ := proto.Marshal(&api.TokenRefreshResponse{BiscuitToken: refreshed, ExpireTime: timestamppb.New(time.Now().Add(24 * time.Hour))})
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		_, _ = w.Write(out)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	node := r.startNode(t, ctx, r.routerAddrs)
+	if err := node.Store.SaveControlPlaneURL(srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.handshakes.Load(); got != 1 {
+		t.Fatalf("handshakes after Start: %d, want 1", got)
+	}
+
+	if err := node.RefreshEnrollment(ctx); err != nil {
+		t.Fatalf("RefreshEnrollment: %v", err)
+	}
+
+	if got := r.handshakes.Load(); got != 2 {
+		t.Fatalf("handshakes after refresh: %d, want 2 (the refreshed credential was not presented)", got)
+	}
+	shown := r.lastBiscuit.Load()
+	if shown == nil || !bytes.Equal(*shown, refreshed) {
+		t.Fatal("router was not shown the refreshed biscuit")
+	}
+	if !node.IsConnected() {
+		t.Fatal("node does not report an authenticated router connection after refresh")
+	}
+	waitForConnectedness(t, node, r.h.ID(), network.Connected)
 }

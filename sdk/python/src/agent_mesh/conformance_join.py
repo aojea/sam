@@ -172,7 +172,12 @@ async def main() -> None:
     # stdout carries the protocol lines only; every log goes to stderr.
     logging.basicConfig(stream=sys.stderr, level=logging.WARNING, force=True)
     control_plane_url = _require_env("SAM_CONTROL_PLANE_URL")
-    bootstrap_token_path = _require_env("SAM_BOOTSTRAP_TOKEN_PATH")
+    # Enrollment is with a bootstrap token or a platform JWT, as the examples
+    # offer; a JWT file is read again at every refresh.
+    bootstrap_token_path = os.environ.get("SAM_BOOTSTRAP_TOKEN_PATH")
+    jwt_path = os.environ.get("SAM_JWT_PATH")
+    if (bootstrap_token_path is None) == (jwt_path is None):
+        raise RuntimeError("exactly one of SAM_BOOTSTRAP_TOKEN_PATH or SAM_JWT_PATH is required")
     state_dir = _require_env("SAM_SDK_STATE_DIR")
     allow_insecure = os.environ.get("SAM_INSECURE_CONTROL_PLANE") == "1"
     listen = [a for a in os.environ.get("SAM_SDK_LISTEN_ADDRS", "").split(",") if a]
@@ -190,6 +195,7 @@ async def main() -> None:
     mesh = AgentMesh.enroll(
         control_plane_url,
         bootstrap_token_path=bootstrap_token_path,
+        jwt_path=jwt_path,
         state_dir=state_dir,
         allow_insecure=allow_insecure,
         labels=labels or None,

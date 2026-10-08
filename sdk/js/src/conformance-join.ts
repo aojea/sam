@@ -189,7 +189,13 @@ async function handle(session: MeshSession, command: Command): Promise<unknown> 
 
 async function main(): Promise<void> {
   const controlPlaneUrl = requireEnv("SAM_CONTROL_PLANE_URL");
-  const bootstrapTokenPath = requireEnv("SAM_BOOTSTRAP_TOKEN_PATH");
+  // Enrollment is with a bootstrap token or a platform JWT, as the examples
+  // offer; a JWT file is read again at every refresh.
+  const bootstrapTokenPath = process.env.SAM_BOOTSTRAP_TOKEN_PATH;
+  const jwtPath = process.env.SAM_JWT_PATH;
+  if ((bootstrapTokenPath === undefined) === (jwtPath === undefined)) {
+    throw new Error("exactly one of SAM_BOOTSTRAP_TOKEN_PATH or SAM_JWT_PATH is required");
+  }
   const stateDir = requireEnv("SAM_SDK_STATE_DIR");
   const allowInsecure = process.env.SAM_INSECURE_CONTROL_PLANE === "1";
   const listenAddrs = (process.env.SAM_SDK_LISTEN_ADDRS ?? "").split(",").filter((a) => a !== "");
@@ -209,6 +215,7 @@ async function main(): Promise<void> {
     allowInsecure,
     stateDir,
     bootstrapTokenPath,
+    jwtPath,
     pollIntervalMs: 200,
     ...(Object.keys(labels).length > 0 ? { labels } : {}),
   });

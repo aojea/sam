@@ -79,6 +79,9 @@ func (n *SamNode) Enroll(ctx context.Context, controlPlaneURL string, jwt string
 		return err
 	}
 
+	// Routers already holding a session are shown the new credential;
+	// connectToRouters skips them, as their sessions are live.
+	n.readmitRouters(ctx)
 	return n.connectToRouters(ctx, enrollResp.RouterAddresses)
 }
 

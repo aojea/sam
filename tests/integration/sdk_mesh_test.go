@@ -1103,12 +1103,20 @@ func launchSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, ad
 	if err := os.WriteFile(tokenPath, []byte(mintBootstrapToken(t, baseURL, adminToken)+"\n"), 0o600); err != nil {
 		t.Fatalf("failed to write bootstrap token: %v", err)
 	}
+	return launchSDKRunner(t, name, cmd, root, baseURL, append([]string{
+		"SAM_BOOTSTRAP_TOKEN_PATH=" + tokenPath,
+		"SAM_SDK_LABELS=" + labelsEnv(sdkMeshLabels),
+		"SAM_SDK_EGRESS_REQUIRE_LABELS=region=" + sdkMeshLabels["region"],
+	}, env...)...)
+}
+
+// launchSDKRunner starts a conformance-join runner against baseURL with env
+// naming how it enrolls (a later entry wins), and reads its join report.
+func launchSDKRunner(t *testing.T, name string, cmd *exec.Cmd, root, baseURL string, env ...string) *sdkMember {
+	t.Helper()
 	cmd.Env = append(append(os.Environ(),
 		"SAM_CONTROL_PLANE_URL="+baseURL,
-		"SAM_BOOTSTRAP_TOKEN_PATH="+tokenPath,
 		"SAM_SDK_STATE_DIR="+filepath.Join(t.TempDir(), "state"),
-		"SAM_SDK_LABELS="+labelsEnv(sdkMeshLabels),
-		"SAM_SDK_EGRESS_REQUIRE_LABELS=region="+sdkMeshLabels["region"],
 	), env...)
 	cmd.Dir = root
 	m := &sdkMember{name: name, cmd: cmd, stderr: &bytes.Buffer{}}

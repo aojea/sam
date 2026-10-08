@@ -1028,36 +1028,16 @@ func (n *SamNode) ConnectAndAuthWithRouter(ctx context.Context, addr multiaddr.M
 			continue
 		}
 
-		// Open auth stream
-		s, err := n.Host.NewStream(replicaCtx, addrInfo.ID, api.AuthProtocolID)
+		err = n.authenticateRouterSession(replicaCtx, addrInfo.ID, biscuitBytes)
+		cancel()
 		if err != nil {
-			cancel()
-			errs = append(errs, fmt.Errorf("failed to open auth stream to router %s: %w", resolved, err))
-			continue
-		}
-		_ = s.SetDeadline(time.Now().Add(5 * time.Second))
-
-		success, err := n.performRouterAuthHandshake(s, biscuitBytes, addrInfo.ID)
-		if err != nil {
-			_ = s.Reset()
-			cancel()
-			errs = append(errs, fmt.Errorf("handshake failed with router %s: %w", resolved, err))
+			errs = append(errs, fmt.Errorf("router %s: %w", resolved, err))
 			if errors.Is(err, ErrFatalAuth) {
 				lastFatalErr = err
 			}
 			continue
 		}
-		_ = s.Close()
-		cancel()
-
-		if success {
-			n.mu.Lock()
-			n.authenticatedRouters[addrInfo.ID] = true
-			n.RouterPeerID = addrInfo.ID
-			n.mu.Unlock()
-			logger.Infof("[AuthN] Successfully authenticated with router via libp2p: %s", addrInfo.ID)
-			connected = true
-		}
+		connected = true
 	}
 
 	if connected {
@@ -1071,6 +1051,57 @@ func (n *SamNode) ConnectAndAuthWithRouter(ctx context.Context, addr multiaddr.M
 		return lastFatalErr
 	}
 	return fmt.Errorf("failed to authenticate with any router addresses: %w", errors.Join(errs...))
+}
+
+// authenticateRouterSession runs the auth handshake with a router this host
+// is connected to and records the session.
+func (n *SamNode) authenticateRouterSession(ctx context.Context, router peer.ID, biscuitBytes []byte) error {
+	s, err := n.Host.NewStream(ctx, router, api.AuthProtocolID)
+	if err != nil {
+		return fmt.Errorf("failed to open auth stream: %w", err)
+	}
+	_ = s.SetDeadline(time.Now().Add(5 * time.Second))
+
+	if _, err := n.performRouterAuthHandshake(s, biscuitBytes, router); err != nil {
+		_ = s.Reset()
+		return fmt.Errorf("handshake failed: %w", err)
+	}
+	_ = s.Close()
+
+	n.mu.Lock()
+	n.authenticatedRouters[router] = true
+	n.RouterPeerID = router
+	n.mu.Unlock()
+	logger.Infof("[AuthN] Successfully authenticated with router via libp2p: %s", router)
+	return nil
+}
+
+// readmitRouters presents the current credential to every router this node
+// holds an authenticated session with. A router admits a peer until the
+// biscuit it was shown expires, whatever the connection does, so a refreshed
+// credential must be shown on the live session or relay circuits to this
+// node are refused once the old one lapses. A router that refuses is
+// dropped from the authenticated set; the connection monitor then dials and
+// handshakes afresh.
+func (n *SamNode) readmitRouters(ctx context.Context) {
+	if n.Host == nil {
+		return
+	}
+	biscuitBytes := n.GetIdentity()
+	if len(biscuitBytes) == 0 {
+		return
+	}
+	for _, router := range n.authenticatedRouterIDs() {
+		routerCtx, cancel := context.WithTimeout(ctx, n.config.RouterConnectTimeout)
+		err := n.authenticateRouterSession(routerCtx, router, biscuitBytes)
+		cancel()
+		if err != nil {
+			logger.Warnf("[AuthN] Router %s did not accept the refreshed credential; the connection monitor will re-handshake: %v", router, err)
+			n.mu.Lock()
+			delete(n.authenticatedRouters, router)
+			n.mu.Unlock()
+		}
+	}
 }
 
 func (n *SamNode) performRouterAuthHandshake(s network.Stream, biscuitBytes []byte, expectedRouter peer.ID) (bool, error) {
@@ -1361,6 +1392,7 @@ func (n *SamNode) RefreshEnrollment(ctx context.Context) error {
 		return fmt.Errorf("failed to save refreshed expiration: %w", err)
 	}
 	n.recordIdentityKeySet()
+	n.readmitRouters(ctx)
 
 	return nil
 }

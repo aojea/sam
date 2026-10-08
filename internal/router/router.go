@@ -169,6 +169,18 @@ func (r *Router) isPeerAuthenticated(p peer.ID) bool {
 	}
 }
 
+// AdmittedUntil reports when this router's admission of p lapses: the
+// expiry of the biscuit p last presented on the auth handshake. A peer that
+// never authenticated, or whose admission has lapsed, is not admitted.
+func (r *Router) AdmittedUntil(p peer.ID) (until time.Time, admitted bool) {
+	v, ok := r.authenticatedPeers.Load(p)
+	if !ok {
+		return time.Time{}, false
+	}
+	exp, isTime := v.(time.Time)
+	return exp, isTime && time.Now().Before(exp)
+}
+
 // credential is the router's own mesh identity as the control plane issued
 // it. issuedUnder is the trusted key set at issuance: a trusted key outside
 // it is a rotation the biscuit predates, so the biscuit must be refreshed

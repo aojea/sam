@@ -572,8 +572,42 @@ export class MeshSession {
 
   /** Refreshes now and reschedules; exposed so a caller can force it. */
   async refresh(): Promise<void> {
-    await this.mesh.refresh();
+    await this.#refreshCredential();
     this.#scheduleRefresh();
+  }
+
+  /**
+   * Trades the credential for a fresh one and shows it to every router this
+   * member is connected to. A router admits a peer until the biscuit it was
+   * shown expires, whatever the connection does; a refreshed credential it
+   * never sees leaves it refusing relay circuits to this member once the
+   * old one lapses, with every connection still open.
+   */
+  async #refreshCredential(): Promise<void> {
+    await this.mesh.refresh();
+    await this.#readmitRouters();
+  }
+
+  /**
+   * Runs the handshake again on the open connection to each admitted
+   * router; the router records the expiry of the credential it is shown.
+   * A router without an open connection is left to keepRelay and the
+   * connection:open listener, which handshake on the next connection.
+   */
+  async #readmitRouters(): Promise<void> {
+    await Promise.all(
+      this.routers.map(async (r) => {
+        const conn = this.node.getConnections(peerIdFromString(r.peerId)).find((c) => c.status === "open");
+        if (conn === undefined) {
+          return;
+        }
+        try {
+          await authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys);
+        } catch {
+          // The router keeps the admission it has until the old credential lapses.
+        }
+      }),
+    );
   }
 
   /**
@@ -592,6 +626,9 @@ export class MeshSession {
 
   async #syncOnce(): Promise<ControlPlaneSync> {
     const result = await this.mesh.syncControlPlane();
+    if (result.refreshed) {
+      await this.#readmitRouters();
+    }
     if (result.bannedPeerIds !== undefined) {
       const { banned } = this.banned.reconcile(canonicalPeerIds(result.bannedPeerIds), result.fetchedAt);
       await Promise.all(banned.map((peerId) => this.#evict(peerId)));
@@ -783,7 +820,7 @@ export class MeshSession {
     const dueMs = this.mesh.credential.expiration * 1000 - this.#refreshLeadMs - Date.now();
     const delay = Math.max(MIN_REFRESH_DELAY_MS, dueMs);
     this.#refreshTimer = setTimeout(() => {
-      this.mesh.refresh().then(
+      this.#refreshCredential().then(
         () => this.#scheduleRefresh(),
         () => {
           if (!this.#closed) {
