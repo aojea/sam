@@ -68,9 +68,6 @@ spec:
         - "--jwt-path=/var/run/secrets/tokens/sam-token"
         - "--keys-path=/data/router.key"
         - "--metrics-addr=0.0.0.0:9090"
-        # How long a provider record outlives its last reprovide (nodes reprovide
-        # every 5m); 0s is the library's 48h. Set per environment in deploy.yaml.
-        - "--dht-provider-addr-ttl=${DHT_PROVIDER_ADDR_TTL}"
         # /healthz answers as soon as the process is up; /readyz once the
         # router has enrolled and its libp2p host is online.
         startupProbe:

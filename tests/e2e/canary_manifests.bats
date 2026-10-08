@@ -24,7 +24,6 @@ load "lib/container_mesh.bash"
 export ENV_NAME="e2e"
 export NAMESPACE="default"
 export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
-export DHT_PROVIDER_ADDR_TTL="0s"
 
 setup_file() {
   if ! command -v kind >/dev/null 2>&1 || ! command -v kubectl >/dev/null 2>&1; then

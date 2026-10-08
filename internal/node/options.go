@@ -63,6 +63,8 @@ type Options struct {
 	// BiscuitTimeout bounds Datalog evaluation when verifying biscuit tokens.
 	BiscuitTimeout time.Duration
 	// DHT Options
+	// DHTProviderAddrTTL is how long a provider record lives after its last
+	// announcement; 0 is DefaultDHTProviderAddrTTL.
 	DHTProviderAddrTTL   time.Duration
 	DHTMaxRecordAge      time.Duration
 	DHTLookupLimit       int

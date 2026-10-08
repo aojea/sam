@@ -104,6 +104,12 @@ const (
 	// Reprovide interval
 	ReprovideInterval = 5 * time.Minute
 
+	// DefaultDHTProviderAddrTTL is three of a node's 5-minute reprovides: when
+	// ModeAuto promotes a dialable node to a DHT server, a peer that is gone
+	// drops out of its provider store within this window while one late
+	// reprovide does not.
+	DefaultDHTProviderAddrTTL = 3 * ReprovideInterval
+
 	// reprovideRetryInterval is the first retry after a backend was withheld,
 	// doubling up to ReprovideInterval. Backends commonly start after the node
 	// does, and the full interval is far too long to wait for one of those.
@@ -634,14 +640,11 @@ func (n *SamNode) Start(ctx context.Context) error {
 		dht.Mode(dht.ModeAuto),
 		dht.ProtocolPrefix("/sam"),
 	}
-	var pmOpts []records.Option
-	if n.config.DHTProviderAddrTTL > 0 {
-		pmOpts = append(pmOpts, records.ProviderAddrTTL(n.config.DHTProviderAddrTTL))
-		pmOpts = append(pmOpts, records.ProvideValidity(n.config.DHTProviderAddrTTL))
+	providerTTL := n.config.DHTProviderAddrTTL
+	if providerTTL <= 0 {
+		providerTTL = DefaultDHTProviderAddrTTL
 	}
-	if len(pmOpts) > 0 {
-		dhtOpts = append(dhtOpts, dht.ProviderManagerOpts(pmOpts...))
-	}
+	dhtOpts = append(dhtOpts, dht.ProviderManagerOpts(records.ProviderAddrTTL(providerTTL), records.ProvideValidity(providerTTL)))
 	if n.config.DHTMaxRecordAge > 0 {
 		dhtOpts = append(dhtOpts, dht.MaxRecordAge(n.config.DHTMaxRecordAge))
 	}
