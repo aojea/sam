@@ -486,7 +486,7 @@ class MeshSession:
             except Exception as err:  # noqa: BLE001 - the router keeps the admission it has until the old credential lapses
                 logger.warning("router %s did not accept the refreshed credential: %s", r.peer_id, err)
                 continue
-            self.routers[i] = replace(r, credential=credential)
+            self.routers[i] = replace(self.routers[i], credential=credential)
 
     async def _refresh_loop(self, lead: float, retry: float) -> None:
         while True:
