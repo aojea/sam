@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Reads a sam-node log on stdin and prints one line per authorization or task decision."""
+"""Reads a agentmesh-node log on stdin and prints one line per authorization or task decision."""
 
 import json
 import re
@@ -20,7 +20,7 @@ import sys
 
 AUDIT = re.compile(r"Audit Traceability\s+(\{.*\})\s*$")
 TAR_DENY = re.compile(r'task authorization denied tool "([^"]+)".*tar_block\[1\] \("([^"]+)"\)')
-KEEP = re.compile(r"\[Egress\] (Serving|Withdrawn)|peer banned|SAM Node Online|PeerID:")
+KEEP = re.compile(r"\[Egress\] (Serving|Withdrawn)|peer banned|Agent Mesh Node Online|PeerID:")
 
 for raw_line in sys.stdin:
     line = raw_line.rstrip("\n")

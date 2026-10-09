@@ -1,0 +1,21 @@
+{{- if .Values.router.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agentmesh.fullname" . }}-router
+  labels:
+    {{- include "agentmesh.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.router.service.type }}
+  ports:
+  - name: p2p-tcp
+    port: {{ .Values.router.service.port }}
+    targetPort: 4501
+    protocol: TCP
+  - name: p2p-udp
+    port: {{ .Values.router.service.port }}
+    targetPort: 4501
+    protocol: UDP
+  selector:
+    app: {{ include "agentmesh.fullname" . }}-router
+{{- end }}

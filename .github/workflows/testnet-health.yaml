@@ -63,7 +63,7 @@ jobs:
         run: |
           set -uo pipefail
           NS="sam-${ENV_NAME}"
-          CNS="sam-canary-${ENV_NAME}"
+          CNS="agentmesh-canary-${ENV_NAME}"
           HOST="${ENV_NAME}.sam-mesh.dev"
           rows=()
           fails=0
@@ -82,10 +82,10 @@ jobs:
 
           # 2. What the control plane knows, read through the API server so no
           #    port is opened to the internet for it.
-          if metrics=$(kubectl get --raw "/api/v1/namespaces/${NS}/services/sam-control-plane-${ENV_NAME}:8080/proxy/metrics" 2>&1); then
-            routers_active=$(awk '$1=="sam_control_plane_routers_active"{print int($2)}' <<<"${metrics}")
-            peers=$(awk '$1=="sam_control_plane_mesh_connected_peers"{print int($2)}' <<<"${metrics}")
-            scrape=$(awk '$1=="sam_control_plane_mesh_state_scrape_success"{print int($2)}' <<<"${metrics}")
+          if metrics=$(kubectl get --raw "/api/v1/namespaces/${NS}/services/agentmesh-control-plane-${ENV_NAME}:8080/proxy/metrics" 2>&1); then
+            routers_active=$(awk '$1=="agentmesh_control_plane_routers_active"{print int($2)}' <<<"${metrics}")
+            peers=$(awk '$1=="agentmesh_control_plane_mesh_connected_peers"{print int($2)}' <<<"${metrics}")
+            scrape=$(awk '$1=="agentmesh_control_plane_mesh_state_scrape_success"{print int($2)}' <<<"${metrics}")
             if [[ "${scrape:-0}" -eq 1 && "${routers_active:-0}" -ge 2 ]]; then
               ok "Routers holding a lease" "${routers_active}"
             else
@@ -101,7 +101,7 @@ jobs:
           fi
 
           # 3. Routers and canaries are fully rolled out.
-          sts=$(kubectl get statefulset "sam-router-${ENV_NAME}" -n "${NS}" -o jsonpath='{.status.readyReplicas}/{.spec.replicas}' 2>&1 || echo "?/?")
+          sts=$(kubectl get statefulset "agentmesh-router-${ENV_NAME}" -n "${NS}" -o jsonpath='{.status.readyReplicas}/{.spec.replicas}' 2>&1 || echo "?/?")
           if [[ "${sts%%/*}" == "${sts##*/}" && "${sts%%/*}" != "?" && "${sts%%/*}" != "" ]]; then
             ok "Router StatefulSet" "${sts} ready"
           else
@@ -125,7 +125,7 @@ jobs:
 
           # 4. The cold path: the probe CronJob enrolled a fresh node, found a
           #    service and spoke MCP to it recently. Three schedules of slack.
-          last=$(kubectl get cronjob "sam-probe-${ENV_NAME}" -n "${CNS}" -o jsonpath='{.status.lastSuccessfulTime}' 2>/dev/null || true)
+          last=$(kubectl get cronjob "agentmesh-probe-${ENV_NAME}" -n "${CNS}" -o jsonpath='{.status.lastSuccessfulTime}' 2>/dev/null || true)
           if [[ -n "${last}" ]]; then
             age=$(( $(date +%s) - $(date -d "${last}" +%s) ))
             if [[ "${age}" -le 2700 ]]; then

@@ -76,14 +76,14 @@ updates:
           - "*"
 
   - package-ecosystem: "pub"
-    directory: "/mobile/sam-node-app"
+    directory: "/mobile/agentmesh-node-app"
     schedule:
       interval: "weekly"
     cooldown:
       default-days: 7
 
   - package-ecosystem: "gradle"
-    directory: "/mobile/sam-node-app/android"
+    directory: "/mobile/agentmesh-node-app/android"
     schedule:
       interval: "weekly"
     cooldown:

@@ -49,7 +49,7 @@ assert_enrolled() {
   run mesh_start_router
   [[ "$status" -eq 0 ]]
 
-  # Run sam-node join to enroll and store identity. The sam-node image has
+  # Run agentmesh-node join to enroll and store identity. The agentmesh-node image has
   # no browser to open, so the loopback flow can't complete; join falls back
   # to the OAuth 2.0 Device Authorization Grant (RFC 8628), which the mock
   # OIDC provider advertises and auto-approves on the first poll. The
@@ -66,15 +66,15 @@ assert_enrolled() {
   # Labels are declared in the node config, never on the command line, so join
   # is the path that has to carry them into enrollment.
   local labels_config
-  labels_config=$(realpath tests/e2e/fixtures/sam-node-labels.yaml)
+  labels_config=$(realpath tests/e2e/fixtures/agentmesh-node-labels.yaml)
 
   docker run -d --name "${node_name}-join" \
     --network "${MESH_NETWORK}" \
     $(mesh_get_add_hosts) \
     -v "${data_vol}:/data" \
-    -v "${labels_config}:/etc/sam/node-config.yaml:ro" \
-    "sam-node:local" \
-    join --config /etc/sam/node-config.yaml --data-dir /data --insecure-control-plane "http://sam-control-plane:8080"
+    -v "${labels_config}:/etc/agentmesh/node-config.yaml:ro" \
+    "agentmesh-node:local" \
+    join --config /etc/agentmesh/node-config.yaml --data-dir /data --insecure-control-plane "http://agentmesh-control-plane:8080"
   MESH_CONTAINERS+=("${node_name}-join")
 
   # join is a command: it ends, and its exit code is its verdict.
@@ -92,12 +92,12 @@ assert_enrolled() {
     --network "${MESH_NETWORK}" \
     $(mesh_get_add_hosts) \
     -v "${data_vol}:/data" \
-    -e SAM_API_TOKEN="secret-token" \
-    "sam-node:local" \
+    -e AGENTMESH_API_TOKEN="secret-token" \
+    "agentmesh-node:local" \
     run \
     --data-dir /data \
     --bind-addr "0.0.0.0:8080" \
-    --control-plane "http://sam-control-plane:8080" \
+    --control-plane "http://agentmesh-control-plane:8080" \
     --insecure-control-plane
   MESH_CONTAINERS+=("${node_name}")
 
@@ -117,7 +117,7 @@ assert_enrolled() {
   local evidence="" biscuit=""
   while ((SECONDS < deadline)); do
     evidence=$(docker run --rm -v "${data_vol}:/data" python:3.12 \
-      curl -s --unix-socket /data/sam.sock http://localhost/mesh/identity 2>&1)
+      curl -s --unix-socket /data/agentmesh.sock http://localhost/mesh/identity 2>&1)
     biscuit=$(echo "${evidence}" | jq -r '.biscuit // empty' 2>/dev/null)
     if [[ -n "${biscuit}" ]] && python3 -c "
 import base64, sys
@@ -159,7 +159,7 @@ sys.exit(0 if b'\x05label' in raw and b'\x06region' in raw and b'\x02eu' in raw 
     busybox \
     sh -c "echo \"${token}\" > /tokens/sa-token"
 
-  # 3. Run sam-node with --jwt-path
+  # 3. Run agentmesh-node with --jwt-path
   local node_name="${MESH_PREFIX}-node-wi"
   local router_peer_id
   router_peer_id=$(cat "/tmp/${MESH_PREFIX}-router-peer-id")
@@ -169,11 +169,11 @@ sys.exit(0 if b'\x05label' in raw and b'\x06region' in raw and b'\x02eu' in raw 
     --network "${MESH_NETWORK}" \
     $(mesh_get_add_hosts) \
     -v "${token_vol}:/var/run/secrets/tokens" \
-    -e SAM_API_TOKEN="secret-token" \
-    "sam-node:local" \
+    -e AGENTMESH_API_TOKEN="secret-token" \
+    "agentmesh-node:local" \
     run \
     --bind-addr "0.0.0.0:8080" \
-    --control-plane "http://sam-control-plane:8080" \
+    --control-plane "http://agentmesh-control-plane:8080" \
     --insecure-control-plane \
     --jwt-path "/var/run/secrets/tokens/sa-token"
   MESH_CONTAINERS+=("${node_name}")
@@ -200,7 +200,7 @@ sys.exit(0 if b'\x05label' in raw and b'\x06region' in raw and b'\x02eu' in raw 
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer super-secret-admin-token" \
       -d '{"role": "mesh:role:node", "max_usages": 1}' \
-      http://sam-control-plane:8080/admin/bootstrap-tokens
+      http://agentmesh-control-plane:8080/admin/bootstrap-tokens
 
   if ! kubectl --context="${KUBECONTEXT}" wait --for=jsonpath='{.status.phase}'=Succeeded pod/curl-token-gen-node --timeout=15s; then
     echo "ERROR: Token generation pod failed! Diagnostics:"
@@ -218,7 +218,7 @@ sys.exit(0 if b'\x05label' in raw and b'\x06region' in raw and b'\x02eu' in raw 
   node_token=$(echo "${token_json}" | jq -r .token)
   [[ -n "${node_token}" && "${node_token}" != "null" ]]
 
-  # 2. Run sam-node join with the bootstrap token; it is a command whose
+  # 2. Run agentmesh-node join with the bootstrap token; it is a command whose
   # exit code is its verdict.
   local node_name="${MESH_PREFIX}-node-bootstrap"
   local data_vol="${MESH_PREFIX}-data-bootstrap"
@@ -229,8 +229,8 @@ sys.exit(0 if b'\x05label' in raw and b'\x06region' in raw and b'\x02eu' in raw 
     --network "${MESH_NETWORK}" \
     $(mesh_get_add_hosts) \
     -v "${data_vol}:/data" \
-    "sam-node:local" \
-    join --data-dir /data --bootstrap-token "${node_token}" --insecure-control-plane "http://sam-control-plane:8080"
+    "agentmesh-node:local" \
+    join --data-dir /data --bootstrap-token "${node_token}" --insecure-control-plane "http://agentmesh-control-plane:8080"
   MESH_CONTAINERS+=("${node_name}-join")
   echo "join output: $output"
   [[ "$status" -eq 0 ]]
@@ -242,12 +242,12 @@ sys.exit(0 if b'\x05label' in raw and b'\x06region' in raw and b'\x02eu' in raw 
     --network "${MESH_NETWORK}" \
     $(mesh_get_add_hosts) \
     -v "${data_vol}:/data" \
-    -e SAM_API_TOKEN="secret-token" \
-    "sam-node:local" \
+    -e AGENTMESH_API_TOKEN="secret-token" \
+    "agentmesh-node:local" \
     run \
     --data-dir /data \
     --bind-addr "0.0.0.0:8080" \
-    --control-plane "http://sam-control-plane:8080" \
+    --control-plane "http://agentmesh-control-plane:8080" \
     --insecure-control-plane
   MESH_CONTAINERS+=("${node_name}")
 

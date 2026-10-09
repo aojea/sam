@@ -2,7 +2,7 @@
 
 load "lib/container_mesh.bash"
 
-CALC_MCP_IMAGE="sam-calc-mcp:local"
+CALC_MCP_IMAGE="agentmesh-calc-mcp:local"
 
 build_calc_mcp_image() {
   if ! docker image inspect "${CALC_MCP_IMAGE}" >/dev/null 2>&1; then
@@ -49,7 +49,7 @@ teardown() {
   echo "[$(date +%T)] Starting Node 2 (with calculator service config)"
   mesh_start_node 2 \
     "--log-level debug" \
-    "tests/e2e/docker/calc-mcp/sam-node-config.yaml"
+    "tests/e2e/docker/calc-mcp/agentmesh-node-config.yaml"
   local node2_name="${MESH_PREFIX}-node-2"
   mesh_wait_for_mcp_ready 2 30
 

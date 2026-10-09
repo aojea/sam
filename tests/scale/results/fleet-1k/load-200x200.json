@@ -9,8 +9,8 @@
     "note": "the other 800 sandboxes stayed resident and idle during the load"
   },
   "driver": {
-    "tool": "sam-bench",
-    "target": "http://mesh.sam.alt/v1/models",
+    "tool": "agentmesh-bench",
+    "target": "http://mesh.alt/v1/models",
     "boundaries": 200,
     "requests_per_agent": 200,
     "concurrency_per_agent": 2,

@@ -1,4 +1,4 @@
-name: Deploy SAM Hub
+name: Deploy Agent Mesh Hub
 
 on:
   push:
@@ -55,7 +55,7 @@ jobs:
       id: meta-cp
       uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
       with:
-        images: ${{ env.REGISTRY }}/google/sam-control-plane
+        images: ${{ env.REGISTRY }}/google/agentmesh-control-plane
         tags: |
           type=ref,event=branch
           type=ref,event=tag
@@ -67,7 +67,7 @@ jobs:
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
       with:
         context: .
-        file: Dockerfile.sam-control-plane
+        file: Dockerfile.agentmesh-control-plane
         build-args: VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
         platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
         push: true
@@ -78,7 +78,7 @@ jobs:
       id: meta-router
       uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
       with:
-        images: ${{ env.REGISTRY }}/google/sam-router
+        images: ${{ env.REGISTRY }}/google/agentmesh-router
         tags: |
           type=ref,event=branch
           type=ref,event=tag
@@ -90,7 +90,7 @@ jobs:
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
       with:
         context: .
-        file: Dockerfile.sam-router
+        file: Dockerfile.agentmesh-router
         build-args: VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
         platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
         push: true
@@ -101,7 +101,7 @@ jobs:
       id: meta-node
       uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
       with:
-        images: ${{ env.REGISTRY }}/google/sam-node
+        images: ${{ env.REGISTRY }}/google/agentmesh-node
         tags: |
           type=ref,event=branch
           type=ref,event=tag
@@ -113,18 +113,18 @@ jobs:
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
       with:
         context: .
-        file: Dockerfile.sam-node
+        file: Dockerfile.agentmesh-node
         build-args: VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
         platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
         push: true
         tags: ${{ steps.meta-node.outputs.tags }}
         labels: ${{ steps.meta-node.outputs.labels }}
 
-    - name: Extract metadata for sam-console
+    - name: Extract metadata for agentmesh-console
       id: meta-console
       uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
       with:
-        images: ${{ env.REGISTRY }}/google/sam-console
+        images: ${{ env.REGISTRY }}/google/agentmesh-console
         tags: |
           type=ref,event=branch
           type=ref,event=tag
@@ -132,22 +132,22 @@ jobs:
           type=raw,value=latest,enable={{is_default_branch}}
           type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
-    - name: Build and push sam-console image
+    - name: Build and push agentmesh-console image
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
       with:
         context: .
-        file: Dockerfile.sam-console
+        file: Dockerfile.agentmesh-console
         build-args: VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
         platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
         push: true
         tags: ${{ steps.meta-console.outputs.tags }}
         labels: ${{ steps.meta-console.outputs.labels }}
 
-    - name: Extract metadata for sam-one
-      id: meta-sam-one
+    - name: Extract metadata for agentmesh-one
+      id: meta-agentmesh-one
       uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
       with:
-        images: ${{ env.REGISTRY }}/google/sam-one
+        images: ${{ env.REGISTRY }}/google/agentmesh-one
         tags: |
           type=ref,event=branch
           type=ref,event=tag
@@ -155,26 +155,26 @@ jobs:
           type=raw,value=latest,enable={{is_default_branch}}
           type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
-    - name: Build and push sam-one image
+    - name: Build and push agentmesh-one image
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
       with:
         context: .
-        file: Dockerfile.sam-one
+        file: Dockerfile.agentmesh-one
         build-args: VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
         platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
         push: true
-        tags: ${{ steps.meta-sam-one.outputs.tags }}
-        labels: ${{ steps.meta-sam-one.outputs.labels }}
+        tags: ${{ steps.meta-agentmesh-one.outputs.tags }}
+        labels: ${{ steps.meta-agentmesh-one.outputs.labels }}
 
     # The SDK images carry the example programs the docs embed, as the
     # testnet canaries and probes run them. Built from the commit, not from
     # npm or PyPI, so bananas exercises the SDK at the same commit as the
     # Go components it talks to.
-    - name: Extract metadata for sam-sdk-js
+    - name: Extract metadata for agentmesh-sdk-js
       id: meta-sdk-js
       uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
       with:
-        images: ${{ env.REGISTRY }}/google/sam-sdk-js
+        images: ${{ env.REGISTRY }}/google/agentmesh-sdk-js
         tags: |
           type=ref,event=branch
           type=ref,event=tag
@@ -182,21 +182,21 @@ jobs:
           type=raw,value=latest,enable={{is_default_branch}}
           type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
-    - name: Build and push sam-sdk-js image
+    - name: Build and push agentmesh-sdk-js image
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
       with:
         context: .
-        file: Dockerfile.sam-sdk-js
+        file: Dockerfile.agentmesh-sdk-js
         platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
         push: true
         tags: ${{ steps.meta-sdk-js.outputs.tags }}
         labels: ${{ steps.meta-sdk-js.outputs.labels }}
 
-    - name: Extract metadata for sam-sdk-python
+    - name: Extract metadata for agentmesh-sdk-python
       id: meta-sdk-python
       uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
       with:
-        images: ${{ env.REGISTRY }}/google/sam-sdk-python
+        images: ${{ env.REGISTRY }}/google/agentmesh-sdk-python
         tags: |
           type=ref,event=branch
           type=ref,event=tag
@@ -204,11 +204,11 @@ jobs:
           type=raw,value=latest,enable={{is_default_branch}}
           type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
-    - name: Build and push sam-sdk-python image
+    - name: Build and push agentmesh-sdk-python image
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
       with:
         context: .
-        file: Dockerfile.sam-sdk-python
+        file: Dockerfile.agentmesh-sdk-python
         platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
         push: true
         tags: ${{ steps.meta-sdk-python.outputs.tags }}
@@ -260,12 +260,12 @@ jobs:
         run: |
           export ENV_NAME="${VAR_ENV_NAME}"
           export NAMESPACE="sam-${ENV_NAME}"
-          export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
+          export CANARY_NAMESPACE="agentmesh-canary-${ENV_NAME}"
           
           kubectl create namespace dex --dry-run=client -o yaml | kubectl apply -f -
           kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
           kubectl create namespace ${CANARY_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
-          envsubst '${ENV_NAME}' < .github/k8s/sam-canary-sa-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME}' < .github/k8s/agentmesh-canary-sa-template.yaml | kubectl apply -f -
 
       - name: Provision Dex Secrets
         env:
@@ -333,7 +333,7 @@ jobs:
           export NAMESPACE="sam-${ENV_NAME}"
           # Idempotently provision the sam-hub-secret if it doesn't already exist
           if ! kubectl get secret sam-hub-secret -n ${NAMESPACE} >/dev/null 2>&1; then
-            echo "Generating a new random 32-byte hex key for SAM_HUB_KEY..."
+            echo "Generating a new random 32-byte hex key for AGENTMESH_HUB_KEY..."
             HUB_KEY=$(openssl rand -hex 32)
             kubectl create secret generic sam-hub-secret \
               --namespace=${NAMESPACE} \
@@ -348,18 +348,18 @@ jobs:
         run: |
           export ENV_NAME="${VAR_ENV_NAME}"
           export NAMESPACE="sam-${ENV_NAME}"
-          if ! kubectl get secret sam-control-plane-secret-${ENV_NAME} -n ${NAMESPACE} >/dev/null 2>&1; then
+          if ! kubectl get secret agentmesh-control-plane-secret-${ENV_NAME} -n ${NAMESPACE} >/dev/null 2>&1; then
             echo "Generating new random secrets for admin-token and the DB..."
             ADMIN_TOKEN=$(openssl rand -hex 32)
             DB_PASSWORD=$(openssl rand -hex 32)
-            DB_DSN="postgres://sam:${DB_PASSWORD}@sam-db-${ENV_NAME}:5432/sam_mesh?sslmode=disable"
-            kubectl create secret generic sam-control-plane-secret-${ENV_NAME} \
+            DB_DSN="postgres://agentmesh:${DB_PASSWORD}@sam-db-${ENV_NAME}:5432/agentmesh?sslmode=disable"
+            kubectl create secret generic agentmesh-control-plane-secret-${ENV_NAME} \
               --namespace=${NAMESPACE} \
               --from-literal=admin-token="${ADMIN_TOKEN}" \
               --from-literal=db-password="${DB_PASSWORD}" \
               --from-literal=db-dsn="${DB_DSN}"
           else
-            echo "sam-control-plane-secret-${ENV_NAME} already exists in namespace ${NAMESPACE}. Skipping generation."
+            echo "agentmesh-control-plane-secret-${ENV_NAME} already exists in namespace ${NAMESPACE}. Skipping generation."
           fi
 
       - name: Deploy Control Plane and Routers
@@ -402,13 +402,13 @@ jobs:
           export CLUSTER_REGION="${VAR_CLUSTER_REGION}"
           export CLUSTER_NAME="${VAR_CLUSTER_NAME}"
 
-          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/sam-control-plane-template.yaml | kubectl apply -f -
-          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/sam-router-template.yaml | kubectl apply -f -
-          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/sam-console-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/agentmesh-control-plane-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/agentmesh-router-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/agentmesh-console-template.yaml | kubectl apply -f -
           envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID}' < .github/k8s/dns-sync-cronjob-template.yaml | kubectl apply -f -
           # Managed Prometheus ships with GKE; a cluster without it should not block the mesh rollout.
           if kubectl get crd podmonitorings.monitoring.googleapis.com >/dev/null 2>&1; then
-            envsubst '${ENV_NAME} ${NAMESPACE}' < .github/k8s/sam-monitoring-template.yaml | kubectl apply -f -
+            envsubst '${ENV_NAME} ${NAMESPACE}' < .github/k8s/agentmesh-monitoring-template.yaml | kubectl apply -f -
           else
             echo "::warning::PodMonitoring CRD not found; managed collection is off on this cluster, metrics will not be scraped"
           fi
@@ -416,17 +416,17 @@ jobs:
           # The pod is Ready only once the load balancer's NEG controller has
           # seen it healthy, which has taken anywhere from half a minute to
           # several minutes; two replicas roll one after the other.
-          kubectl rollout status deployment/sam-control-plane-${ENV_NAME} -n ${NAMESPACE} --timeout=600s || {
+          kubectl rollout status deployment/agentmesh-control-plane-${ENV_NAME} -n ${NAMESPACE} --timeout=600s || {
             echo "Control Plane Deployment failed!"
-            print_rollout_diagnostics "${NAMESPACE}" "deployment/sam-control-plane-${ENV_NAME}" "app=sam-control-plane-${ENV_NAME}"
+            print_rollout_diagnostics "${NAMESPACE}" "deployment/agentmesh-control-plane-${ENV_NAME}" "app=agentmesh-control-plane-${ENV_NAME}"
             exit 1
           }
 
           echo "Seeding Control Plane Policies..."
-          ADMIN_TOKEN=$(kubectl get secret sam-control-plane-secret-${ENV_NAME} -n ${NAMESPACE} -o jsonpath='{.data.admin-token}' | base64 -d)
+          ADMIN_TOKEN=$(kubectl get secret agentmesh-control-plane-secret-${ENV_NAME} -n ${NAMESPACE} -o jsonpath='{.data.admin-token}' | base64 -d)
           echo "::add-mask::${ADMIN_TOKEN}"
           
-          kubectl port-forward deployment/sam-control-plane-${ENV_NAME} -n ${NAMESPACE} 8080:8080 &
+          kubectl port-forward deployment/agentmesh-control-plane-${ENV_NAME} -n ${NAMESPACE} 8080:8080 &
           PF_PID=$!
           
           for i in {1..15}; do
@@ -441,14 +441,14 @@ jobs:
             -H "Authorization: Bearer ${ADMIN_TOKEN}" \
             -d '{
               "roles": [
-                {"name": "sam-canary", "allowed_services": ["*"], "allowed_targets": ["*"]},
+                {"name": "agentmesh-canary", "allowed_services": ["*"], "allowed_targets": ["*"]},
                 {"name": "mesh:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]},
                 {"name": "mesh:role:node"},
                 {"name": "public-mesh", "allowed_services": ["*"], "allowed_targets": ["*"]}
               ],
               "bindings": [
-                {"role": "sam-canary", "members": ["user:system:serviceaccount:sam-canary-'"${ENV_NAME}"':sam-node-sa"]},
-                {"role": "mesh:role:router", "members": ["group:routers", "user:system:serviceaccount:'"${NAMESPACE}"':sam-router-sa"]},
+                {"role": "agentmesh-canary", "members": ["user:system:serviceaccount:agentmesh-canary-'"${ENV_NAME}"':agentmesh-node-sa"]},
+                {"role": "mesh:role:router", "members": ["group:routers", "user:system:serviceaccount:'"${NAMESPACE}"':agentmesh-router-sa"]},
                 {"role": "mesh:role:node", "members": ["mesh:system:authenticated"]},
                 {"role": "public-mesh", "members": ["mesh:system:authenticated"]}
               ]
@@ -462,21 +462,21 @@ jobs:
           kill $PF_PID
 
 
-          kubectl rollout status deployment/sam-console-${ENV_NAME} -n ${NAMESPACE} --timeout=120s || {
+          kubectl rollout status deployment/agentmesh-console-${ENV_NAME} -n ${NAMESPACE} --timeout=120s || {
             echo "Console Deployment failed!"
-            print_rollout_diagnostics "${NAMESPACE}" "deployment/sam-console-${ENV_NAME}" "app=sam-console-${ENV_NAME}"
+            print_rollout_diagnostics "${NAMESPACE}" "deployment/agentmesh-console-${ENV_NAME}" "app=agentmesh-console-${ENV_NAME}"
             exit 1
           }
 
           # Three routers, each held 90s after it is ready (minReadySeconds)
           # so members re-attach before the next one goes.
-          kubectl rollout status statefulset/sam-router-${ENV_NAME} -n ${NAMESPACE} --timeout=600s || {
+          kubectl rollout status statefulset/agentmesh-router-${ENV_NAME} -n ${NAMESPACE} --timeout=600s || {
             echo "Router Deployment failed!"
-            print_rollout_diagnostics "${NAMESPACE}" "statefulset/sam-router-${ENV_NAME}" "app=sam-router-${ENV_NAME}"
+            print_rollout_diagnostics "${NAMESPACE}" "statefulset/agentmesh-router-${ENV_NAME}" "app=agentmesh-router-${ENV_NAME}"
 
             echo "Rolling back Router deployment..."
-            kubectl rollout undo statefulset/sam-router-${ENV_NAME} -n ${NAMESPACE}
-            kubectl rollout status statefulset/sam-router-${ENV_NAME} -n ${NAMESPACE}
+            kubectl rollout undo statefulset/agentmesh-router-${ENV_NAME} -n ${NAMESPACE}
+            kubectl rollout status statefulset/agentmesh-router-${ENV_NAME} -n ${NAMESPACE}
             exit 1
           }
 
@@ -507,14 +507,14 @@ jobs:
           export ZONE="${CLUSTER_REGION}-a"
 
           echo "Retrieving Admin Token to generate Bootstrap Token..."
-          ADMIN_TOKEN=$(kubectl get secret sam-control-plane-secret-${ENV_NAME} -n ${NAMESPACE} -o jsonpath='{.data.admin-token}' | base64 -d)
+          ADMIN_TOKEN=$(kubectl get secret agentmesh-control-plane-secret-${ENV_NAME} -n ${NAMESPACE} -o jsonpath='{.data.admin-token}' | base64 -d)
           echo "::add-mask::${ADMIN_TOKEN}"
 
           # Mint the token from the runner over a port-forward: a helper pod
           # would carry the admin token in its spec, where kubectl describe
           # and anyone with pod read access can see it.
           echo "Generating Bootstrap Token via port-forward to the Control Plane..."
-          kubectl port-forward deployment/sam-control-plane-${ENV_NAME} -n ${NAMESPACE} 8080:8080 &
+          kubectl port-forward deployment/agentmesh-control-plane-${ENV_NAME} -n ${NAMESPACE} 8080:8080 &
           PF_PID=$!
           for i in {1..15}; do
             if nc -z localhost 8080; then
@@ -546,32 +546,32 @@ jobs:
 
           echo "Provisioning GCE VM Router instance..."
           # Delete existing VM if it exists to ensure fresh deployment with the new token and image
-          gcloud compute instances delete sam-router-${ENV_NAME}-vm --zone=${ZONE} --project=${GCP_PROJECT_ID} --quiet || true
+          gcloud compute instances delete agentmesh-router-${ENV_NAME}-vm --zone=${ZONE} --project=${GCP_PROJECT_ID} --quiet || true
 
-          # Create a new COS VM instance running the sam-router
-          gcloud compute instances create sam-router-${ENV_NAME}-vm \
+          # Create a new COS VM instance running the agentmesh-router
+          gcloud compute instances create agentmesh-router-${ENV_NAME}-vm \
             --project=${GCP_PROJECT_ID} \
             --zone=${ZONE} \
             --machine-type=e2-micro \
             --image-family=cos-stable \
             --image-project=cos-cloud \
-            --tags=sam-router \
+            --tags=agentmesh-router \
             --metadata=startup-script='#!/bin/bash
           set -euo pipefail
           EXTERNAL_IP=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip)
           # COS drops inbound traffic on the host by default; the VPC rule alone does not open the port.
           iptables -w -I INPUT -p tcp --dport 4501 -j ACCEPT
           iptables -w -I INPUT -p udp --dport 4501 -j ACCEPT
-          install -d -m 0755 /etc/sam-router
-          printf "%s" "'"${BOOTSTRAP_TOKEN}"'" > /etc/sam-router/bootstrap-token
-          chown 65532:65532 /etc/sam-router/bootstrap-token
-          chmod 0600 /etc/sam-router/bootstrap-token
+          install -d -m 0755 /etc/agentmesh-router
+          printf "%s" "'"${BOOTSTRAP_TOKEN}"'" > /etc/agentmesh-router/bootstrap-token
+          chown 65532:65532 /etc/agentmesh-router/bootstrap-token
+          chmod 0600 /etc/agentmesh-router/bootstrap-token
           docker run -d \
-            --name sam-router \
+            --name agentmesh-router \
             --network host \
             --restart always \
-            -v /etc/sam-router/bootstrap-token:/run/secrets/bootstrap-token:ro \
-            ghcr.io/google/sam-router:'"${IMAGE_TAG}"' \
+            -v /etc/agentmesh-router/bootstrap-token:/run/secrets/bootstrap-token:ro \
+            ghcr.io/google/agentmesh-router:'"${IMAGE_TAG}"' \
             --control-plane=https://'"${ENV_NAME}"'.sam-mesh.dev \
             --bootstrap-token-path=/run/secrets/bootstrap-token \
             --listen=/ip4/0.0.0.0/tcp/4501 \
@@ -609,7 +609,7 @@ jobs:
           }
 
           export ENV_NAME="${VAR_ENV_NAME}"
-          export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
+          export CANARY_NAMESPACE="agentmesh-canary-${ENV_NAME}"
           export NAMESPACE="sam-${ENV_NAME}"
           export IMAGE_TAG="${VAR_IMAGE_TAG}"
           export GEMINI_API_KEY="${VAR_GEMINI_API_KEY}"
@@ -629,7 +629,7 @@ jobs:
 
           # Allow-list the placeholders: ${OPENCLAW_GATEWAY_TOKEN} in the
           # template is a container-runtime shell variable, not ours to expand.
-          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/sam-node-openclaw-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/agentmesh-node-openclaw-template.yaml | kubectl apply -f -
           kubectl rollout status deployment/openclaw-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=300s || {
             echo "OpenClaw Canary Deployment failed!"
             print_rollout_diagnostics "${CANARY_NAMESPACE}" "openclaw-canary-${ENV_NAME}" "app=openclaw-canary-${ENV_NAME}"
@@ -671,7 +671,7 @@ jobs:
           }
 
           export ENV_NAME="${VAR_ENV_NAME}"
-          export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
+          export CANARY_NAMESPACE="agentmesh-canary-${ENV_NAME}"
           export NAMESPACE="sam-${ENV_NAME}"
           export IMAGE_TAG="${VAR_IMAGE_TAG}"
           export HF_TOKEN="${VAR_HF_TOKEN}"
@@ -681,7 +681,7 @@ jobs:
             --from-literal=hf-token="${HF_TOKEN}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
-          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/sam-node-vllm-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/agentmesh-node-vllm-template.yaml | kubectl apply -f -
           kubectl rollout status deployment/vllm-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=300s || {
             echo "vLLM Canary Deployment failed!"
             print_rollout_diagnostics "${CANARY_NAMESPACE}" "vllm-canary-${ENV_NAME}" "app=vllm-canary-${ENV_NAME}"
@@ -721,11 +721,11 @@ jobs:
           }
 
           export ENV_NAME="${VAR_ENV_NAME}"
-          export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
+          export CANARY_NAMESPACE="agentmesh-canary-${ENV_NAME}"
           export NAMESPACE="sam-${ENV_NAME}"
           export IMAGE_TAG="${VAR_IMAGE_TAG}"
 
-          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/sam-node-everything-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/agentmesh-node-everything-template.yaml | kubectl apply -f -
           kubectl rollout status deployment/everything-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=120s || {
             echo "Everything Canary Deployment failed!"
             print_rollout_diagnostics "${CANARY_NAMESPACE}" "everything-canary-${ENV_NAME}" "app=everything-canary-${ENV_NAME}"
@@ -746,23 +746,23 @@ jobs:
           VAR_IMAGE_TAG: ${{ env.IMAGE_TAG }}
         run: |
           export ENV_NAME="${VAR_ENV_NAME}"
-          export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
+          export CANARY_NAMESPACE="agentmesh-canary-${ENV_NAME}"
           export NAMESPACE="sam-${ENV_NAME}"
           export IMAGE_TAG="${VAR_IMAGE_TAG}"
 
-          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/sam-soak-template.yaml | kubectl apply -f -
-          kubectl rollout status deployment/sam-soak-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=300s || {
+          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/agentmesh-soak-template.yaml | kubectl apply -f -
+          kubectl rollout status deployment/agentmesh-soak-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=300s || {
             echo "Soak fleet rollout failed: a member could not join or hold a router."
-            kubectl describe deployment/sam-soak-${ENV_NAME} -n ${CANARY_NAMESPACE} || true
-            kubectl get pods -n ${CANARY_NAMESPACE} -l app=sam-soak-${ENV_NAME} -o wide || true
-            for pod in $(kubectl get pods -n ${CANARY_NAMESPACE} -l app=sam-soak-${ENV_NAME} -o name | head -3); do
+            kubectl describe deployment/agentmesh-soak-${ENV_NAME} -n ${CANARY_NAMESPACE} || true
+            kubectl get pods -n ${CANARY_NAMESPACE} -l app=agentmesh-soak-${ENV_NAME} -o wide || true
+            for pod in $(kubectl get pods -n ${CANARY_NAMESPACE} -l app=agentmesh-soak-${ENV_NAME} -o name | head -3); do
               echo "==== ${pod} ===="
               kubectl logs -n ${CANARY_NAMESPACE} "${pod#pod/}" --tail=40 || true
             done
             exit 1
           }
 
-      # Two long-lived pairs with no sam-node: an agent written with one SDK
+      # Two long-lived pairs with no agentmesh-node: an agent written with one SDK
       # and the official A2A SDK, and a caller written with the other that
       # sends it a message with the A2A SDK's client every few minutes, by
       # peer ID. The caller's readiness is the last call's outcome.
@@ -772,13 +772,13 @@ jobs:
           VAR_IMAGE_TAG: ${{ env.IMAGE_TAG }}
         run: |
           export ENV_NAME="${VAR_ENV_NAME}"
-          export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
+          export CANARY_NAMESPACE="agentmesh-canary-${ENV_NAME}"
           export NAMESPACE="sam-${ENV_NAME}"
           export IMAGE_TAG="${VAR_IMAGE_TAG}"
 
           # The SDK canaries that published services, replaced by these.
           kubectl delete deployment js-canary-${ENV_NAME} python-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --ignore-not-found
-          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/sam-sdk-canary-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/agentmesh-sdk-canary-template.yaml | kubectl apply -f -
           for lang in js python; do
             kubectl rollout status deployment/${lang}-agent-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=180s || {
               echo "${lang} agent canary deployment failed: the other SDK's caller could not reach the agent."
@@ -828,7 +828,7 @@ jobs:
 
           export ENV_NAME="${VAR_ENV_NAME}"
           export NAMESPACE="sam-${ENV_NAME}"
-          export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
+          export CANARY_NAMESPACE="agentmesh-canary-${ENV_NAME}"
           export IMAGE_TAG="${VAR_IMAGE_TAG}"
 
           # The key lives in a Secret the pod references, never in the
@@ -838,7 +838,7 @@ jobs:
             --from-literal=api-key="${OPENROUTER_API_KEY}" \
             --dry-run=client -o yaml | kubectl apply -f -
           
-          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/sam-node-openrouter-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/agentmesh-node-openrouter-template.yaml | kubectl apply -f -
           
           kubectl rollout status deployment/openrouter-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=120s || {
             echo "OpenRouter Canary Deployment failed!"
@@ -861,15 +861,15 @@ jobs:
           VAR_IMAGE_TAG: ${{ env.IMAGE_TAG }}
         run: |
           export ENV_NAME="${VAR_ENV_NAME}"
-          export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
+          export CANARY_NAMESPACE="agentmesh-canary-${ENV_NAME}"
           export NAMESPACE="sam-${ENV_NAME}"
           export IMAGE_TAG="${VAR_IMAGE_TAG}"
-          JOB="sam-probe-rollout-${ENV_NAME}"
+          JOB="agentmesh-probe-rollout-${ENV_NAME}"
 
-          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/sam-probe-cronjob-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/agentmesh-probe-cronjob-template.yaml | kubectl apply -f -
 
           kubectl delete job "${JOB}" -n "${CANARY_NAMESPACE}" --ignore-not-found
-          kubectl create job --from="cronjob/sam-probe-${ENV_NAME}" "${JOB}" -n "${CANARY_NAMESPACE}"
+          kubectl create job --from="cronjob/agentmesh-probe-${ENV_NAME}" "${JOB}" -n "${CANARY_NAMESPACE}"
 
           # `kubectl wait` can only wait for one condition; a failed Job would
           # otherwise sit out the whole timeout.
@@ -889,7 +889,7 @@ jobs:
             *Complete=True*) echo "Cold-path probe passed." ;;
             *)
               echo "Cold-path probe did not pass: a fresh node could not enroll, reach a router, call a mesh service, or reach an SDK agent."
-              for c in sam-node js-agent python-agent; do
+              for c in agentmesh-node js-agent python-agent; do
                 echo "==== ${c} sidecar log ===="
                 kubectl logs "job/${JOB}" -n "${CANARY_NAMESPACE}" -c "${c}" --tail=200 || true
               done
@@ -900,7 +900,7 @@ jobs:
 
       # The same cold path through each SDK: an agent written with the A2A
       # SDK and a caller enroll with the JavaScript and the Python SDK; each
-      # caller reaches the everything canary's MCP server (a sam-node) by
+      # caller reaches the everything canary's MCP server (a agentmesh-node) by
       # name and the other SDK's agent by peer ID, its card with the mesh
       # SDK's client and a message with the A2A SDK's. With the node probe
       # above, every pair of implementations is crossed in both directions
@@ -911,15 +911,15 @@ jobs:
           VAR_IMAGE_TAG: ${{ env.IMAGE_TAG }}
         run: |
           export ENV_NAME="${VAR_ENV_NAME}"
-          export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
+          export CANARY_NAMESPACE="agentmesh-canary-${ENV_NAME}"
           export NAMESPACE="sam-${ENV_NAME}"
           export IMAGE_TAG="${VAR_IMAGE_TAG}"
-          JOB="sam-sdk-probe-rollout-${ENV_NAME}"
+          JOB="agentmesh-sdk-probe-rollout-${ENV_NAME}"
 
-          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/sam-sdk-probe-cronjob-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/agentmesh-sdk-probe-cronjob-template.yaml | kubectl apply -f -
 
           kubectl delete job "${JOB}" -n "${CANARY_NAMESPACE}" --ignore-not-found
-          kubectl create job --from="cronjob/sam-sdk-probe-${ENV_NAME}" "${JOB}" -n "${CANARY_NAMESPACE}"
+          kubectl create job --from="cronjob/agentmesh-sdk-probe-${ENV_NAME}" "${JOB}" -n "${CANARY_NAMESPACE}"
 
           for _ in $(seq 1 96); do
             status=$(kubectl get job "${JOB}" -n "${CANARY_NAMESPACE}" -o jsonpath='{range .status.conditions[*]}{.type}={.status}{"\n"}{end}')

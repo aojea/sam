@@ -14,9 +14,9 @@ from a2a.types import Message, Part, Role, SendMessageRequest
 
 
 async def main(url: str, text: str) -> None:
-    token = os.environ.get("SAM_API_TOKEN", "secret-token")
+    token = os.environ.get("AGENTMESH_API_TOKEN", "secret-token")
     headers = {"X-Mesh-Authentication": f"Bearer {token}"}
-    labels = os.environ.get("SAM_REQUIRED_LABELS")
+    labels = os.environ.get("AGENTMESH_REQUIRED_LABELS")
     if labels:
         headers["X-Mesh-Required-Labels"] = labels
     async with httpx.AsyncClient(timeout=60, headers=headers) as http:

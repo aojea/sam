@@ -13,13 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Orders & Refunds MCP server backed by SQLite, exposed via sam-node."""
+"""Orders & Refunds MCP server backed by SQLite, exposed via agentmesh-node."""
 
 import os
 import sqlite3
 from mcp.server.mcpserver import MCPServer
 
-DB_PATH = os.environ.get("ORDERS_DB_PATH", "/tmp/sam-multi-tier-orders.db")
+DB_PATH = os.environ.get("ORDERS_DB_PATH", "/tmp/agentmesh-multi-tier-orders.db")
 PORT = int(os.environ.get("ORDERS_MCP_PORT", "18888"))
 
 

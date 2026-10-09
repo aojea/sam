@@ -28,7 +28,7 @@ STACK_CONSOLE_URL="http://${STACK_CONSOLE_ADDR}"
 STACK_OIDC_ISSUER="http://127.0.0.1:${STACK_OIDC_PORT}"
 
 # Both the control plane and the console read this from the environment.
-export SAM_ADMIN_TOKEN="${STACK_ADMIN_TOKEN}"
+export AGENTMESH_ADMIN_TOKEN="${STACK_ADMIN_TOKEN}"
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 WORK_DIR=$(mktemp -d)
@@ -88,7 +88,7 @@ EOF
 
 stack_start_control_plane() {
   echo "Starting control plane..."
-  "${REPO_ROOT}/bin/sam-control-plane" \
+  "${REPO_ROOT}/bin/agentmesh-control-plane" \
     --bind-address "${STACK_CP_ADDR}" \
     --db-dsn "${WORK_DIR}/console-ui.db" \
     --issuer "${STACK_OIDC_ISSUER}" \
@@ -102,7 +102,7 @@ stack_start_console() {
   echo "Starting console..."
   # Served straight from the working tree, so a browser refresh picks up edits to
   # the HTML, CSS and JS without a rebuild.
-  "${REPO_ROOT}/bin/sam-console" \
+  "${REPO_ROOT}/bin/agentmesh-console" \
     --control-plane "${STACK_CP_URL}" \
     --bind-addr "${STACK_CONSOLE_ADDR}" \
     --static-dir "${REPO_ROOT}/internal/console/public" \

@@ -3,7 +3,7 @@ set -e
 
 # Redirect all output to log file
 exec > >(tee -a /var/log/startup-script.log) 2>&1
-echo "Starting SAM Host VM bootstrap..."
+echo "Starting Agent Mesh Host VM bootstrap..."
 
 # Kill unattended-upgrades to avoid apt lock
 systemctl stop unattended-upgrades.service || true
@@ -34,16 +34,16 @@ rm -rf release-v1.16.1-x86_64 firecracker-v1.16.1-x86_64.tgz
 sysctl -w net.ipv4.ip_forward=1
 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.d/99-ipforward.conf
 
-# 4. Install SAM Mesh binaries & MicroVM files
+# 4. Install Agent Mesh binaries & MicroVM files
 # Check if custom binaries/rootfs were injected via GCP metadata (GCS URL)
-BIN_URL=$(curl --retry 5 --retry-connrefused --retry-delay 5 -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/attributes/sam-binaries-url" || true)
+BIN_URL=$(curl --retry 5 --retry-connrefused --retry-delay 5 -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/attributes/agentmesh-binaries-url" || true)
 
 if [ -n "$BIN_URL" ] && [ "$BIN_URL" != "null" ]; then
     echo "Found custom artifacts URL: $BIN_URL. Downloading from GCS..."
-    # Download SAM binaries
-    gcloud storage cp "$BIN_URL/sam-node" /usr/local/bin/
-    gcloud storage cp "$BIN_URL/sam-box" /usr/local/bin/
-    chmod +x /usr/local/bin/sam-*
+    # Download Agent Mesh binaries
+    gcloud storage cp "$BIN_URL/agentmesh-node" /usr/local/bin/
+    gcloud storage cp "$BIN_URL/agentmesh-box" /usr/local/bin/
+    chmod +x /usr/local/bin/agentmesh-*
     
     # Download the pre-built MicroVM rootfs
     mkdir -p /opt/microvm
@@ -54,7 +54,7 @@ if [ -n "$BIN_URL" ] && [ "$BIN_URL" != "null" ]; then
     chmod +x /opt/microvm/collect-fleet.sh 2>/dev/null || true
 else
     echo "No custom binaries specified. Installing latest release from github..."
-    export SAM_INSTALL_DIR=/usr/local/bin
+    export AGENTMESH_INSTALL_DIR=/usr/local/bin
     curl --retry 5 --retry-connrefused --retry-delay 5 -sL https://sam-mesh.dev/install.sh | bash
 fi
 
@@ -78,4 +78,4 @@ fi
 # Ensure launch script is executable (if it was downloaded via GCS)
 chmod +x /opt/microvm/launch-microvms.sh || true
 
-echo "SAM Host bootstrap finished successfully."
+echo "Agent Mesh Host bootstrap finished successfully."

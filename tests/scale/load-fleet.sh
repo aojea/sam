@@ -22,7 +22,7 @@
 # counted rather than against a fresh, empty host.
 #
 # The important detail is that load goes through one boundary per agent rather
-# than many connections through one. Each sam-box carries its own agent's
+# than many connections through one. Each agentmesh-box carries its own agent's
 # identity, so the node sees N distinct principals and the admission path is
 # exercised the way it would be in practice. Pointing a single load generator at
 # a single boundary would measure a socket, not a mesh.
@@ -45,10 +45,10 @@ REQUESTS=200
 CONCURRENCY=2
 WARMUP=5
 OUT="/var/log/load"
-TARGET="http://mesh.sam.alt/v1/models"
-SOCKET_PREFIX="/var/run/sam-vm"
+TARGET="http://mesh.alt/v1/models"
+SOCKET_PREFIX="/var/run/agentmesh-vm"
 SOCKET_SUFFIX=".vsock_1080"
-SAM_BENCH="${SAM_BENCH:-sam-bench}"
+AGENTMESH_BENCH="${AGENTMESH_BENCH:-agentmesh-bench}"
 REPORT_ONLY=""
 
 usage() {
@@ -60,7 +60,7 @@ Options:
   --requests N      requests per agent (default 200)
   --concurrency N   in-flight requests per agent (default 2)
   --warmup N        unmeasured requests per agent (default 5)
-  --target URL      mesh URL to request (default http://mesh.sam.alt/v1/models)
+  --target URL      mesh URL to request (default http://mesh.alt/v1/models)
   --out DIR         where per-agent JSON lands (default /var/log/load)
   --report DIR      aggregate an existing result directory and exit
 EOF
@@ -125,8 +125,8 @@ if [[ -n "$REPORT_ONLY" ]]; then
   exit 0
 fi
 
-command -v "$SAM_BENCH" >/dev/null 2>&1 || {
-  echo "sam-bench not found; build it with 'go build ./cmd/sam-bench' or set SAM_BENCH" >&2
+command -v "$AGENTMESH_BENCH" >/dev/null 2>&1 || {
+  echo "agentmesh-bench not found; build it with 'go build ./cmd/agentmesh-bench' or set AGENTMESH_BENCH" >&2
   exit 1
 }
 
@@ -137,7 +137,7 @@ for i in $(seq 1 "$AGENTS"); do
 done
 if (( missing > 0 )); then
   echo "missing $missing of $AGENTS boundary sockets under ${SOCKET_PREFIX}-N${SOCKET_SUFFIX}" >&2
-  echo "is the fleet still resident? check with: pgrep -c sam-box" >&2
+  echo "is the fleet still resident? check with: pgrep -c agentmesh-box" >&2
   exit 1
 fi
 
@@ -146,7 +146,7 @@ rm -f "$OUT"/agent-*.json
 
 echo "driving $AGENTS agents x $REQUESTS requests at $TARGET"
 for i in $(seq 1 "$AGENTS"); do
-  "$SAM_BENCH" run \
+  "$AGENTMESH_BENCH" run \
     --socket "${SOCKET_PREFIX}-${i}${SOCKET_SUFFIX}" \
     --target "$TARGET" \
     --requests "$REQUESTS" \

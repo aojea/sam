@@ -14,7 +14,7 @@ const REVIEW_PROMPT =
 // Single-flight backstop: reject a concurrent call so the one-at-a-time pool
 // invariant holds even if a manager lease race hands this worker out twice.
 const POOL_BUSY = "POOL_BUSY";
-const POOL_SECRET = process.env.SAM_POOL_SECRET ?? "sam-dev-pool-secret"; // shared dev secret; enforcement always on
+const POOL_SECRET = process.env.AGENTMESH_POOL_SECRET ?? "sam-dev-pool-secret"; // shared dev secret; enforcement always on
 const NO_LEASE = "NO_LEASE";
 let busy = false;
 

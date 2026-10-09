@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: mock-oidc
-        image: sam-mock-oidc:local
+        image: agentmesh-mock-oidc:local
         ports:
         - containerPort: 18080
           hostPort: 18080

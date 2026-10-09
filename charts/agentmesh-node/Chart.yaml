@@ -1,0 +1,6 @@
+apiVersion: v2
+name: agentmesh-node
+description: A Helm chart for deploying a Agent Mesh node, optionally hosting a service as a sidecar
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

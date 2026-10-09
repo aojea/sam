@@ -13,15 +13,15 @@
 // limitations under the License.
 
 // The JS SDK in a browser page (sdk/js/examples/browser) as a member of a
-// sam-one mesh: the page enrolls with the join token from an origin of its
+// agentmesh-one mesh: the page enrolls with the join token from an origin of its
 // own, joins the router over WebSocket and Noise, answers A2A requests from
 // a Node member, calls a Node agent, and after a reload resumes the saved
-// enrollment without a token. Once against sam-one directly and once behind
-// a TLS-terminating edge reached by name, the topology `sam-one --tunnel`
+// enrollment without a token. Once against agentmesh-one directly and once behind
+// a TLS-terminating edge reached by name, the topology `agentmesh-one --tunnel`
 // leaves the page in, where the router is advertised as wss.
 
 const { test, expect } = require('@playwright/test');
-const stack = require('./lib/sam-one');
+const stack = require('./lib/agentmesh-one');
 
 test.use({ ignoreHTTPSErrors: true });
 test.describe.configure({ mode: 'serial' });
@@ -33,7 +33,7 @@ const topologies = [
 ];
 
 for (const topology of topologies) {
-  test(`a browser page is a member of a sam-one mesh (${topology.name})`, async ({ page }) => {
+  test(`a browser page is a member of a agentmesh-one mesh (${topology.name})`, async ({ page }) => {
     const why = stack.missing();
     test.skip(why !== '', why);
 
@@ -45,8 +45,8 @@ for (const topology of topologies) {
         const cert = stack.selfSignedCert('localhost');
         test.skip(cert === null, 'openssl is not installed');
         caFile = cert.certFile;
-        // The edge's port must be known before sam-one starts, since sam-one
-        // advertises it; the edge then proxies to wherever sam-one bound.
+        // The edge's port must be known before agentmesh-one starts, since agentmesh-one
+        // advertises it; the edge then proxies to wherever agentmesh-one bound.
         const edgePort = await stack.freePort();
         samOne = await stack.startSamOne({ externalUrl: `https://localhost:${edgePort}` });
         stops.push(() => samOne.stop());

@@ -63,9 +63,9 @@ jobs:
 
       - name: Build binaries
         run: |
-          go build -o bin/sam-one ./cmd/sam-one
-          go build -o bin/sam-node ./cmd/sam-node
-          go build -o bin/sam-bench ./cmd/sam-bench
+          go build -o bin/agentmesh-one ./cmd/agentmesh-one
+          go build -o bin/agentmesh-node ./cmd/agentmesh-node
+          go build -o bin/agentmesh-bench ./cmd/agentmesh-bench
           go build -o bin/stdio-mcp ./tests/scale/stdio-mcp
 
       - name: Setup Python
@@ -77,12 +77,12 @@ jobs:
         run: python -m pip install --quiet "mcp>=2,<3"
 
       - name: Start a local mesh
-        # sam-one is the control plane and the router on one port; its first
+        # agentmesh-one is the control plane and the router on one port; its first
         # boot writes the join token every member enrolls with.
         run: |
           mkdir -p "$RUNNER_TEMP/mesh"
-          bin/sam-one --data-dir "$RUNNER_TEMP/mesh" --port 18090 --bind-address 127.0.0.1 \
-            > "$RUNNER_TEMP/sam-one.log" 2>&1 &
+          bin/agentmesh-one --data-dir "$RUNNER_TEMP/mesh" --port 18090 --bind-address 127.0.0.1 \
+            > "$RUNNER_TEMP/agentmesh-one.log" 2>&1 &
           for _ in $(seq 1 60); do
             curl -fsS -o /dev/null "$CONTROL_PLANE/readyz" 2>/dev/null && break
             sleep 1
@@ -102,7 +102,7 @@ jobs:
             dir="$RUNNER_TEMP/provider-$i"
             mkdir -p "$dir"
             command_json=$(python -c 'import json, sys; print(json.dumps(sys.argv[1].split()))' "$backend")
-            cat > "$dir/sam-node.yaml" <<EOF
+            cat > "$dir/agentmesh-node.yaml" <<EOF
           version: "v1alpha1"
           services:
             - type: "mcp"
@@ -110,10 +110,10 @@ jobs:
               description: "member-journey provider $i"
               command: $command_json
           EOF
-            bin/sam-node run \
+            bin/agentmesh-node run \
               --control-plane "$CONTROL_PLANE" \
               --bootstrap-token-path "$RUNNER_TEMP/mesh/join-token" \
-              --config "$dir/sam-node.yaml" \
+              --config "$dir/agentmesh-node.yaml" \
               --data-dir "$dir" \
               --bind-addr= \
               --socket-path "$dir/node.sock" \
@@ -162,7 +162,7 @@ jobs:
         run: |
           mkdir -p _artifacts
           cp "$RUNNER_TEMP"/journey/*.json "$RUNNER_TEMP"/journey/*.log "$RUNNER_TEMP"/journey/*.jsonl _artifacts/ 2>/dev/null || true
-          cp "$RUNNER_TEMP"/sam-one.log "$RUNNER_TEMP"/provider-*.log _artifacts/ 2>/dev/null || true
+          cp "$RUNNER_TEMP"/agentmesh-one.log "$RUNNER_TEMP"/provider-*.log _artifacts/ 2>/dev/null || true
 
       - name: Upload observations
         if: always()

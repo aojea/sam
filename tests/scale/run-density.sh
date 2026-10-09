@@ -23,7 +23,7 @@
 # whether the ones already running got slower.
 #
 # It deliberately runs the boundaries as host processes rather than containers.
-# The question is what sam-box costs, and wrapping each one in a container would
+# The question is what agentmesh-box costs, and wrapping each one in a container would
 # measure the container runtime instead.
 #
 # Usage:
@@ -63,7 +63,7 @@ BOX_DIR="$(mktemp -d /tmp/sam-scale-XXXXXX)"
 
 # Pick a metrics port range that is actually free. A previous run that leaked
 # its processes would otherwise make this one fail on its first sandbox, and
-# that failure reads as a defect in sam-box rather than in the harness.
+# that failure reads as a defect in agentmesh-box rather than in the harness.
 pick_port_base() {
   local base
   for base in 19600 19700 19800 19900 20000; do
@@ -94,7 +94,7 @@ cleanup() {
   # The recorded pids are the reliable path; this catches anything that
   # outlived its record, so a failed run cannot leave sandboxes holding ports
   # and make the next run look broken.
-  pkill -f "sam-box run --socket ${BOX_DIR}/" 2>/dev/null || true
+  pkill -f "agentmesh-box run --socket ${BOX_DIR}/" 2>/dev/null || true
   mesh_cleanup_test_resources 2>/dev/null || true
   [[ "${KEEP}" -eq 1 ]] || rm -rf "${BOX_DIR}"
   exit "${status}"
@@ -131,7 +131,7 @@ start_box() {
   local started
   started="$(date +%s%N)"
 
-  "${REPO_ROOT}/bin/sam-box" run \
+  "${REPO_ROOT}/bin/agentmesh-box" run \
     --socket "${socket}" \
     --sidecar-socket "${MESH_SOCKET_DIR}/node.sock" \
     --metrics-addr "127.0.0.1:${port}" \
@@ -169,7 +169,7 @@ mesh_start_mock_oidc
 mesh_start_router
 mesh_start_node 1 "--socket-path /sockets/node.sock --data-dir /sockets/node-data" "" \
   "-v ${MESH_SOCKET_DIR}:/sockets --user $(id -u):$(id -g) -e HOME=/sockets"
-mesh_wait_for_log "${MESH_PREFIX}-node-1" "SAM Node Online" 120
+mesh_wait_for_log "${MESH_PREFIX}-node-1" "Agent Mesh Node Online" 120
 mesh_wait_for_mcp_ready 1 30
 
 echo "==> Sweeping ${STEPS} sandboxes"
@@ -182,7 +182,7 @@ echo "index,startup_ms" >> "${OUT_DIR}/startup.csv"
 # socket directly, because putting a relay there to give it a TCP address would
 # add a userspace hop to the baseline and flatter everything compared to it.
 echo "==> Measuring the baseline, no boundary"
-"${REPO_ROOT}/bin/sam-bench" run \
+"${REPO_ROOT}/bin/agentmesh-bench" run \
   --target-unix "${MESH_SOCKET_DIR}/node.sock" \
   --target "http://localhost/v1/models" \
   --requests "${REQUESTS}" \
@@ -221,9 +221,9 @@ for step in ${STEPS//,/ }; do
     flag=()
     [[ "${condition}" == "new-flow-per-request" ]] && flag=(--new-flow-per-request)
 
-    "${REPO_ROOT}/bin/sam-bench" run \
+    "${REPO_ROOT}/bin/agentmesh-bench" run \
       --socket "${BOX_DIR}/agent-1.sock" \
-      --target "http://mesh.sam.alt/v1/models" \
+      --target "http://mesh.alt/v1/models" \
       --requests "${REQUESTS}" \
       --concurrency "${CONCURRENCY}" \
       --warmup "${WARMUP}" \
@@ -239,7 +239,7 @@ for step in ${STEPS//,/ }; do
   # must fail, and a run where any succeeded is a security result, not a
   # performance one, so it is recorded next to the latencies rather than in a
   # separate place nobody reads.
-  "${REPO_ROOT}/bin/sam-bench" run \
+  "${REPO_ROOT}/bin/agentmesh-bench" run \
     --socket "${BOX_DIR}/agent-1.sock" \
     --target "http://blocked.example.com/v1/models" \
     --requests "${REQUESTS}" \
@@ -255,25 +255,25 @@ echo "==> Results in ${OUT_DIR}"
 {
   echo "### Reused flow: what an agent normally experiences"
   echo
-  "${REPO_ROOT}/bin/sam-bench" report \
+  "${REPO_ROOT}/bin/agentmesh-bench" report \
     --gauge "process_resident_memory_bytes" \
     "${OUT_DIR}"/reused-flow-*.json
   echo
   echo "### New flow per request: what admission costs"
   echo
-  "${REPO_ROOT}/bin/sam-bench" report \
-    --metric "sam_box_flows_total{outcome=allowed,route=mesh-entrypoint}" \
+  "${REPO_ROOT}/bin/agentmesh-bench" report \
+    --metric "agentmesh_box_flows_total{outcome=allowed,route=mesh-entrypoint}" \
     "${OUT_DIR}"/new-flow-per-request-*.json
   echo
   echo "### Denied: what enforcement costs, and that it held"
   echo
-  "${REPO_ROOT}/bin/sam-bench" report \
-    --metric "sam_box_flows_total{outcome=denied,route=unresolved}" \
+  "${REPO_ROOT}/bin/agentmesh-bench" report \
+    --metric "agentmesh_box_flows_total{outcome=denied,route=unresolved}" \
     "${OUT_DIR}"/denied-*.json
   if [[ -f "${OUT_DIR}/baseline.json" ]]; then
     echo
     echo "### Baseline: the same node, no boundary"
     echo
-    "${REPO_ROOT}/bin/sam-bench" report "${OUT_DIR}/baseline.json"
+    "${REPO_ROOT}/bin/agentmesh-bench" report "${OUT_DIR}/baseline.json"
   fi
 } | tee "${OUT_DIR}/table.md"

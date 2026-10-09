@@ -29,7 +29,7 @@ import (
 	"github.com/google/agentmesh/api"
 )
 
-const sdkCanaryTemplate = ".github/k8s/sam-sdk-canary-template.yaml"
+const sdkCanaryTemplate = ".github/k8s/agentmesh-sdk-canary-template.yaml"
 
 // canaryVerdict is one line the canary script prints per call.
 type canaryVerdict struct {
@@ -41,7 +41,7 @@ type canaryVerdict struct {
 }
 
 // TestSDKCanaryScript runs the testnet's SDK canary script, taken from
-// .github/k8s/sam-sdk-canary-template.yaml, the way its pod runs it: an
+// .github/k8s/agentmesh-sdk-canary-template.yaml, the way its pod runs it: an
 // agent example in one language writes its output to the directory the pod
 // shares, and the script calls it with the other language's A2A example,
 // both enrolled with the same projected token, the caller resuming its

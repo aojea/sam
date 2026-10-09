@@ -45,8 +45,8 @@ CAPTION_CPS=${CAPTION_CPS:-24}
 CAPTION_FILE=/tmp/samdemo-caption.txt
 CAPTIONS=$OUT/captions.tsv
 SRT=$OUT/demo.srt
-GITHUB_TOKEN_FILE=${GITHUB_TOKEN_FILE:-$HOME/.config/sam-demo/github-ro}
-DEMO_DIR=${DEMO_DIR:-$HOME/sam-demo}
+GITHUB_TOKEN_FILE=${GITHUB_TOKEN_FILE:-$HOME/.config/agentmesh-demo/github-ro}
+DEMO_DIR=${DEMO_DIR:-$HOME/agentmesh-demo}
 
 mkdir -p "$OUT"
 rm -f "$SRT" "$CAPTIONS"
@@ -150,7 +150,7 @@ CAPTION=$(tmux split-window -P -F '#{pane_id}' -v -l 4 -t "$MESH" -c "$HERE")
 SANDBOX=$(tmux split-window -P -F '#{pane_id}' -h -l 50% -t "$MESH" -c "$HERE")
 NODE=$(tmux split-window -P -F '#{pane_id}' -v -l 20 -t "$MESH" -c "$HERE")
 ADMIN=$(tmux split-window -P -F '#{pane_id}' -v -l 12 -t "$MESH" -c "$HERE")
-tmux select-pane -t "$MESH" -T 'office · mesh (sam-one)'
+tmux select-pane -t "$MESH" -T 'office · mesh (agentmesh-one)'
 tmux select-pane -t "$ADMIN" -T 'office · admin'
 tmux select-pane -t "$NODE" -T 'office · node (what it serves, every decision)'
 tmux select-pane -t "$SANDBOX" -T 'developer sandbox · a codespace, no VPN'
@@ -185,12 +185,12 @@ tmux send-keys -t "$CAPTION" "python3 /tmp/samdemo-caption.py $CAPTION_FILE $COL
 # names its source instead of showing it.
 ADMIN_TOKEN=$(openssl rand -hex 16)
 for p in "$MESH" "$ADMIN" "$NODE"; do
-  tmux send-keys -t "$p" "export SAM_ADMIN_TOKEN=$ADMIN_TOKEN GITHUB_TOKEN_FILE=$GITHUB_TOKEN_FILE DEMO_DIR=$DEMO_DIR AUDIT_RAW=$OUT/node.log PS1='office\$ '; clear" Enter
+  tmux send-keys -t "$p" "export AGENTMESH_ADMIN_TOKEN=$ADMIN_TOKEN GITHUB_TOKEN_FILE=$GITHUB_TOKEN_FILE DEMO_DIR=$DEMO_DIR AUDIT_RAW=$OUT/node.log PS1='office\$ '; clear" Enter
 done
 rm -f "$OUT/node.log"
 tmux send-keys -t "$SANDBOX" "gh codespace ssh -c $CODESPACE" Enter
 wait_for "$SANDBOX" '\$\s*$' 120
-tmux send-keys -t "$SANDBOX" "PS1='sandbox\$ '; cd ~/sandbox && source ~/venv/bin/activate && rm -rf ~/.config/sam-mesh/sandboxed-agent ~/sandbox/state && clear" Enter
+tmux send-keys -t "$SANDBOX" "PS1='sandbox\$ '; cd ~/sandbox && source ~/venv/bin/activate && rm -rf ~/.config/agentmesh/sandboxed-agent ~/sandbox/state && clear" Enter
 wait_for "$SANDBOX" 'sandbox\$' 30
 # A fresh mesh every take; the downloaded cloudflared is kept.
 rm -rf "$DEMO_DIR/pep"
@@ -217,7 +217,7 @@ pause 2
 
 # 2. The mesh and the policy
 caption "The admin starts a mesh: a control plane, a router and a console, on a public https URL, with the policy in policy.json. No standing join token."
-expect "$MESH" "make mesh" 'SAM standalone mesh is ready' 120
+expect "$MESH" "make mesh" 'Agent Mesh standalone mesh is ready' 120
 URL=$(grab "$MESH" 'https://[a-z0-9-]+\.trycloudflare\.com')
 # A quick tunnel is routed a few seconds after cloudflared prints it, and
 # once in a while it dies at once; either way, do not type into a dead URL.
@@ -236,17 +236,17 @@ gh codespace ssh -c "$CODESPACE" -- 'cat > ~/sandbox/agent-token; chmod 600 ~/sa
 pause 1
 
 type_in "$ADMIN" "jq -c '.roles[1].allowed_services, .roles[1].http[0], .egress[0]' policy.json"
-caption "The policy: the agent may call the model, the MCP server and api.github.com by name, and api.github.com only with GET under /repos/google/sam/. The destination is served by nodes labelled site=office."
+caption "The policy: the agent may call the model, the MCP server and api.github.com by name, and api.github.com only with GET under /repos/google/agentmesh/. The destination is served by nodes labelled site=office."
 pause 1
 
 caption "The office node fronts a model and an MCP server on loopback. api.github.com is assigned to it by the policy; its read-only token is a file on this machine, read by the node, never by an agent."
 type_in "$NODE" "export URL=$URL"
-expect "$NODE" "make pep URL=\$URL 2>&1 | python3 audit.py" 'SAM Node Online' 60
+expect "$NODE" "make pep URL=\$URL 2>&1 | python3 audit.py" 'Agent Mesh Node Online' 60
 pause 2
 
 # 3. The developer's program joins
 caption "The agent is an ordinary Python program with the SDK. The admin handed the developer the single-use token out of band. It enrolls once and gets an identity: no sidecar, no proxy variables, no VPN."
-type_in "$SANDBOX" "export SAM_CONTROL_PLANE_URL=$URL SAM_BOOTSTRAP_TOKEN_PATH=~/sandbox/agent-token"
+type_in "$SANDBOX" "export AGENTMESH_CONTROL_PLANE_URL=$URL AGENTMESH_BOOTSTRAP_TOKEN_PATH=~/sandbox/agent-token"
 expect "$SANDBOX" "python agent.py models" '← 200  gemma3' 90
 PEER=$(grab "$SANDBOX" 'on the mesh as 12D3KooW[A-Za-z0-9]+' | awk '{print $NF}')
 pause 1
@@ -259,9 +259,9 @@ caption "A tool call reaches the MCP server in the office. On the left, every de
 pause 1
 
 # 5. External API
-expect "$SANDBOX" "python agent.py github GET '/repos/google/sam/pulls?state=open&per_page=1'" '← 200  #' 60
+expect "$SANDBOX" "python agent.py github GET '/repos/google/agentmesh/pulls?state=open&per_page=1'" '← 200  #' 60
 caption "An external API. GitHub answers 200: the node presented the office's token. The request the sandbox sent had none."
-expect "$SANDBOX" "python agent.py github POST /repos/google/sam/pulls" 'http_request_denied' 60
+expect "$SANDBOX" "python agent.py github POST /repos/google/agentmesh/pulls" 'http_request_denied' 60
 expect "$SANDBOX" "python agent.py github GET /user" 'http_request_denied' 60
 wait_for "$NODE" 'DENY.*GET /user' 30
 caption "The agent may try anything. POST is outside the grant; /user is outside the grant. The network answers 403 before GitHub hears of it."
@@ -271,7 +271,7 @@ pause 1
 caption "The admin takes api.github.com off the mesh: one policy change. The node withdraws it within seconds."
 expect "$ADMIN" "make revoke URL=\$URL" 'success' 30
 wait_for "$NODE" 'Withdrawn egress://api.github.com' 60
-expect "$SANDBOX" "python agent.py github GET '/repos/google/sam/pulls?state=open&per_page=1'" '← 404' 60
+expect "$SANDBOX" "python agent.py github GET '/repos/google/agentmesh/pulls?state=open&per_page=1'" '← 404' 60
 caption "The same request finds no service. Nothing to revoke in the sandbox: it never had anything."
 pause 1
 

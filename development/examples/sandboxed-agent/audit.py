@@ -1,4 +1,4 @@
-"""Reads a sam-node log on stdin and prints the lines an admin watches: what
+"""Reads a agentmesh-node log on stdin and prints the lines an admin watches: what
 the node serves, and one line per authorization decision.
 
     make pep URL=https://... 2>&1 | python3 audit.py
@@ -11,7 +11,7 @@ import sys
 from contextlib import nullcontext
 
 AUDIT = re.compile(r"Audit Traceability\s+(\{.*\})\s*$")
-KEEP = re.compile(r"\[Egress\] (Serving|Withdrawn|Assignments)|peer banned|SAM Node Online|PeerID:")
+KEEP = re.compile(r"\[Egress\] (Serving|Withdrawn|Assignments)|peer banned|Agent Mesh Node Online|PeerID:")
 
 
 def verdict(line):

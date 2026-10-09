@@ -1,0 +1,64 @@
+suite: db statefulset
+templates:
+  - templates/db-statefulset.yaml
+release:
+  name: agentmesh
+tests:
+  - it: probes postgres with pg_isready
+    documentSelector:
+      path: kind
+      value: StatefulSet
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.exec.command[0]
+          value: pg_isready
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.exec.command[0]
+          value: pg_isready
+
+  - it: runs postgres as its own uid with no capabilities
+    documentSelector:
+      path: kind
+      value: StatefulSet
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 70
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 70
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+      - contains:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          content: ALL
+      # Non-root initdb needs a data directory it owns, below the PVC root.
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PGDATA
+            value: /var/lib/postgresql/data/pgdata
+
+  - it: scheduling knobs pass through to the pod spec
+    set:
+      database.postgres.tolerations:
+        - key: dedicated
+    documentSelector:
+      path: kind
+      value: StatefulSet
+    asserts:
+      - contains:
+          path: spec.template.spec.tolerations
+          content:
+            key: dedicated
+
+  - it: external postgres renders nothing
+    set:
+      database.postgres.deployInternal: false
+    asserts:
+      - hasDocuments:
+          count: 0

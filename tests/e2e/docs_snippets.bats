@@ -30,8 +30,8 @@ teardown() {
   run docker run --rm \
     --network "${MESH_NETWORK}" \
     -v "$(pwd)/site/content/docs/snippets:/snippets" \
-    -e SAM_MCP_URL="http://${node1_name}:8080/mcp" \
-    -e SAM_API_TOKEN="secret-token" \
+    -e AGENTMESH_MCP_URL="http://${node1_name}:8080/mcp" \
+    -e AGENTMESH_API_TOKEN="secret-token" \
     python:3.12 \
     bash -c 'pip install "mcp>=2,<3" httpx && python3 /snippets/agent_demo.py'
 
@@ -43,7 +43,7 @@ teardown() {
   fi
 
   [[ "$status" -eq 0 ]]
-  [[ "$output" == *"Connecting to SAM Node at"* ]]
+  [[ "$output" == *"Connecting to Agent Mesh Node at"* ]]
   [[ "$output" == *"Discovered"* ]]
   [[ "$output" == *"Calling get_mesh_info tool..."* ]]
   [[ "$output" == *"Result:"* ]]

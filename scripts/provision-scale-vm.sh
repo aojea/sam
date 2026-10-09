@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VM_NAME_PREFIX="sam-minions"
+VM_NAME_PREFIX="agentmesh-minions"
 ZONE="us-central1-a"
 PROJECT="ipv6-project-379110"
 GCS_URL=""
@@ -41,12 +41,12 @@ METADATA="enable-osconfig=TRUE"
 if [ -n "$GCS_URL" ]; then
     echo "Building local binaries for injection..."
     # Make sure we build for Linux x86_64 since the VM is Debian x86_64
-    GOOS=linux GOARCH=amd64 go build -o /tmp/sam-node ./cmd/sam-node
-    GOOS=linux GOARCH=amd64 go build -o /tmp/sam-box ./cmd/sam-box
+    GOOS=linux GOARCH=amd64 go build -o /tmp/agentmesh-node ./cmd/agentmesh-node
+    GOOS=linux GOARCH=amd64 go build -o /tmp/agentmesh-box ./cmd/agentmesh-box
     
     echo "Uploading binaries to GCS: $GCS_URL"
-    gcloud storage cp /tmp/sam-node "$GCS_URL/sam-node"
-    gcloud storage cp /tmp/sam-box "$GCS_URL/sam-box"
+    gcloud storage cp /tmp/agentmesh-node "$GCS_URL/agentmesh-node"
+    gcloud storage cp /tmp/agentmesh-box "$GCS_URL/agentmesh-box"
     
     echo "Uploading rootfs.ext4 and launch script to GCS..."
     if [ ! -f "rootfs.ext4" ]; then
@@ -58,7 +58,7 @@ if [ -n "$GCS_URL" ]; then
     # A run that cannot report on itself is not worth the machine it ran on.
     gcloud storage cp tests/scale/collect-fleet.sh "$GCS_URL/collect-fleet.sh"
     
-    METADATA="enable-osconfig=TRUE,sam-binaries-url=$GCS_URL"
+    METADATA="enable-osconfig=TRUE,agentmesh-binaries-url=$GCS_URL"
 fi
 
 echo "Provisioning $COUNT GCP Scale Experiment VM(s) with prefix '${VM_NAME_PREFIX}' in ${ZONE} (${PROJECT})..."
@@ -128,6 +128,6 @@ gcloud compute instances ops-agents policies create "goog-ops-agent-v2-template-
     --file=/tmp/ops-agent-config.yaml || echo "Warning: Ops Agent policy creation returned an error (it might already exist)."
 
 echo ""
-echo "Done! The VM ${VM_NAME} is booting. cloud-init is running in the background to install Firecracker, Go, and sam-box."
+echo "Done! The VM ${VM_NAME} is booting. cloud-init is running in the background to install Firecracker, Go, and agentmesh-box."
 echo "You can view the cloud-init logs by SSHing into the VM and running:"
 echo "  sudo tail -f /var/log/cloud-init-output.log"

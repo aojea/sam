@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build, load and install a service into the kind mesh from a directory holding
-# a Dockerfile and a charts/sam-node values.yaml (e.g. development/examples/calc-mcp).
+# a Dockerfile and a charts/agentmesh-node values.yaml (e.g. development/examples/calc-mcp).
 # --release-name deploys the same directory as several nodes; anything else
 # after the directory passes to helm (e.g. --set replicaCount=3).
 set -euo pipefail
@@ -32,9 +32,9 @@ fi
 
 set -x
 docker build -t "${NAME}:local" "${DIR}"
-kind load docker-image --name sam-kind "${NAME}:local"
-"${HELM}" --kube-context kind-sam-kind -n sam-kind upgrade --install "${RELEASE}" "${PROJECT_ROOT}/charts/sam-node" \
-  -f "${PROJECT_ROOT}/development/kind/sam-node.values.yaml" \
+kind load docker-image --name agentmesh-kind "${NAME}:local"
+"${HELM}" --kube-context kind-agentmesh-kind -n agentmesh-kind upgrade --install "${RELEASE}" "${PROJECT_ROOT}/charts/agentmesh-node" \
+  -f "${PROJECT_ROOT}/development/kind/agentmesh-node.values.yaml" \
   -f "${DIR}/values.yaml" ${HELM_ARGS[@]+"${HELM_ARGS[@]}"}
-kubectl --context kind-sam-kind -n sam-kind rollout status deployment \
-  -l "app.kubernetes.io/name=sam-node,app.kubernetes.io/instance=${RELEASE}" --timeout=180s
+kubectl --context kind-agentmesh-kind -n agentmesh-kind rollout status deployment \
+  -l "app.kubernetes.io/name=agentmesh-node,app.kubernetes.io/instance=${RELEASE}" --timeout=180s

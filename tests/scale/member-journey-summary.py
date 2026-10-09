@@ -137,14 +137,14 @@ def p99_of_delta(before, after, name):
     return float("inf")
 
 
-cp_before, cp_after = parse_all("sam-control-plane", "before"), parse_all("sam-control-plane", "after")
+cp_before, cp_after = parse_all("agentmesh-control-plane", "before"), parse_all("agentmesh-control-plane", "after")
 if cp_before and cp_after:
     print()
-    codes = delta_by(cp_before, cp_after, "sam_control_plane_http_requests_total", "code")
+    codes = delta_by(cp_before, cp_after, "agentmesh_control_plane_http_requests_total", "code")
     errors = sum(v for c, v in codes.items() if c and c.startswith("5"))
-    p99 = p99_of_delta(cp_before, cp_after, "sam_control_plane_http_request_duration_seconds")
+    p99 = p99_of_delta(cp_before, cp_after, "agentmesh_control_plane_http_request_duration_seconds")
     # Both replicas export the same store-derived gauge; take one.
-    nodes = tuple(max([v for (n, labels), v in s.items() if n == "sam_control_plane_enrolled_nodes" and dict(labels).get("role") == "mesh:role:node"] or [0])
+    nodes = tuple(max([v for (n, labels), v in s.items() if n == "agentmesh_control_plane_enrolled_nodes" and dict(labels).get("role") == "mesh:role:node"] or [0])
                   for s in (cp_before, cp_after))
     print(f"control plane: requests by code {codes}; p99 <= {p99} s; enrolled nodes {nodes[0]:.0f} -> {nodes[1]:.0f}")
     check("control plane: no 5xx during the run", errors == 0, f"{errors:.0f} responses")
@@ -152,16 +152,16 @@ if cp_before and cp_after:
         check(f"control plane: request p99 <= {t_cp_p99:g} s", p99 <= t_cp_p99, f"<= {p99} s bucket")
 
 routers = sorted({re.sub(r"-(before|after|resident|rolled)\.prom$", "", os.path.basename(p))
-                  for p in glob.glob(os.path.join(out, "sam-router-*.prom"))})
+                  for p in glob.glob(os.path.join(out, "agentmesh-router-*.prom"))})
 refused_total = 0
 for r in routers:
     b, a = parse(os.path.join(out, f"{r}-before.prom")), parse(os.path.join(out, f"{r}-after.prom"))
     if not (b and a):
         continue
-    refused = delta_by(b, a, "sam_router_inbound_connections_refused_total", "reason")
-    handshakes = delta_by(b, a, "sam_router_auth_handshakes_total", "result")
+    refused = delta_by(b, a, "agentmesh_router_inbound_connections_refused_total", "reason")
+    handshakes = delta_by(b, a, "agentmesh_router_auth_handshakes_total", "result")
     rss = (total(b, "process_resident_memory_bytes") / 2**20, total(a, "process_resident_memory_bytes") / 2**20)
-    peers = total(a, "sam_router_authenticated_peers")
+    peers = total(a, "agentmesh_router_authenticated_peers")
     refused_total += sum(refused.values())
     print(f"{r}: refused {refused}; handshakes {handshakes}; rss {rss[0]:.0f} -> {rss[1]:.0f} MiB; authenticated peers now {peers:.0f}")
 if routers:

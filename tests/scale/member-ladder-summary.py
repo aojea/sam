@@ -118,20 +118,20 @@ for n in notes:
     print(n)
 
 for i in range(1, len(steps) + 1):
-    b, a = parse_all("sam-control-plane", f"step{i}-before"), parse_all("sam-control-plane", f"step{i}-after")
+    b, a = parse_all("agentmesh-control-plane", f"step{i}-before"), parse_all("agentmesh-control-plane", f"step{i}-after")
     if not (b and a):
         continue
-    codes = delta_by(b, a, "sam_control_plane_http_requests_total", "code")
-    p99 = p99_of_delta(b, a, "sam_control_plane_http_request_duration_seconds")
-    nodes = max([v for (n, labels), v in a.items() if n == "sam_control_plane_enrolled_nodes" and dict(labels).get("role") == "mesh:role:node"] or [0])
-    peers = max([v for (n, labels), v in a.items() if n == "sam_control_plane_mesh_connected_peers"] or [0])
+    codes = delta_by(b, a, "agentmesh_control_plane_http_requests_total", "code")
+    p99 = p99_of_delta(b, a, "agentmesh_control_plane_http_request_duration_seconds")
+    nodes = max([v for (n, labels), v in a.items() if n == "agentmesh_control_plane_enrolled_nodes" and dict(labels).get("role") == "mesh:role:node"] or [0])
+    peers = max([v for (n, labels), v in a.items() if n == "agentmesh_control_plane_mesh_connected_peers"] or [0])
     print(f"\nstep {i} control plane: requests {codes}; p99 <= {p99} s; enrolled nodes {nodes:.0f}; mesh peers seen {peers:.0f}")
-    for r in sorted({re.sub(r"-step\d+-(before|after)\.prom$", "", os.path.basename(p)) for p in glob.glob(os.path.join(out, f"sam-router-*-step{i}-after.prom"))}):
-        rb = {k: v for k, v in parse_all("sam-router", f"step{i}-before").items() if dict(k[1]).get("pod") == r}
-        ra = {k: v for k, v in parse_all("sam-router", f"step{i}-after").items() if dict(k[1]).get("pod") == r}
-        refused = delta_by(rb, ra, "sam_router_inbound_connections_refused_total", "reason")
-        hs = delta_by(rb, ra, "sam_router_auth_handshakes_total", "result")
-        print(f"  {r}: authenticated peers {total(ra, 'sam_router_authenticated_peers'):.0f}, connected {total(ra, 'sam_router_connected_peers'):.0f}, "
+    for r in sorted({re.sub(r"-step\d+-(before|after)\.prom$", "", os.path.basename(p)) for p in glob.glob(os.path.join(out, f"agentmesh-router-*-step{i}-after.prom"))}):
+        rb = {k: v for k, v in parse_all("agentmesh-router", f"step{i}-before").items() if dict(k[1]).get("pod") == r}
+        ra = {k: v for k, v in parse_all("agentmesh-router", f"step{i}-after").items() if dict(k[1]).get("pod") == r}
+        refused = delta_by(rb, ra, "agentmesh_router_inbound_connections_refused_total", "reason")
+        hs = delta_by(rb, ra, "agentmesh_router_auth_handshakes_total", "result")
+        print(f"  {r}: authenticated peers {total(ra, 'agentmesh_router_authenticated_peers'):.0f}, connected {total(ra, 'agentmesh_router_connected_peers'):.0f}, "
               f"rss {total(rb, 'process_resident_memory_bytes')/2**20:.0f} -> {total(ra, 'process_resident_memory_bytes')/2**20:.0f} MiB, "
               f"handshakes {dict((k, v) for k, v in hs.items() if v)}, refused {dict((k, v) for k, v in refused.items() if v) or 'none'}")
 

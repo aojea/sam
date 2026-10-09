@@ -11,7 +11,7 @@ from a2a.types import Message, Part, Role, SendMessageRequest
 
 
 async def main(url: str) -> None:
-    token = os.environ.get("SAM_API_TOKEN", "devtoken")
+    token = os.environ.get("AGENTMESH_API_TOKEN", "devtoken")
     async with httpx.AsyncClient(timeout=120, headers={"X-Mesh-Authentication": f"Bearer {token}"}) as http:
         card = await A2ACardResolver(http, url).get_agent_card()
         print(f"{card.name}: {card.description}")

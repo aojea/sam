@@ -14,7 +14,7 @@
 
 const { test, expect } = require('@playwright/test');
 
-const ADMIN_TOKEN = process.env.SAM_ADMIN_TOKEN || 'ui-test-admin-token';
+const ADMIN_TOKEN = process.env.AGENTMESH_ADMIN_TOKEN || 'ui-test-admin-token';
 
 // Tests run serially with a single worker, so one collector is enough.
 let jsFailures = [];
@@ -79,7 +79,7 @@ test('generating a token shows a copyable value and lists it', async ({ page }) 
 
   const tokenField = page.locator('#token-result-value');
   await expect(page.locator('#token-result')).toBeVisible();
-  await expect(tokenField).toHaveValue(/^sam-bt-[0-9a-f]{32}$/);
+  await expect(tokenField).toHaveValue(/^mesh-bt-[0-9a-f]{32}$/);
 
   const token = await tokenField.inputValue();
   await expect(page.locator('#token-result-owner')).toHaveText('root-admin');
@@ -115,8 +115,8 @@ test('the session credential is never exposed to JavaScript', async ({ page, con
   expect(storage).not.toContain(ADMIN_TOKEN);
   expect(await page.evaluate(() => document.cookie)).not.toContain(ADMIN_TOKEN);
 
-  const session = (await context.cookies()).find((c) => c.name === 'sam_session');
-  expect(session, 'sam_session cookie was not set').toBeTruthy();
+  const session = (await context.cookies()).find((c) => c.name === 'agentmesh_session');
+  expect(session, 'agentmesh_session cookie was not set').toBeTruthy();
   expect(session.httpOnly).toBe(true);
 });
 

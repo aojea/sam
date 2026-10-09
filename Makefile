@@ -37,14 +37,14 @@ build:
 .PHONY: mobile-ffi-host mobile-ffi-android mobile-ffi-android-x86_64 mobile-ffi-ios mobile-ffi mobile-app-apk mobile-app-apk-emulator mobile-app-bundle
 mobile-ffi-host:
 	mkdir -p "$(OUT_DIR)"
-	CGO_ENABLED=1 go build -v -ldflags "$(VERSION_LDFLAGS)" -buildmode=c-shared -o "$(OUT_DIR)/libsam.so" ./mobile/sam-node-ffi
+	CGO_ENABLED=1 go build -v -ldflags "$(VERSION_LDFLAGS)" -buildmode=c-shared -o "$(OUT_DIR)/libsam.so" ./mobile/agentmesh-node-ffi
 
 mobile-ffi-android:
 	@if [ -z "$(ANDROID_NDK_LATEST)" ]; then \
 		echo "Error: Android NDK not found under $(ANDROID_HOME_RESOLVED)/ndk/. Please install NDK (Side-by-side) via Android Studio or sdkmanager." >&2; \
 		exit 1; \
 	fi
-	GOOS=android GOARCH=arm64 CGO_ENABLED=1 CC=$(ANDROID_CC_ARM64) go build -v -ldflags="-checklinkname=0 $(VERSION_LDFLAGS)" -buildmode=c-shared -o "$(OUT_DIR)/android/libsam.so" ./mobile/sam-node-ffi
+	GOOS=android GOARCH=arm64 CGO_ENABLED=1 CC=$(ANDROID_CC_ARM64) go build -v -ldflags="-checklinkname=0 $(VERSION_LDFLAGS)" -buildmode=c-shared -o "$(OUT_DIR)/android/libsam.so" ./mobile/agentmesh-node-ffi
 
 mobile-ffi-android-x86_64:
 	@if [ -z "$(ANDROID_NDK_LATEST)" ]; then \
@@ -52,15 +52,15 @@ mobile-ffi-android-x86_64:
 		exit 1; \
 	fi
 	mkdir -p "$(OUT_DIR)/android-x86_64"
-	GOOS=android GOARCH=amd64 CGO_ENABLED=1 CC=$(ANDROID_CC_X86_64) go build -v -ldflags="-checklinkname=0 $(VERSION_LDFLAGS)" -buildmode=c-shared -o "$(OUT_DIR)/android-x86_64/libsam.so" ./mobile/sam-node-ffi
+	GOOS=android GOARCH=amd64 CGO_ENABLED=1 CC=$(ANDROID_CC_X86_64) go build -v -ldflags="-checklinkname=0 $(VERSION_LDFLAGS)" -buildmode=c-shared -o "$(OUT_DIR)/android-x86_64/libsam.so" ./mobile/agentmesh-node-ffi
 
 mobile-ffi-ios:
 	mkdir -p "$(OUT_DIR)/ios"
-	GOOS=ios GOARCH=arm64 CGO_ENABLED=1 go build -v -ldflags "$(VERSION_LDFLAGS)" -buildmode=c-archive -o "$(OUT_DIR)/ios/libsam.a" ./mobile/sam-node-ffi
+	GOOS=ios GOARCH=arm64 CGO_ENABLED=1 go build -v -ldflags "$(VERSION_LDFLAGS)" -buildmode=c-archive -o "$(OUT_DIR)/ios/libsam.a" ./mobile/agentmesh-node-ffi
 
 mobile-ffi: mobile-ffi-host mobile-ffi-android mobile-ffi-android-x86_64 mobile-ffi-ios
 
-MOBILE_APP_DIR=mobile/sam-node-app
+MOBILE_APP_DIR=mobile/agentmesh-node-app
 # Optional overrides of pubspec.yaml's `version: X.Y.Z+N`. Google Play rejects
 # a bundle whose versionCode (N) it has already seen, so CI passes a fresh one.
 MOBILE_BUILD_NAME?=
@@ -104,7 +104,7 @@ mobile-app-apk-emulator: mobile-app-jnilibs-x86_64 mobile-app-google-services
 # Android App Bundle for Google Play. Play rejects debug-signed bundles, so an
 # upload key is required: either $(MOBILE_APP_DIR)/android/key.properties or
 # the ANDROID_KEYSTORE_PATH / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS /
-# ANDROID_KEY_PASSWORD environment variables (see mobile/sam-node-app/README.md).
+# ANDROID_KEY_PASSWORD environment variables (see mobile/agentmesh-node-app/README.md).
 #
 # Play serves each device the split for its own ABI, so the bundle must only
 # contain ABIs that have a libsam.so: Flutter's default set also includes
@@ -233,13 +233,13 @@ helm-lint:
 			exit 1; \
 		fi; \
 	fi; \
-	$$HELM_BIN lint ./charts/sam-mesh && $$HELM_BIN lint ./charts/sam-node --set controlPlaneUrl=http://required-for-lint:8080
+	$$HELM_BIN lint ./charts/agentmesh && $$HELM_BIN lint ./charts/agentmesh-node --set controlPlaneUrl=http://required-for-lint:8080
 
 # render the chart to bin/chart/ for inspection; pass extra flags via ARGS, e.g. ARGS="--set gateway.enabled=true"
 .PHONY: helm-template
 helm-template:
 	rm -rf bin/chart
-	helm template sam-mesh ./charts/sam-mesh --output-dir bin/chart $(ARGS)
+	helm template agentmesh ./charts/agentmesh --output-dir bin/chart $(ARGS)
 
 lint: fmt helm-lint
 	hack/lint.sh
@@ -248,7 +248,7 @@ lint: fmt helm-lint
 .PHONY: helm-test
 helm-test:
 	@helm plugin list 2>/dev/null | grep -q '^unittest' || helm plugin install https://github.com/helm-unittest/helm-unittest --version 0.8.2
-	helm unittest charts/sam-mesh charts/sam-node
+	helm unittest charts/agentmesh charts/agentmesh-node
 
 .PHONY: verify
 verify:
@@ -274,7 +274,7 @@ docker-build-mock-oidc:
 	docker build --load -t agentmesh-mock-oidc:local -f tests/e2e/docker/Dockerfile.mock-oidc .
 
 docker-build-e2e-runtime:
-	docker build --load -t agentmesh-e2e-runtime:local -f tests/e2e/docker/Dockerfile.sam-runtime .
+	docker build --load -t agentmesh-e2e-runtime:local -f tests/e2e/docker/Dockerfile.agentmesh-runtime .
 
 docker-build-agentmesh-console:
 	docker build --load --build-arg VERSION="$(VERSION)" -t agentmesh-console:local -f Dockerfile.agentmesh-console .

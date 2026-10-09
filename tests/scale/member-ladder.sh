@@ -23,7 +23,7 @@
 # members; the ladder is therefore in minions, and a step of two minions is
 # a thousand members more.
 #
-# Each minion runs `sam-bench join` with a long --hold; the join report it
+# Each minion runs `agentmesh-bench join` with a long --hold; the join report it
 # writes the moment its fleet is resident is pulled back here, so a step is
 # judged while its members stay. The control plane and every router are read
 # before and after each step, through the API server. At the end, or on
@@ -36,7 +36,7 @@
 #               "sam-ladder-06 sam-ladder-07 sam-ladder-08 sam-ladder-09 sam-ladder-10" \
 #       --out /tmp/ladder
 #
-# The minions need sam-node and sam-bench on their PATH and a bootstrap token
+# The minions need agentmesh-node and agentmesh-bench on their PATH and a bootstrap token
 # at --remote-token-path; the token is minted here with enough usages for the
 # whole ladder and revoked on exit, as member-journey.sh does. The minions are
 # reached with gcloud over IAP in $ZONE (default us-central1-a) and $PROJECT
@@ -100,10 +100,10 @@ admin_api() {
   local port
   port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
   if [[ ! -s "$OUT/admin-header" ]]; then
-    $KUBECTL get secret "sam-control-plane-secret-${ENV_NAME}" -n "$NS" -o json \
+    $KUBECTL get secret "agentmesh-control-plane-secret-${ENV_NAME}" -n "$NS" -o json \
       | python3 -c 'import json,sys,base64,os; d=json.load(sys.stdin)["data"]["admin-token"]; p=sys.argv[1]; open(p,"w").write("Authorization: Bearer "+base64.b64decode(d).decode()+"\n"); os.chmod(p,0o600)' "$OUT/admin-header"
   fi
-  $KUBECTL port-forward "deployment/sam-control-plane-${ENV_NAME}" -n "$NS" "${port}:8080" >/dev/null 2>&1 &
+  $KUBECTL port-forward "deployment/agentmesh-control-plane-${ENV_NAME}" -n "$NS" "${port}:8080" >/dev/null 2>&1 &
   PF_PID=$!
   for _ in $(seq 1 30); do curl -fsS -o /dev/null "http://127.0.0.1:${port}/healthz" 2>/dev/null && break; sleep 0.5; done
   local status=0
@@ -114,11 +114,11 @@ admin_api() {
 
 snapshot() {
   local tag="$1" pod name
-  for pod in $($KUBECTL get pods -n "$NS" -l "app=sam-control-plane-${ENV_NAME}" -o name 2>/dev/null); do
+  for pod in $($KUBECTL get pods -n "$NS" -l "app=agentmesh-control-plane-${ENV_NAME}" -o name 2>/dev/null); do
     name="${pod#pod/}"
     $KUBECTL get --raw "/api/v1/namespaces/${NS}/pods/${name}:8080/proxy/metrics" > "$OUT/${name}-${tag}.prom" 2>/dev/null || log "could not read ${name} (${tag})"
   done
-  for pod in $($KUBECTL get pods -n "$NS" -l "app=sam-router-${ENV_NAME}" -o name 2>/dev/null); do
+  for pod in $($KUBECTL get pods -n "$NS" -l "app=agentmesh-router-${ENV_NAME}" -o name 2>/dev/null); do
     name="${pod#pod/}"
     $KUBECTL get --raw "/api/v1/namespaces/${NS}/pods/${name}:9090/proxy/metrics" > "$OUT/${name}-${tag}.prom" 2>/dev/null || log "could not read ${name} (${tag})"
   done
@@ -128,11 +128,11 @@ STARTED_MINIONS=()
 collect_holds() {
   local m
   for m in "${STARTED_MINIONS[@]}"; do
-    rssh "$m" "pkill -INT -x sam-bench || true" || true
+    rssh "$m" "pkill -INT -x agentmesh-bench || true" || true
   done
   for m in "${STARTED_MINIONS[@]}"; do
     for _ in $(seq 1 60); do
-      rssh "$m" "pgrep -x sam-bench >/dev/null" || break
+      rssh "$m" "pgrep -x agentmesh-bench >/dev/null" || break
       sleep 2
     done
     rscp_from "$m" "/var/log/ladder/${m}.json" "$OUT/${m}.json" || log "no final report from $m"
@@ -173,7 +173,7 @@ log "minted bootstrap token ${TOKEN_ID} for ${uses} enrollments"
 
 log "placing the token on ${#ALL_MINIONS[@]} minions"
 for m in "${ALL_MINIONS[@]}"; do
-  rssh "$m" "test -x /usr/local/bin/sam-bench && test -x /usr/local/bin/sam-node" || fail "$m has no binaries yet (startup script still running?)"
+  rssh "$m" "test -x /usr/local/bin/agentmesh-bench && test -x /usr/local/bin/agentmesh-node" || fail "$m has no binaries yet (startup script still running?)"
   rscp_to "$OUT/bootstrap-token" "$m" /tmp/bootstrap-token
   rssh "$m" "sudo install -m 0644 /tmp/bootstrap-token ${REMOTE_TOKEN_PATH} && rm -f /tmp/bootstrap-token" || fail "could not place the token on $m"
 done
@@ -192,7 +192,7 @@ for step in "${STEPS[@]}"; do
   event "step${step_no}-start"
   for m in "${minions[@]}"; do
     # The run detaches from the ssh session; its stderr is the progress log.
-    rssh "$m" "ulimit -n 1048576; rm -rf /var/lib/ladder/${m} /var/log/ladder/${m}.json /var/log/ladder/resident; nohup sam-bench join --node-bin /usr/local/bin/sam-node --control-plane ${CONTROL_PLANE} --bootstrap-token-path ${REMOTE_TOKEN_PATH} --service ${SERVICE} --count ${PER_MINION} --ramp ${RAMP} --hold ${HOLD} --dir /var/lib/ladder/${m} --label minion=${m} --label step=${step_no} --label resident_before=${resident} --resident-marker /var/log/ladder/resident --out /var/log/ladder/${m}.json > /var/log/ladder/${m}.log 2>&1 < /dev/null &" || fail "could not start the run on $m"
+    rssh "$m" "ulimit -n 1048576; rm -rf /var/lib/ladder/${m} /var/log/ladder/${m}.json /var/log/ladder/resident; nohup agentmesh-bench join --node-bin /usr/local/bin/agentmesh-node --control-plane ${CONTROL_PLANE} --bootstrap-token-path ${REMOTE_TOKEN_PATH} --service ${SERVICE} --count ${PER_MINION} --ramp ${RAMP} --hold ${HOLD} --dir /var/lib/ladder/${m} --label minion=${m} --label step=${step_no} --label resident_before=${resident} --resident-marker /var/log/ladder/resident --out /var/log/ladder/${m}.json > /var/log/ladder/${m}.log 2>&1 < /dev/null &" || fail "could not start the run on $m"
     STARTED_MINIONS+=("$m")
   done
   # Resident means every member's journey has ended, one way or the other.
@@ -200,7 +200,7 @@ for step in "${STEPS[@]}"; do
   for m in "${minions[@]}"; do
     until rssh "$m" "test -f /var/log/ladder/resident"; do
       [[ $(date +%s) -lt $deadline ]] || fail "$m was not resident within 15 minutes; see /var/log/ladder/${m}.log on it"
-      rssh "$m" "pgrep -x sam-bench >/dev/null" || fail "the run on $m ended before its fleet was resident"
+      rssh "$m" "pgrep -x agentmesh-bench >/dev/null" || fail "the run on $m ended before its fleet was resident"
       sleep 10
     done
     rscp_from "$m" "/var/log/ladder/${m}.json" "$OUT/step${step_no}-${m}.json" || fail "could not fetch the join report from $m"
@@ -216,4 +216,4 @@ done
 
 log "ladder complete: ${resident} members resident; holding until Ctrl-C or ${HOLD}"
 # Stay until the first minion's hold ends or the operator interrupts.
-while rssh "${STARTED_MINIONS[0]}" "pgrep -x sam-bench >/dev/null"; do sleep 60; done
+while rssh "${STARTED_MINIONS[0]}" "pgrep -x agentmesh-bench >/dev/null"; do sleep 60; done

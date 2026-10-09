@@ -35,8 +35,8 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-SAM_ONE="${REPO_ROOT}/bin/sam-one"
-SAM_NODE="${REPO_ROOT}/bin/sam-node"
+AGENTMESH_ONE="${REPO_ROOT}/bin/agentmesh-one"
+AGENTMESH_NODE="${REPO_ROOT}/bin/agentmesh-node"
 MCP_CLIENT="${REPO_ROOT}/bin/mcp-client"
 WORK_DIR="${WORK_DIR:-$(mktemp -d /tmp/sam-multi-tier-XXXXXX)}"
 VENV_DIR="${VENV_DIR:-/tmp/sam-multi-tier-venv}"
@@ -62,8 +62,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ ! -x "${SAM_ONE}" || ! -x "${SAM_NODE}" || ! -x "${MCP_CLIENT}" ]]; then
-  echo "Building sam-one, sam-node, and mcp-client..."
+if [[ ! -x "${AGENTMESH_ONE}" || ! -x "${AGENTMESH_NODE}" || ! -x "${MCP_CLIENT}" ]]; then
+  echo "Building agentmesh-one, agentmesh-node, and mcp-client..."
   make -C "${REPO_ROOT}" build
 fi
 
@@ -75,10 +75,10 @@ fi
 
 if [[ "${LLM_BASE_URL:-http://127.0.0.1:11434/v1}" == "http://127.0.0.1:11434/v1" ]]; then
   if ! curl -sf http://127.0.0.1:11434/v1/models >/dev/null 2>&1; then
-    docker start sam-demo-ollama >/dev/null 2>&1 || \
-      docker run -d --name sam-demo-ollama -p 127.0.0.1:11434:11434 -v sam-demo-ollama:/root/.ollama ollama/ollama >/dev/null
+    docker start agentmesh-demo-ollama >/dev/null 2>&1 || \
+      docker run -d --name agentmesh-demo-ollama -p 127.0.0.1:11434:11434 -v agentmesh-demo-ollama:/root/.ollama ollama/ollama >/dev/null
     for _ in $(seq 1 30); do curl -sf http://127.0.0.1:11434/ >/dev/null && break; sleep 1; done
-    docker exec sam-demo-ollama ollama pull "${LLM_MODEL}" >/dev/null
+    docker exec agentmesh-demo-ollama ollama pull "${LLM_MODEL}" >/dev/null
   fi
 fi
 
@@ -114,14 +114,14 @@ done
 
 CP_PORT=18090
 CP_URL="http://127.0.0.1:${CP_PORT}"
-"${SAM_ONE}" \
+"${AGENTMESH_ONE}" \
   --data-dir "${WORK_DIR}/one" \
   --port "${CP_PORT}" \
   --policy-file "${SCRIPT_DIR}/policy.json" \
   --no-join-token \
   --enroll-qr=false \
-  --log-level info >"${WORK_DIR}/sam-one.log" 2>&1 &
-echo $! > "${WORK_DIR}/sam-one.pid"
+  --log-level info >"${WORK_DIR}/agentmesh-one.log" 2>&1 &
+echo $! > "${WORK_DIR}/agentmesh-one.pid"
 
 for _ in $(seq 1 80); do
   if [[ -s "${WORK_DIR}/one/admin-token" ]] && curl -sf "${CP_URL}/readyz" >/dev/null; then
@@ -140,7 +140,7 @@ chmod 600 "${WORK_DIR}"/*.token
 create_bootstrap_token() {
   local desc="$1"
   local out="$2"
-  "${SAM_ONE}" token create \
+  "${AGENTMESH_ONE}" token create \
     --server "${CP_URL}" \
     --data-dir "${WORK_DIR}/one" \
     --max-usages 1 \
@@ -155,7 +155,7 @@ create_bootstrap_token "cloudrun-v2-prod" "${WORK_DIR}/dev-v2.token"
 create_bootstrap_token "contractor-node" "${WORK_DIR}/contractor.token"
 
 # Start Input / Caller Node with node-caller.yaml (egress.require_labels: {env: prod})
-"${SAM_NODE}" run \
+"${AGENTMESH_NODE}" run \
   --control-plane "${CP_URL}" \
   --insecure-control-plane \
   --bootstrap-token-path "${WORK_DIR}/caller.token" \
@@ -176,7 +176,7 @@ echo "  (Personas: Agent Developer Alice + Central Security / Platform)"
 echo "================================================================================"
 echo ""
 echo "--> Alice (Developer) enrolls her node in staging quarantine (env=staging, team=support)..."
-"${SAM_NODE}" run \
+"${AGENTMESH_NODE}" run \
   --control-plane "${CP_URL}" \
   --insecure-control-plane \
   --bootstrap-token-path "${WORK_DIR}/dev-v1.token" \
@@ -208,7 +208,7 @@ echo "--> Why can't Alice just set 'env: prod' in her node YAML, or the caller s
 echo "    [Label Point 1 — Mesh Enforcement (policy.json allowed_labels)]:"
 sed 's/env: staging/env: prod/' "${SCRIPT_DIR}/node-v1.yaml" > "${WORK_DIR}/node-v1-prod.yaml"
 set +e
-SPOOF_OUT="$("${SAM_NODE}" join "${CP_URL}" \
+SPOOF_OUT="$("${AGENTMESH_NODE}" join "${CP_URL}" \
   --insecure-control-plane \
   --bootstrap-token-path "${WORK_DIR}/dev-spoof.token" \
   --config "${WORK_DIR}/node-v1-prod.yaml" \
@@ -238,7 +238,7 @@ kill -9 "$(cat "${WORK_DIR}/node-v1.pid")" 2>/dev/null || true
 rm -rf "${WORK_DIR}/node-v1"
 create_bootstrap_token "dev-laptop-v1-prod" "${WORK_DIR}/dev-v1.token"
 
-"${SAM_NODE}" run \
+"${AGENTMESH_NODE}" run \
   --control-plane "${CP_URL}" \
   --insecure-control-plane \
   --bootstrap-token-path "${WORK_DIR}/dev-v1.token" \
@@ -291,7 +291,7 @@ echo ""
 echo "--> [Label Point 3 — End-User/Agent Intent (X-Mesh-Required-Labels)]:"
 echo "    Within the Input Node's mandatory env=prod floor, the calling agent passes"
 echo "    'X-Mesh-Required-Labels: replica=v1-laptop' on Turn 1 to express replica intent:"
-TURN1_REPLY="$(SAM_API_TOKEN=caller-secret "${PYTHON}" "${SCRIPT_DIR}/a2a_client.py" \
+TURN1_REPLY="$(AGENTMESH_API_TOKEN=caller-secret "${PYTHON}" "${SCRIPT_DIR}/a2a_client.py" \
   "http://127.0.0.1:19002/mesh/${V1_PEER}/a2a/support.acme" \
   "ctx-acme-1042" \
   "Check order #1042 for alice@acme.com and tell me the item and status." \
@@ -300,7 +300,7 @@ echo "    Turn 1 Reply: ${TURN1_REPLY}"
 
 echo ""
 echo "--> Starting Cloud Run v2 replica serving a2a://support.acme (env=prod, replica=v2-cloudrun)..."
-"${SAM_NODE}" run \
+"${AGENTMESH_NODE}" run \
   --control-plane "${CP_URL}" \
   --insecure-control-plane \
   --bootstrap-token-path "${WORK_DIR}/dev-v2.token" \
@@ -330,7 +330,7 @@ echo "    Discovered Cloud Run v2 PeerID: ${V2_PEER}"
 
 echo ""
 echo "--> Sending Turn 2 (preserving contextId=ctx-acme-1042) with 'X-Mesh-Required-Labels: replica=v2-cloudrun'..."
-TURN2_REPLY="$(SAM_API_TOKEN=caller-secret "${PYTHON}" "${SCRIPT_DIR}/a2a_client.py" \
+TURN2_REPLY="$(AGENTMESH_API_TOKEN=caller-secret "${PYTHON}" "${SCRIPT_DIR}/a2a_client.py" \
   "http://127.0.0.1:19002/mesh/${V2_PEER}/a2a/support.acme" \
   "ctx-acme-1042" \
   "Based on our previous turn, what item did Alice order and has it shipped?" \
@@ -347,25 +347,25 @@ echo ""
 echo "--> [Layer 1: Central Security Org Policy + Secret Broker] Calling real egress://api.github.com..."
 GH_ALLOW="$(curl -sf -H "X-Mesh-Authentication: Bearer caller-secret" \
   -H "Accept: application/vnd.github+json" \
-  -H "User-Agent: sam-multi-tier-demo" \
-  "http://127.0.0.1:19002/mesh/${V1_PEER}/egress/api.github.com/repos/google/sam/pulls?state=open&per_page=1")"
+  -H "User-Agent: agentmesh-multi-tier-demo" \
+  "http://127.0.0.1:19002/mesh/${V1_PEER}/egress/api.github.com/repos/google/agentmesh/pulls?state=open&per_page=1")"
 PR_SUMMARY="$(echo "${GH_ALLOW}" | jq -r 'if type=="array" and length>0 then "#\(.[0].number) \(.[0].title)" else "200 OK (open PRs queried)" end')"
-echo "    Allowed Path (GET /repos/google/sam/pulls): HTTP 200 OK — ${PR_SUMMARY} (node injected secrets/github-ro)"
+echo "    Allowed Path (GET /repos/google/agentmesh/pulls): HTTP 200 OK — ${PR_SUMMARY} (node injected secrets/github-ro)"
 
 GH_DENY_CODE="$(curl -s -o "${WORK_DIR}/gh-deny.out" -w '%{http_code}' \
   -X POST \
   -H "X-Mesh-Authentication: Bearer caller-secret" \
   -H "Accept: application/vnd.github+json" \
-  -H "User-Agent: sam-multi-tier-demo" \
-  "http://127.0.0.1:19002/mesh/${V1_PEER}/egress/api.github.com/repos/google/sam/pulls" \
+  -H "User-Agent: agentmesh-multi-tier-demo" \
+  "http://127.0.0.1:19002/mesh/${V1_PEER}/egress/api.github.com/repos/google/agentmesh/pulls" \
   -d '{}')"
-echo "    Forbidden Path (POST /repos/google/sam/pulls): HTTP ${GH_DENY_CODE} — blocked by Block 0 Org HTTP Policy before GitHub hears of it!"
+echo "    Forbidden Path (POST /repos/google/agentmesh/pulls): HTTP ${GH_DENY_CODE} — blocked by Block 0 Org HTTP Policy before GitHub hears of it!"
 
 echo ""
 echo "--> [Layer 2: Department Lead Local Node Enforcement (Label Point 2b: Egress/Provider Node)]"
 echo "    Support Dept's node-v1.yaml requires positive 'check if label(\"team\", \"support\")'."
 echo "    Contractor node (attested team=contractor) attempts to call mcp://orders-db..."
-"${SAM_NODE}" run \
+"${AGENTMESH_NODE}" run \
   --control-plane "${CP_URL}" \
   --insecure-control-plane \
   --bootstrap-token-path "${WORK_DIR}/contractor.token" \
@@ -380,7 +380,7 @@ echo "    Contractor node (attested team=contractor) attempts to call mcp://orde
 echo $! > "${WORK_DIR}/node-contractor.pid"
 
 for _ in $(seq 1 30); do
-  grep -q "SAM Node Online" "${WORK_DIR}/node-contractor.log" 2>/dev/null && break
+  grep -q "Agent Mesh Node Online" "${WORK_DIR}/node-contractor.log" 2>/dev/null && break
   sleep 0.25
 done
 CONTRACTOR_PEER="$(awk '/PeerID:/ {print $2; exit}' "${WORK_DIR}/node-contractor.log")"
@@ -439,8 +439,8 @@ echo "--> Hosting Node (node-v1) Structured Audit Trail (python3 audit.py):"
 "${PYTHON}" "${SCRIPT_DIR}/audit.py" < "${WORK_DIR}/node-v1.log" | sed 's/^/    /'
 
 echo ""
-echo "--> Executing Instant Kill-Switch: banning contractor PeerID via sam-one admin ban..."
-BAN_OUT="$("${SAM_ONE}" admin ban "${CONTRACTOR_PEER}" --server "${CP_URL}" --data-dir "${WORK_DIR}/one" 2>&1)"
+echo "--> Executing Instant Kill-Switch: banning contractor PeerID via agentmesh-one admin ban..."
+BAN_OUT="$("${AGENTMESH_ONE}" admin ban "${CONTRACTOR_PEER}" --server "${CP_URL}" --data-dir "${WORK_DIR}/one" 2>&1)"
 echo "    ${BAN_OUT}"
 
 echo ""

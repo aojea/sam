@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
-# Shared BATS helpers for containerized SAM mesh tests.
+# Shared BATS helpers for containerized Agent Mesh tests.
 # Refactored to use Kind-hosted unified OIDC and control plane services.
 
 if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   MESH_HELPERS_LOADED=1
 
-  MESH_RUNTIME_IMAGE="${MESH_RUNTIME_IMAGE:-sam-e2e-runtime:local}"
+  MESH_RUNTIME_IMAGE="${MESH_RUNTIME_IMAGE:-agentmesh-e2e-runtime:local}"
   MESH_NETWORK="kind"
   MESH_CONTAINERS=()
   MESH_PREFIX=""
@@ -29,7 +29,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   mesh_build_runtime_image() {
     if ! docker image inspect "${MESH_RUNTIME_IMAGE}" >/dev/null 2>&1; then
       docker build \
-        -f tests/e2e/docker/Dockerfile.sam-runtime \
+        -f tests/e2e/docker/Dockerfile.agentmesh-runtime \
         -t "${MESH_RUNTIME_IMAGE}" \
         . >/dev/null
     fi
@@ -239,7 +239,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   mesh_admin_status() {
     docker run --rm --network "${MESH_NETWORK}" $(mesh_get_add_hosts) "${MESH_RUNTIME_IMAGE}" \
       curl -sf --max-time 10 -H "Authorization: Bearer super-secret-admin-token" \
-      "http://sam-control-plane:8080/admin/status"
+      "http://agentmesh-control-plane:8080/admin/status"
   }
 
   # mesh_enrolled_node prints the control plane's enrollment record for a
@@ -334,7 +334,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local net="${MESH_NETWORK:-kind}"
     # Resolve mock-oidc node IP
     local oidc_node
-    oidc_node=$(kubectl --context="${KUBECONTEXT:-kind-sam-wi-test}" get pod -l app=mock-oidc -o jsonpath='{.items[0].spec.nodeName}')
+    oidc_node=$(kubectl --context="${KUBECONTEXT:-kind-agentmesh-wi-test}" get pod -l app=mock-oidc -o jsonpath='{.items[0].spec.nodeName}')
     local oidc_node_ip
     oidc_node_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${net}\").IPAddress}}" "${oidc_node}")
 
@@ -348,14 +348,14 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       if docker inspect "${custom_cp}" >/dev/null 2>&1; then
         cp_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${net}\").IPAddress}}" "${custom_cp}")
       fi
-      echo "--add-host mock-oidc:${oidc_node_ip} --add-host sam-router:${router_ip} --add-host sam-control-plane:${cp_ip}"
+      echo "--add-host mock-oidc:${oidc_node_ip} --add-host agentmesh-router:${router_ip} --add-host agentmesh-control-plane:${cp_ip}"
     else
-      # Resolve sam-router-0 node IP
+      # Resolve agentmesh-router-0 node IP
       local router_node
-      router_node=$(kubectl --context="${KUBECONTEXT:-kind-sam-wi-test}" get pod sam-router-0 -o jsonpath='{.spec.nodeName}')
+      router_node=$(kubectl --context="${KUBECONTEXT:-kind-agentmesh-wi-test}" get pod agentmesh-router-0 -o jsonpath='{.spec.nodeName}')
       local router_node_ip
       router_node_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${net}\").IPAddress}}" "${router_node}")
-      echo "--add-host mock-oidc:${oidc_node_ip} --add-host sam-router:${router_node_ip} --add-host sam-control-plane:${router_node_ip} --add-host ${router_node}:${router_node_ip}"
+      echo "--add-host mock-oidc:${oidc_node_ip} --add-host agentmesh-router:${router_node_ip} --add-host agentmesh-control-plane:${router_node_ip} --add-host ${router_node}:${router_node_ip}"
     fi
   }
 
@@ -383,12 +383,12 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     make
     make docker-build
 
-    if [[ ! -x "./bin/sam-node" || ! -x "./bin/sam-control-plane" || ! -x "./bin/sam-router" || ! -x "./bin/mcp-client" ]]; then
+    if [[ ! -x "./bin/agentmesh-node" || ! -x "./bin/agentmesh-control-plane" || ! -x "./bin/agentmesh-router" || ! -x "./bin/mcp-client" ]]; then
       echo "missing binaries; run: make build" >&2
       return 1
     fi
 
-    export KUBERNETES_CLUSTER_NAME="sam-wi-test"
+    export KUBERNETES_CLUSTER_NAME="agentmesh-wi-test"
     export KUBECONTEXT="kind-${KUBERNETES_CLUSTER_NAME}"
 
     # Recreating is the default so a local run matches CI, which builds a cluster
@@ -403,10 +403,10 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       kind create cluster --name "${KUBERNETES_CLUSTER_NAME}" --config=tests/e2e/fixtures/kind-cluster.yaml
     fi
 
-    kind load docker-image sam-control-plane:local --name "${KUBERNETES_CLUSTER_NAME}"
-    kind load docker-image sam-router:local --name "${KUBERNETES_CLUSTER_NAME}"
-    kind load docker-image sam-node:local --name "${KUBERNETES_CLUSTER_NAME}"
-    kind load docker-image sam-mock-oidc:local --name "${KUBERNETES_CLUSTER_NAME}"
+    kind load docker-image agentmesh-control-plane:local --name "${KUBERNETES_CLUSTER_NAME}"
+    kind load docker-image agentmesh-router:local --name "${KUBERNETES_CLUSTER_NAME}"
+    kind load docker-image agentmesh-node:local --name "${KUBERNETES_CLUSTER_NAME}"
+    kind load docker-image agentmesh-mock-oidc:local --name "${KUBERNETES_CLUSTER_NAME}"
 
     kubectl --context="${KUBECONTEXT}" apply -f tests/e2e/fixtures/mock-oidc.yaml
     mesh_wait_for_rollout deployment/mock-oidc
@@ -434,16 +434,16 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       fi
     fi
 
-    # router.externalAddrs: nodes resolve sam-router per-network via --add-host, so the router must
+    # router.externalAddrs: nodes resolve agentmesh-router per-network via --add-host, so the router must
     # announce that name. Announcing a node IP instead is unroutable from an isolated test network.
     # bootstrap.nodeServices: policy.bats asserts the control plane denies an ungranted service, so
     # this lane pins the grants it tests rather than inheriting the chart default.
-    local helm_args=(--kube-context="${KUBECONTEXT}" upgrade --install sam ./charts/sam-mesh
+    local helm_args=(--kube-context="${KUBECONTEXT}" upgrade --install sam ./charts/agentmesh
       --namespace default
       --set fullnameOverride="sam"
       --set global.imageTag="local"
       --set controlPlane.oidcIssuer="${ISSUERS//,/\\,}"
-      --set controlPlane.allowedAudiences="agentmesh-audience\,sam-control-plane-audience"
+      --set controlPlane.allowedAudiences="agentmesh-audience\,agentmesh-control-plane-audience"
       --set controlPlane.insecureSkipTlsVerify=true
       --set controlPlane.adminToken="super-secret-admin-token"
       --set controlPlane.replicaCount=2
@@ -451,27 +451,27 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --set router.useOidcToken=false
       --set router.hostPort=4501
       --set console.enabled=false
-      --set 'router.externalAddrs={/dns4/sam-router/tcp/4501}'
+      --set 'router.externalAddrs={/dns4/agentmesh-router/tcp/4501}'
       --set 'bootstrap.nodeServices={mcp://calculator,mcp://db-agent,mcp://http-tool,mcp://stdio-tool,a2a://echo,system://mesh.catalog}'
       --set 'bootstrap.nodeMembers={user:test-user}'
       --set 'bootstrap.nodeLabels={region=*}')
     if ! "${helm_bin}" "${helm_args[@]}"; then
       # The reused cluster may hold StatefulSets whose immutable spec (e.g.
       # volumeClaimTemplates) changed; drop them (PVCs survive) and retry.
-      kubectl --context="${KUBECONTEXT}" delete statefulset sam-router sam-db --ignore-not-found
+      kubectl --context="${KUBECONTEXT}" delete statefulset agentmesh-router sam-db --ignore-not-found
       "${helm_bin}" "${helm_args[@]}"
     fi
 
     mesh_wait_for_rollout statefulset/sam-db
-    mesh_wait_for_rollout deployment/sam-control-plane
+    mesh_wait_for_rollout deployment/agentmesh-control-plane
     mesh_wait_for_job job/sam-bootstrap
     # A router surviving a reinstall holds a biscuit no current control plane key
     # verifies and a bootstrap token past its 24h default, so it can never lease
     # again. Restarting re-enrolls it against the state this run just installed.
     if [[ "${reused_cluster}" == "1" ]]; then
-      kubectl --context="${KUBECONTEXT}" rollout restart statefulset/sam-router
+      kubectl --context="${KUBECONTEXT}" rollout restart statefulset/agentmesh-router
     fi
-    mesh_wait_for_rollout statefulset/sam-router
+    mesh_wait_for_rollout statefulset/agentmesh-router
 
     # The router pod reports Ready before its lease reaches the control plane,
     # and a node's /register serves router addresses from that lease, so a
@@ -480,7 +480,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     # cluster the freshest renewal is the router that is running now.
     local router_node_ip
     router_node_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${MESH_NETWORK:-kind}\").IPAddress}}" \
-      "$(kubectl --context="${KUBECONTEXT}" get pod sam-router-0 -o jsonpath='{.spec.nodeName}')")
+      "$(kubectl --context="${KUBECONTEXT}" get pod agentmesh-router-0 -o jsonpath='{.spec.nodeName}')")
     local router_peer_id=""
     local lease_deadline=$((SECONDS + 60))
     while [[ -z "${router_peer_id}" ]]; do
@@ -496,14 +496,14 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       [[ -n "${router_peer_id}" ]] || sleep 1
     done
 
-    echo "${router_peer_id}" > "/tmp/sam-wi-test-router-peer-id"
+    echo "${router_peer_id}" > "/tmp/agentmesh-wi-test-router-peer-id"
     return 0
   }
 
   mesh_teardown_suite() {
     cd "${BATS_TEST_DIRNAME}/../.."
     mesh_cleanup_stale_resources
-    # kind delete cluster --name "${KUBERNETES_CLUSTER_NAME:-sam-wi-test}" >/dev/null 2>&1 || true
+    # kind delete cluster --name "${KUBERNETES_CLUSTER_NAME:-agentmesh-wi-test}" >/dev/null 2>&1 || true
     echo "teardown suite"
   }
 
@@ -529,8 +529,8 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       local staged_config="${MESH_SOCKET_DIR}/node-${idx}-config.yaml"
       cp "${config_path}" "${staged_config}"
       chmod 0644 "${staged_config}"
-      mount_args+=(-v "${staged_config}:/etc/sam/node-config.yaml:ro")
-      config_args+=(--config /etc/sam/node-config.yaml)
+      mount_args+=(-v "${staged_config}:/etc/agentmesh/node-config.yaml:ro")
+      config_args+=(--config /etc/agentmesh/node-config.yaml)
     fi
 
     docker run -d \
@@ -540,14 +540,14 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       ${add_hosts} \
       "${mount_args[@]}" \
       ${docker_args} \
-      -e SAM_CLIENT_SECRET="sam-e2e-secret" \
-      -e SAM_API_TOKEN="secret-token" \
+      -e AGENTMESH_CLIENT_SECRET="sam-e2e-secret" \
+      -e AGENTMESH_API_TOKEN="secret-token" \
       "${MESH_RUNTIME_IMAGE}" \
-      /usr/local/bin/sam-node run \
+      /usr/local/bin/agentmesh-node run \
       ${flags} \
       --log-level debug \
       --discovery-interval 2s \
-      --control-plane "http://sam-control-plane:8080" \
+      --control-plane "http://agentmesh-control-plane:8080" \
       --insecure-control-plane \
       --client-id "agentmesh-audience" \
       --oidc-issuer "http://mock-oidc:18080" \
@@ -570,7 +570,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   mesh_start_router() {
     # No-op: router is running in k8s
     local peer_id
-    peer_id=$(cat "/tmp/sam-wi-test-router-peer-id")
+    peer_id=$(cat "/tmp/agentmesh-wi-test-router-peer-id")
     echo "${peer_id}" > "/tmp/${MESH_PREFIX}-router-peer-id"
     return 0
   }
@@ -578,7 +578,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   mesh_assert_container_running() {
     local name="$1"
     if [[ "${name}" == *"-router" ]]; then
-      kubectl --context="${KUBECONTEXT:-kind-sam-wi-test}" get pod sam-router-0 -o jsonpath='{.status.phase}' | grep -q "Running"
+      kubectl --context="${KUBECONTEXT:-kind-agentmesh-wi-test}" get pod agentmesh-router-0 -o jsonpath='{.status.phase}' | grep -q "Running"
       return $?
     fi
     local state

@@ -1,0 +1,20 @@
+{{- if .Values.console.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agentmesh.fullname" . }}-console
+  labels:
+    {{- include "agentmesh.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.console.service.type }}
+  ports:
+  - name: http
+    port: {{ .Values.console.service.port }}
+    targetPort: 8081
+    {{- if and (eq .Values.console.service.type "NodePort") .Values.console.service.nodePort }}
+    nodePort: {{ .Values.console.service.nodePort }}
+    {{- end }}
+    protocol: TCP
+  selector:
+    app: {{ include "agentmesh.fullname" . }}-console
+{{- end }}

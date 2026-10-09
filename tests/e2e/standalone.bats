@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
-# Black-box CUJ for the sam-one all-in-one binary: boot on a random port
-# published in the banner, join real sam-nodes through it, drive the admin CLI
+# Black-box CUJ for the agentmesh-one all-in-one binary: boot on a random port
+# published in the banner, join real agentmesh-nodes through it, drive the admin CLI
 # against the live server, and serve a model across the dataplane from an
 # inference service declared in node A's configuration to node B's /v1
 # endpoint (B -> router -> A). Mirrors docs/getting-started/your-own-mesh.
@@ -9,8 +9,8 @@
 # only exercises what needs the real binaries.
 
 setup() {
-  export SAM_ONE_BINARY="${SAM_ONE_BINARY:-./bin/sam-one}"
-  export SAM_NODE_BINARY="${SAM_NODE_BINARY:-./bin/sam-node}"
+  export AGENTMESH_ONE_BINARY="${AGENTMESH_ONE_BINARY:-./bin/agentmesh-one}"
+  export AGENTMESH_NODE_BINARY="${AGENTMESH_NODE_BINARY:-./bin/agentmesh-node}"
 
   export TEST_TMPDIR
   TEST_TMPDIR="$(mktemp -d)"
@@ -18,14 +18,14 @@ setup() {
   export XDG_CONFIG_HOME="$HOME/.config"
   mkdir -p "$XDG_CONFIG_HOME"
 
-  export SAM_ONE_DATA="$TEST_TMPDIR/sam-one"
+  export AGENTMESH_ONE_DATA="$TEST_TMPDIR/agentmesh-one"
 }
 
 teardown() {
   if [[ -n "${ENVOY_CONTAINER:-}" ]]; then
     docker rm -f "$ENVOY_CONTAINER" >/dev/null 2>&1 || true
   fi
-  for pid in "${BACKEND_PID:-}" "${NODE_A_PID:-}" "${NODE_B_PID:-}" "${SAM_ONE_PID:-}"; do
+  for pid in "${BACKEND_PID:-}" "${NODE_A_PID:-}" "${NODE_B_PID:-}" "${AGENTMESH_ONE_PID:-}"; do
     [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
   done
   # Give the processes a moment to release the sqlite/bbolt locks.
@@ -60,7 +60,7 @@ wait_for_log() {
 # once, with its log.
 wait_for_node() {
   local name="$1" pid_var="NODE_${1^^}_PID"
-  local sock="$TEST_TMPDIR/node-$name/sam.sock"
+  local sock="$TEST_TMPDIR/node-$name/agentmesh.sock"
   for _ in $(seq 1 150); do
     if ! kill -0 "${!pid_var}" 2>/dev/null; then
       echo "node $name exited before serving its API:" >&2
@@ -77,11 +77,11 @@ wait_for_node() {
 
 # node_peer_id is the peer ID node $1 reports for itself.
 node_peer_id() {
-  curl -sf --unix-socket "$TEST_TMPDIR/node-$1/sam.sock" http://localhost/debug/mesh-info |
+  curl -sf --unix-socket "$TEST_TMPDIR/node-$1/agentmesh.sock" http://localhost/debug/mesh-info |
     python3 -c 'import json, sys; print(json.load(sys.stdin)["peer_id"])'
 }
 
-# start_node boots a background sam-node joined via the bootstrap token; sets
+# start_node boots a background agentmesh-node joined via the bootstrap token; sets
 # NODE_<NAME>_PID for teardown. The sidecar serves only on the Unix socket so
 # two nodes on one host never fight over the default TCP bind, and loopback
 # addresses must be publishable or peers on one host cannot dial each other.
@@ -89,8 +89,8 @@ node_peer_id() {
 start_node() {
   local name="$1"
   shift
-  SAM_API_TOKEN=e2e-secret "$SAM_NODE_BINARY" run \
-    --control-plane "$SAM_ONE_URL" \
+  AGENTMESH_API_TOKEN=e2e-secret "$AGENTMESH_NODE_BINARY" run \
+    --control-plane "$AGENTMESH_ONE_URL" \
     --bootstrap-token "$JOIN_TOKEN" \
     --data-dir "$TEST_TMPDIR/node-$name" \
     --bind-addr= \
@@ -99,26 +99,26 @@ start_node() {
   eval "NODE_${name^^}_PID=$!"
 }
 
-@test "sam-one boots, nodes join over the single port, and the dataplane carries a service call" {
-  "$SAM_ONE_BINARY" --bind-address 127.0.0.1 --port 0 \
-    --data-dir "$SAM_ONE_DATA" > "$TEST_TMPDIR/sam-one.log" 2>&1 3>&- &
-  SAM_ONE_PID=$!
+@test "agentmesh-one boots, nodes join over the single port, and the dataplane carries a service call" {
+  "$AGENTMESH_ONE_BINARY" --bind-address 127.0.0.1 --port 0 \
+    --data-dir "$AGENTMESH_ONE_DATA" > "$TEST_TMPDIR/agentmesh-one.log" 2>&1 3>&- &
+  AGENTMESH_ONE_PID=$!
 
   # The random port is published in the banner, like the generated tokens.
-  wait_for_log "$TEST_TMPDIR/sam-one.log" "Join Token:"
-  grep -q "Admin Token:  sam_adm_" "$TEST_TMPDIR/sam-one.log"
-  SAM_ONE_PORT="$(grep -oE 'API URL:[[:space:]]+http://[^:]+:[0-9]+' "$TEST_TMPDIR/sam-one.log" | grep -oE '[0-9]+$')"
-  [[ -n "$SAM_ONE_PORT" ]]
-  export SAM_ONE_URL="http://127.0.0.1:${SAM_ONE_PORT}"
-  wait_for_http "$SAM_ONE_URL/healthz"
+  wait_for_log "$TEST_TMPDIR/agentmesh-one.log" "Join Token:"
+  grep -q "Admin Token:  mesh_adm_" "$TEST_TMPDIR/agentmesh-one.log"
+  AGENTMESH_ONE_PORT="$(grep -oE 'API URL:[[:space:]]+http://[^:]+:[0-9]+' "$TEST_TMPDIR/agentmesh-one.log" | grep -oE '[0-9]+$')"
+  [[ -n "$AGENTMESH_ONE_PORT" ]]
+  export AGENTMESH_ONE_URL="http://127.0.0.1:${AGENTMESH_ONE_PORT}"
+  wait_for_http "$AGENTMESH_ONE_URL/healthz"
 
   # The embedded console is served from the same port.
-  run curl -sf "$SAM_ONE_URL/console/"
+  run curl -sf "$AGENTMESH_ONE_URL/console/"
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"<html"* ]]
 
   # Two real nodes join through the single port with the persisted join token.
-  JOIN_TOKEN="$(cat "$SAM_ONE_DATA/join-token")"
+  JOIN_TOKEN="$(cat "$AGENTMESH_ONE_DATA/join-token")"
   [[ "$JOIN_TOKEN" == mesh_tok_* ]]
 
   # An OpenAI-compatible and MCP backend on node A's host, declared in node A's
@@ -165,8 +165,8 @@ EOF
   peer_b="$(node_peer_id b)"
   [[ -n "$peer_a" && -n "$peer_b" ]]
 
-  sock_a="$TEST_TMPDIR/node-a/sam.sock"
-  sock_b="$TEST_TMPDIR/node-b/sam.sock"
+  sock_a="$TEST_TMPDIR/node-a/agentmesh.sock"
+  sock_b="$TEST_TMPDIR/node-b/agentmesh.sock"
   [[ -S "$sock_a" && -S "$sock_b" ]]
 
   # Node B's OpenAI-compatible endpoint lists the model with A as its owner:
@@ -220,7 +220,7 @@ EOF
   # Real Envoy proxy CUJ: when Docker is available, place Envoy in front of node B
   # with both ext_authz and ext_proc configured over gRPC h2c, and drive real
   # inference (/v1/chat/completions) and MCP (/mesh/<peer_a>/mcp/github) calls
-  # through Envoy -> Node B -> sam-one Router -> Node A -> Backend.
+  # through Envoy -> Node B -> agentmesh-one Router -> Node A -> Backend.
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     envoy_port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 
@@ -247,7 +247,7 @@ static_resources:
                         - match:
                             prefix: "/"
                           route:
-                            cluster: sam_node_b_sidecar
+                            cluster: agentmesh_node_b_sidecar
                 http_filters:
                   - name: envoy.filters.http.ext_authz
                     typed_config:
@@ -255,14 +255,14 @@ static_resources:
                       transport_api_version: V3
                       grpc_service:
                         envoy_grpc:
-                          cluster_name: sam_node_b_h2c
+                          cluster_name: agentmesh_node_b_h2c
                         timeout: 5s
                   - name: envoy.filters.http.ext_proc
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
                       grpc_service:
                         envoy_grpc:
-                          cluster_name: sam_node_b_h2c
+                          cluster_name: agentmesh_node_b_h2c
                         timeout: 5s
                       allow_mode_override: true
                       message_timeout: 5s
@@ -275,7 +275,7 @@ static_resources:
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   clusters:
-    - name: sam_node_b_h2c
+    - name: agentmesh_node_b_h2c
       type: STATIC
       connect_timeout: 2s
       typed_extension_protocol_options:
@@ -284,7 +284,7 @@ static_resources:
           explicit_http_config:
             http2_protocol_options: {}
       load_assignment:
-        cluster_name: sam_node_b_h2c
+        cluster_name: agentmesh_node_b_h2c
         endpoints:
           - lb_endpoints:
               - endpoint:
@@ -292,11 +292,11 @@ static_resources:
                     socket_address:
                       address: 127.0.0.1
                       port_value: ${node_b_tcp_port}
-    - name: sam_node_b_sidecar
+    - name: agentmesh_node_b_sidecar
       type: STATIC
       connect_timeout: 2s
       load_assignment:
-        cluster_name: sam_node_b_sidecar
+        cluster_name: agentmesh_node_b_sidecar
         endpoints:
           - lb_endpoints:
               - endpoint:
@@ -403,16 +403,16 @@ EOF
   [[ "$output" != *"$peer_a"* ]]
 
   # The admin CLI works against the live server using the persisted admin token.
-  run "$SAM_ONE_BINARY" token create --server "$SAM_ONE_URL" \
-    --data-dir "$SAM_ONE_DATA" --description "e2e token"
+  run "$AGENTMESH_ONE_BINARY" token create --server "$AGENTMESH_ONE_URL" \
+    --data-dir "$AGENTMESH_ONE_DATA" --description "e2e token"
   [[ "$status" -eq 0 ]]
-  [[ "$output" == *"Token:    sam-bt-"* ]]
+  [[ "$output" == *"Token:    mesh-bt-"* ]]
 
-  run "$SAM_ONE_BINARY" token list --server "$SAM_ONE_URL" --data-dir "$SAM_ONE_DATA"
+  run "$AGENTMESH_ONE_BINARY" token list --server "$AGENTMESH_ONE_URL" --data-dir "$AGENTMESH_ONE_DATA"
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"e2e token"* ]]
   # The two node enrollments above consumed join token usages.
-  join_row="$(echo "$output" | grep "sam-one join token")"
+  join_row="$(echo "$output" | grep "agentmesh-one join token")"
   [[ "$join_row" == *" 2/"* ]]
 }
 

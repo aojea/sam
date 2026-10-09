@@ -8,12 +8,12 @@ model, an MCP server and an external API whose credential it never holds.
     python agent.py models        list the office model
     python agent.py ask "..."     one chat completion
     python agent.py tool          call an MCP tool
-    python agent.py github GET /repos/google/sam/pulls?state=open&per_page=1
-    python agent.py github POST /repos/google/sam/pulls
+    python agent.py github GET /repos/google/agentmesh/pulls?state=open&per_page=1
+    python agent.py github POST /repos/google/agentmesh/pulls
     python agent.py github GET /user
 
-SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the token in
-SAM_BOOTSTRAP_TOKEN_PATH and keeps identity and credential in SAM_STATE_DIR.
+AGENTMESH_CONTROL_PLANE_URL names the mesh. The first run enrolls with the token in
+AGENTMESH_BOOTSTRAP_TOKEN_PATH and keeps identity and credential in AGENTMESH_STATE_DIR.
 """
 
 import json
@@ -29,17 +29,17 @@ TOOLS = "mcp://tools"
 GITHUB = "egress://api.github.com"
 
 # py-libp2p narrates every failed dial over several lines; the verdicts this
-# program prints are the story. SAM_DEBUG=1 brings the narration back.
-if not os.environ.get("SAM_DEBUG"):
+# program prints are the story. AGENTMESH_DEBUG=1 brings the narration back.
+if not os.environ.get("AGENTMESH_DEBUG"):
     logging.getLogger("libp2p").setLevel(logging.CRITICAL)
 
 mesh = AgentMesh.enroll(
-    os.environ.get("SAM_CONTROL_PLANE_URL", "https://mesh.example.com"),
-    bootstrap_token_path=os.environ.get("SAM_BOOTSTRAP_TOKEN_PATH"),
+    os.environ.get("AGENTMESH_CONTROL_PLANE_URL", "https://mesh.example.com"),
+    bootstrap_token_path=os.environ.get("AGENTMESH_BOOTSTRAP_TOKEN_PATH"),
     # The role the token was minted for; the policy's grants hang off it.
-    role=os.environ.get("SAM_ROLE", "agent"),
-    state_dir=os.environ.get("SAM_STATE_DIR", "~/.config/sam-mesh/sandboxed-agent"),
-    allow_insecure=os.environ.get("SAM_INSECURE_CONTROL_PLANE") == "true",
+    role=os.environ.get("AGENTMESH_ROLE", "agent"),
+    state_dir=os.environ.get("AGENTMESH_STATE_DIR", "~/.config/agentmesh/sandboxed-agent"),
+    allow_insecure=os.environ.get("AGENTMESH_INSECURE_CONTROL_PLANE") == "true",
 )
 
 
@@ -111,7 +111,7 @@ async def github(session, method, path):
         pep, GITHUB, path,
         method=method,
         # GitHub refuses requests without a User-Agent; the node forwards it.
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "sam-sandboxed-agent"},
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "agentmesh-sandboxed-agent"},
         body=b"{}" if method in ("POST", "PUT", "PATCH") else None,
     )
     if resp.status == 200:
@@ -140,8 +140,8 @@ async def run(session, argv):
         await models(session)
         await ask(session, "In one sentence, in English: why should an agent never hold API credentials?")
         await tool(session)
-        await github(session, "GET", "/repos/google/sam/pulls?state=open&per_page=1")
-        await github(session, "POST", "/repos/google/sam/pulls")
+        await github(session, "GET", "/repos/google/agentmesh/pulls?state=open&per_page=1")
+        await github(session, "POST", "/repos/google/agentmesh/pulls")
         await github(session, "GET", "/user")
     else:
         raise SystemExit(__doc__)

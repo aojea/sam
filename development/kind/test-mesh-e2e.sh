@@ -15,21 +15,21 @@
 
 set -euo pipefail
 
-echo "== Deploying calc-mcp via charts/sam-node =="
+echo "== Deploying calc-mcp via charts/agentmesh-node =="
 ./development/deploy-kind-service.sh development/examples/calc-mcp
 
 # If running locally, we might want to store logs in a temp dir
 LOG_DIR="${RUNNER_TEMP:-$(mktemp -d)}"
 
-echo "== Enrolling a local sam-node =="
+echo "== Enrolling a local agentmesh-node =="
 ./development/kind/run-local-node.sh > "$LOG_DIR/local-node.log" 2>&1 &
 PID=$!
 for _ in $(seq 1 60); do
-  grep -q "SAM Node Online" "$LOG_DIR/local-node.log" && break
+  grep -q "Agent Mesh Node Online" "$LOG_DIR/local-node.log" && break
   kill -0 "$PID" 2>/dev/null || { echo "local node exited early:"; cat "$LOG_DIR/local-node.log"; exit 1; }
   sleep 1
 done
-grep -q "SAM Node Online" "$LOG_DIR/local-node.log" \
+grep -q "Agent Mesh Node Online" "$LOG_DIR/local-node.log" \
   || { echo "local node did not come online:"; cat "$LOG_DIR/local-node.log"; exit 1; }
 echo "local node online"
 

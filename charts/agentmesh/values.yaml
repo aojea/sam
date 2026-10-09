@@ -1,0 +1,246 @@
+global:
+  imageTag: local
+  imagePullPolicy: IfNotPresent
+
+# One Gateway fronting the mesh: the control plane's enrollment surface plus the console
+# under gateway.consolePath.
+gateway:
+  enabled: false
+  # Required when enabled. No default: the GatewayClass is provider-specific, e.g.
+  # cloud-provider-kind in kind, gke-l7-global-external-managed on GKE.
+  className: ""
+  # Routes the control plane's /admin API. Dev only.
+  adminRoute: false
+  # External prefix the console is served under. Empty leaves the console unrouted.
+  consolePath: /console
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+    allowedRoutes:
+      namespaces:
+        from: Same
+  hostnames: []
+  addresses: []
+  annotations: {}
+
+controlPlane:
+  replicaCount: 2
+  image:
+    repository: agentmesh-control-plane
+    # Overrides global.imageTag for this image only.
+    tag: ""
+  logLevel: info
+  # Leave empty to auto-generate a random admin token on first install (kept
+  # stable across upgrades). Set explicitly (e.g. via --set) to pin a known value.
+  adminToken: ""
+  autoApproveEnrollment: true
+  # Only skips TLS verification for the OIDC issuer; leave false unless
+  # pointing at a local/dev issuer without a valid certificate.
+  insecureSkipTlsVerify: false
+  # Required: the chart bundles no identity provider. Point it at your OIDC issuer
+  # (comma-separated for more than one); the control plane refuses to start without one.
+  oidcIssuer: ""
+  # Optional: comma-separated list of workload OIDC issuers (subset of or addition
+  # to oidcIssuer, optionally "<issuer>=<email-suffix>"). Tokens from a workload
+  # issuer are accepted at /register, /refresh, and /token/exchange, and refused
+  # at /user/* and /oauth/authorize.
+  workloadIssuer: ""
+  # Optional: session TTL for workload OIDC enrollments (e.g. "48h"); empty uses
+  # the control plane default (48h).
+  workloadSessionTtl: ""
+  allowedAudiences: "agentmesh-audience,agentmesh-control-plane-audience"
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    # Dockerfiles say "USER nonroot" by name; runAsNonRoot needs the numeric uid.
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  service:
+    type: ClusterIP
+    port: 8080
+    nodePort: null
+
+database:
+  type: postgres
+  postgres:
+    deployInternal: true
+    image:
+      repository: postgres
+      tag: 16-alpine
+    user: agentmesh
+    # Leave empty to auto-generate a random password on first install (kept
+    # stable across upgrades). Set explicitly (e.g. via --set) to pin a known value.
+    password: ""
+    database: agentmesh
+    port: 5432
+    sslmode: disable
+    storageSize: 1Gi
+    # postgres:16-alpine runs as uid 70 (postgres); the data directory is
+    # the pgdata/ subdirectory of the PVC (initdb must own what it chmods,
+    # and the PVC root belongs to root). fsGroup gives uid 70 group access
+    # to create it. Upgrading a release whose postgres ran as root with
+    # data at the PVC root: move that data into pgdata/ first, or the new
+    # pod initialises an empty cluster beside it.
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 70
+      runAsGroup: 70
+      fsGroup: 70
+      fsGroupChangePolicy: "OnRootMismatch"
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+router:
+  enabled: true
+  replicaCount: 1
+  # Seconds a new router must be ready before the rollout moves to the next
+  # one. Members redial a dropped router with a backoff that reaches a
+  # minute; a rollout faster than that takes every router a member has
+  # before any is back.
+  minReadySeconds: 90
+  podSecurityContext:
+    runAsNonRoot: true
+    # Dockerfiles say "USER nonroot" by name; runAsNonRoot needs the numeric uid.
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+    fsGroup: 65532
+    fsGroupChangePolicy: "OnRootMismatch"
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+  image:
+    repository: agentmesh-router
+    # Overrides global.imageTag for this image only.
+    tag: ""
+  useOidcToken: false
+  logLevel: info
+  # Binds 4501 TCP+UDP on the router's own node and announces /ip4/<node IP>/... for both
+  # transports. One router per node.
+  hostPort: null
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # Overrides the announced multiaddrs; derived from hostPort when left empty.
+  externalAddrs: []
+  allowLoopback: false
+  # Plain HTTP port for /metrics, /healthz and /readyz. Unauthenticated, so it
+  # is only ever a containerPort, never a hostPort or Service.
+  metricsPort: 9090
+  # PVC for /data/router.key, so the libp2p peer ID survives rescheduling.
+  storageSize: 1Gi
+  # PVC StorageClass; cluster default when null.
+  storageClass: null
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  service:
+    type: ClusterIP
+    port: 4501
+
+console:
+  enabled: true
+  replicaCount: 1
+  # Origin browsers reach the console on, e.g. https://console.example. Set this
+  # when a proxy terminates TLS: without it the OIDC redirect_uri and the cookie
+  # Secure flag are derived from the Host and X-Forwarded-Proto headers, so a
+  # proxy that drops the header leaves session cookies without Secure.
+  externalUrl: ""
+  image:
+    repository: agentmesh-console
+    # Overrides global.imageTag for this image only.
+    tag: ""
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    # Dockerfiles say "USER nonroot" by name; runAsNonRoot needs the numeric uid.
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  service:
+    type: ClusterIP
+    port: 8081
+    nodePort: null
+
+bootstrap:
+  bindings: []
+  # Identities that may enroll as mesh:role:node ("user:<sub>", "group:<name>",
+  # "email:<addr>", or "mesh:system:authenticated" for an intentionally open
+  # mesh). Empty means no node can enroll until an operator grants it (fail
+  # closed). Ignored when bindings is set: then you own the whole list.
+  nodeMembers: []
+  # Services mesh:role:node may call, as "type://name" entries (e.g.
+  # "mcp://calculator"). Any authenticated identity can claim mesh:role:node,
+  # so this list is effectively mesh-wide. Empty means nodes can call nothing
+  # until a policy grants it (fail closed); never use ["*"] outside an
+  # intentionally public mesh.
+  nodeServices: []
+  # Label patterns ("key=value" or "key=*") mesh:role:node may attest with the
+  # labels in its agentmesh-node.yaml. Empty means nodes cannot enroll with any label
+  # (fail closed).
+  nodeLabels: []
+
+# Scraping of the control-plane and router /metrics endpoints. Both are
+# cluster-internal and unauthenticated; enable the resource for whichever
+# collector the cluster runs, since each is a CRD that may not be installed.
+monitoring:
+  interval: 30s
+  # Google Managed Prometheus (monitoring.googleapis.com/v1 PodMonitoring),
+  # present by default on GKE.
+  podMonitoring:
+    enabled: false
+  # prometheus-operator (monitoring.coreos.com/v1 PodMonitor).
+  podMonitor:
+    enabled: false
+    # Extra labels, e.g. the release selector a Prometheus instance matches on.
+    labels: {}

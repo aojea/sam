@@ -4,5 +4,5 @@ nodes:
   - role: control-plane
   - role: worker
     labels:
-      sam-role: control-plane
+      agentmesh-role: control-plane
   - role: worker

@@ -1,0 +1,285 @@
+# Two long-lived pairs of SDK members with no agentmesh-node beside them: an agent
+# written with one SDK and the official A2A SDK, and a caller written with the
+# other, in one pod, both example programs (sdk/js/examples,
+# sdk/python/examples) unchanged. The agent joins through a router and accepts
+# A2A requests for a2a://agent; it publishes nothing, so the caller learns its
+# peer ID from the line it prints, through a volume the pod shares, and sends
+# it a message with the A2A SDK's client every few minutes. The caller is Ready
+# while its last call succeeded, so the Deployment's availability is the
+# answer to "can an agent written with one SDK still be reached by the other
+# after hours on the mesh": relay reservations renewed, credentials refreshed,
+# the control plane followed. Both enroll with the pod's projected service
+# account token, the way every other canary does, and keep their identity in
+# an emptyDir, so a container restart resumes and a new pod enrolls afresh.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: js-agent-canary-${ENV_NAME}
+  namespace: agentmesh-canary-${ENV_NAME}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: js-agent-canary-${ENV_NAME}
+  template:
+    metadata:
+      labels:
+        app: js-agent-canary-${ENV_NAME}
+        agentmesh-canary: "true"
+    spec:
+      serviceAccountName: agentmesh-node-sa
+      terminationGracePeriodSeconds: 10
+      containers:
+      - name: agent
+        image: ghcr.io/google/agentmesh-sdk-js:${IMAGE_TAG}
+        command: ["/bin/sh", "-c", "node build/examples/a2a-agent.js 2>&1 | tee /var/run/agentmesh/agent.log"]
+        env:
+        - name: AGENTMESH_CONTROL_PLANE_URL
+          value: "http://agentmesh-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
+        - name: AGENTMESH_INSECURE_CONTROL_PLANE
+          value: "true"
+        - name: AGENTMESH_JWT_PATH
+          value: /var/run/secrets/tokens/agentmesh-token
+        - name: AGENTMESH_STATE_DIR
+          value: /var/run/agentmesh/agent
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        volumeMounts:
+        - name: agentmesh-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+        - name: agentmesh-state
+          mountPath: /var/run/agentmesh
+      - name: caller
+        image: ghcr.io/google/agentmesh-sdk-python:${IMAGE_TAG}
+        command: ["/bin/sh", "/etc/agentmesh-canary/canary.sh"]
+        env:
+        - name: AGENTMESH_CONTROL_PLANE_URL
+          value: "http://agentmesh-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
+        - name: AGENTMESH_INSECURE_CONTROL_PLANE
+          value: "true"
+        - name: AGENTMESH_JWT_PATH
+          value: /var/run/secrets/tokens/agentmesh-token
+        - name: AGENTMESH_STATE_DIR
+          value: /var/run/agentmesh/caller
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: CANARY
+          value: python-calls-js-agent
+        - name: CALL
+          value: "python examples/a2a_call.py"
+        readinessProbe:
+          exec:
+            command: ["test", "-f", "/var/run/agentmesh/reachable"]
+          initialDelaySeconds: 20
+          periodSeconds: 30
+          failureThreshold: 1
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        volumeMounts:
+        - name: agentmesh-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+        - name: agentmesh-state
+          mountPath: /var/run/agentmesh
+        - name: canary-script
+          mountPath: /etc/agentmesh-canary
+          readOnly: true
+      volumes:
+      - name: agentmesh-state
+        emptyDir: {}
+      - name: canary-script
+        configMap:
+          name: agentmesh-sdk-canary-script-${ENV_NAME}
+      - name: agentmesh-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: agentmesh-token
+              expirationSeconds: 3600
+              audience: "agentmesh-control-plane-audience"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python-agent-canary-${ENV_NAME}
+  namespace: agentmesh-canary-${ENV_NAME}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: python-agent-canary-${ENV_NAME}
+  template:
+    metadata:
+      labels:
+        app: python-agent-canary-${ENV_NAME}
+        agentmesh-canary: "true"
+    spec:
+      serviceAccountName: agentmesh-node-sa
+      terminationGracePeriodSeconds: 10
+      containers:
+      - name: agent
+        image: ghcr.io/google/agentmesh-sdk-python:${IMAGE_TAG}
+        command: ["/bin/sh", "-c", "python examples/a2a_agent.py 2>&1 | tee /var/run/agentmesh/agent.log"]
+        env:
+        - name: AGENTMESH_CONTROL_PLANE_URL
+          value: "http://agentmesh-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
+        - name: AGENTMESH_INSECURE_CONTROL_PLANE
+          value: "true"
+        - name: AGENTMESH_JWT_PATH
+          value: /var/run/secrets/tokens/agentmesh-token
+        - name: AGENTMESH_STATE_DIR
+          value: /var/run/agentmesh/agent
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        volumeMounts:
+        - name: agentmesh-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+        - name: agentmesh-state
+          mountPath: /var/run/agentmesh
+      - name: caller
+        image: ghcr.io/google/agentmesh-sdk-js:${IMAGE_TAG}
+        command: ["/bin/sh", "/etc/agentmesh-canary/canary.sh"]
+        env:
+        - name: AGENTMESH_CONTROL_PLANE_URL
+          value: "http://agentmesh-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
+        - name: AGENTMESH_INSECURE_CONTROL_PLANE
+          value: "true"
+        - name: AGENTMESH_JWT_PATH
+          value: /var/run/secrets/tokens/agentmesh-token
+        - name: AGENTMESH_STATE_DIR
+          value: /var/run/agentmesh/caller
+        - name: CANARY
+          value: js-calls-python-agent
+        - name: CALL
+          value: "node build/examples/a2a-call.js"
+        readinessProbe:
+          exec:
+            command: ["test", "-f", "/var/run/agentmesh/reachable"]
+          initialDelaySeconds: 20
+          periodSeconds: 30
+          failureThreshold: 1
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        volumeMounts:
+        - name: agentmesh-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+        - name: agentmesh-state
+          mountPath: /var/run/agentmesh
+        - name: canary-script
+          mountPath: /etc/agentmesh-canary
+          readOnly: true
+      volumes:
+      - name: agentmesh-state
+        emptyDir: {}
+      - name: canary-script
+        configMap:
+          name: agentmesh-sdk-canary-script-${ENV_NAME}
+      - name: agentmesh-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: agentmesh-token
+              expirationSeconds: 3600
+              audience: "agentmesh-control-plane-audience"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentmesh-sdk-canary-script-${ENV_NAME}
+  namespace: agentmesh-canary-${ENV_NAME}
+data:
+  canary.sh: |
+    #!/bin/sh
+    # Sends the agent beside this container a message with the A2A SDK's
+    # client every INTERVAL seconds, by the peer ID it printed to
+    # $AGENTMESH_CANARY_DIR/agent.log, and keeps $AGENTMESH_CANARY_DIR/reachable present
+    # while the last call succeeded; the readiness probe reads it. One JSON
+    # line per call, for a log-based metric. The first call enrolls with the
+    # projected token; the later ones resume from AGENTMESH_STATE_DIR.
+    # tests/integration runs this script against the example programs.
+    set -u
+    INTERVAL=${INTERVAL:-300}
+    LOG=${AGENTMESH_CANARY_DIR:-/var/run/agentmesh}/agent.log
+    REACHABLE=${AGENTMESH_CANARY_DIR:-/var/run/agentmesh}/reachable
+
+    verdict() {
+      printf '{"canary":"%s","ok":%s,"agent_peer":"%s","call_s":%d,"error":"%s","detail":"%s"}\n' \
+        "$CANARY" "$1" "${AGENT_PEER:-}" "$2" "$(printf '%s' "$3" | tr -d '"\n' | cut -c1-300)" "$(printf '%s' "${4:-}" | tr -d '"' | tr '\n' ' ' | cut -c1-600)"
+    }
+
+    # The line naming the error: Node prints it before the stack trace and
+    # Python after, so the end of the output is not the place to look.
+    reason() {
+      printf '%s\n' "$1" | grep -m1 -E '^[A-Za-z_.]*(Error|Exception)\b' || printf '%s' "$1" | tail -c 200
+    }
+
+    # What the SDKs put under the error line: one indented line per address
+    # or router tried and why it failed (NO_RESERVATION, a closed stream, a
+    # refused handshake). Only lines after the error line count, so neither
+    # Python's source frames nor Node's throw site are taken; Node's stack
+    # frames ("at ...") and its error-list brackets are dropped too.
+    detail() {
+      printf '%s\n' "$1" | sed -n '/^[A-Za-z_.]*\(Error\|Exception\)\b/,$p' | tail -n +2 \
+        | grep -E '^[[:space:]]+[^[:space:]]' | grep -vE '^[[:space:]]+(at |\[errors\]|\]|\}|code:|\[cause\])' | sed 's/^[[:space:]]*//; s/,$//' | head -8
+    }
+
+    while :; do
+      AGENT_PEER=$(grep -o 'accepting a2a://agent as [^ ]*' "$LOG" 2>/dev/null | tail -1 | cut -d' ' -f4)
+      if [ -z "$AGENT_PEER" ]; then
+        sleep 2
+        continue
+      fi
+      start=$(date +%s)
+      out=$($CALL "$AGENT_PEER" "hello from ${CANARY}" 2>&1); rc=$?
+      if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "said: hello from ${CANARY}"; then
+        touch "$REACHABLE"
+        verdict true $(( $(date +%s) - start )) ""
+        sleep "$INTERVAL"
+      else
+        rm -f "$REACHABLE"
+        verdict false $(( $(date +%s) - start )) "$(reason "$out")" "$(detail "$out")"
+        # A failed call is retried soon; the readiness probe already shows it.
+        sleep 30
+      fi
+    done

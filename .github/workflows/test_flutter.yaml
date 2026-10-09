@@ -57,10 +57,10 @@ jobs:
         cache: true
     - name: Install dependencies
       run: flutter pub get
-      working-directory: mobile/sam-node-app
+      working-directory: mobile/agentmesh-node-app
     - name: Analyze code
       run: flutter analyze
-      working-directory: mobile/sam-node-app
+      working-directory: mobile/agentmesh-node-app
 
   e2e-android:
     runs-on: ubuntu-latest
@@ -92,10 +92,10 @@ jobs:
       run: |
         if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
           echo "[CI] Decoding google-services.json from secret..."
-          echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > mobile/sam-node-app/android/app/google-services.json
+          echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > mobile/agentmesh-node-app/android/app/google-services.json
         else
           echo "[CI] GOOGLE_SERVICES_JSON_BASE64 secret not set, copying dummy configuration template..."
-          cp mobile/sam-node-app/android/app/google-services.json.tmpl mobile/sam-node-app/android/app/google-services.json
+          cp mobile/agentmesh-node-app/android/app/google-services.json.tmpl mobile/agentmesh-node-app/android/app/google-services.json
         fi
     - name: Build images and start the mesh (no emulator needed)
       run: ./mobile/mobile_e2e.sh setup

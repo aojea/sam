@@ -17,7 +17,7 @@
 # What does the Nth member experience?
 #
 # The density and fleet runs say how many agents one member can carry. This
-# run is about members: N sam-node processes join a real mesh from one host,
+# run is about members: N agentmesh-node processes join a real mesh from one host,
 # each is timed from start to its first call of a service through the mesh,
 # the fleet then stays resident while more members join and, if asked, while
 # the routers are restarted under it. Every member on this host shares one
@@ -65,8 +65,8 @@ ROLLOUT=0
 NODE_ARGS=()
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SAM_NODE="${SAM_NODE:-${REPO_ROOT}/bin/sam-node}"
-SAM_BENCH="${SAM_BENCH:-${REPO_ROOT}/bin/sam-bench}"
+AGENTMESH_NODE="${AGENTMESH_NODE:-${REPO_ROOT}/bin/agentmesh-node}"
+AGENTMESH_BENCH="${AGENTMESH_BENCH:-${REPO_ROOT}/bin/agentmesh-bench}"
 # May carry arguments, e.g. KUBECTL="kubectl --context my-cluster".
 KUBECTL="${KUBECTL:-kubectl}"
 
@@ -91,7 +91,7 @@ Options:
   --hold DURATION            how long the burst fleet stays resident (default ${HOLD})
   --rollout                  restart the router StatefulSet while the fleet is resident (needs --env)
   --service NAME             MCP service each member finds and calls (default ${SERVICE})
-  --node-arg ARG             extra sam-node argument, repeatable
+  --node-arg ARG             extra agentmesh-node argument, repeatable
   --out DIR                  where observations, logs and member state land (required)
 EOF
 }
@@ -119,8 +119,8 @@ fail() { echo "member-journey: $*" >&2; exit 1; }
 log() { echo "$(date -u +%FT%TZ) $*"; }
 
 [[ -n "$OUT" ]] || fail "--out is required"
-[[ -x "$SAM_NODE" ]] || fail "sam-node not found at $SAM_NODE; run make or set SAM_NODE"
-[[ -x "$SAM_BENCH" ]] || fail "sam-bench not found at $SAM_BENCH; run make or set SAM_BENCH"
+[[ -x "$AGENTMESH_NODE" ]] || fail "agentmesh-node not found at $AGENTMESH_NODE; run make or set AGENTMESH_NODE"
+[[ -x "$AGENTMESH_BENCH" ]] || fail "agentmesh-bench not found at $AGENTMESH_BENCH; run make or set AGENTMESH_BENCH"
 command -v python3 >/dev/null || fail "python3 is needed for the summary"
 if [[ -n "$ENV_NAME" ]]; then
   NS="sam-${ENV_NAME}"
@@ -174,11 +174,11 @@ admin_api() {
   local port
   port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
   if [[ ! -s "$OUT/admin-header" ]]; then
-    $KUBECTL get secret "sam-control-plane-secret-${ENV_NAME}" -n "$NS" -o jsonpath='{.data.admin-token}' \
+    $KUBECTL get secret "agentmesh-control-plane-secret-${ENV_NAME}" -n "$NS" -o jsonpath='{.data.admin-token}' \
       | base64 -d | sed 's/^/Authorization: Bearer /' > "$OUT/admin-header"
     chmod 600 "$OUT/admin-header"
   fi
-  $KUBECTL port-forward "deployment/sam-control-plane-${ENV_NAME}" -n "$NS" "${port}:8080" >/dev/null 2>&1 &
+  $KUBECTL port-forward "deployment/agentmesh-control-plane-${ENV_NAME}" -n "$NS" "${port}:8080" >/dev/null 2>&1 &
   PF_PID=$!
   for _ in $(seq 1 30); do
     curl -fsS -o /dev/null "http://127.0.0.1:${port}/healthz" 2>/dev/null && break
@@ -228,12 +228,12 @@ revoke_token() {
 snapshot() {
   local tag="$1" pod name
   [[ -n "$ENV_NAME" ]] || return 0
-  for pod in $($KUBECTL get pods -n "$NS" -l "app=sam-control-plane-${ENV_NAME}" -o name 2>/dev/null); do
+  for pod in $($KUBECTL get pods -n "$NS" -l "app=agentmesh-control-plane-${ENV_NAME}" -o name 2>/dev/null); do
     name="${pod#pod/}"
     $KUBECTL get --raw "/api/v1/namespaces/${NS}/pods/${name}:8080/proxy/metrics" \
       > "$OUT/${name}-${tag}.prom" 2>/dev/null || log "could not read ${name} metrics (${tag})"
   done
-  for pod in $($KUBECTL get pods -n "$NS" -l "app=sam-router-${ENV_NAME}" -o name 2>/dev/null); do
+  for pod in $($KUBECTL get pods -n "$NS" -l "app=agentmesh-router-${ENV_NAME}" -o name 2>/dev/null); do
     name="${pod#pod/}"
     $KUBECTL get --raw "/api/v1/namespaces/${NS}/pods/${name}:9090/proxy/metrics" \
       > "$OUT/${name}-${tag}.prom" 2>/dev/null || log "could not read ${name} metrics (${tag})"
@@ -254,7 +254,7 @@ summarize() {
     "$T_JOURNEY_P50_MS" "$T_JOURNEY_P95_MS" "$T_OUTAGE_MAX_MS" "$T_CP_P99_S"
 }
 
-# join_cmd fills JOIN_CMD with one phase's sam-bench invocation. It is an
+# join_cmd fills JOIN_CMD with one phase's agentmesh-bench invocation. It is an
 # array rather than a function so the burst can be backgrounded directly:
 # a backgrounded function is a subshell, and a signal to it would not reach
 # the run inside.
@@ -262,8 +262,8 @@ JOIN_CMD=()
 join_cmd() { # phase count base-port extra...
   local phase="$1" count="$2" base="$3" a
   shift 3
-  JOIN_CMD=("$SAM_BENCH" join
-    --node-bin "$SAM_NODE"
+  JOIN_CMD=("$AGENTMESH_BENCH" join
+    --node-bin "$AGENTMESH_NODE"
     --control-plane "$CONTROL_PLANE"
     --bootstrap-token-path "$BOOTSTRAP_TOKEN_PATH"
     --service "$SERVICE"
@@ -282,7 +282,7 @@ rm -f "$OUT/resident"
 {
   echo "control_plane=$CONTROL_PLANE"
   echo "host=$(hostname) nproc=$(nproc) mem_kib=$(awk '/MemTotal/{print $2}' /proc/meminfo)"
-  echo "sam_node=$("$SAM_NODE" --version 2>/dev/null | head -1)"
+  echo "sam_node=$("$AGENTMESH_NODE" --version 2>/dev/null | head -1)"
 } > "$OUT/environment.txt"
 
 snapshot before
@@ -316,9 +316,9 @@ fi
 
 if (( ROLLOUT )); then
   event rollout-start
-  log "rollout: restarting statefulset/sam-router-${ENV_NAME} under the resident fleet"
-  $KUBECTL rollout restart "statefulset/sam-router-${ENV_NAME}" -n "$NS"
-  $KUBECTL rollout status "statefulset/sam-router-${ENV_NAME}" -n "$NS" --timeout=600s || log "rollout did not finish in 600s"
+  log "rollout: restarting statefulset/agentmesh-router-${ENV_NAME} under the resident fleet"
+  $KUBECTL rollout restart "statefulset/agentmesh-router-${ENV_NAME}" -n "$NS"
+  $KUBECTL rollout status "statefulset/agentmesh-router-${ENV_NAME}" -n "$NS" --timeout=600s || log "rollout did not finish in 600s"
   event rollout-end
   snapshot rolled
   if (( LATE > 0 )); then

@@ -56,8 +56,8 @@ spec:
               # naming the router's peer ID). The peer ID is read from the
               # router's cluster-internal metrics endpoint through the API
               # server proxy, so it does not depend on log retention.
-              echo "Finding sam-router pods in ${NAMESPACE}..."
-              PODS=$(kubectl get pods -n ${NAMESPACE} -l app=sam-router-${ENV_NAME} -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{" "}{.spec.nodeName}{"\n"}{end}')
+              echo "Finding agentmesh-router pods in ${NAMESPACE}..."
+              PODS=$(kubectl get pods -n ${NAMESPACE} -l app=agentmesh-router-${ENV_NAME} -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{" "}{.spec.nodeName}{"\n"}{end}')
               
               declare -a IP_ARRAY=()
               declare -a TXT_ARRAY=()
@@ -72,7 +72,7 @@ spec:
                 IP_LIST=$(kubectl get node $node -o jsonpath='{.status.addresses[?(@.type=="ExternalIP")].address}')
 
                 PEER_ID=$(kubectl get --raw "/api/v1/namespaces/${NAMESPACE}/pods/${pod}:9090/proxy/metrics" 2>/dev/null \
-                  | sed -n 's/^sam_router_info{peer_id="\([A-Za-z0-9]*\)"} 1$/\1/p' | head -n 1 || true)
+                  | sed -n 's/^agentmesh_router_info{peer_id="\([A-Za-z0-9]*\)"} 1$/\1/p' | head -n 1 || true)
                 if [ -z "$PEER_ID" ]; then
                   echo "No peer ID from $pod yet; leaving the TXT record set unchanged this run."
                   TXT_INCOMPLETE=1

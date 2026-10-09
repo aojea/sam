@@ -12,7 +12,7 @@
 
 ### New flow per request: what admission costs
 
-| agents | requests | conc | ok | failed | rps | ttfb p50 | ttfb p95 | ttfb p99 | ttfb max | sam_box_flows_total{outcome=allowed,route=mesh-entrypoint} |
+| agents | requests | conc | ok | failed | rps | ttfb p50 | ttfb p95 | ttfb p99 | ttfb max | agentmesh_box_flows_total{outcome=allowed,route=mesh-entrypoint} |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 500 | 4 | 500 | 0 | 1154 | 1.55 | 2.71 | 78.15 | 85.25 | 520 |
 | 2 | 500 | 4 | 500 | 0 | 1991 | 1.40 | 2.20 | 3.19 | 70.09 | 520 |
@@ -24,7 +24,7 @@
 
 ### Denied: what enforcement costs, and that it held
 
-| agents | requests | conc | ok | failed | rps | ttfb p50 | ttfb p95 | ttfb p99 | ttfb max | sam_box_flows_total{outcome=denied,route=unresolved} |
+| agents | requests | conc | ok | failed | rps | ttfb p50 | ttfb p95 | ttfb p99 | ttfb max | agentmesh_box_flows_total{outcome=denied,route=unresolved} |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 500 | 4 | 0 | 500 | 26225 | 0.00 | 0.00 | 0.00 | 0.00 | 500 |
 | 2 | 500 | 4 | 0 | 500 | 28274 | 0.00 | 0.00 | 0.00 | 0.00 | 500 |

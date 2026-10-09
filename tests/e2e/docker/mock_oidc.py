@@ -93,7 +93,7 @@ class Handler(BaseHTTPRequestHandler):
             client_id = params.get('client_id', [''])[0]
             grant_type = params.get('grant_type', [''])[0]
 
-            # Only the grants a SAM component drives are served, so a token
+            # Only the grants a Agent Mesh component drives are served, so a token
             # is proof of which flow obtained it: client credentials for a
             # configured node, the device grant, with the code handed out
             # above, for an interactive join that has no browser.

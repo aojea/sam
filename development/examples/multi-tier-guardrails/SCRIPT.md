@@ -1,6 +1,6 @@
 # Multi-Tier Guardrails & Quality Gates — Recording Script
 
-A ~3.5-minute terminal recording demonstrating how SAM serves all **5 enterprise personas** across **4 acts** with real backends (`gemma3:1b` on Ollama, official `a2a-sdk`, official `mcp` SDK + SQLite, and `api.github.com`). Every config file (`node-v1.yaml`, `node-caller.yaml`, `node-v2.yaml`, `node-contractor.yaml`, `policy.json`) and every command (`sam-node join`, `make node-v1-staging`, `curl`, `python3 a2a_client.py`, `mcp-client`, `sam-one admin ban`) is shown directly on screen.
+A ~3.5-minute terminal recording demonstrating how SAM serves all **5 enterprise personas** across **4 acts** with real backends (`gemma3:1b` on Ollama, official `a2a-sdk`, official `mcp` SDK + SQLite, and `api.github.com`). Every config file (`node-v1.yaml`, `node-caller.yaml`, `node-v2.yaml`, `node-contractor.yaml`, `policy.json`) and every command (`agentmesh-node join`, `make node-v1-staging`, `curl`, `python3 a2a_client.py`, `mcp-client`, `agentmesh-one admin ban`) is shown directly on screen.
 
 ## Scenes
 
@@ -14,7 +14,7 @@ cat node-v1.yaml
 # admin (Label Point 1 — Mesh Enforcement)
 jq -c '.roles[0].allowed_labels' policy.json
 sed 's/staging/prod/' node-v1.yaml > $WORK_DIR/node-v1-prod.yaml && \
-  sam-node join $CP_URL --insecure-control-plane \
+  agentmesh-node join $CP_URL --insecure-control-plane \
     --bootstrap-token-path $WORK_DIR/dev-spoof.token \
     --config $WORK_DIR/node-v1-prod.yaml --data-dir $WORK_DIR/spoof
 
@@ -60,10 +60,10 @@ python3 a2a_client.py http://127.0.0.1:19102/mesh/$V2_PEER/a2a/support.acme \
 # Layer 1 — Central Security (Org HTTP Policy + Secret Brokering)
 jq -c '.roles[0].http[0], .egress[0]' policy.json
 curl -s -H 'X-Mesh-Authentication: Bearer caller-secret' \
-  "http://127.0.0.1:19102/mesh/$V1_PEER/egress/api.github.com/repos/google/sam/pulls?state=open&per_page=1" | \
+  "http://127.0.0.1:19102/mesh/$V1_PEER/egress/api.github.com/repos/google/agentmesh/pulls?state=open&per_page=1" | \
   jq -c '.[0] | {number, title}'
 curl -i -s -X POST -H 'X-Mesh-Authentication: Bearer caller-secret' \
-  http://127.0.0.1:19102/mesh/$V1_PEER/egress/api.github.com/repos/google/sam/pulls -d '{}' | head -n 5
+  http://127.0.0.1:19102/mesh/$V1_PEER/egress/api.github.com/repos/google/agentmesh/pulls -d '{}' | head -n 5
 
 # Layer 2 — Department Lead (Label Point 2b — Egress Node Positive Check)
 cat node-contractor.yaml
@@ -85,7 +85,7 @@ mcp-client -url http://127.0.0.1:19102/mcp -token $TASK_BISCUIT -tool call_remot
 
 ```bash
 # admin
-sam-one admin ban $CONTRACTOR_PEER --server $CP_URL --data-dir $WORK_DIR/one
+agentmesh-one admin ban $CONTRACTOR_PEER --server $CP_URL --data-dir $WORK_DIR/one
 ```
 
 ## Recording

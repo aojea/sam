@@ -70,7 +70,7 @@ jobs:
         if: failure()
         run: |
           mkdir -p _artifacts
-          kind export logs --name sam-kind ./_artifacts/logs
+          kind export logs --name agentmesh-kind ./_artifacts/logs
           cp "$RUNNER_TEMP/local-node.log" _artifacts/ 2>/dev/null || true
 
       - name: Upload logs

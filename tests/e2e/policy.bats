@@ -2,7 +2,7 @@
 
 load "lib/container_mesh.bash"
 
-CALC_MCP_IMAGE="sam-calc-mcp:local"
+CALC_MCP_IMAGE="agentmesh-calc-mcp:local"
 
 build_calc_mcp_image() {
   if ! docker image inspect "${CALC_MCP_IMAGE}" >/dev/null 2>&1; then

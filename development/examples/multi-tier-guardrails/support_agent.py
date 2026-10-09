@@ -47,7 +47,7 @@ from starlette.applications import Starlette
 
 REPLICA_ID = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("REPLICA_ID", "v1-laptop")
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else int(os.environ.get("PORT", "17771"))
-DB_PATH = os.environ.get("ORDERS_DB_PATH", "/tmp/sam-multi-tier-orders.db")
+DB_PATH = os.environ.get("ORDERS_DB_PATH", "/tmp/agentmesh-multi-tier-orders.db")
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:11434/v1")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "ollama")
 LLM_MODEL = os.environ.get("LLM_MODEL", "gemma3:1b")

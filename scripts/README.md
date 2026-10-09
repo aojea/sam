@@ -1,6 +1,6 @@
-# SAM Scale Experiment Scripts
+# Agent Mesh Scale Experiment Scripts
 
-This directory contains the automation scripts to run massive scale experiments of the SAM mesh network using Google Cloud Platform (GCP) and Firecracker microVMs.
+This directory contains the automation scripts to run massive scale experiments of the Agent Mesh network using Google Cloud Platform (GCP) and Firecracker microVMs.
 
 ## Architecture Overview
 
@@ -16,19 +16,19 @@ Run the `build-rootfs.sh` script locally. This uses Docker to create an Alpine L
 
 ```bash
 # Build locally and automatically upload to your Google Cloud Storage bucket
-./scripts/build-rootfs.sh gs://my-sam-bucket/scale-test
+./scripts/build-rootfs.sh gs://my-agentmesh-bucket/scale-test
 ```
 
 ### 2. Provision the Cloud Minions
-Use the `provision-scale-vm.sh` script to bulk-create your GCP Minion VMs. The script automatically compiles your local `sam-node` and `sam-box` binaries, uploads them, and configures the VMs via `cloud-init.yaml`.
+Use the `provision-scale-vm.sh` script to bulk-create your GCP Minion VMs. The script automatically compiles your local `agentmesh-node` and `agentmesh-box` binaries, uploads them, and configures the VMs via `cloud-init.yaml`.
 
 ```bash
 # Provision 100 VMs using your local binaries and rootfs
-./scripts/provision-scale-vm.sh --prefix sam-minions --count 100 --local-binaries gs://my-sam-bucket/scale-test
+./scripts/provision-scale-vm.sh --prefix agentmesh-minions --count 100 --local-binaries gs://my-agentmesh-bucket/scale-test
 ```
 
 ### 3. Launch MicroVMs
-Once the GCP Minions boot up, their `cloud-init` automatically downloads Firecracker, your rootfs, and the latest SAM binaries. 
+Once the GCP Minions boot up, their `cloud-init` automatically downloads Firecracker, your rootfs, and the latest Agent Mesh binaries. 
 SSH into a Minion VM (or use a startup-script wrapper) and run the launcher:
 
 ```bash
@@ -36,4 +36,4 @@ SSH into a Minion VM (or use a startup-script wrapper) and run the launcher:
 /opt/microvm/launch-microvms.sh 20
 ```
 
-Each microVM is spawned with a dedicated `sam-box` running on the host. Network traffic is transparently routed out of the guest using `tun2proxy` over Firecracker VSOCK, hitting the local `sam-box` UDS endpoint.
+Each microVM is spawned with a dedicated `agentmesh-box` running on the host. Network traffic is transparently routed out of the guest using `tun2proxy` over Firecracker VSOCK, hitting the local `agentmesh-box` UDS endpoint.

@@ -1,0 +1,151 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentmesh-canary-openclaw-config-${ENV_NAME}
+  namespace: agentmesh-canary-${ENV_NAME}
+data:
+  agentmesh-node.yaml: |
+    version: "v1alpha1"
+    attenuation:
+      policies:
+        - 'allow if service("mcp", "openclaw");'
+        - 'allow if service("system", "/mesh/catalog");'
+      checks: []
+      rules: []
+    services: []
+  openclaw.json: |
+    {
+      "agents": {
+        "defaults": {
+          "model": "google/gemini-3.1-pro"
+        }
+      },
+      "gateway": {
+        "mode": "local"
+      },
+      "mcp": {
+        "servers": {
+          "agentmesh": {
+            "enabled": true,
+            "url": "http://127.0.0.1:8080/mcp"
+          }
+        }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openclaw-canary-${ENV_NAME}
+  namespace: agentmesh-canary-${ENV_NAME}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: openclaw-canary-${ENV_NAME}
+  template:
+    metadata:
+      labels:
+        app: openclaw-canary-${ENV_NAME}
+        agentmesh-canary: "true"
+    spec:
+      serviceAccountName: agentmesh-node-sa
+      containers:
+      - name: openclaw
+        image: ghcr.io/openclaw/openclaw:2026.8.1
+        ports:
+        - containerPort: 18789
+          name: http-gateway
+        lifecycle:
+          postStart:
+            exec:
+              command:
+                - "/bin/sh"
+                - "-c"
+                - |
+                  (
+                  for i in $(seq 1 30); do
+                    if curl -sf http://localhost:18789/ >/dev/null; then
+                      break
+                    fi
+                    sleep 1
+                  done
+                  # Directly add the cron job to force operator.admin auto-approval on the first connection
+                  openclaw cron add --name mesh-health-check --every 5m --token "${OPENCLAW_GATEWAY_TOKEN}" --best-effort-deliver --no-deliver --message "Use the get_mesh_info tool to check the mesh connection status and log the output." || true
+                  ) >/dev/null 2>&1 </dev/null &
+        env:
+        - name: AGENTMESH_MCP_URL
+          value: "http://127.0.0.1:8080/mcp"
+        - name: OPENCLAW_STATE_DIR
+          value: "/data"
+        - name: OPENCLAW_GATEWAY_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: openclaw-secret-${ENV_NAME}
+              key: gateway-token
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: openclaw-secret-${ENV_NAME}
+              key: gemini-api-key
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        volumeMounts:
+        - name: openclaw-data
+          mountPath: /data
+        - name: config-volume
+          mountPath: /data/openclaw.json
+          subPath: openclaw.json
+        - name: dshm
+          mountPath: /dev/shm
+      - name: agentmesh-node
+        image: ghcr.io/google/agentmesh-node:${IMAGE_TAG}
+        env:
+        - name: AGENTMESH_API_TOKEN
+          value: "secret-token"
+        args: 
+          - "run"
+          - "--config=/etc/agentmesh/agentmesh-node.yaml"
+          - "--control-plane=http://agentmesh-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
+          - "--insecure-control-plane"
+          - "--jwt-path=/var/run/secrets/tokens/agentmesh-token"
+          - "--bind-addr=127.0.0.1:8080"
+          - "--metrics-addr=0.0.0.0:9090"
+        ports:
+        - containerPort: 8080
+        - containerPort: 9090
+          name: metrics
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/agentmesh
+        - name: agentmesh-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+      volumes:
+      - name: config-volume
+        configMap:
+          name: agentmesh-canary-openclaw-config-${ENV_NAME}
+      - name: openclaw-data
+        emptyDir: {}
+      - name: dshm
+        emptyDir:
+          medium: Memory
+      - name: agentmesh-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: agentmesh-token
+              expirationSeconds: 3600
+              audience: "agentmesh-control-plane-audience"

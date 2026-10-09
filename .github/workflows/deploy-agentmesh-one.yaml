@@ -1,0 +1,204 @@
+name: AgentMesh-One Cloud Run Sandbox
+
+# On-demand agentmesh-one deployments on Cloud Run (see
+# site/content/docs/guides/cloud-run.md for the manual version).
+# Deploys are gated by the 'sam-one-sandbox' GitHub Environment: required
+# reviewers approve each run before GCP credentials are minted.
+#
+# Generated join/admin tokens never appear in logs: they are encrypted to
+# the SSH public keys of the user who triggered the run (github.com/<user>.keys)
+# and published in the job summary as an age-armored blob.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'What to do'
+        type: choice
+        options: [deploy, delete]
+        default: deploy
+      name:
+        description: 'Sandbox name (service becomes agentmesh-one-<name>)'
+        type: string
+        default: sandbox
+      region:
+        description: 'Cloud Run region'
+        type: choice
+        options: [us-central1, europe-west1, asia-northeast1]
+        default: us-central1
+
+run-name: 'agentmesh-one ${{ inputs.action }} ${{ inputs.name }} @ ${{ inputs.region }} (${{ github.ref_name }}) by ${{ github.actor }}'
+
+# One run at a time per sandbox; never cancel an in-flight deploy.
+concurrency:
+  group: agentmesh-one-${{ inputs.name }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  sandbox:
+    name: '${{ inputs.action }} agentmesh-one-${{ inputs.name }}'
+    runs-on: ubuntu-latest
+    environment: sam-one-sandbox
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ inputs.region }}
+      SERVICE: agentmesh-one-${{ inputs.name }}
+      AR_REPO: ${{ vars.AR_REPO || 'agentmesh' }}
+      # The agentmesh AR repo only exists in us-central1; Cloud Run pulls
+      # cross-region, so the deploy region stays a free choice.
+      AR_LOCATION: ${{ vars.AR_LOCATION || 'us-central1' }}
+
+    steps:
+      - name: Validate inputs
+        env:
+          INPUT_NAME: ${{ inputs.name }}
+        run: |
+          if ! [[ "${INPUT_NAME}" =~ ^[a-z][a-z0-9-]{0,29}$ ]]; then
+            echo "::error::name must match ^[a-z][a-z0-9-]{0,29}$ (got '${INPUT_NAME}')"
+            exit 1
+          fi
+
+      - name: Check out code
+        if: inputs.action == 'deploy'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Google Auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER_NAME }}
+          service_account: ${{ vars.SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Build and push image
+        if: inputs.action == 'deploy'
+        run: |
+          IMG="${AR_LOCATION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPO}/agentmesh-one:${GITHUB_SHA}"
+          echo "IMG=${IMG}" >> "$GITHUB_ENV"
+          gcloud auth configure-docker "${AR_LOCATION}-docker.pkg.dev" --quiet
+          docker build --build-arg VERSION="${GITHUB_SHA}" -f Dockerfile.agentmesh-one -t "${IMG}" .
+          docker push "${IMG}"
+
+      - name: Deploy to Cloud Run
+        if: inputs.action == 'deploy'
+        env:
+          RUNTIME_SA: ${{ vars.RUNTIME_SERVICE_ACCOUNT_EMAIL }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          # Fresh tokens every deploy; Cloud Run has no disk so they must be
+          # pinned via env vars or each instance restart regenerates them.
+          JOIN_TOKEN="mesh_tok_$(openssl rand -hex 16)"
+          ADMIN_TOKEN="mesh_adm_$(openssl rand -hex 16)"
+          echo "::add-mask::${JOIN_TOKEN}"
+          echo "::add-mask::${ADMIN_TOKEN}"
+          echo "JOIN_TOKEN=${JOIN_TOKEN}" >> "$GITHUB_ENV"
+          echo "ADMIN_TOKEN=${ADMIN_TOKEN}" >> "$GITHUB_ENV"
+
+          EXTRA_FLAGS=()
+          if [[ -n "${RUNTIME_SA}" ]]; then
+            EXTRA_FLAGS+=(--service-account "${RUNTIME_SA}")
+          fi
+
+          # Flag rationale: docs/user/cloud-run-deployment.md ("all load-bearing").
+          gcloud run deploy "${SERVICE}" \
+            --project "${GCP_PROJECT_ID}" --region "${REGION}" \
+            --image "${IMG}" \
+            --allow-unauthenticated \
+            --min-instances 1 --max-instances 1 \
+            --port 8080 \
+            --no-cpu-throttling \
+            --timeout 3600 \
+            --labels "managed-by=agentmesh-one-dispatch,requested-by=$(echo "${ACTOR}" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-_' | cut -c1-63)" \
+            --set-env-vars "AGENTMESH_TOKEN=${JOIN_TOKEN},AGENTMESH_ADMIN_TOKEN=${ADMIN_TOKEN}" \
+            "${EXTRA_FLAGS[@]}" \
+            --quiet
+
+          # The URL only exists after the first deploy; a second revision
+          # teaches the router its public wss multiaddr.
+          URL=$(gcloud run services describe "${SERVICE}" --project "${GCP_PROJECT_ID}" \
+            --region "${REGION}" --format='value(status.url)')
+          echo "URL=${URL}" >> "$GITHUB_ENV"
+          gcloud run services update "${SERVICE}" \
+            --project "${GCP_PROJECT_ID}" --region "${REGION}" \
+            --update-env-vars "AGENTMESH_EXTERNAL_URL=${URL}" \
+            --quiet
+
+      - name: Verify readiness
+        if: inputs.action == 'deploy'
+        run: |
+          # /healthz is swallowed by the Google frontend on run.app; use /readyz.
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 10 "${URL}/readyz" >/dev/null 2>&1; then
+              echo "agentmesh-one ready at ${URL}"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::${URL}/readyz never became ready"
+          exit 1
+
+      - name: Publish summary
+        if: inputs.action == 'deploy'
+        env:
+          ACTOR: ${{ github.actor }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq age
+
+          # Encrypt the tokens to the triggering user's GitHub SSH keys so
+          # they can be published in a public job summary.
+          curl -fsSL "https://github.com/${ACTOR}.keys" \
+            | grep -E '^(ssh-ed25519|ssh-rsa) ' > /tmp/recipient.keys || true
+
+          {
+            echo "## agentmesh-one sandbox \`${SERVICE}\` (${REGION})"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Service URL | ${URL} |"
+            echo "| Console | ${URL}/console |"
+            echo "| Built from | \`${REF_NAME}\` @ \`${GITHUB_SHA}\` |"
+            echo
+            echo "Join a node (socket-only local API; or export AGENTMESH_API_TOKEN instead of --bind-addr \"\"):"
+            echo
+            echo '```bash'
+            echo "agentmesh-node run --control-plane ${URL} --bootstrap-token <JOIN_TOKEN> --bind-addr \"\""
+            echo '```'
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ -s /tmp/recipient.keys ]]; then
+            {
+              echo "### Tokens (encrypted to @${ACTOR}'s SSH keys)"
+              echo
+              echo "Decrypt with the matching private key:"
+              echo
+              echo '```bash'
+              echo "age -d -i ~/.ssh/id_ed25519 <<'EOF'"
+              printf 'JOIN_TOKEN=%s\nADMIN_TOKEN=%s\n' "${JOIN_TOKEN}" "${ADMIN_TOKEN}" \
+                | age -a -R /tmp/recipient.keys
+              echo "EOF"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "> [!WARNING]"
+              echo "> @${ACTOR} has no RSA/ed25519 SSH keys on GitHub, so the"
+              echo "> generated tokens were not published. Add a key at"
+              echo "> https://github.com/settings/keys and re-run the workflow."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Delete service
+        if: inputs.action == 'delete'
+        run: |
+          gcloud run services delete "${SERVICE}" \
+            --project "${GCP_PROJECT_ID}" --region "${REGION}" --quiet
+          echo "Deleted \`${SERVICE}\` from ${REGION}." >> "$GITHUB_STEP_SUMMARY"

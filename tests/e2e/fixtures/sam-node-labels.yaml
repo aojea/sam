@@ -1,5 +1,0 @@
-# Operator-declared labels only: this fixture exists to prove "sam-node join"
-# carries them into enrollment, where the control plane attests them.
-version: "v1alpha1"
-labels:
-  region: "eu"

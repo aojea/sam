@@ -15,9 +15,9 @@
 
 # Records SCRIPT.md for the Multi-Tier Guardrails & Quality Gates example.
 # Every config file (node-v1.yaml, node-caller.yaml, node-v2.yaml,
-# node-contractor.yaml, policy.json) and every command (sam-node join,
+# node-contractor.yaml, policy.json) and every command (agentmesh-node join,
 # make node-v1-staging, curl, python3 a2a_client.py, mcp-client,
-# sam-one admin ban) is typed directly in the panes — no hidden wrapper
+# agentmesh-one admin ban) is typed directly in the panes — no hidden wrapper
 # functions.
 
 set -o errexit
@@ -42,11 +42,11 @@ PYTHON=$VENV_DIR/bin/python
 export ORDERS_DB_PATH=$WORK_DIR/orders.db
 export LLM_MODEL=${LLM_MODEL:-gemma3:1b}
 
-SAM_ONE=$REPO_ROOT/bin/sam-one
-SAM_NODE=$REPO_ROOT/bin/sam-node
+AGENTMESH_ONE=$REPO_ROOT/bin/agentmesh-one
+AGENTMESH_NODE=$REPO_ROOT/bin/agentmesh-node
 MCP_CLIENT=$REPO_ROOT/bin/mcp-client
 
-if [[ ! -x "$SAM_ONE" || ! -x "$SAM_NODE" || ! -x "$MCP_CLIENT" ]]; then
+if [[ ! -x "$AGENTMESH_ONE" || ! -x "$AGENTMESH_NODE" || ! -x "$MCP_CLIENT" ]]; then
   make -C "$REPO_ROOT" build
 fi
 
@@ -57,10 +57,10 @@ fi
   "$VENV_DIR/bin/pip" install -q -r "$HERE/requirements.txt"
 
 if ! curl -sf http://127.0.0.1:11434/v1/models >/dev/null 2>&1; then
-  docker start sam-demo-ollama >/dev/null 2>&1 || \
-    docker run -d --name sam-demo-ollama -p 127.0.0.1:11434:11434 -v sam-demo-ollama:/root/.ollama ollama/ollama >/dev/null
+  docker start agentmesh-demo-ollama >/dev/null 2>&1 || \
+    docker run -d --name agentmesh-demo-ollama -p 127.0.0.1:11434:11434 -v agentmesh-demo-ollama:/root/.ollama ollama/ollama >/dev/null
   for _ in $(seq 1 30); do curl -sf http://127.0.0.1:11434/ >/dev/null && break; sleep 1; done
-  docker exec sam-demo-ollama ollama pull "$LLM_MODEL" >/dev/null
+  docker exec agentmesh-demo-ollama ollama pull "$LLM_MODEL" >/dev/null
 fi
 
 mkdir -p "$OUT"
@@ -177,16 +177,16 @@ for _ in $(seq 1 120); do
   sleep 0.25
 done
 
-# Start sam-one control plane + router in background
+# Start agentmesh-one control plane + router in background
 CP_URL="http://127.0.0.1:18190"
-"$SAM_ONE" \
+"$AGENTMESH_ONE" \
   --data-dir "$WORK_DIR/one" \
   --port 18190 \
   --policy-file "$HERE/policy.json" \
   --no-join-token \
   --enroll-qr=false \
-  --log-level warn > "$WORK_DIR/sam-one.log" 2>&1 &
-echo $! > "$WORK_DIR/sam-one.pid"
+  --log-level warn > "$WORK_DIR/agentmesh-one.log" 2>&1 &
+echo $! > "$WORK_DIR/agentmesh-one.pid"
 
 for _ in $(seq 1 80); do
   if [[ -s "$WORK_DIR/one/admin-token" ]] && curl -sf "$CP_URL/readyz" >/dev/null; then
@@ -197,7 +197,7 @@ done
 ADMIN_TOKEN=$(cat "$WORK_DIR/one/admin-token")
 
 mint_tok() {
-  "$SAM_ONE" token create --server "$CP_URL" --data-dir "$WORK_DIR/one" \
+  "$AGENTMESH_ONE" token create --server "$CP_URL" --data-dir "$WORK_DIR/one" \
     --max-usages 1 --description "$1" 2>/dev/null | awk '/^Token:/ {print $2}' > "$2"
   chmod 600 "$2"
 }
@@ -209,7 +209,7 @@ mint_tok "cloudrun-v2-prod" "$WORK_DIR/dev-v2.token"
 mint_tok "contractor-node" "$WORK_DIR/contractor.token"
 
 # Start Input / Caller Node with node-caller.yaml (egress.require_labels: {env: prod})
-"$SAM_NODE" run \
+"$AGENTMESH_NODE" run \
   --control-plane "$CP_URL" --insecure-control-plane \
   --bootstrap-token-path "$WORK_DIR/caller.token" \
   --config "$HERE/node-caller.yaml" \
@@ -221,7 +221,7 @@ mint_tok "contractor-node" "$WORK_DIR/contractor.token"
 echo $! > "$WORK_DIR/node-caller.pid"
 
 # Start Contractor Node with node-contractor.yaml (labels: {team: contractor})
-"$SAM_NODE" run \
+"$AGENTMESH_NODE" run \
   --control-plane "$CP_URL" --insecure-control-plane \
   --bootstrap-token-path "$WORK_DIR/contractor.token" \
   --config "$HERE/node-contractor.yaml" \
@@ -233,8 +233,8 @@ echo $! > "$WORK_DIR/node-caller.pid"
 echo $! > "$WORK_DIR/node-contractor.pid"
 
 for _ in $(seq 1 40); do
-  if grep -q "SAM Node Online" "$WORK_DIR/node-caller.log" 2>/dev/null && \
-     grep -q "SAM Node Online" "$WORK_DIR/node-contractor.log" 2>/dev/null; then
+  if grep -q "Agent Mesh Node Online" "$WORK_DIR/node-caller.log" 2>/dev/null && \
+     grep -q "Agent Mesh Node Online" "$WORK_DIR/node-contractor.log" 2>/dev/null; then
     break
   fi
   sleep 0.25
@@ -282,7 +282,7 @@ while True:
 EOF
 tmux send-keys -t "$CAPTION" "python3 /tmp/samguardrails-caption.py $CAPTION_FILE $COLS $CAPTION_CPS" Enter
 
-ENV_SETUP="export PATH=$REPO_ROOT/bin:$VENV_DIR/bin:\$PATH CP_URL=$CP_URL ADMIN_TOKEN=$ADMIN_TOKEN WORK_DIR=$WORK_DIR NODE=http://127.0.0.1:19102 SAM_API_TOKEN=caller-secret CONTRACTOR_PEER=$CONTRACTOR_PEER"
+ENV_SETUP="export PATH=$REPO_ROOT/bin:$VENV_DIR/bin:\$PATH CP_URL=$CP_URL ADMIN_TOKEN=$ADMIN_TOKEN WORK_DIR=$WORK_DIR NODE=http://127.0.0.1:19102 AGENTMESH_API_TOKEN=caller-secret CONTRACTOR_PEER=$CONTRACTOR_PEER"
 tmux send-keys -t "$NODE" "$ENV_SETUP; PS1='node-v1\$ '; clear" Enter
 tmux send-keys -t "$ADMIN" "$ENV_SETUP; PS1='admin\$ '; clear" Enter
 tmux send-keys -t "$CALLER" "$ENV_SETUP CURL_HOME=$WORK_DIR; PS1='caller\$ '; clear" Enter
@@ -307,12 +307,12 @@ pause 2.5
 
 caption "Why can't Alice just put 'env: prod' in node-v1.yaml? Point 1 is Mesh Enforcement (policy.json allowed_labels): the Control Plane rejects ungranted labels at enrollment."
 expect "$ADMIN" "jq -c '.roles[0].allowed_labels' policy.json" 'env=staging' 15
-expect "$ADMIN" "sed 's/staging/prod/' node-v1.yaml > \$WORK_DIR/node-v1-prod.yaml && sam-node join \$CP_URL --insecure-control-plane --bootstrap-token-path \$WORK_DIR/dev-spoof.token --config \$WORK_DIR/node-v1-prod.yaml --data-dir \$WORK_DIR/spoof" 'Label not permitted' 30
+expect "$ADMIN" "sed 's/staging/prod/' node-v1.yaml > \$WORK_DIR/node-v1-prod.yaml && agentmesh-node join \$CP_URL --insecure-control-plane --bootstrap-token-path \$WORK_DIR/dev-spoof.token --config \$WORK_DIR/node-v1-prod.yaml --data-dir \$WORK_DIR/spoof" 'Label not permitted' 30
 pause 3
 
 caption "Alice starts her node with node-v1.yaml in env=staging. Meanwhile, on the caller side (Point 2a — Input Node Enforcement), node-caller.yaml requires egress.require_labels: env=prod."
 type_in "$NODE" "make node-v1-staging 2>&1 | python3 audit.py"
-wait_for "$NODE" 'SAM Node Online' 30
+wait_for "$NODE" 'Agent Mesh Node Online' 30
 V1_STAGING=$(tmux capture-pane -J -p -t "$NODE" -S -50 | awk '/PeerID:/ {print $2; exit}')
 tmux send-keys -t "$CALLER" "V1_PEER=$V1_STAGING; clear" Enter
 wait_for "$CALLER" 'caller\$' 10
@@ -327,7 +327,7 @@ sleep 0.5
 rm -rf "$WORK_DIR/node-v1"
 wait_prompt "$NODE"
 type_in "$NODE" "make node-v1-prod 2>&1 | python3 audit.py"
-wait_for "$NODE" 'SAM Node Online' 30
+wait_for "$NODE" 'Agent Mesh Node Online' 30
 V1_PROD=$(tmux capture-pane -J -p -t "$NODE" -S -30 | awk '/PeerID:/ {p=$2} END {print p}')
 tmux send-keys -t "$CALLER" "V1_PEER=$V1_PROD" Enter
 wait_for "$CALLER" 'caller\$' 10
@@ -347,7 +347,7 @@ pause 3
 
 caption "A Cloud Run replica (node-v2.yaml, replica=v2-cloudrun) joins the mesh. On Turn 2, the caller passes X-Mesh-Required-Labels: replica=v2-cloudrun and keeps full conversation context."
 expect "$CALLER" "cat node-v2.yaml" 'v2-cloudrun' 15
-"$SAM_NODE" run \
+"$AGENTMESH_NODE" run \
   --control-plane "$CP_URL" --insecure-control-plane \
   --bootstrap-token-path "$WORK_DIR/dev-v2.token" --config "$HERE/node-v2.yaml" \
   --data-dir "$WORK_DIR/node-v2" --bind-addr 127.0.0.1:19103 --socket-path="" \
@@ -355,7 +355,7 @@ expect "$CALLER" "cat node-v2.yaml" 'v2-cloudrun' 15
   --api-token-path "$WORK_DIR/dev2-api.token" --allow-loopback --control-plane-sync-interval 5s > "$WORK_DIR/node-v2.log" 2>&1 &
 echo $! > "$WORK_DIR/node-v2.pid"
 for _ in $(seq 1 40); do
-  grep -q "SAM Node Online" "$WORK_DIR/node-v2.log" 2>/dev/null && break
+  grep -q "Agent Mesh Node Online" "$WORK_DIR/node-v2.log" 2>/dev/null && break
   sleep 0.25
 done
 V2_PEER=$(awk '/PeerID:/ {print $2; exit}' "$WORK_DIR/node-v2.log")
@@ -371,10 +371,10 @@ pause 3
 
 # --- Act 3: 3-Tier Guardrails -----------------------------------------------
 
-caption "Act 3, Layer 1 (Central Security): policy.json grants GET /repos/google/sam/pulls* on egress://api.github.com and injects secrets/github-ro. POST is blocked with 403."
+caption "Act 3, Layer 1 (Central Security): policy.json grants GET /repos/google/agentmesh/pulls* on egress://api.github.com and injects secrets/github-ro. POST is blocked with 403."
 expect "$ADMIN" "jq -c '.roles[0].http[0], .egress[0]' policy.json" 'github-ro' 15
-expect "$CALLER" "curl -s \"\$NODE/mesh/\$V1_PEER/egress/api.github.com/repos/google/sam/pulls?state=open&per_page=1\" | jq -c '.[0] | {number, title}'" 'number' 30
-expect "$CALLER" "curl -i -s -X POST \$NODE/mesh/\$V1_PEER/egress/api.github.com/repos/google/sam/pulls -d '{}' | head -n 5" '403 Forbidden' 30
+expect "$CALLER" "curl -s \"\$NODE/mesh/\$V1_PEER/egress/api.github.com/repos/google/agentmesh/pulls?state=open&per_page=1\" | jq -c '.[0] | {number, title}'" 'number' 30
+expect "$CALLER" "curl -i -s -X POST \$NODE/mesh/\$V1_PEER/egress/api.github.com/repos/google/agentmesh/pulls -d '{}' | head -n 5" '403 Forbidden' 30
 pause 3
 
 caption "Act 3, Layer 2 (Department Lead — Point 2b, Egress Node Label Check): node-v1.yaml requires positive 'check if label(\"team\", \"support\")', so node-contractor.yaml (team=contractor) is rejected."
@@ -390,8 +390,8 @@ pause 3.5
 
 # --- Act 4: Day-2 Ops & Ban -------------------------------------------------
 
-caption "Act 4 (Day-2 Operations): Every ALLOW and DENY across all three layers is logged in the left pane. Finally, the admin bans the contractor peer with sam-one admin ban."
-expect "$ADMIN" "sam-one admin ban \$CONTRACTOR_PEER --server \$CP_URL --data-dir \$WORK_DIR/one" 'banned' 30
+caption "Act 4 (Day-2 Operations): Every ALLOW and DENY across all three layers is logged in the left pane. Finally, the admin bans the contractor peer with agentmesh-one admin ban."
+expect "$ADMIN" "agentmesh-one admin ban \$CONTRACTOR_PEER --server \$CP_URL --data-dir \$WORK_DIR/one" 'banned' 30
 pause 3.5
 
 caption "sam-mesh.dev"

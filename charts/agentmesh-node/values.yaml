@@ -1,0 +1,102 @@
+image:
+  repository: agentmesh-node
+  tag: local
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Required: control plane URL the node enrolls with,
+# e.g. http://agentmesh-control-plane:8080. A plaintext http:// URL makes the
+# chart pass --insecure-control-plane: whoever answers it becomes the node's
+# trust root, so use https:// for anything beyond the cluster network.
+controlPlaneUrl: ""
+
+# Audience of the projected ServiceAccount token; must be one of the control
+# plane's allowedAudiences.
+audience: agentmesh-audience
+
+# Bearer token protecting the node's local REST API. Leave empty to generate a
+# random one on first install (kept stable across upgrades) in the Secret
+# <release>-api-token; read it with
+#   kubectl get secret <release>-api-token -o jsonpath='{.data.api-token}' | base64 -d
+# Set explicitly (e.g. via --set) to pin a known value. The generated form
+# relies on Helm's lookup, which sees no cluster under `helm template`,
+# `--dry-run` or a GitOps diff: those render a fresh value each time. Pin the
+# token, or pre-create the Secret, when the manifests are rendered outside
+# `helm install`/`upgrade`.
+apiToken: ""
+
+# Pod and container security contexts. The image is distroless nonroot;
+# runAsNonRoot needs the numeric uid.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+# Address the node API binds inside the pod. Loopback keeps the API
+# pod-private; set 0.0.0.0:8080 to expose it on the pod IP.
+bindAddr: "127.0.0.1:8080"
+
+# Plain HTTP port for /metrics, /healthz and /readyz, separate from bindAddr
+# so neither the scraper nor the kubelet needs the API token. Unauthenticated,
+# so it is only ever a containerPort. Set to 0 to disable it and the probes.
+metricsPort: 9090
+
+# Scraping of the metrics port. Each is a CRD the cluster may not have, so
+# both are off until you pick the collector you run.
+monitoring:
+  interval: 30s
+  # Google Managed Prometheus (monitoring.googleapis.com/v1 PodMonitoring),
+  # present by default on GKE.
+  podMonitoring:
+    enabled: false
+  # prometheus-operator (monitoring.coreos.com/v1 PodMonitor).
+  podMonitor:
+    enabled: false
+    # Extra labels, e.g. the release selector a Prometheus instance matches on.
+    labels: {}
+
+# Extra agentmesh-node args, e.g. ["--discovery-interval=200ms"].
+extraArgs: []
+
+# Rendered verbatim as the node's agentmesh-node.yaml: static services the node
+# advertises, and local attenuation.
+config:
+  version: v1alpha1
+  # Operator-declared labels the control plane attests, subject to the role's
+  # allowed_labels grant (e.g. region: us-east-1).
+  labels: {}
+  attenuation:
+    policies: []
+    checks: []
+    rules: []
+  services: []
+
+# Optional service container next to the node; they share localhost, so
+# config.services target_url entries point at 127.0.0.1:<port>.
+# Rendered only when image is non-empty.
+service:
+  name: service
+  image: ""
+  command: []
+  env: []
+  ports: []
+  resources: {}
+
+# Set create: false and name to reuse an existing ServiceAccount; annotations
+# cover IAM bindings (e.g. GKE Workload Identity).
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

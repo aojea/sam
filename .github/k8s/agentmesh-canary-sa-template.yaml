@@ -1,0 +1,8 @@
+# Identity shared by every canary node in the namespace; deploy.yaml's policy
+# seed binds it to the agentmesh-canary role. Applied with the namespaces so it
+# exists before any canary references it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agentmesh-node-sa
+  namespace: agentmesh-canary-${ENV_NAME}

@@ -1,0 +1,98 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentmesh-canary-openrouter-config-${ENV_NAME}
+  namespace: agentmesh-canary-${ENV_NAME}
+data:
+  agentmesh-node.yaml: |
+    version: "v1alpha1"
+    attenuation:
+      policies:
+        - 'allow if service("inference", "openrouter");'
+        - 'allow if service("system", "/mesh/catalog");'
+      checks: []
+      rules: []
+    services:
+      - type: inference
+        name: openrouter
+        description: "OpenRouter Proxy Inference Service"
+        target_url: "http://localhost:4000"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openrouter-canary-${ENV_NAME}
+  namespace: agentmesh-canary-${ENV_NAME}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openrouter-canary-${ENV_NAME}
+  template:
+    metadata:
+      labels:
+        app: openrouter-canary-${ENV_NAME}
+        agentmesh-canary: "true"
+    spec:
+      serviceAccountName: agentmesh-node-sa
+      containers:
+      - name: openrouter-proxy
+        image: ghcr.io/berriai/litellm:main-latest
+        command:
+          - "litellm"
+          - "--host"
+          - "127.0.0.1"
+          - "--model"
+          - "openrouter/auto"
+          - "--port"
+          - "4000"
+        env:
+          - name: OPENROUTER_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: openrouter-secret-${ENV_NAME}
+                key: api-key
+          - name: LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY
+            value: "true"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+      - name: agentmesh-node
+        image: ghcr.io/google/agentmesh-node:${IMAGE_TAG}
+        env:
+        - name: AGENTMESH_API_TOKEN
+          value: "secret-token"
+        args: 
+          - "run"
+          - "--config=/etc/agentmesh/agentmesh-node.yaml"
+          - "--control-plane=http://agentmesh-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
+          - "--insecure-control-plane"
+          - "--jwt-path=/var/run/secrets/tokens/agentmesh-token"
+          - "--bind-addr=127.0.0.1:8080"
+          - "--metrics-addr=0.0.0.0:9090"
+        ports:
+        - containerPort: 8080
+        - containerPort: 9090
+          name: metrics
+        resources:
+          requests:
+            cpu: 500m
+            memory: 128Mi
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/agentmesh
+        - name: agentmesh-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+      volumes:
+      - name: config-volume
+        configMap:
+          name: agentmesh-canary-openrouter-config-${ENV_NAME}
+      - name: agentmesh-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: agentmesh-token
+              expirationSeconds: 3600
+              audience: "agentmesh-control-plane-audience"

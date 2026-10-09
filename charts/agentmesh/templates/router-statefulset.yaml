@@ -1,0 +1,193 @@
+{{- if .Values.router.enabled -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "agentmesh.fullname" . }}-router-sa
+  labels:
+    {{- include "agentmesh.labels" . | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "agentmesh.fullname" . }}-router
+  labels:
+    {{- include "agentmesh.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "agentmesh.fullname" . }}-router
+  replicas: {{ .Values.router.replicaCount }}
+  minReadySeconds: {{ .Values.router.minReadySeconds }}
+  selector:
+    matchLabels:
+      app: {{ include "agentmesh.fullname" . }}-router
+  template:
+    metadata:
+      labels:
+        app: {{ include "agentmesh.fullname" . }}-router
+    spec:
+      serviceAccountName: {{ include "agentmesh.fullname" . }}-router-sa
+      {{- with .Values.router.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.router.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.router.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.router.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+      - name: wait-control-plane
+        image: curlimages/curl:8.6.0
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        securityContext:
+          # curlimages/curl's USER is non-numeric; runAsNonRoot needs an explicit uid.
+          runAsUser: 100
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          CP_URL="http://{{ include "agentmesh.fullname" . }}-control-plane:{{ .Values.controlPlane.service.port }}"
+          until curl -sf "${CP_URL}/info" > /dev/null; do
+            echo "Control plane not ready yet, sleeping..."
+            sleep 2
+          done
+      containers:
+      - name: agentmesh-router
+        image: "{{ .Values.router.image.repository }}:{{ .Values.router.image.tag | default .Values.global.imageTag }}"
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        {{- with .Values.router.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        ports:
+        - containerPort: 4501
+          name: p2p-tcp
+          {{- if .Values.router.hostPort }}
+          hostPort: {{ .Values.router.hostPort }}
+          {{- end }}
+          protocol: TCP
+        - containerPort: 4501
+          name: p2p-udp
+          {{- if .Values.router.hostPort }}
+          hostPort: {{ .Values.router.hostPort }}
+          {{- end }}
+          protocol: UDP
+        # Cluster-internal: never given a hostPort, nothing on it is authenticated.
+        - containerPort: {{ .Values.router.metricsPort }}
+          name: metrics
+          protocol: TCP
+        # /healthz answers as soon as the process is up; /readyz once the
+        # router has enrolled and its libp2p host is online.
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: metrics
+          periodSeconds: 5
+          failureThreshold: 24
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: metrics
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: metrics
+          periodSeconds: 15
+        resources:
+          {{- toYaml .Values.router.resources | nindent 10 }}
+        {{- if .Values.router.hostPort }}
+        env:
+        # kubelet expands $(HOST_IP) in the args below.
+        - name: HOST_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        {{- end }}
+        args:
+        - "--control-plane=http://{{ include "agentmesh.fullname" . }}-control-plane:{{ .Values.controlPlane.service.port }}"
+        # In-cluster plaintext to the chart's own control-plane Service; the
+        # cluster network is the trust boundary here.
+        - "--insecure-control-plane"
+        - "--listen=/ip4/0.0.0.0/tcp/4501"
+        - "--listen=/ip4/0.0.0.0/udp/4501/quic-v1"
+        - "--metrics-addr=0.0.0.0:{{ .Values.router.metricsPort }}"
+        {{- if .Values.router.externalAddrs }}
+        {{- range .Values.router.externalAddrs }}
+        - "--external-addr={{ . }}"
+        {{- end }}
+        {{- else if .Values.router.hostPort }}
+        - "--external-addr=/ip4/$(HOST_IP)/tcp/{{ .Values.router.hostPort }}"
+        - "--external-addr=/ip4/$(HOST_IP)/udp/{{ .Values.router.hostPort }}/quic-v1"
+        {{- else }}
+        - "--external-addr=/dns4/{{ include "agentmesh.fullname" . }}-router/tcp/{{ .Values.router.service.port }}"
+        {{- end }}
+        - "--keys-path=/data/router.key"
+        {{- if .Values.router.allowLoopback }}
+        - "--allow-loopback"
+        {{- end }}
+        - "--log-level={{ .Values.router.logLevel }}"
+        {{- if .Values.router.useOidcToken }}
+        - "--jwt-path=/var/run/secrets/tokens/agentmesh-token"
+        {{- else }}
+        # A file, not a flag value: argv is readable through kubectl exec and
+        # /proc/<pid>/cmdline.
+        - "--bootstrap-token-path=/var/run/secrets/agentmesh-router/token"
+        {{- end }}
+        volumeMounts:
+        - name: router-data
+          mountPath: /data
+        {{- if .Values.router.useOidcToken }}
+        - name: agentmesh-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+        {{- else }}
+        - name: router-token
+          mountPath: /var/run/secrets/agentmesh-router
+          readOnly: true
+        {{- end }}
+      volumes:
+      {{- if .Values.router.useOidcToken }}
+      - name: agentmesh-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: agentmesh-token
+              expirationSeconds: 3600
+              audience: "agentmesh-control-plane-audience"
+      {{- else }}
+      - name: router-token
+        secret:
+          secretName: {{ include "agentmesh.fullname" . }}-router-token
+          items:
+          - key: token
+            path: token
+      {{- end }}
+  volumeClaimTemplates:
+  - metadata:
+      name: router-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      {{- if .Values.router.storageClass }}
+      storageClassName: {{ .Values.router.storageClass | quote }}
+      {{- end }}
+      resources:
+        requests:
+          storage: {{ .Values.router.storageSize | quote }}
+{{- end }}

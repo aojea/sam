@@ -1,0 +1,111 @@
+suite: bootstrap job
+templates:
+  - templates/bootstrap-job.yaml
+release:
+  name: agentmesh
+tests:
+  - it: role only touches the router-token secret
+    documentSelector:
+      path: kind
+      value: Role
+    asserts:
+      - equal:
+          path: rules[0].verbs
+          value: [create]
+      - equal:
+          path: rules[1].resourceNames
+          value: [agentmesh-router-token]
+      - equal:
+          path: rules[1].verbs
+          value: [get, patch, update]
+      - lengthEqual:
+          path: rules
+          count: 2
+
+  - it: job pod runs as the numeric curl uid with resources set
+    documentSelector:
+      path: kind
+      value: Job
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 100
+      - exists:
+          path: spec.template.spec.containers[0].resources.limits
+
+  - it: node role grants no labels by default (fail closed)
+    documentSelector:
+      path: kind
+      value: Job
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '"name": "mesh:role:node".*"allowed_labels": \[\]'
+
+  - it: router bootstrap token is spent after one use per replica
+    set:
+      router.replicaCount: 3
+    documentSelector:
+      path: kind
+      value: Job
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '"role": "mesh:role:router", "max_usages": 3\}'
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '999999'
+
+  - it: node role grants no services by default (fail closed)
+    documentSelector:
+      path: kind
+      value: Job
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '"name": "mesh:role:node", "allowed_services": \[\]'
+
+  - it: no identity may enroll as a node by default (fail closed)
+    documentSelector:
+      path: kind
+      value: Job
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '"role":"mesh:role:node"'
+
+  - it: node enrollment is granted to exactly the configured members
+    documentSelector:
+      path: kind
+      value: Job
+    set:
+      bootstrap:
+        nodeMembers: ["user:test-user", "group:eng"]
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '\{"members":\["user:test-user","group:eng"\],"role":"mesh:role:node"\}'
+
+  - it: node role grants only the configured services
+    documentSelector:
+      path: kind
+      value: Job
+    set:
+      bootstrap:
+        nodeServices: ["mcp://calculator", "system://mesh.catalog"]
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '"name": "mesh:role:node", "allowed_services": \["mcp://calculator","system://mesh.catalog"\]'
+
+  - it: node role grants only the configured label patterns
+    documentSelector:
+      path: kind
+      value: Job
+    set:
+      bootstrap:
+        nodeLabels: ["region=*", "team=platform"]
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '"name": "mesh:role:node".*"allowed_labels": \["region=\*","team=platform"\]'

@@ -11,7 +11,7 @@
       "allowed_services": ["inference://office-llm", "mcp://tools", "egress://api.github.com"],
       "allowed_targets": ["*"],
       "http": [
-        { "service": "egress://api.github.com", "methods": ["GET"], "paths": ["/repos/google/sam/*"] }
+        { "service": "egress://api.github.com", "methods": ["GET"], "paths": ["/repos/google/agentmesh/*"] }
       ]
     }
   ],

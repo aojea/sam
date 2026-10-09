@@ -1,8 +1,0 @@
-# Identity shared by every canary node in the namespace; deploy.yaml's policy
-# seed binds it to the sam-canary role. Applied with the namespaces so it
-# exists before any canary references it.
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: sam-node-sa
-  namespace: sam-canary-${ENV_NAME}

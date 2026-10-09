@@ -1,0 +1,48 @@
+{{- /*
+One scrape target per component, rendered for whichever collector the
+cluster runs. Pod-selecting resources are used for both so the router's
+metrics port never has to appear on a Service.
+*/ -}}
+{{- $targets := list (dict "name" "control-plane" "port" "http") -}}
+{{- if .Values.router.enabled -}}
+{{- $targets = append $targets (dict "name" "router" "port" "metrics") -}}
+{{- end -}}
+{{- range $t := $targets }}
+{{- if $.Values.monitoring.podMonitoring.enabled }}
+---
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: {{ include "agentmesh.fullname" $ }}-{{ $t.name }}
+  labels:
+    {{- include "agentmesh.labels" $ | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "agentmesh.fullname" $ }}-{{ $t.name }}
+  endpoints:
+  - port: {{ $t.port }}
+    path: /metrics
+    interval: {{ $.Values.monitoring.interval }}
+{{- end }}
+{{- if $.Values.monitoring.podMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "agentmesh.fullname" $ }}-{{ $t.name }}
+  labels:
+    {{- include "agentmesh.labels" $ | nindent 4 }}
+    {{- with $.Values.monitoring.podMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "agentmesh.fullname" $ }}-{{ $t.name }}
+  podMetricsEndpoints:
+  - port: {{ $t.port }}
+    path: /metrics
+    interval: {{ $.Values.monitoring.interval }}
+{{- end }}
+{{- end }}

@@ -9,7 +9,7 @@
 #
 # The boundary is a Unix socket on the host. Firecracker's vsock multiplexes
 # guest connections onto "<uds_path>_<port>", so a guest connection to CID 2
-# port 1080 arrives on the host at the path sam-box serves.
+# port 1080 arrives on the host at the path agentmesh-box serves.
 set -eu
 
 # Best effort, not preconditions: a kernel configured with devtmpfs has already

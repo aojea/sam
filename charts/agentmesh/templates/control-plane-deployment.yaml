@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agentmesh.fullname" . }}-control-plane
+  labels:
+    {{- include "agentmesh.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.controlPlane.replicaCount }}
+  {{- if .Values.controlPlane.hostPort }}
+  # hostPort: a surged pod can't bind a port the old pod still holds, so the
+  # default maxSurge=1 deadlocks the rollout on port-saturated nodes.
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ include "agentmesh.fullname" . }}-control-plane
+  template:
+    metadata:
+      annotations:
+        # Secrets land as env vars, which are not live-reloaded; roll the pods on change.
+        checksum/secrets: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+      labels:
+        app: {{ include "agentmesh.fullname" . }}-control-plane
+    spec:
+      {{- with .Values.controlPlane.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controlPlane.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controlPlane.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controlPlane.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: agentmesh-control-plane
+        image: "{{ .Values.controlPlane.image.repository }}:{{ .Values.controlPlane.image.tag | default .Values.global.imageTag }}"
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        {{- with .Values.controlPlane.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "agentmesh.fullname" . }}-secrets
+              key: db-password
+        {{- if eq .Values.database.type "postgres" }}
+        {{- $dbHost := printf "%s-db" (include "agentmesh.fullname" .) }}
+        {{- if not .Values.database.postgres.deployInternal }}
+          {{- $dbHost = .Values.database.postgres.host }}
+        {{- end }}
+        - name: AGENTMESH_DB_DSN
+          value: "postgres://{{ .Values.database.postgres.user }}:$(DB_PASSWORD)@{{ $dbHost }}:{{ .Values.database.postgres.port | default 5432 }}/{{ .Values.database.postgres.database }}?sslmode={{ .Values.database.postgres.sslmode | default "disable" }}"
+        {{- end }}
+        - name: AGENTMESH_ADMIN_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "agentmesh.fullname" . }}-secrets
+              key: admin-token
+        ports:
+        - containerPort: 8080
+          name: http
+          {{- if .Values.controlPlane.hostPort }}
+          hostPort: {{ .Values.controlPlane.hostPort }}
+          {{- end }}
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: http
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 15
+        resources:
+          {{- toYaml .Values.controlPlane.resources | nindent 10 }}
+        args:
+        - "--bind-address=0.0.0.0:8080"
+        {{- if eq .Values.database.type "postgres" }}
+        - "--db-driver=postgres"
+        {{- else }}
+        - "--db-driver=sqlite"
+        - "--db-dsn=/data/control-plane.db"
+        {{- end }}
+        - "--issuer={{ .Values.controlPlane.oidcIssuer }}"
+        {{- if .Values.controlPlane.workloadIssuer }}
+        - "--workload-issuer={{ .Values.controlPlane.workloadIssuer }}"
+        {{- end }}
+        {{- if .Values.controlPlane.workloadSessionTtl }}
+        - "--workload-session-ttl={{ .Values.controlPlane.workloadSessionTtl }}"
+        {{- end }}
+        - "--allowed-audiences={{ .Values.controlPlane.allowedAudiences }}"
+        {{- if .Values.controlPlane.autoApproveEnrollment }}
+        - "--auto-approve-enrollment"
+        {{- end }}
+        {{- if .Values.controlPlane.insecureSkipTlsVerify }}
+        - "--insecure-skip-tls-verify"
+        {{- end }}
+        - "--log-level={{ .Values.controlPlane.logLevel }}"

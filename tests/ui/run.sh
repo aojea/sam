@@ -27,13 +27,13 @@ cd "${REPO_ROOT}"
 
 trap stack_cleanup EXIT INT TERM
 
-export SAM_ADMIN_TOKEN="${STACK_ADMIN_TOKEN}"
-export SAM_CONSOLE_URL="${STACK_CONSOLE_URL}"
+export AGENTMESH_ADMIN_TOKEN="${STACK_ADMIN_TOKEN}"
+export AGENTMESH_CONSOLE_URL="${STACK_CONSOLE_URL}"
 
 stack_start
 
 # The browser SDK test (browser-sdk.spec.js) runs sdk/js in a page against
-# bin/sam-one; the page and the Node examples it talks to are built here.
+# bin/agentmesh-one; the page and the Node examples it talks to are built here.
 cd "${REPO_ROOT}/sdk/js"
 npm ci --no-audit --no-fund
 npm run build

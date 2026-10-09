@@ -27,7 +27,7 @@ from a2a.types import Message, Part, Role, SendMessageRequest
 
 
 async def send_once(url: str, prompt: str, context_id: str, required_labels: str = "") -> None:
-    token = os.environ.get("SAM_API_TOKEN", "")
+    token = os.environ.get("AGENTMESH_API_TOKEN", "")
     headers = {"X-Mesh-Authentication": f"Bearer {token}"}
     if required_labels:
         headers["X-Mesh-Required-Labels"] = required_labels

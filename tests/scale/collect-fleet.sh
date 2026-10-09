@@ -28,12 +28,12 @@
 # an agent cost rather than what was left over.
 #
 # Usage:
-#   tests/scale/collect-fleet.sh --node-socket /var/run/sam-node.sock \
+#   tests/scale/collect-fleet.sh --node-socket /var/run/agentmesh-node.sock \
 #     --duration 300 --out results.jsonl
 
 set -euo pipefail
 
-NODE_SOCKET="/var/run/sam-node.sock"
+NODE_SOCKET="/var/run/agentmesh-node.sock"
 DURATION=300
 INTERVAL=5
 OUT=""
@@ -87,7 +87,7 @@ scrape() {
 }
 
 agents_seen() {
-    scrape | awk '/^sam_node_agents_seen /{printf "%d", $2; found=1} END{if(!found) printf "0"}'
+    scrape | awk '/^agentmesh_node_agents_seen /{printf "%d", $2; found=1} END{if(!found) printf "0"}'
 }
 
 node_metric() {
@@ -107,10 +107,10 @@ while :; do
 
     agents="$(agents_seen)"
     vms="$(count_of 'firecracker --api-sock')"
-    boxes="$(count_of 'sam-box run --socket')"
+    boxes="$(count_of 'agentmesh-box run --socket')"
     vm_rss_kb="$(rss_total 'firecracker --api-sock')"
-    box_rss_kb="$(rss_total 'sam-box run --socket')"
-    node_rss_kb="$(rss_total 'sam-node run')"
+    box_rss_kb="$(rss_total 'agentmesh-box run --socket')"
+    node_rss_kb="$(rss_total 'agentmesh-node run')"
     mem_avail_kb="$(awk '/MemAvailable/ {print $2}' /proc/meminfo)"
     load="$(awk '{print $1}' /proc/loadavg)"
 
@@ -119,7 +119,7 @@ while :; do
     printf '"guest_rss_kb":%s,"boundary_rss_kb":%s,"node_rss_kb":%s,' \
         "${vm_rss_kb}" "${box_rss_kb}" "${node_rss_kb}" >> "${OUT}"
     printf '"mem_available_kb":%s,"load1":%s,"requests_in_flight":%s}\n' \
-        "${mem_avail_kb}" "${load}" "$(node_metric sam_node_requests_in_flight)" >> "${OUT}"
+        "${mem_avail_kb}" "${load}" "$(node_metric agentmesh_node_requests_in_flight)" >> "${OUT}"
 
     printf '%-9s %-8s %-8s %-10s %-10s\n' \
         "${elapsed}s" "${agents:-0}" "${vms:-0}" \

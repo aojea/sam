@@ -2,7 +2,7 @@
 
 load "lib/container_mesh.bash"
 
-A2A_ECHO_IMAGE="sam-a2a-echo:local"
+A2A_ECHO_IMAGE="agentmesh-a2a-echo:local"
 
 build_a2a_echo_image() {
   if ! docker image inspect "${A2A_ECHO_IMAGE}" >/dev/null 2>&1; then
@@ -51,7 +51,7 @@ teardown() {
   echo "[$(date +%T)] Starting Node 2 (provider, region=eu) with the echo service"
   mesh_start_node 2 \
     "--log-level debug" \
-    "tests/e2e/docker/a2a-echo/sam-node-config.yaml"
+    "tests/e2e/docker/a2a-echo/agentmesh-node-config.yaml"
   mesh_wait_for_mcp_ready 2 30
 
   local node2_peer_id
@@ -69,7 +69,7 @@ teardown() {
   # the regenerated URLs, the gRPC drop and streaming-off) and gets an echo.
   echo "[$(date +%T)] Running stock a2a-sdk client against ${mesh_base}"
   run docker run --rm --network "${MESH_NETWORK}" \
-    -e SAM_API_TOKEN="secret-token" \
+    -e AGENTMESH_API_TOKEN="secret-token" \
     "${A2A_ECHO_IMAGE}" python3 /workspace/client.py "${mesh_base}" "hello mesh"
   echo "client output: $output"
   [[ "$status" -eq 0 ]]
@@ -86,8 +86,8 @@ teardown() {
   local attempt
   for attempt in 1 2 3; do
     run docker run --rm --network "${MESH_NETWORK}" \
-      -e SAM_API_TOKEN="secret-token" \
-      -e SAM_REQUIRED_LABELS="region=eu" \
+      -e AGENTMESH_API_TOKEN="secret-token" \
+      -e AGENTMESH_REQUIRED_LABELS="region=eu" \
       "${A2A_ECHO_IMAGE}" python3 /workspace/client.py "${mesh_base}" "hello eu"
     [[ "$status" -eq 0 ]] && break
     echo "labelled attempt ${attempt} failed, node-1 label gate verdicts:"

@@ -62,7 +62,7 @@ for mem in ${SIZES}; do
     dir="$(mktemp -d /tmp/sam-guest-size-XXXXXX)"
     cp "${ROOTFS}" "${dir}/rootfs.ext4"
 
-    # Stands in for sam-box: the flow only has to arrive, because what is being
+    # Stands in for agentmesh-box: the flow only has to arrive, because what is being
     # measured is whether the guest had enough memory to get that far.
     socat -u "UNIX-LISTEN:${dir}/vm.vsock_1080,fork" "CREATE:${dir}/arrived" &
     socat_pid=$!

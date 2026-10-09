@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ include "sam-node.fullname" . }}-config
-  labels:
-    {{- include "sam-node.labels" . | nindent 4 }}
-data:
-  sam-node.yaml: |
-    {{- .Values.config | toYaml | nindent 4 }}

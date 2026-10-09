@@ -30,7 +30,7 @@ cd "${REPO_ROOT}"
 
 trap stack_cleanup EXIT INT TERM
 
-for binary in sam-control-plane sam-console sam-router sam-node; do
+for binary in agentmesh-control-plane agentmesh-console agentmesh-router agentmesh-node; do
   if [[ ! -x "${REPO_ROOT}/bin/${binary}" ]]; then
     echo "missing ${REPO_ROOT}/bin/${binary}; run 'make build' first" >&2
     exit 1
@@ -50,14 +50,14 @@ api() {
 echo "Seeding mesh policy..."
 api POST /policies -H "Content-Type: application/json" -d '{
   "roles": [
-    {"name": "sam-admin", "allowed_services": ["*"], "allowed_targets": ["*"]},
+    {"name": "mesh-admin", "allowed_services": ["*"], "allowed_targets": ["*"]},
     {"name": "mesh:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]},
     {"name": "mesh:role:node", "allowed_services": ["mcp://*", "system://mesh.catalog"], "allowed_targets": ["*"]}
   ],
   "bindings": [
     {"role": "mesh:role:router", "members": ["group:routers"]},
     {"role": "mesh:role:node", "members": ["group:users"]},
-    {"role": "sam-admin", "members": ["user:root-admin"]}
+    {"role": "mesh-admin", "members": ["user:root-admin"]}
   ]
 }' >/dev/null
 
@@ -72,7 +72,7 @@ mint_token() {
 
 echo "Enrolling a router..."
 ROUTER_TOKEN=$(mint_token "mesh:role:router" "ui-dev router")
-"${REPO_ROOT}/bin/sam-router" \
+"${REPO_ROOT}/bin/agentmesh-router" \
   --control-plane "${STACK_CP_URL}" \
   --listen "/ip4/127.0.0.1/tcp/5101" \
   --keys-path "${WORK_DIR}/router.key" \
@@ -85,14 +85,14 @@ echo "Enrolling a node..."
 NODE_TOKEN=$(mint_token "mesh:role:node" "ui-dev node")
 NODE_DIR="${WORK_DIR}/node"
 mkdir -p "${NODE_DIR}"
-cat >"${NODE_DIR}/sam-node.yaml" <<'EOF'
+cat >"${NODE_DIR}/agentmesh-node.yaml" <<'EOF'
 version: "v1alpha1"
 services: []
 EOF
-"${REPO_ROOT}/bin/sam-node" join "${STACK_CP_URL}" \
+"${REPO_ROOT}/bin/agentmesh-node" join "${STACK_CP_URL}" \
   --bootstrap-token "${NODE_TOKEN}" \
   --data-dir "${NODE_DIR}" \
-  --config "${NODE_DIR}/sam-node.yaml" \
+  --config "${NODE_DIR}/agentmesh-node.yaml" \
   --allow-loopback \
   >"${WORK_DIR}/node-join.log" 2>&1 || echo "  node join failed, see ${WORK_DIR}/node-join.log" >&2
 

@@ -24,7 +24,7 @@ module.exports = defineConfig({
   workers: 1,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
-    baseURL: process.env.SAM_CONSOLE_URL || 'http://127.0.0.1:8091',
+    baseURL: process.env.AGENTMESH_CONSOLE_URL || 'http://127.0.0.1:8091',
     permissions: ['clipboard-read', 'clipboard-write'],
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',

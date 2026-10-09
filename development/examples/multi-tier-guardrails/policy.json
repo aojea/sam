@@ -21,7 +21,7 @@
         {
           "service": "egress://api.github.com",
           "methods": ["GET"],
-          "paths": ["/repos/google/sam/pulls*"]
+          "paths": ["/repos/google/agentmesh/pulls*"]
         }
       ]
     }

@@ -2,12 +2,12 @@
 # Launch N agent sandboxes on one host.
 #
 # The shape here is the point, and it is not what this script used to do. It
-# ran one sam-node per microVM, which made every agent a mesh member: its own
+# ran one agentmesh-node per microVM, which made every agent a mesh member: its own
 # enrolment, its own libp2p host, its own place in the DHT. That does not reach
 # a thousand agents on a host, and it measures the wrong thing besides. An
 # agent is a principal, not a peer.
 #
-# So: one sam-node for the host, which is the mesh member, and one sam-box per
+# So: one agentmesh-node for the host, which is the mesh member, and one agentmesh-box per
 # agent, which holds no mesh identity at all and names its agent on every
 # request. Adding an agent costs a boundary, not an enrolment.
 set -euo pipefail
@@ -30,7 +30,7 @@ AGENT_DOMAIN="${AGENT_DOMAIN:-scale.sam-mesh.dev}"
 # Worth knowing when budgeting: mem_size_mib is a ceiling, not an allocation.
 # The host only pays for pages the guest touches, so raising it is cheap and
 # the real cost per agent is roughly the guest's working set plus about 18 MiB
-# for its sam-box.
+# for its agentmesh-box.
 VM_MEM_MIB="${VM_MEM_MIB:-160}"
 VM_VCPUS="${VM_VCPUS:-1}"
 
@@ -45,7 +45,7 @@ SANDBOX_LINGER="${SANDBOX_LINGER:-0}"
 # variables. Model names and durations are safe; prompts are not, which is why
 # the task stays in the init script.
 AGENT_ENV=""
-for v in SAM_MODEL CHAOS_SLEEP CHAOS_ROUNDS; do
+for v in AGENTMESH_MODEL CHAOS_SLEEP CHAOS_ROUNDS; do
     eval "val=\${$v:-}"
     [ -z "$val" ] && continue
     case "$val" in
@@ -62,13 +62,13 @@ fi
 # Everything the host writes is overridable, so this can be exercised on a
 # workstation before it is trusted on a fleet. The defaults are the paths a
 # provisioned VM has.
-NODE_UDS="${NODE_UDS:-/var/run/sam-node.sock}"
-NODE_DIR="${NODE_DIR:-/var/lib/sam-node}"
+NODE_UDS="${NODE_UDS:-/var/run/agentmesh-node.sock}"
+NODE_DIR="${NODE_DIR:-/var/lib/agentmesh-node}"
 RUN_DIR="${RUN_DIR:-/var/run}"
 LOG_DIR="${LOG_DIR:-/var/log}"
-SAM_NODE="${SAM_NODE:-sam-node}"
-SAM_BOX="${SAM_BOX:-sam-box}"
-BOOTSTRAP_TOKEN_PATH="${BOOTSTRAP_TOKEN_PATH:-/etc/sam-bootstrap-token}"
+AGENTMESH_NODE="${AGENTMESH_NODE:-agentmesh-node}"
+AGENTMESH_BOX="${AGENTMESH_BOX:-agentmesh-box}"
+BOOTSTRAP_TOKEN_PATH="${BOOTSTRAP_TOKEN_PATH:-/etc/agentmesh-bootstrap-token}"
 
 # Everything is checked before anything is started. Launching a thousand
 # sandboxes against a node that turned out to be unenrollable wastes the whole
@@ -82,7 +82,7 @@ command -v firecracker >/dev/null 2>&1 || fail "firecracker is not installed"
 [ -w /dev/kvm ] || fail "/dev/kvm is not writable; nested virtualisation is required"
 [ -f "$WORKDIR/vmlinux.bin" ] || fail "no guest kernel at $WORKDIR/vmlinux.bin"
 [ -f "$WORKDIR/rootfs.ext4" ] || fail "no guest rootfs at $WORKDIR/rootfs.ext4"
-command -v "$SAM_BOX" >/dev/null 2>&1 || [ -x "$SAM_BOX" ] || fail "sam-box not found ($SAM_BOX)"
+command -v "$AGENTMESH_BOX" >/dev/null 2>&1 || [ -x "$AGENTMESH_BOX" ] || fail "agentmesh-box not found ($AGENTMESH_BOX)"
 
 # An agent sandbox has no network device and reaches the mesh through a tun, so
 # a kernel without the driver gives every sandbox no route at all.
@@ -98,7 +98,7 @@ fi
 # A node that is already serving needs no credential. One that has to be
 # started does, and finding that out after a fleet is up is too late.
 if [ ! -S "$NODE_UDS" ]; then
-    command -v "$SAM_NODE" >/dev/null 2>&1 || [ -x "$SAM_NODE" ] || fail "sam-node not found ($SAM_NODE)"
+    command -v "$AGENTMESH_NODE" >/dev/null 2>&1 || [ -x "$AGENTMESH_NODE" ] || fail "agentmesh-node not found ($AGENTMESH_NODE)"
     if [ ! -s "$BOOTSTRAP_TOKEN_PATH" ]; then
         fail "no bootstrap token at $BOOTSTRAP_TOKEN_PATH (set BOOTSTRAP_TOKEN_PATH), and no node already serving $NODE_UDS"
     fi
@@ -119,13 +119,13 @@ if [ -S "${NODE_UDS}" ]; then
     echo "Using the node already serving ${NODE_UDS}"
 else
     mkdir -p "${NODE_DIR}"
-    "${SAM_NODE}" run \
+    "${AGENTMESH_NODE}" run \
         --data-dir "${NODE_DIR}" \
         --control-plane "$CONTROL_PLANE" \
         --bootstrap-token-path "${BOOTSTRAP_TOKEN_PATH}" \
         --bind-addr "" \
         --socket-path "${NODE_UDS}" \
-        > "${LOG_DIR}/sam-node.log" 2>&1 &
+        > "${LOG_DIR}/agentmesh-node.log" 2>&1 &
 
     # The boundaries are useless before the node answers, and starting a
     # thousand of them against a socket that does not exist yet produces a
@@ -136,7 +136,7 @@ else
     done
     [ -S "${NODE_UDS}" ] || {
         echo "node never bound ${NODE_UDS}" >&2
-        tail -20 "${LOG_DIR}/sam-node.log" >&2
+        tail -20 "${LOG_DIR}/agentmesh-node.log" >&2
         exit 1
     }
 
@@ -153,7 +153,7 @@ else
     done
     [ "${enrolled}" -eq 1 ] || {
         echo "node bound its socket but never enrolled; is the bootstrap token valid?" >&2
-        tail -20 "${LOG_DIR}/sam-node.log" >&2
+        tail -20 "${LOG_DIR}/agentmesh-node.log" >&2
         exit 1
     }
     echo "Node ready at ${NODE_UDS}"
@@ -177,10 +177,10 @@ for i in $(seq 1 "$COUNT"); do
     # Firecracker's vsock multiplexes guest connections onto
     # "<uds_path>_<port>", so the boundary must listen on that exact name for
     # the guest's connections to CID 2 port 1080 to arrive.
-    VSOCK_UDS="${RUN_DIR}/sam-$VM_ID.vsock"
+    VSOCK_UDS="${RUN_DIR}/agentmesh-$VM_ID.vsock"
     BOUNDARY_UDS="${VSOCK_UDS}_1080"
     API_SOCKET="/tmp/firecracker-$VM_ID.socket"
-    BUNDLE="${RUN_DIR}/sam-$VM_ID.bundle.yaml"
+    BUNDLE="${RUN_DIR}/agentmesh-$VM_ID.bundle.yaml"
 
     rm -f "$VSOCK_UDS" "$BOUNDARY_UDS" "$API_SOCKET"
 
@@ -202,12 +202,12 @@ EOF
 
     # There is no credential issuer in this harness, and the flag says so
     # rather than a default quietly meaning it.
-    "${SAM_BOX}" run \
+    "${AGENTMESH_BOX}" run \
         --socket "$BOUNDARY_UDS" \
         --sidecar-socket "${NODE_UDS}" \
         --bundle "$BUNDLE" \
         --insecure-unverified-bundle \
-        > "${LOG_DIR}/sam-box-$VM_ID.log" 2>&1 &
+        > "${LOG_DIR}/agentmesh-box-$VM_ID.log" 2>&1 &
 
     firecracker --api-sock "$API_SOCKET" > "${LOG_DIR}/fc-$VM_ID.log" 2>&1 &
 
@@ -256,4 +256,4 @@ done
 
 echo "=== $COUNT sandboxes running against one node ==="
 echo "How many agents the node thinks it is serving:"
-echo "  grep sam_node_agents_seen <(curl -s --unix-socket $NODE_UDS http://localhost/metrics)"
+echo "  grep agentmesh_node_agents_seen <(curl -s --unix-socket $NODE_UDS http://localhost/metrics)"

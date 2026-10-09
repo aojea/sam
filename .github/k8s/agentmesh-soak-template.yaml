@@ -1,0 +1,108 @@
+# A resident fleet: members that join the mesh and stay, publishing nothing
+# and calling nothing. The other canaries are two pods each and restart when
+# their own service misbehaves, so between rollouts nobody watches what a
+# plain member experiences over days: a router rollout under it, the daily
+# key rotation, its credential refresh. These do. Readiness is the node's
+# /readyz, which is 200 only while it holds an authenticated router
+# connection, so a member that lost the mesh is a pod that is not ready and
+# the canary alerts see it. There is deliberately no liveness probe: a
+# restart would hide exactly the reconnection this fleet exists to observe.
+#
+# Every pod carries agentmesh-canary=true, so the canary PodMonitoring scrapes
+# agentmesh_node_mesh_connected from each; agentmesh-monitoring-template.yaml alerts on
+# a member that reads 0 for five minutes.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentmesh-soak-config-${ENV_NAME}
+  namespace: agentmesh-canary-${ENV_NAME}
+data:
+  agentmesh-node.yaml: |
+    version: "v1alpha1"
+    attenuation:
+      policies: []
+      checks: []
+      rules: []
+    services: []
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentmesh-soak-${ENV_NAME}
+  namespace: agentmesh-canary-${ENV_NAME}
+spec:
+  replicas: 20
+  # A rollout of this fleet is itself a burst of joiners; let it be one
+  # rather than a trickle.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 100%
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: agentmesh-soak-${ENV_NAME}
+  template:
+    metadata:
+      labels:
+        app: agentmesh-soak-${ENV_NAME}
+        agentmesh-canary: "true"
+    spec:
+      # Bound to the agentmesh-canary role by deploy.yaml's policy seed.
+      serviceAccountName: agentmesh-node-sa
+      terminationGracePeriodSeconds: 10
+      containers:
+      - name: agentmesh-node
+        image: ghcr.io/google/agentmesh-node:${IMAGE_TAG}
+        args:
+          - "run"
+          - "--config=/etc/agentmesh/agentmesh-node.yaml"
+          - "--control-plane=http://agentmesh-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
+          - "--insecure-control-plane"
+          - "--jwt-path=/var/run/secrets/tokens/agentmesh-token"
+          - "--data-dir=/var/run/agentmesh/data"
+          # Socket only: no TCP listener, so no API token to hand out.
+          - "--bind-addr="
+          - "--socket-path=/var/run/agentmesh/node.sock"
+          - "--metrics-addr=0.0.0.0:9090"
+        ports:
+        - containerPort: 9090
+          name: metrics
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: metrics
+          periodSeconds: 10
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests:
+            cpu: 20m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/agentmesh
+        - name: agentmesh-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+        - name: agentmesh-uds
+          mountPath: /var/run/agentmesh
+      volumes:
+      - name: config-volume
+        configMap:
+          name: agentmesh-soak-config-${ENV_NAME}
+      - name: agentmesh-uds
+        emptyDir: {}
+      - name: agentmesh-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: agentmesh-token
+              expirationSeconds: 3600
+              audience: "agentmesh-control-plane-audience"

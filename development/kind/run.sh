@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Kind dev mesh: control plane, router, console and Dex, with live per-pod logs in named tmux
-# panes. No sam-nodes are deployed — put services on the mesh with charts/sam-node (see the
+# panes. No agentmesh-nodes are deployed — put services on the mesh with charts/agentmesh-node (see the
 # epilogue below) or enroll a local node. Gateway addresses come from cloud-provider-kind.
 set -euo pipefail
 
-CLUSTER="sam-kind"
-NAMESPACE="sam-kind"
-SESSION="sam-kind"
+CLUSTER="agentmesh-kind"
+NAMESPACE="agentmesh-kind"
+SESSION="agentmesh-kind"
 KCTX="kind-${CLUSTER}"
 IMAGE_TAG="local"
-CONTROL_PLANE_URL="http://sam-mesh-control-plane:8080"
+CONTROL_PLANE_URL="http://agentmesh-control-plane:8080"
 HELM="helm"
 # Serves the gateway LoadBalancer IPs. It installs the Gateway API CRDs and the
 # cloud-provider-kind GatewayClass itself, so the cluster needs no CRD step.
@@ -97,7 +97,7 @@ gateway_ip() {
 # nodes host whatever example service is being tested, so grant them everything
 # explicitly here rather than weakening the chart default.
 deploy_chart() {
-  "${HELM}" --kube-context "${KCTX}" upgrade --install sam-mesh "${PROJECT_ROOT}/charts/sam-mesh" --timeout 10m \
+  "${HELM}" --kube-context "${KCTX}" upgrade --install agentmesh "${PROJECT_ROOT}/charts/agentmesh" --timeout 10m \
     --namespace "${NAMESPACE}" \
     --set global.imageTag="${IMAGE_TAG}" \
     --set controlPlane.oidcIssuer="${CONTROL_PLANE_ISSUERS//,/\\,}" \
@@ -110,7 +110,7 @@ deploy_chart() {
     --set gateway.className=cloud-provider-kind \
     --set gateway.adminRoute=true \
     --set router.hostPort=4501 \
-    --set router.nodeSelector.sam-role=control-plane \
+    --set router.nodeSelector.agentmesh-role=control-plane \
     --set router.useOidcToken=true \
     "$@"
 }
@@ -135,11 +135,11 @@ show_cluster_logs() {
   # Looked up here, not inherited, so `-l` gets the header too; one direct query rather
   # than gateway_ip's polling, so the logs still open when a gateway has no address.
   local main_ip dex_ip
-  main_ip="$(kubectl --context "${KCTX}" -n "${NAMESPACE}" get gateway sam-mesh-gateway -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || true)"
-  dex_ip="$(kubectl --context "${KCTX}" -n "${NAMESPACE}" get gateway sam-mesh-dex-gateway -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || true)"
+  main_ip="$(kubectl --context "${KCTX}" -n "${NAMESPACE}" get gateway agentmesh-gateway -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || true)"
+  dex_ip="$(kubectl --context "${KCTX}" -n "${NAMESPACE}" get gateway agentmesh-dex-gateway -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || true)"
 
-  tmuxs new-session -d -s "${SESSION}" -n mesh "$(logs control-plane 'deploy/sam-mesh-control-plane')" \; set -t "${SESSION}" destroy-unattached off
-  tmuxs split-window -t "${SESSION}:0" "$(logs router 'statefulset/sam-mesh-router')"
+  tmuxs new-session -d -s "${SESSION}" -n mesh "$(logs control-plane 'deploy/agentmesh-control-plane')" \; set -t "${SESSION}" destroy-unattached off
+  tmuxs split-window -t "${SESSION}:0" "$(logs router 'statefulset/agentmesh-router')"
   tmuxs set-option -t "${SESSION}" -g pane-border-status top
   tmuxs set-option -t "${SESSION}" -g pane-border-format ' #{pane_title} '
   tmuxs set-option -t "${SESSION}" status-position top
@@ -186,10 +186,10 @@ kind create cluster --name "${CLUSTER}" --config "${SCRIPT_DIR}/kind-config.yaml
 echo "== Starting cloud-provider-kind =="
 start_cloud_provider_kind
 
-echo "== Building sam images =="
-make docker-build-control-plane docker-build-router docker-build-node docker-build-sam-console
-echo "== Loading sam images into kind =="
-kind load docker-image --name "${CLUSTER}" "sam-control-plane:${IMAGE_TAG}" "sam-router:${IMAGE_TAG}" "sam-node:${IMAGE_TAG}" "sam-console:${IMAGE_TAG}"
+echo "== Building agentmesh images =="
+make docker-build-control-plane docker-build-router docker-build-node docker-build-agentmesh-console
+echo "== Loading agentmesh images into kind =="
+kind load docker-image --name "${CLUSTER}" "agentmesh-control-plane:${IMAGE_TAG}" "agentmesh-router:${IMAGE_TAG}" "agentmesh-node:${IMAGE_TAG}" "agentmesh-console:${IMAGE_TAG}"
 
 # Apply the control plane and router, and wait until they accept connections
 ISSUER="$(kubectl --context "${KCTX}" get --raw /.well-known/openid-configuration | jq -r .issuer)"
@@ -201,7 +201,7 @@ CONTROL_PLANE_ISSUERS="${ISSUER}"
 
 # The first audience is what the control plane reports as the OIDC client id, so it has to
 # match Dex's static client.
-ALLOWED_AUDIENCES="sam-console,agentmesh-audience,sam-control-plane-audience"
+ALLOWED_AUDIENCES="agentmesh-console,agentmesh-audience,agentmesh-control-plane-audience"
 
 # 00-namespace-rbac.yaml's envsubst reads this from the environment.
 export NAMESPACE
@@ -209,19 +209,19 @@ export NAMESPACE
 echo "== Applying namespace and RBAC cluster rules =="
 envsubst '${NAMESPACE}' < "${SCRIPT_DIR}/00-namespace-rbac.yaml" | kubectl --context "${KCTX}" apply -f -
 
-echo "== Deploying SAM Mesh via Helm =="
+echo "== Deploying Agent Mesh via Helm =="
 deploy_chart
 
 # The real URLs aren't known until Dex's gateway exists, so deploy it with placeholders
 # first and rewire it below.
 echo "== Deploying Dex =="
-apply_dex "http://sam-mesh-dex:5556/dex" "http://127.0.0.1${CONSOLE_BASE_PATH}/auth/callback"
+apply_dex "http://agentmesh-dex:5556/dex" "http://127.0.0.1${CONSOLE_BASE_PATH}/auth/callback"
 
 # The OIDC URLs are the gateway addresses, which only exist once the gateways do — so
 # resolve them, then redeploy with the URLs everything must agree on.
 echo "== Waiting for gateway LoadBalancer addresses =="
-MAIN_IP="$(gateway_ip sam-mesh-gateway)"
-DEX_IP="$(gateway_ip sam-mesh-dex-gateway)"
+MAIN_IP="$(gateway_ip agentmesh-gateway)"
+DEX_IP="$(gateway_ip agentmesh-dex-gateway)"
 CONSOLE_URL="http://${MAIN_IP}${CONSOLE_BASE_PATH}/"
 echo "control plane: http://${MAIN_IP}  console: ${CONSOLE_URL}  dex: http://${DEX_IP}"
 
@@ -230,8 +230,8 @@ OIDC_ISSUER="http://${DEX_IP}/dex"
 echo "== Wiring the OIDC URLs into Dex =="
 apply_dex "${OIDC_ISSUER}" "http://${MAIN_IP}${CONSOLE_BASE_PATH}/auth/callback"
 # A config-only change doesn't roll the pods, and Dex reads its config at startup.
-kubectl --context "${KCTX}" -n "${NAMESPACE}" rollout restart deployment/sam-mesh-dex
-kubectl --context "${KCTX}" -n "${NAMESPACE}" rollout status deployment/sam-mesh-dex --timeout=180s
+kubectl --context "${KCTX}" -n "${NAMESPACE}" rollout restart deployment/agentmesh-dex
+kubectl --context "${KCTX}" -n "${NAMESPACE}" rollout status deployment/agentmesh-dex --timeout=180s
 
 # The control plane discovers the issuer at startup and refuses to start if it can't, so
 # prove a pod can reach the gateway address before pinning the mesh to it.
@@ -252,24 +252,24 @@ CONTROL_PLANE_ISSUERS="${OIDC_ISSUER},${ISSUER}"
 deploy_chart
 
 echo "== Waiting for database to be ready =="
-kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=sam-mesh-db
+kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=agentmesh-db
 echo "== Waiting for control plane to be ready =="
 # rollout status, not wait --for=available: every pod must serve the Dex issuer before
 # the console reads it below.
-kubectl --context "${KCTX}" -n "${NAMESPACE}" rollout status deployment/sam-mesh-control-plane --timeout=180s
+kubectl --context "${KCTX}" -n "${NAMESPACE}" rollout status deployment/agentmesh-control-plane --timeout=180s
 
 # Policy seeding is handled automatically by the Helm chart bootstrap job, we just wait for it to complete.
 echo "== Waiting for bootstrap job to complete =="
-kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=complete --timeout=120s job/sam-mesh-bootstrap
+kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=complete --timeout=120s job/agentmesh-bootstrap
 
 echo "== Waiting for router to be ready =="
-kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=sam-mesh-router
+kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=agentmesh-router
 
 # The console discovers the issuer from the control plane's /info once, at startup, so
 # restart it now that the control plane serves the Dex issuer.
 echo "== Restarting the console with the final issuer =="
-kubectl --context "${KCTX}" -n "${NAMESPACE}" rollout restart deployment/sam-mesh-console
-kubectl --context "${KCTX}" -n "${NAMESPACE}" rollout status deployment/sam-mesh-console --timeout=180s
+kubectl --context "${KCTX}" -n "${NAMESPACE}" rollout restart deployment/agentmesh-console
+kubectl --context "${KCTX}" -n "${NAMESPACE}" rollout status deployment/agentmesh-console --timeout=180s
 
 echo
 echo "Mesh up."
@@ -277,7 +277,7 @@ echo "  console:       ${CONSOLE_URL}"
 echo "  control plane: http://${MAIN_IP}"
 echo "  dex:           ${OIDC_ISSUER}"
 echo
-echo "To put a service on the mesh, deploy an example with charts/sam-node:"
+echo "To put a service on the mesh, deploy an example with charts/agentmesh-node:"
 echo "  ./development/deploy-kind-service.sh development/examples/calc-mcp"
 echo "(it prints the docker build / kind load / helm install commands as it runs them)"
 echo

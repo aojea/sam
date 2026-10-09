@@ -23,7 +23,7 @@ load "lib/container_mesh.bash"
 # which in this cluster is the namespace helm installed into.
 export ENV_NAME="e2e"
 export NAMESPACE="default"
-export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
+export CANARY_NAMESPACE="agentmesh-canary-${ENV_NAME}"
 
 setup_file() {
   if ! command -v kind >/dev/null 2>&1 || ! command -v kubectl >/dev/null 2>&1; then
@@ -38,15 +38,15 @@ setup_file() {
 # asynchronous, and a second test that recreates it races the first one's
 # termination.
 teardown_file() {
-  local kubectl="kubectl --context=${KUBECONTEXT:-kind-${KUBERNETES_CLUSTER_NAME:-sam-wi-test}}"
+  local kubectl="kubectl --context=${KUBECONTEXT:-kind-${KUBERNETES_CLUSTER_NAME:-agentmesh-wi-test}}"
   ${kubectl} delete namespace "${CANARY_NAMESPACE}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  ${kubectl} -n "${NAMESPACE}" delete service "sam-control-plane-${ENV_NAME}" \
+  ${kubectl} -n "${NAMESPACE}" delete service "agentmesh-control-plane-${ENV_NAME}" \
     --ignore-not-found --wait=false >/dev/null 2>&1 || true
 }
 
 setup() {
   mesh_setup_env
-  export KUBECTL="kubectl --context=${KUBECONTEXT:-kind-${KUBERNETES_CLUSTER_NAME:-sam-wi-test}}"
+  export KUBECTL="kubectl --context=${KUBECONTEXT:-kind-${KUBERNETES_CLUSTER_NAME:-agentmesh-wi-test}}"
   ${KUBECTL} create namespace "${CANARY_NAMESPACE}" --dry-run=client -o yaml | ${KUBECTL} apply -f - >/dev/null
 }
 

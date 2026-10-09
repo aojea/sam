@@ -1,0 +1,15 @@
+# Kind-mesh wiring shared by every agentmesh-node release; stack an example's
+# values on top: helm install <name> charts/agentmesh-node -f this-file -f <example>/values.yaml
+controlPlaneUrl: http://agentmesh-control-plane:8080
+extraArgs: ["--discovery-interval=200ms"]
+
+# Keep nodes off the router's worker: a pod dialing its own node's
+# hostPort 4501 trips kind's portmap hairpin hole and enrollment fails.
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: agentmesh-role
+              operator: NotIn
+              values: ["control-plane"]

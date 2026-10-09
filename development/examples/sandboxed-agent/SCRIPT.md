@@ -12,14 +12,14 @@ what it says.
 On the workstation:
 
 ```bash
-make build                                   # ./bin/sam-one and ./bin/sam-node
+make build                                   # ./bin/agentmesh-one and ./bin/agentmesh-node
 cd development/examples/sandboxed-agent
 make ollama                                  # the office model, in Docker
 make mcp &                                   # the MCP reference server on :3001
-export GITHUB_TOKEN_FILE=~/.config/sam-demo/github-ro   # read-only, google/sam pull requests
+export GITHUB_TOKEN_FILE=~/.config/agentmesh-demo/github-ro   # read-only, google/agentmesh pull requests
 ```
 
-The sandbox: a codespace on `google/sam` (any configuration with Python),
+The sandbox: a codespace on `google/agentmesh` (any configuration with Python),
 with the SDK installed and `agent.py` in `~/sandbox`:
 
 ```bash
@@ -76,7 +76,7 @@ make pep URL=$URL 2>&1 | python3 audit.py
 > on loopback, and `api.github.com` with a read-only token in a file on
 > this machine. The policy assigns the destination to the node by its
 > label, `site=office`. The role `agent` may call the three by name, and
-> `api.github.com` only with `GET` under `/repos/google/sam/`.
+> `api.github.com` only with `GET` under `/repos/google/agentmesh/`.
 
 `policy.json` is on screen here, shortened to the `agent` role and the
 `egress` entry.
@@ -85,7 +85,7 @@ make pep URL=$URL 2>&1 | python3 audit.py
 
 ```bash
 # sandbox
-export SAM_CONTROL_PLANE_URL=$URL SAM_BOOTSTRAP_TOKEN_PATH=~/sandbox/agent-token
+export AGENTMESH_CONTROL_PLANE_URL=$URL AGENTMESH_BOOTSTRAP_TOKEN_PATH=~/sandbox/agent-token
 python agent.py models
 ```
 
@@ -109,7 +109,7 @@ python agent.py tool
 
 ```bash
 # sandbox
-python agent.py github GET '/repos/google/sam/pulls?state=open&per_page=1'
+python agent.py github GET '/repos/google/agentmesh/pulls?state=open&per_page=1'
 ```
 
 > GitHub answers 200. The node presented the office's token; the request
@@ -117,7 +117,7 @@ python agent.py github GET '/repos/google/sam/pulls?state=open&per_page=1'
 
 ```bash
 # sandbox
-python agent.py github POST /repos/google/sam/pulls
+python agent.py github POST /repos/google/agentmesh/pulls
 python agent.py github GET /user
 ```
 
@@ -130,7 +130,7 @@ python agent.py github GET /user
 # office
 make revoke URL=$URL
 # sandbox
-python agent.py github GET '/repos/google/sam/pulls?state=open&per_page=1'
+python agent.py github GET '/repos/google/agentmesh/pulls?state=open&per_page=1'
 ```
 
 > One policy change. The node withdraws `api.github.com` within seconds,

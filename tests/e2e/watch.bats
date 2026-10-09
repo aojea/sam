@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 setup() {
-  export SAM_NODE_BINARY="${SAM_NODE_BINARY:-./bin/sam-node}"
+  export AGENTMESH_NODE_BINARY="${AGENTMESH_NODE_BINARY:-./bin/agentmesh-node}"
 
 
   export TEST_TMPDIR
@@ -11,7 +11,7 @@ setup() {
   mkdir -p "$XDG_CONFIG_HOME"
 
   # Generate mock DB
-  go run tests/e2e/gen_db.go "$XDG_CONFIG_HOME/sam-mesh/agent.db"
+  go run tests/e2e/gen_db.go "$XDG_CONFIG_HOME/agentmesh/agent.db"
 }
 
 teardown() {
@@ -19,8 +19,8 @@ teardown() {
   rm -rf "$TEST_TMPDIR"
 }
 
-@test "sam-node run with stored identity fails if the control plane is unreachable" {
-  run "$SAM_NODE_BINARY" run --listen /ip4/127.0.0.1/udp/0/quic-v1 --listen /ip4/127.0.0.1/tcp/0
+@test "agentmesh-node run with stored identity fails if the control plane is unreachable" {
+  run "$AGENTMESH_NODE_BINARY" run --listen /ip4/127.0.0.1/udp/0/quic-v1 --listen /ip4/127.0.0.1/tcp/0
   
   if [[ "$status" -eq 0 ]]; then
     echo "Test failed: Node was expected to exit with non-zero status"

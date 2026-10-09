@@ -13,12 +13,12 @@ Edit `Dockerfile` and replace `<API_KEY>` in `ENV GEMINI_API_KEY=<API_KEY>`
 ## 2. Bring the mesh up and deploy the agent
 
 ```sh
-make build            # builds ./bin/sam-node (once)
-make kind-up          # control plane + router (no sam-nodes yet)
+make build            # builds ./bin/agentmesh-node (once)
+make kind-up          # control plane + router (no agentmesh-nodes yet)
 docker build -t chat-a2a:local development/examples/chat-a2a
-kind load docker-image --name sam-kind chat-a2a:local
-helm --kube-context kind-sam-kind -n sam-kind install chat-a2a charts/sam-node \
-  -f development/kind/sam-node.values.yaml \
+kind load docker-image --name agentmesh-kind chat-a2a:local
+helm --kube-context kind-agentmesh-kind -n agentmesh-kind install chat-a2a charts/agentmesh-node \
+  -f development/kind/agentmesh-node.values.yaml \
   -f development/examples/chat-a2a/values.yaml
 ```
 
