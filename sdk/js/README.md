@@ -1,6 +1,6 @@
 # @sam-mesh/sdk
 
-Native JavaScript SDK for joining a SAM agent mesh from inside the agent
+Native JavaScript SDK for joining an Agent Mesh (SAM) from inside the agent
 process. It replaces the `sam-node` sidecar for agents written for Node.js
 or running in a browser page:
 the agent enrolls with the control plane, joins the mesh through a router,

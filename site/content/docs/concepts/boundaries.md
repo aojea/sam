@@ -2,8 +2,6 @@
 title: "Control and data boundaries"
 linkTitle: "Boundaries"
 weight: 5
-aliases:
-  - /docs/sovereignty/
 ---
 
 When you run your own control plane, you decide everything about the mesh.

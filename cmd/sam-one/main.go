@@ -71,7 +71,7 @@ func main() {
 
 	rootCmd := &cobra.Command{
 		Use:     "sam-one",
-		Short:   "Sovereign Agent Mesh - all-in-one standalone server",
+		Short:   "Agent Mesh - all-in-one standalone server",
 		Version: version.String(),
 		Run: func(cmd *cobra.Command, args []string) {
 			if os.Getenv("LOG_FORMAT") == "json" {

@@ -1,14 +1,17 @@
 ---
-title: "SAM Documentation"
+title: "Agent Mesh (SAM) Documentation"
 linkTitle: "Documentation"
 ---
 
-SAM is a private network for AI agents. A node runs
-next to an agent and gives it three things: a way to publish tools and
+**Agent Mesh** (`SAM` — OSS Agent Mesh) is a private network for AI agents. A
+node runs next to an agent and gives it three things: a way to publish tools and
 models to the network, a way to find and call what other nodes publish, and
 an identity that every other node can verify. Nodes reach each other
 directly when they can and through relays when they cannot, so the network
 works across laptops, containers, clusters and phones behind NAT.
+
+> We have updated the name to Agent Mesh to better align with the goals of the
+> project in the ecosystem.
 
 Three programs make up a mesh:
 

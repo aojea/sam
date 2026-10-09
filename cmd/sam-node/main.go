@@ -283,7 +283,7 @@ func interactiveJoin(ctx context.Context, store *node.Store, targetControlPlane 
 func main() {
 	rootCmd := &cobra.Command{
 		Use:     "sam-node",
-		Short:   "Sovereign Agent Mesh Node",
+		Short:   "Agent Mesh Node",
 		Version: version.String(),
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			node.SetAllowInsecureControlPlane(insecureControlPlaneFlag)
@@ -299,7 +299,7 @@ func main() {
 	// RUN COMMAND: Start the Mesh
 	runCmd := &cobra.Command{
 		Use:   "run",
-		Short: "Start the sovereign mesh node",
+		Short: "Start the mesh node",
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := cmd.Context()
 			if daemonizeFlag {
@@ -661,7 +661,7 @@ func main() {
 
 	joinCmd := &cobra.Command{
 		Use:   "join [control_plane_url]",
-		Short: "Join the Sovereign Agent Mesh",
+		Short: "Join the Agent Mesh",
 		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := cmd.Context()
@@ -783,7 +783,7 @@ func main() {
 				}
 			}
 
-			fmt.Println("Successfully joined the Sovereign Agent Mesh!")
+			fmt.Println("Successfully joined the Agent Mesh!")
 		},
 	}
 

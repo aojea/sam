@@ -58,7 +58,7 @@ wait_for_socket() {
 @test "sam-node --help returns success" {
   run "$SAM_NODE_BINARY" --help
   [[ "$status" -eq 0 ]]
-  [[ "$output" == *"Sovereign Agent Mesh Node"* ]]
+  [[ "$output" == *"Agent Mesh Node"* ]]
 }
 
 
@@ -226,11 +226,11 @@ wait_for_socket() {
 @test "sam-control-plane --help returns success" {
   run "$SAM_CONTROL_PLANE_BINARY" --help
   [[ "$status" -eq 0 ]]
-  [[ "$output" == *"Sovereign Agent Mesh - Control Plane"* ]]
+  [[ "$output" == *"Agent Mesh - Control Plane"* ]]
 }
 
 @test "sam-router --help returns success" {
   run "$SAM_ROUTER_BINARY" --help
   [[ "$status" -eq 0 ]]
-  [[ "$output" == *"Sovereign Agent Mesh - libp2p Router Node"* ]]
+  [[ "$output" == *"Agent Mesh - libp2p Router Node"* ]]
 }

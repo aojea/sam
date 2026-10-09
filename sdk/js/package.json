@@ -1,7 +1,7 @@
 {
   "name": "@sam-mesh/sdk",
   "version": "0.1.0",
-  "description": "Native SDK for joining a SAM agent mesh from a Node.js agent process or a browser page",
+  "description": "Native SDK for joining an Agent Mesh (SAM) from a Node.js agent process or a browser page",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

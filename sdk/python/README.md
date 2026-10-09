@@ -1,6 +1,6 @@
 # sam-mesh (Python)
 
-Native Python SDK for joining a SAM agent mesh from inside the agent
+Native Python SDK for joining an Agent Mesh (SAM) from inside the agent
 process. It replaces the `sam-node` sidecar for agents written in Python:
 the agent enrolls with the control plane, joins the mesh through a router,
 finds services and calls them, answers A2A requests for the agent itself,

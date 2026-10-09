@@ -1,12 +1,12 @@
 ---
 name: sam-mesh
-description: "Use when local tools cannot provide a needed capability and a SAM agent mesh can: inspect mesh state, discover reachable services/tools, describe and call namespaced remote MCP tools, reach OpenAI-compatible inference models hosted by mesh peers, and hand work to A2A agents on the mesh through the official a2a CLI. Also use to set up, join, or reconnect a sam-node when its MCP tools are not callable yet."
+description: "Use when local tools cannot provide a needed capability and an Agent Mesh (SAM) network can: inspect mesh state, discover reachable services/tools, describe and call namespaced remote MCP tools, reach OpenAI-compatible inference models hosted by mesh peers, and hand work to A2A agents on the mesh through the official a2a CLI. Also use to set up, join, or reconnect a sam-node when its MCP tools are not callable yet."
 ---
 
-# SAM Agent Skill
+# Agent Mesh (SAM) Skill
 
-Use this skill when local tools cannot satisfy the task and the SAM mesh can.
-Prefer local tools first. Reach into the SAM mesh only for the capability needed
+Use this skill when local tools cannot satisfy the task and the Agent Mesh (SAM)
+can. Prefer local tools first. Reach into the SAM mesh only for the capability needed
 to complete the task.
 
 Pick the path that matches the need:

@@ -27,7 +27,7 @@ func TestSamControlPlaneHelp(t *testing.T) {
 		t.Fatalf("sam-control-plane --help failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 	out := stdout + stderr
-	if !strings.Contains(out, "Sovereign Agent Mesh - Control Plane") {
+	if !strings.Contains(out, "Agent Mesh - Control Plane") {
 		t.Fatalf("unexpected help output:\n%s", out)
 	}
 }
@@ -39,7 +39,7 @@ func TestSamRouterHelp(t *testing.T) {
 		t.Fatalf("sam-router --help failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 	out := stdout + stderr
-	if !strings.Contains(out, "Sovereign Agent Mesh - libp2p Router Node") {
+	if !strings.Contains(out, "Agent Mesh - libp2p Router Node") {
 		t.Fatalf("unexpected help output:\n%s", out)
 	}
 }

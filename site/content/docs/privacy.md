@@ -2,13 +2,13 @@
 title: Privacy Policy
 linkTitle: Privacy
 weight: 900
-description: "Privacy policy and data transparency declaration for SAM Agent Mesh and SAM Connect."
+description: "Privacy policy and data transparency declaration for Agent Mesh (SAM) and SAM Connect."
 ---
 
 **Last Updated:** September 17, 2026
 
 This Privacy Policy explains how SAM Connect ("we", "us", or "our") collects, uses, and protects your information when you use our mobile application.
-SAM Connect is an open-source SAM Agent Mesh network client designed for zero-trust, peer-to-peer connectivity.
+SAM Connect is an open-source Agent Mesh (SAM) network client designed for zero-trust, peer-to-peer connectivity.
 
 ## 1. Information We Collect
 
@@ -29,7 +29,7 @@ Because SAM Connect operates as a continuous mesh network router, it requires **
 
 SAM Connect does **not** sell, rent, or share your personal data with third-party data brokers, analytics companies, or advertising networks. The architecture contains no telemetry, tracking, or proprietary phone-home mechanisms. 
 
-* **Within the Mesh:** Information necessary for routing (which may optionally include location data if configured by the user via MCP) is transmitted strictly to other authorized participants within your specific SAM Mesh network.
+* **Within the Mesh:** Information necessary for routing (which may optionally include location data if configured by the user via MCP) is transmitted strictly to other authorized participants within your specific Agent Mesh network.
 * **Encrypted in Transit:** All data transmitted across the mesh network is secured using end-to-end encryption. The centralized control plane cannot access or decrypt your local node traffic.
 
 ## 4. Data Retention and Deletion

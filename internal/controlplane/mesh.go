@@ -51,7 +51,7 @@ type NodeStatus struct {
 	LastSeen    time.Time
 }
 
-// MeshAdapter defines the generic interface for Control Plane operations interacting with the Sovereign Agent Mesh.
+// MeshAdapter defines the generic interface for Control Plane operations interacting with the Agent Mesh.
 type MeshAdapter interface {
 	// PublishEvent constructs, signs, and broadcasts a Control Plane MeshEvent (POLICY_UPDATE, BANNED, KEY_ROTATION).
 	PublishEvent(ctx context.Context, eventType api.MeshEvent_Type, peerID string, payload []byte) error

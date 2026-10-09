@@ -60,7 +60,7 @@ var logger = golog.Logger("sam-router-cli")
 func main() {
 	rootCmd := &cobra.Command{
 		Use:     "sam-router",
-		Short:   "Sovereign Agent Mesh - libp2p Router Node",
+		Short:   "Agent Mesh - libp2p Router Node",
 		Version: version.String(),
 		Run: func(cmd *cobra.Command, args []string) {
 			// Initialize logging

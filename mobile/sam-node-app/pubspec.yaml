@@ -1,5 +1,5 @@
 name: sam_agent
-description: "SAM Mobile Agent - Secure, decentralized mesh node and MCP tool registry for Android and iOS."
+description: "Agent Mesh (SAM) Mobile Agent - Decentralized mesh node and MCP tool registry for Android and iOS."
 publish_to: 'none'
 
 version: 1.0.0+1

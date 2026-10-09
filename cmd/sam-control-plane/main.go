@@ -62,7 +62,7 @@ var logger = golog.Logger("sam-control-plane-cli")
 func main() {
 	rootCmd := &cobra.Command{
 		Use:     "sam-control-plane",
-		Short:   "Sovereign Agent Mesh - Control Plane",
+		Short:   "Agent Mesh - Control Plane",
 		Version: version.String(),
 		// Resolve the DB DSN (may embed a password) before any subcommand runs.
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
