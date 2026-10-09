@@ -1,0 +1,14 @@
+# Secondary Cloud Run replica (v2-cloudrun) for a2a://support.acme.
+# Enrolled with env=prod and replica=v2-cloudrun so callers can either rely on
+# the input node's env=prod floor or pass X-Sam-Required-Labels: replica=v2-cloudrun
+# to target this specific replica.
+version: "v1alpha1"
+labels:
+  env: prod
+  team: support
+  replica: v2-cloudrun
+services:
+  - type: a2a
+    name: support.acme
+    description: "Acme Customer Support & Refund Triage A2A Agent (v2-cloudrun)"
+    target_url: "http://127.0.0.1:17772"

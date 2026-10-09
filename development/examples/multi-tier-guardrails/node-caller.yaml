@@ -1,0 +1,12 @@
+# Input / Caller Node (node-caller.yaml) managed by Platform / Security Admin.
+#
+# egress.require_labels sets an operator-enforced floor on every outbound mesh
+# request leaving this node: even if the local application sends NO
+# X-Sam-Required-Labels header, this input node verifies that the remote
+# provider's Control-Plane-signed Biscuit attests label("env", "prod").
+version: "v1alpha1"
+labels:
+  team: support
+egress:
+  require_labels:
+    env: prod

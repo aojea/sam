@@ -1,0 +1,4 @@
+# Contractor node carrying label team=contractor.
+version: "v1alpha1"
+labels:
+  team: contractor

@@ -1,0 +1,36 @@
+{
+  "roles": [
+    {
+      "name": "sam:role:node",
+      "allowed_services": [
+        "system://sam.catalog",
+        "a2a://support.acme",
+        "inference://office-llm",
+        "mcp://orders-db",
+        "egress://api.github.com"
+      ],
+      "allowed_targets": ["*"],
+      "allowed_labels": [
+        "env=staging",
+        "team=support",
+        "team=contractor",
+        "site=office",
+        "replica=*"
+      ],
+      "http": [
+        {
+          "service": "egress://api.github.com",
+          "methods": ["GET"],
+          "paths": ["/repos/google/sam/pulls*"]
+        }
+      ]
+    }
+  ],
+  "egress": [
+    {
+      "name": "api.github.com",
+      "credential": "github-ro",
+      "served_by": ["site=office"]
+    }
+  ]
+}

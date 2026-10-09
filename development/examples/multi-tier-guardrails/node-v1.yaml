@@ -1,0 +1,31 @@
+# Primary support Egress / Provider Node (node-v1.yaml).
+#
+# 1. Starts in quarantine (env=staging). If it tries to claim env=prod before
+#    the Control Plane policy grants env=prod, enrollment is rejected.
+# 2. Enforces a POSITIVE inbound label constraint via attenuation.checks:
+#      check if label("team", "support");
+#    Every incoming caller MUST hold a Control-Plane-signed Biscuit attesting
+#    label("team", "support"). Callers with team=contractor or with no labels
+#    at all are rejected locally by this egress node.
+version: "v1alpha1"
+labels:
+  env: staging
+  team: support
+  site: office
+  replica: v1-laptop
+attenuation:
+  checks:
+    - 'check if label("team", "support");'
+services:
+  - type: a2a
+    name: support.acme
+    description: "Acme Customer Support & Refund Triage A2A Agent (gemma3:1b)"
+    target_url: "http://127.0.0.1:17771"
+  - type: inference
+    name: office-llm
+    description: "Ollama gemma3:1b on the support workstation"
+    target_url: "http://127.0.0.1:11434"
+  - type: mcp
+    name: orders-db
+    description: "Orders & Refunds SQLite MCP Server (mcp-sdk)"
+    target_url: "http://127.0.0.1:18888/mcp"
