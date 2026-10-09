@@ -20,6 +20,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -368,5 +369,144 @@ func TestStdioBridge_ServeHTTP_RefusesAfterBackendExit(t *testing.T) {
 	b.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"jsonrpc":"2.0","id":2,"method":"ping"}`)))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("POST after exit: status = %d, want 503", rec.Code)
+	}
+}
+
+// post issues one POST to the bridge from its own goroutine and returns the
+// recorder and a channel closed when ServeHTTP returns.
+func post(b *StdioBridge, body string) (*httptest.ResponseRecorder, chan struct{}) {
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		b.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)))
+		close(done)
+	}()
+	return rec, done
+}
+
+func await(t *testing.T, done chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ServeHTTP did not return")
+	}
+}
+
+func replyOf(t *testing.T, rec *httptest.ResponseRecorder) map[string]json.RawMessage {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s, want 200", rec.Code, rec.Body.String())
+	}
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("reply is not JSON: %v", err)
+	}
+	return got
+}
+
+// Stdio MCP is one session per process and a server built with the Go or
+// TypeScript SDK refuses a second initialize on it. Every mesh caller opens
+// its own session against the shared process, so the bridge handshakes once
+// and answers the rest itself, each under its own id; the backend also gets
+// exactly one notifications/initialized.
+func TestStdioBridge_HandshakesOnceForEveryCaller(t *testing.T) {
+	b, stdoutWriter, stdinBuf := newPipeBridge()
+	defer func() { _ = stdoutWriter.Close() }()
+
+	const serverInfo = `{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"strict","version":"1"}}`
+	recA, doneA := post(b, `{"jsonrpc":"2.0","id":"a-1","method":"initialize","params":{}}`)
+	bridgeID := bridgeIDOf(t, stdinBuf, 1)
+	_, _ = stdoutWriter.Write([]byte(`{"jsonrpc":"2.0","id":` + bridgeID + `,"result":` + serverInfo + `}` + "\n"))
+	await(t, doneA)
+	if got := replyOf(t, recA); string(got["id"]) != `"a-1"` || !strings.Contains(string(got["result"]), `"strict"`) {
+		t.Fatalf("first caller got %s", recA.Body.String())
+	}
+
+	recB, doneB := post(b, `{"jsonrpc":"2.0","id":7,"method":"initialize","params":{}}`)
+	await(t, doneB)
+	got := replyOf(t, recB)
+	if string(got["id"]) != `7` {
+		t.Errorf("second caller's reply id = %s, want its own 7", got["id"])
+	}
+	if !strings.Contains(string(got["result"]), `"strict"`) {
+		t.Errorf("second caller's result = %s, want the backend's handshake", got["result"])
+	}
+	if lines := stdinBuf.lines(); len(lines) != 1 {
+		t.Fatalf("backend saw %d lines, want only the first initialize: %q", len(lines), lines)
+	}
+
+	for _, body := range []string{`{"jsonrpc":"2.0","method":"notifications/initialized"}`, `{"jsonrpc":"2.0","method":"notifications/initialized"}`} {
+		rec, done := post(b, body)
+		await(t, done)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("notification status = %d, want 202", rec.Code)
+		}
+	}
+	if lines := stdinBuf.lines(); len(lines) != 2 || !strings.Contains(lines[1], "notifications/initialized") {
+		t.Fatalf("backend saw %q, want one initialize and one initialized", lines)
+	}
+
+	// Everything after the handshake still reaches the backend per call.
+	recC, doneC := post(b, `{"jsonrpc":"2.0","id":"c","method":"tools/list"}`)
+	bridgeID = bridgeIDOf(t, stdinBuf, 3)
+	_, _ = stdoutWriter.Write([]byte(`{"jsonrpc":"2.0","id":` + bridgeID + `,"result":{"tools":[]}}` + "\n"))
+	await(t, doneC)
+	if got := replyOf(t, recC); string(got["id"]) != `"c"` {
+		t.Errorf("tools/list reply id = %s, want \"c\"", got["id"])
+	}
+}
+
+// A burst of joiners initializes at the same instant. Only one handshake may
+// reach the backend; the others wait for its outcome instead of racing it.
+func TestStdioBridge_ConcurrentInitializesWaitForTheFirst(t *testing.T) {
+	b, stdoutWriter, stdinBuf := newPipeBridge()
+	defer func() { _ = stdoutWriter.Close() }()
+
+	const callers = 8
+	recs := make([]*httptest.ResponseRecorder, callers)
+	dones := make([]chan struct{}, callers)
+	for i := range callers {
+		recs[i], dones[i] = post(b, `{"jsonrpc":"2.0","id":`+strconv.Itoa(i)+`,"method":"initialize","params":{}}`)
+	}
+	bridgeID := bridgeIDOf(t, stdinBuf, 1)
+	// Give the stragglers time to have sent their own initialize if they were
+	// going to; the backend must still see exactly one.
+	time.Sleep(50 * time.Millisecond)
+	if lines := stdinBuf.lines(); len(lines) != 1 {
+		t.Fatalf("backend saw %d initializes before answering, want 1", len(lines))
+	}
+	_, _ = stdoutWriter.Write([]byte(`{"jsonrpc":"2.0","id":` + bridgeID + `,"result":{"serverInfo":{"name":"s"}}}` + "\n"))
+	for i := range callers {
+		await(t, dones[i])
+		if got := replyOf(t, recs[i]); string(got["id"]) != strconv.Itoa(i) {
+			t.Errorf("caller %d got id %s", i, got["id"])
+		}
+	}
+	if lines := stdinBuf.lines(); len(lines) != 1 {
+		t.Fatalf("backend saw %d lines, want 1", len(lines))
+	}
+}
+
+// A handshake the backend refuses is nobody's handshake: the caller that
+// carried it gets the error, and the next caller performs its own.
+func TestStdioBridge_FailedHandshakeIsNotCached(t *testing.T) {
+	b, stdoutWriter, stdinBuf := newPipeBridge()
+	defer func() { _ = stdoutWriter.Close() }()
+
+	recA, doneA := post(b, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	bridgeID := bridgeIDOf(t, stdinBuf, 1)
+	_, _ = stdoutWriter.Write([]byte(`{"jsonrpc":"2.0","id":` + bridgeID + `,"error":{"code":-32602,"message":"unsupported protocol version"}}` + "\n"))
+	await(t, doneA)
+	if got := replyOf(t, recA); got["error"] == nil {
+		t.Fatalf("first caller got %s, want the backend's error", recA.Body.String())
+	}
+
+	recB, doneB := post(b, `{"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}`)
+	bridgeID = bridgeIDOf(t, stdinBuf, 2)
+	_, _ = stdoutWriter.Write([]byte(`{"jsonrpc":"2.0","id":` + bridgeID + `,"result":{"serverInfo":{"name":"s"}}}` + "\n"))
+	await(t, doneB)
+	if got := replyOf(t, recB); got["result"] == nil {
+		t.Fatalf("second caller got %s, want its own handshake to succeed", recB.Body.String())
 	}
 }

@@ -79,9 +79,10 @@ func (b *baseService) Info() *api.ServiceInfo { return b.info }
 func (b *baseService) Handler() http.Handler  { return b.handler }
 
 // Init builds the ingress handler for the backend: URL -> reverse-proxy,
-// Command -> StdioBridge (the local SSE/POST HTTP route only - mesh
-// sessions get their own subprocess via MCPService.backendTransport
-// instead of this one). MCPService extends this; it does not replace it.
+// Command -> StdioBridge, one process shared by every caller, with the
+// bridge owning the id space and the MCP handshake. Probes and tool
+// listings get their own subprocess via MCPService.backendTransport.
+// MCPService extends this; it does not replace it.
 func (b *baseService) Init(ctx context.Context) error {
 	switch x := b.backend.(type) {
 	case *api.RegisterServiceRequest_TargetUrl:
