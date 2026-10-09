@@ -495,10 +495,12 @@ func (r *Router) Start() (retErr error) {
 		return err
 	}
 
-	// Setup Relay
+	// Setup Relay. Its counters (reservations, circuits, refusals by
+	// status) go to the default registry the metrics listener serves.
 	_, err = relay.New(hostNode, relay.WithACL(&relayACL{r: r}),
 		relay.WithResources(relayResources(r.config.RelayMaxReservations, r.config.RelayMaxCircuits, r.config.ConnsPerSourceIP)),
-		relay.WithLimit(relayLimit(r.config.RelayLimitDuration, r.config.RelayLimitData)))
+		relay.WithLimit(relayLimit(r.config.RelayLimitDuration, r.config.RelayLimitData)),
+		relay.WithMetricsTracer(relay.NewMetricsTracer()))
 	if err != nil {
 		return err
 	}

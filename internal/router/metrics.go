@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -81,8 +82,12 @@ type routerStateCollector struct {
 
 	infoDesc          *prometheus.Desc
 	readyDesc         *prometheus.Desc
+	drainingDesc      *prometheus.Desc
 	authenticatedDesc *prometheus.Desc
 	connectedDesc     *prometheus.Desc
+	connectionsDesc   *prometheus.Desc
+	watermarkDesc     *prometheus.Desc
+	relayLimitDesc    *prometheus.Desc
 	bannedDesc        *prometheus.Desc
 	dhtDesc           *prometheus.Desc
 	biscuitExpiryDesc *prometheus.Desc
@@ -99,6 +104,10 @@ func newRouterStateCollector(r *Router) *routerStateCollector {
 			"sam_router_ready",
 			"1 once the router is enrolled and its libp2p host is online",
 			nil, nil),
+		drainingDesc: prometheus.NewDesc(
+			"sam_router_draining",
+			"1 once the router has withdrawn its lease and is shutting down",
+			nil, nil),
 		authenticatedDesc: prometheus.NewDesc(
 			"sam_router_authenticated_peers",
 			"Connected peers that have completed the mesh authentication handshake",
@@ -107,6 +116,18 @@ func newRouterStateCollector(r *Router) *routerStateCollector {
 			"sam_router_connected_peers",
 			"Peers with an open libp2p connection, authenticated or not",
 			nil, nil),
+		connectionsDesc: prometheus.NewDesc(
+			"sam_router_connections",
+			"Open libp2p connections by direction; a peer may hold several",
+			[]string{"direction"}, nil),
+		watermarkDesc: prometheus.NewDesc(
+			"sam_router_connection_watermark",
+			"Connection manager limits: above high, connections are trimmed down to low",
+			[]string{"level"}, nil),
+		relayLimitDesc: prometheus.NewDesc(
+			"sam_router_relay_limit",
+			"Relay budgets in force, to read libp2p_relaysvc_* against",
+			[]string{"limit"}, nil),
 		bannedDesc: prometheus.NewDesc(
 			"sam_router_banned_peers",
 			"Peers on the ban list synced from the control plane",
@@ -124,7 +145,8 @@ func newRouterStateCollector(r *Router) *routerStateCollector {
 
 func (c *routerStateCollector) Describe(ch chan<- *prometheus.Desc) {
 	for _, d := range []*prometheus.Desc{
-		c.infoDesc, c.readyDesc, c.authenticatedDesc, c.connectedDesc, c.bannedDesc, c.dhtDesc, c.biscuitExpiryDesc, connsPerSourceIPDesc,
+		c.infoDesc, c.readyDesc, c.drainingDesc, c.authenticatedDesc, c.connectedDesc, c.connectionsDesc, c.watermarkDesc, c.relayLimitDesc,
+		c.bannedDesc, c.dhtDesc, c.biscuitExpiryDesc, connsPerSourceIPDesc,
 	} {
 		ch <- d
 	}
@@ -133,6 +155,16 @@ func (c *routerStateCollector) Describe(ch chan<- *prometheus.Desc) {
 func (c *routerStateCollector) Collect(ch chan<- prometheus.Metric) {
 	r := c.r
 	ch <- prometheus.MustNewConstMetric(connsPerSourceIPDesc, prometheus.GaugeValue, float64(effectiveConnsPerSourceIP(r.config.ConnsPerSourceIP)))
+	ch <- prometheus.MustNewConstMetric(c.watermarkDesc, prometheus.GaugeValue, float64(r.config.LowWaterMark), "low")
+	ch <- prometheus.MustNewConstMetric(c.watermarkDesc, prometheus.GaugeValue, float64(r.config.HighWaterMark), "high")
+	ch <- prometheus.MustNewConstMetric(c.relayLimitDesc, prometheus.GaugeValue, float64(r.config.RelayMaxReservations), "reservations")
+	ch <- prometheus.MustNewConstMetric(c.relayLimitDesc, prometheus.GaugeValue, float64(r.config.ConnsPerSourceIP), "reservations_per_ip")
+	ch <- prometheus.MustNewConstMetric(c.relayLimitDesc, prometheus.GaugeValue, float64(r.config.RelayMaxCircuits), "circuits_per_peer")
+	draining := 0.0
+	if r.shutdown.Load() {
+		draining = 1
+	}
+	ch <- prometheus.MustNewConstMetric(c.drainingDesc, prometheus.GaugeValue, draining)
 	// isReady is stored after Host and DHT are assigned, so observing it
 	// true is what makes reading them from this goroutine safe.
 	if !r.isReady.Load() {
@@ -143,6 +175,16 @@ func (c *routerStateCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.infoDesc, prometheus.GaugeValue, 1, r.Host.ID().String())
 	ch <- prometheus.MustNewConstMetric(c.authenticatedDesc, prometheus.GaugeValue, float64(syncMapLen(&r.authenticatedPeers)))
 	ch <- prometheus.MustNewConstMetric(c.connectedDesc, prometheus.GaugeValue, float64(len(r.Host.Network().Peers())))
+	var inbound, outbound int
+	for _, conn := range r.Host.Network().Conns() {
+		if conn.Stat().Direction == network.DirInbound {
+			inbound++
+		} else {
+			outbound++
+		}
+	}
+	ch <- prometheus.MustNewConstMetric(c.connectionsDesc, prometheus.GaugeValue, float64(inbound), "inbound")
+	ch <- prometheus.MustNewConstMetric(c.connectionsDesc, prometheus.GaugeValue, float64(outbound), "outbound")
 	ch <- prometheus.MustNewConstMetric(c.bannedDesc, prometheus.GaugeValue, float64(syncMapLen(&r.bannedPeers)))
 	ch <- prometheus.MustNewConstMetric(c.dhtDesc, prometheus.GaugeValue, float64(r.DHT.RoutingTable().Size()))
 

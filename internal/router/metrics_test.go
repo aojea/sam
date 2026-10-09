@@ -101,6 +101,13 @@ func TestRouterMetricsListener(t *testing.T) {
 		`sam_router_info{peer_id="` + host.ID().String() + `"} 1`,
 		// The derived cap: a quarter of the default high watermark.
 		"sam_router_conns_per_source_ip_limit 1000",
+		"sam_router_draining 0",
+		`sam_router_connections{direction="inbound"} 0`,
+		`sam_router_connections{direction="outbound"} 0`,
+		`sam_router_connection_watermark{level="high"} 4000`,
+		`sam_router_relay_limit{limit="reservations"} 4000`,
+		`sam_router_relay_limit{limit="reservations_per_ip"} 1000`,
+		`sam_router_relay_limit{limit="circuits_per_peer"} 1024`,
 		"sam_router_inbound_connections_refused_total",
 		"sam_router_authenticated_peers 2",
 		"sam_router_banned_peers 1",

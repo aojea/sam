@@ -76,8 +76,24 @@ important state. Nodes reconnect and publish their services again.
 
 ## Metrics
 
-The metrics address exposes `sam_router_connected_peers`,
-`sam_router_dht_routing_table_size`, `sam_router_auth_handshakes_total` (by
-outcome) and `sam_router_lease_renewals_total` (by outcome), next to the Go
-runtime metrics. `/healthz` and `/readyz` on the same address are the probes
-to use in a pod spec.
+The metrics address exposes, next to the Go runtime metrics:
+
+| Metric | Meaning |
+|---|---|
+| `sam_router_ready` | `1` once the router is enrolled and the host is up. |
+| `sam_router_draining` | `1` from the moment the router starts stopping until the process exits. |
+| `sam_router_connections{direction}` | Open connections, `inbound` and `outbound`. |
+| `sam_router_connection_watermark{level}` | The `low` and `high` watermarks in force. The gap between `inbound` connections and the `high` watermark is the free capacity. |
+| `sam_router_conns_per_source_ip_limit` | The per-address cap in force. |
+| `sam_router_relay_limit{limit}` | The relay budget in force: `reservations`, `reservations_per_ip` and `circuits_per_peer`. |
+| `sam_router_connected_peers`, `sam_router_authenticated_peers`, `sam_router_banned_peers` | Peers in each state. |
+| `sam_router_dht_routing_table_size` | DHT routing table size. |
+| `sam_router_auth_handshakes_total{result}`, `sam_router_lease_renewals_total{result}` | Handshakes and lease renewals by outcome. |
+| `sam_router_inbound_connections_refused_total` | Inbound connections refused by the per-address cap. |
+| `libp2p_relaysvc_*` | The relay service's own counters: `reservations_total{type}` and `connections_total{type}` (`opened`, `closed`, `renewed`), requests by response status, rejections and bytes relayed. The difference between `opened` and `closed` is the number in use; read it against `sam_router_relay_limit` to see how close the relay is to its budget. |
+
+A fleet is at capacity when `sam_router_connections{direction="inbound"}`
+approaches the `high` watermark or open relay reservations approach
+`sam_router_relay_limit{limit="reservations"}` on every router that is not
+draining; both are the inputs for an autoscaler. `/healthz` and `/readyz`
+on the same address are the probes to use in a pod spec.
