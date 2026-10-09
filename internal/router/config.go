@@ -54,6 +54,13 @@ type Options struct {
 	// no limit, so Default() leaves them alone.
 	RelayLimitDuration time.Duration
 	RelayLimitData     int64
+	// RelayMaxReservations is how many members may hold a relay reservation,
+	// which is what makes a member reachable through this router. Zero is
+	// HighWaterMark: every connected member may be reachable.
+	RelayMaxReservations int
+	// RelayMaxCircuits is how many relayed connections one peer may hold at
+	// once through this router. Zero is DefaultRelayMaxCircuits.
+	RelayMaxCircuits int
 	// ShutdownLeaseTTL is the lease the router asks for as it stops: how
 	// long the control plane keeps listing it, which is the time the router
 	// expects to be away. Zero sends no last lease and the entry expires on
@@ -108,6 +115,12 @@ func (o *Options) Default() {
 	}
 	if o.ConnsPerSourceIP <= 0 {
 		o.ConnsPerSourceIP = DefaultConnsPerSourceIP(o.HighWaterMark)
+	}
+	if o.RelayMaxReservations <= 0 {
+		o.RelayMaxReservations = o.HighWaterMark
+	}
+	if o.RelayMaxCircuits <= 0 {
+		o.RelayMaxCircuits = DefaultRelayMaxCircuits
 	}
 	if o.KeysDBPath == "" {
 		o.KeysDBPath = "router.key"

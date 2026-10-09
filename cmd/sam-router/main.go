@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -49,6 +50,8 @@ var (
 	metricsAddr          string
 	relayLimitDuration   time.Duration
 	relayLimitData       router.ByteSize
+	relayMaxReservations int
+	relayMaxCircuits     int
 	shutdownLeaseTTL     time.Duration
 )
 
@@ -93,6 +96,8 @@ func main() {
 				MetricsAddr:               metricsAddr,
 				RelayLimitDuration:        relayLimitDuration,
 				RelayLimitData:            int64(relayLimitData),
+				RelayMaxReservations:      relayMaxReservations,
+				RelayMaxCircuits:          relayMaxCircuits,
 				ShutdownLeaseTTL:          shutdownLeaseTTL,
 			}
 
@@ -136,6 +141,8 @@ func main() {
 	rootCmd.Flags().StringVar(&metricsAddr, "metrics-addr", "", "Serve Prometheus /metrics, /healthz and /readyz on this address (e.g. 0.0.0.0:9090); unauthenticated, off by default")
 	rootCmd.Flags().DurationVar(&relayLimitDuration, "relay-limit-duration", router.DefaultRelayLimitDuration, "Lifetime of each relayed connection (0 = no limit)")
 	rootCmd.Flags().Var(&relayLimitData, "relay-limit-data", "Bytes relayed per direction on each relayed connection, e.g. 512MiB (0 = no limit)")
+	rootCmd.Flags().IntVar(&relayMaxReservations, "relay-max-reservations", 0, "Members that may hold a relay reservation, which is what makes a member reachable through this router; 0 is --high-watermark")
+	rootCmd.Flags().IntVar(&relayMaxCircuits, "relay-max-circuits", 0, fmt.Sprintf("Relayed connections one peer may hold at once through this router, as caller or as destination; 0 is %d", router.DefaultRelayMaxCircuits))
 	rootCmd.Flags().DurationVar(&shutdownLeaseTTL, "shutdown-lease-ttl", router.DefaultShutdownLeaseTTL, "Sent in this router's last lease when it stops: how long it expects to be away, which is how long the control plane keeps listing it. 0 sends nothing and the lease expires on the control plane's schedule")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

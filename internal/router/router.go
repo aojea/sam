@@ -497,6 +497,7 @@ func (r *Router) Start() (retErr error) {
 
 	// Setup Relay
 	_, err = relay.New(hostNode, relay.WithACL(&relayACL{r: r}),
+		relay.WithResources(relayResources(r.config.RelayMaxReservations, r.config.RelayMaxCircuits, r.config.ConnsPerSourceIP)),
 		relay.WithLimit(relayLimit(r.config.RelayLimitDuration, r.config.RelayLimitData)))
 	if err != nil {
 		return err

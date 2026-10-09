@@ -45,6 +45,8 @@ replica count.
 | `--dht-provider-addr-ttl` | `15m` | How long a service announcement lives after a node last made it. Nodes re-announce every 5 minutes, so a node that is gone drops out of discovery within this time. `0` keeps the default. |
 | `--dht-max-record-age` | library default | DHT value record lifetime. |
 | `--relay-limit-duration`, `--relay-limit-data` | `1h`, `0` | Caps on each relayed connection: lifetime, and bytes per direction (`512MiB`, `1GB`). The relay cuts the connection when either is reached. `0` means no limit. |
+| `--relay-max-reservations` | `--high-watermark` (`4000`) | Members that may hold a relay reservation on this router at once, which is how many members it can reach on behalf of callers. Per source address the cap is `--conns-per-source-ip`. |
+| `--relay-max-circuits` | `1024` | Relayed connections one peer may hold at once through this router, as caller or as destination. A service that many members call at once needs this many open circuits. |
 | `--shutdown-lease-ttl` | `30s` | Sent in the router's last lease when it stops: how long it expects to be away, which is how long the control plane keeps listing it. The default covers a pod that restarts in place. A router that is being removed for good can send `1s`. `0` sends nothing and the lease expires on the control plane's schedule. |
 | `--metrics-addr` | off | Serve `/metrics`, `/healthz` and `/readyz` without authentication on this address. `/readyz` returns `200` once the router is enrolled and the libp2p host is up. Keep this address separate from the libp2p ports and inside the cluster. |
 | `--log-level` | `info` | `debug`, `info`, `warn`, `error`. `LOG_FORMAT=json` selects JSON output. |
