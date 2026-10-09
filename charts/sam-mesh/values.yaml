@@ -123,6 +123,11 @@ database:
 router:
   enabled: true
   replicaCount: 1
+  # Seconds a new router must be ready before the rollout moves to the next
+  # one. Members redial a dropped router with a backoff that reaches a
+  # minute; a rollout faster than that takes every router a member has
+  # before any is back.
+  minReadySeconds: 90
   podSecurityContext:
     runAsNonRoot: true
     # Dockerfiles say "USER nonroot" by name; runAsNonRoot needs the numeric uid.

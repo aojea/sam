@@ -31,6 +31,13 @@ metadata:
 spec:
   serviceName: "sam-router-${ENV_NAME}"
   replicas: 3
+  # A router that is ready has not been re-handshaken by anyone yet: members
+  # redial a dropped router with a backoff that reaches a minute, and older
+  # members only on their monitor interval of one minute. A rollout that
+  # takes the next router sooner takes every session a member has before
+  # any is back. The first rollout under the soak fleet did exactly that in
+  # 45 seconds.
+  minReadySeconds: 90
   selector:
     matchLabels:
       app: sam-router-${ENV_NAME}

@@ -15,6 +15,7 @@ metadata:
 spec:
   serviceName: {{ include "sam-mesh.fullname" . }}-router
   replicas: {{ .Values.router.replicaCount }}
+  minReadySeconds: {{ .Values.router.minReadySeconds }}
   selector:
     matchLabels:
       app: {{ include "sam-mesh.fullname" . }}-router
