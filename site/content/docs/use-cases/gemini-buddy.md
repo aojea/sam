@@ -8,7 +8,7 @@ Hold a real multi-turn conversation with a second LLM exposed as an ordinary
 mesh service. Your agent never resends the conversation, because the service
 remembers its own side.
 
-Source: [`development/examples/gemini-buddy-mcp/`](https://github.com/google/sam/tree/main/development/examples/gemini-buddy-mcp).
+Source: [`development/examples/gemini-buddy-mcp/`](https://github.com/google/agentmesh/tree/main/development/examples/gemini-buddy-mcp).
 
 ## The idea
 
@@ -22,9 +22,9 @@ This use case shows that you do not have to. A **buddy** is a plain MCP
 service backed by the Gemini CLI that owns its own conversation. Your agent
 sends one message per turn and gets one reply. The buddy keeps the running
 transcript on the server side, keyed by a `session_id`. It is built from an
-ordinary `sam-node` MCP service, and it is the conversational version of the
+ordinary `agentmesh-node` MCP service, and it is the conversational version of the
 one-shot
-[`code-reviewer`](https://github.com/google/sam/tree/main/development/examples/code-reviewer-pool/reviewer)
+[`code-reviewer`](https://github.com/google/agentmesh/tree/main/development/examples/code-reviewer-pool/reviewer)
 example.
 
 ## Two conversations, two places
@@ -84,19 +84,19 @@ free Google AI Studio key is enough for the demo.
 ### 2. Bring the mesh up and deploy the buddy
 
 ```bash
-make build            # builds ./bin/sam-node (once)
-make kind-up          # control plane + router (no sam-nodes yet)
+make build            # builds ./bin/agentmesh-node (once)
+make kind-up          # control plane + router (no agentmesh-nodes yet)
 docker build -t gemini-buddy-mcp:local development/examples/gemini-buddy-mcp
-kind load docker-image --name sam-kind gemini-buddy-mcp:local
-helm --kube-context kind-sam-kind -n sam-kind install gemini-buddy charts/sam-node \
-  -f development/kind/sam-node.values.yaml \
+kind load docker-image --name agentmesh-kind gemini-buddy-mcp:local
+helm --kube-context kind-agentmesh-kind -n agentmesh-kind install gemini-buddy charts/agentmesh-node \
+  -f development/kind/agentmesh-node.values.yaml \
   -f development/examples/gemini-buddy-mcp/values.yaml
 ```
 
 ### 3. Start a local orchestrator node
 
 ```bash
-make kind-local-node  # a local sam-node enrolled in the mesh; leave it running
+make kind-local-node  # a local agentmesh-node enrolled in the mesh; leave it running
 ```
 
 `kind-local-node` runs in the foreground in its own shell and exposes the
@@ -120,7 +120,7 @@ Code, Cursor, and others) would add:
 ```json
 {
   "mcpServers": {
-    "sam-mesh": {
+    "agentmesh": {
       "type": "http",
       "url": "http://127.0.0.1:9099/mcp",
       "headers": { "X-Mesh-Authentication": "Bearer devtoken" }

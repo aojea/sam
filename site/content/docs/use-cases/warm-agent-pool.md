@@ -12,7 +12,7 @@ no changes to the node.
   <source src="../../../demo-warm-agent-pool.mp4" type="video/mp4">
 </video>
 
-Source: [`development/examples/code-reviewer-pool/`](https://github.com/google/sam/tree/main/development/examples/code-reviewer-pool).
+Source: [`development/examples/code-reviewer-pool/`](https://github.com/google/agentmesh/tree/main/development/examples/code-reviewer-pool).
 
 ## The idea
 
@@ -66,7 +66,7 @@ race and workers come and go:
   it busy), so two concurrent `acquire_worker` calls can never receive the
   same peer.
 - **Grace eviction.** Discovery never drops a leased worker on a transient
-  miss, and it drops a free one only after `SAM_GRACE_MISSES` consecutive
+  miss, and it drops a free one only after `AGENTMESH_GRACE_MISSES` consecutive
   misses. A slow, busy worker is not evicted and handed out again in the
   middle of a review.
 - **Fencing tokens.** `acquire_worker` returns a `lease_id`. `release_worker`
@@ -84,8 +84,8 @@ lease expiry. The orchestrator forwards the token in the `review_code`
 arguments, and the worker verifies it offline (shared secret, no call back to
 the manager). Any `review_code` without a valid, unexpired token gets
 `NO_LEASE`. Both sides default to a hardcoded development secret
-(`sam-dev-pool-secret`), so enforcement works out of the box. Set a matching
-`SAM_POOL_SECRET` on the manager and on every worker to override it.
+(`agentmesh-dev-pool-secret`), so enforcement works out of the box. Set a matching
+`AGENTMESH_POOL_SECRET` on the manager and on every worker to override it.
 Mismatched or one-sided secrets fail closed, and every call returns
 `NO_LEASE`.
 
@@ -100,7 +100,7 @@ Mismatched or one-sided secrets fail closed, and every call returns
   corrupting in-flight leases.
 - **A reusable pattern.** Swap `code-reviewer` for any tool that is expensive
   to warm up (test runner, sandbox, embedder, browser). The manager is
-  generic. It pools whatever `SAM_POOL_SERVICE` names.
+  generic. It pools whatever `AGENTMESH_POOL_SERVICE` names.
 
 ## Try it on kind
 
@@ -116,31 +116,31 @@ building. A free key is enough for the demo.
 ### 2. Bring the mesh up and deploy the pool
 
 ```bash
-make build            # builds ./bin/sam-node (once)
-make kind-up          # control plane + router (no sam-nodes yet)
+make build            # builds ./bin/agentmesh-node (once)
+make kind-up          # control plane + router (no agentmesh-nodes yet)
 ```
 
-Then build the two images and deploy the pool as `charts/sam-node` releases:
+Then build the two images and deploy the pool as `charts/agentmesh-node` releases:
 three reviewer replicas and one manager. Each replica enrolls as its own
 mesh node, so the pool is three `code-reviewer` services with the same name.
 
 ```bash
 docker build -t reviewer:local development/examples/code-reviewer-pool/reviewer
 docker build -t pool-manager:local development/examples/code-reviewer-pool/manager
-kind load docker-image --name sam-kind reviewer:local pool-manager:local
+kind load docker-image --name agentmesh-kind reviewer:local pool-manager:local
 
-helm --kube-context kind-sam-kind -n sam-kind install reviewers charts/sam-node \
-  -f development/kind/sam-node.values.yaml \
+helm --kube-context kind-agentmesh-kind -n agentmesh-kind install reviewers charts/agentmesh-node \
+  -f development/kind/agentmesh-node.values.yaml \
   -f development/examples/code-reviewer-pool/reviewer/values.yaml --set replicaCount=3
-helm --kube-context kind-sam-kind -n sam-kind install manager charts/sam-node \
-  -f development/kind/sam-node.values.yaml \
+helm --kube-context kind-agentmesh-kind -n agentmesh-kind install manager charts/agentmesh-node \
+  -f development/kind/agentmesh-node.values.yaml \
   -f development/examples/code-reviewer-pool/manager/values.yaml
 ```
 
 ### 3. Start a local orchestrator node
 
 ```bash
-make kind-local-node  # a local sam-node enrolled in the mesh; leave it running
+make kind-local-node  # a local agentmesh-node enrolled in the mesh; leave it running
 ```
 
 `kind-local-node` runs in the foreground in its own shell and exposes the
@@ -164,7 +164,7 @@ Cursor, and others) would add:
 ```json
 {
   "mcpServers": {
-    "sam-mesh": {
+    "agentmesh": {
       "type": "http",
       "url": "http://127.0.0.1:9099/mcp",
       "headers": { "X-Mesh-Authentication": "Bearer devtoken" }
@@ -190,7 +190,7 @@ Have your orchestrator run these steps per file, in parallel:
 
 A natural prompt for an agent harness:
 
-> Using the `sam-mesh` tools: for each file in
+> Using the `agentmesh-p2p` tools: for each file in
 > `development/examples/code-reviewer-pool/samples/`, acquire a worker, call its
 > `review_code` with the file contents (forwarding the token), and release it
 > (pass the `lease_id` back). Run them in parallel.
@@ -205,19 +205,19 @@ manager picks up the new worker on its next discovery pass and starts
 leasing it:
 
 ```bash
-kubectl --context kind-sam-kind -n sam-kind scale deploy/reviewers-sam-node --replicas=2
+kubectl --context kind-agentmesh-kind -n agentmesh-kind scale deploy/reviewers-agentmesh-node --replicas=2
 # start a big job, then:
-kubectl --context kind-sam-kind -n sam-kind scale deploy/reviewers-sam-node --replicas=3
+kubectl --context kind-agentmesh-kind -n agentmesh-kind scale deploy/reviewers-agentmesh-node --replicas=3
 ```
 
 ## Configuration
 
 | var | default | used by |
 |-----|---------|---------|
-| `SAM_NODE_URL` | `http://127.0.0.1:8080/mcp` | manager |
-| `SAM_API_TOKEN` | `devtoken` | manager |
-| `SAM_POOL_SERVICE` | `code-reviewer` | manager |
-| `SAM_DISCOVERY_MS` | `3000` | manager |
-| `SAM_LEASE_MS` | `60000` | manager |
-| `SAM_GRACE_MISSES` | `2` | manager |
-| `SAM_POOL_SECRET` | `sam-dev-pool-secret` (enforcement always on) | manager + reviewer |
+| `AGENTMESH_NODE_URL` | `http://127.0.0.1:8080/mcp` | manager |
+| `AGENTMESH_API_TOKEN` | `devtoken` | manager |
+| `AGENTMESH_POOL_SERVICE` | `code-reviewer` | manager |
+| `AGENTMESH_DISCOVERY_MS` | `3000` | manager |
+| `AGENTMESH_LEASE_MS` | `60000` | manager |
+| `AGENTMESH_GRACE_MISSES` | `2` | manager |
+| `AGENTMESH_POOL_SECRET` | `agentmesh-dev-pool-secret` (enforcement always on) | manager + reviewer |

@@ -6,10 +6,10 @@ weight: 30
 
 Hold a multi-turn conversation with an [A2A](https://a2a-protocol.org/)
 (Agent2Agent) agent hosted on a remote mesh node, using a stock, unmodified
-`a2a-sdk` client. There is no SAM-specific client code. The mesh regenerates
+`a2a-sdk` client. There is no Agent Mesh-specific client code. The mesh regenerates
 the agent card, and that is enough for the standard SDK to work as it is.
 
-Source: [`development/examples/chat-a2a/`](https://github.com/google/sam/tree/main/development/examples/chat-a2a).
+Source: [`development/examples/chat-a2a/`](https://github.com/google/agentmesh/tree/main/development/examples/chat-a2a).
 
 ## The idea
 
@@ -50,7 +50,7 @@ This example demonstrates both halves:
   Python `a2a-sdk`. It serves its agent card, answers messages, and holds
   history on the server side, one Gemini chat session per `contextId`. The
   node proxies to it through `target_url`. The agent knows nothing about
-  SAM.
+  Agent Mesh.
 - **REPL client** (`chat.py`): a stock `a2a-sdk` client of about forty lines
   that resolves the card through the mesh, then loops `input()` to a message
   send, echoing the `contextId` that the server created on the first reply.
@@ -63,7 +63,7 @@ This example demonstrates both halves:
   line in the node configuration.
 - **Use any stock A2A client.** `chat.py` is the smallest one. Because of the
   regenerated card, SDKs, CLIs and other agents resolve and call the service
-  without knowing that SAM exists.
+  without knowing that Agent Mesh exists.
 - **Let the agent own the conversation.** This is the same pattern as
   [Gemini Buddy](../gemini-buddy/), on the standard A2A protocol instead of
   a custom MCP tool. State lives with the agent, keyed by `contextId`, and
@@ -83,19 +83,19 @@ Google AI Studio key is enough for the demo.
 ### 2. Bring the mesh up and deploy the agent
 
 ```bash
-make build            # builds ./bin/sam-node (once)
-make kind-up          # control plane + router (no sam-nodes yet)
+make build            # builds ./bin/agentmesh-node (once)
+make kind-up          # control plane + router (no agentmesh-nodes yet)
 docker build -t chat-a2a:local development/examples/chat-a2a
-kind load docker-image --name sam-kind chat-a2a:local
-helm --kube-context kind-sam-kind -n sam-kind install chat-a2a charts/sam-node \
-  -f development/kind/sam-node.values.yaml \
+kind load docker-image --name agentmesh-kind chat-a2a:local
+helm --kube-context kind-agentmesh-kind -n agentmesh-kind install chat-a2a charts/agentmesh-node \
+  -f development/kind/agentmesh-node.values.yaml \
   -f development/examples/chat-a2a/values.yaml
 ```
 
 ### 3. Enroll a local caller node
 
 ```bash
-make kind-local-node  # a local sam-node enrolled in the mesh; leave it running
+make kind-local-node  # a local agentmesh-node enrolled in the mesh; leave it running
 ```
 
 The local node is your entry point. Its API listens on
@@ -117,7 +117,7 @@ Fetch the agent card through the mesh with `curl`:
 
 ```bash
 curl -s -H 'X-Mesh-Authentication: Bearer devtoken' \
-  "http://127.0.0.1:9099/sam/$PEER/a2a/chat/.well-known/agent-card.json" | jq
+  "http://127.0.0.1:9099/mesh/$PEER/a2a/chat/.well-known/agent-card.json" | jq
 ```
 
 The interface URLs in the response point back at this
@@ -132,7 +132,7 @@ Requires [`uv`](https://docs.astral.sh/uv/).
 ```bash
 cd development/examples/chat-a2a
 uv run --with-requirements requirements.txt chat.py \
-  "http://127.0.0.1:9099/sam/$PEER/a2a/chat"
+  "http://127.0.0.1:9099/mesh/$PEER/a2a/chat"
 ```
 
 To check the continuity: introduce yourself in one turn, chat about
@@ -146,7 +146,7 @@ back as `--context-id` and the agent continues the same conversation:
 
 ```bash
 export A2ACLI_SVC_PARAM='X-Mesh-Authentication=Bearer devtoken'
-CARD="http://127.0.0.1:9099/sam/$PEER/a2a/chat/.well-known/agent-card.json"
+CARD="http://127.0.0.1:9099/mesh/$PEER/a2a/chat/.well-known/agent-card.json"
 a2a send -a "$CARD" "hello, I am Ada"
 a2a send -a "$CARD" --context-id <contextId from the first reply> "what is my name?"
 ```

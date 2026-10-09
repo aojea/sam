@@ -1,7 +1,7 @@
-# SAM Code Review Style Guide
+# Agent Mesh Code Review Style Guide
 
 This file extends the standard Gemini Code Assist review prompt for this
-repository. It lists checks that are specific to SAM and that generic review
+repository. It lists checks that are specific to Agent Mesh and that generic review
 does not catch. Apply them to every pull request that touches Go code. When a
 rule is violated, quote the offending line and state the concrete fix; do not
 only describe the principle.
@@ -17,7 +17,7 @@ A libp2p peer ID has several valid string encodings. `peer.Decode` accepts
 all of them (base58 multihash `12D3KooW...`, CIDv1 base32 `bafzaajai...`,
 and others) and returns the same `peer.ID`, but `peer.ID.String()` always
 emits the base58 form. Every cache, ban set, storage row, and `map[string]`
-in SAM is keyed on that canonical form. A raw string copied off the wire and
+in Agent Mesh is keyed on that canonical form. A raw string copied off the wire and
 used as a key is therefore a *different key for the same peer*, and a ban,
 admission or dedup check silently misses. This is a security bug, not a
 style issue.
@@ -183,7 +183,7 @@ any new root dependency that lacks this justification.
 
 ### Why
 
-SAM has two API surfaces with different encodings (`AGENTS.md` §1, "Two API
+Agent Mesh has two API surfaces with different encodings (`AGENTS.md` §1, "Two API
 surfaces"): the mesh protocol between components is protobuf from
 `api/agentmesh.proto`; the operator plane (`/admin/*`, `/users/*`) is JSON whose
 shapes are Go structs in `api/`. Shapes defined ad hoc inside a handler, or
@@ -213,7 +213,7 @@ regardless of how carefully the rest of the system handles them.
    "...secret"|"...password", ...)` whose value is the credential itself,
    rather than a `--*-path` or an env var name, is a finding; so is a
    banner or log line that prints a credential the operator supplied.
-   `sam-control-plane --admin-token-path` and `sam-node
+   `agentmesh-control-plane --admin-token-path` and `agentmesh-node
    --bootstrap-token-path` are the reference shape.
 
 ## 6. Review output

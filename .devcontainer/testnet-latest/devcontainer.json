@@ -1,15 +1,15 @@
 {
-  "name": "SAM testnet (latest from main)",
+  "name": "Agent Mesh testnet (latest from main)",
   "build": {
     "dockerfile": "../testnet/Dockerfile",
-    "args": { "SAM_CHANNEL": "latest" }
+    "args": { "AGENTMESH_CHANNEL": "latest" }
   },
   "features": {
     "ghcr.io/devcontainers/features/sshd:1": {}
   },
   "forwardPorts": [8080],
   "portsAttributes": {
-    "8080": { "label": "SAM mesh (sam-one)", "protocol": "http" }
+    "8080": { "label": "Agent Mesh (agentmesh-one)", "protocol": "http" }
   },
   "customizations": {
     "codespaces": {

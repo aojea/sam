@@ -15,15 +15,15 @@ revocation.
 ## Keys and peer IDs
 
 The first thing a node does is generate an Ed25519 key pair and store it in
-its data directory (`~/.config/sam-mesh/agent.db` by default). Its **peer
+its data directory (`~/.config/agentmesh/agent.db` by default). Its **peer
 ID**, the `12D3KooW...` string that appears in logs, discovery results and
 proxy URLs, is derived from the public key. The key never leaves the machine.
 The credential is bound to the key, so a copied credential is useless without
 it, and every peer-to-peer connection proves possession of the key as part
 of the libp2p handshake.
 
-`sam-node reset --all` deletes the key and gives the node a new peer ID.
-`sam-node reset` without `--all` keeps the key and deletes only the
+`agentmesh-node reset --all` deletes the key and gives the node a new peer ID.
+`agentmesh-node reset` without `--all` keeps the key and deletes only the
 credential.
 
 ## Enrollment
@@ -32,7 +32,7 @@ Enrollment is a request to the control plane: "here is my public key, here is
 who I am, please issue me a credential for role *X* with labels *Y*". There
 are three ways to say who you are.
 
-**Interactive OIDC login.** `sam-node join <control-plane-url>` fetches the
+**Interactive OIDC login.** `agentmesh-node join <control-plane-url>` fetches the
 control plane's `/info`, learns which identity provider it trusts, and runs an
 OpenID Connect login. If a browser is available, it uses the loopback flow.
 On a headless machine it uses the device flow (a URL and a code that you enter
@@ -42,26 +42,26 @@ one of these explicitly. The ID token from the login is sent to
 challenge. This is how a person enrolls a laptop.
 
 **Non-interactive OIDC.** A workload that already has an OIDC token does not
-need a login. `sam-node run --jwt-path <file>` enrolls with the token in that
+need a login. `agentmesh-node run --jwt-path <file>` enrolls with the token in that
 file (such as a Kubernetes projected service account token or a SPIRE
 JWT-SVID written by `spiffe-helper`). On GCE and Cloud Run,
-`sam-node run --cloud-provider gcp` (or `auto`) fetches an identity token
+`agentmesh-node run --cloud-provider gcp` (or `auto`) fetches an identity token
 directly from the instance metadata server. `--client-id` and
 `--client-secret-path` do the same with an OAuth client-credentials grant.
-Routers enroll in the same way with `sam-router --jwt-path`. The control
+Routers enroll in the same way with `agentmesh-router --jwt-path`. The control
 plane marks workload issuers with `--workload-issuer` (`<issuer>` or
 `<issuer>=<email-suffix>`) so workload tokens can enroll, refresh, and
 exchange credentials while being refused at human operator endpoints
 (`/user/*`, `/oauth/authorize`).
 
 **Bootstrap token.** An operator mints a token with the admin API, the
-console, or `sam-one token create`, and copies it to the machine. The node
+console, or `agentmesh-one token create`, and copies it to the machine. The node
 sends it to `POST /enroll`. Unless the control plane runs with
 `--auto-approve-enrollment`, the request waits in a queue until an
 administrator approves it, and the node polls `GET /enroll/status` while it
 waits. A token has a role, an expiry and a usage count. A single-use token is
 spent as soon as one node is approved with it. This is how machines without
-an identity of their own enroll, and how `sam-one` enrolls devices by QR
+an identity of their own enroll, and how `agentmesh-one` enrolls devices by QR
 code.
 
 For all three paths, the control plane checks the same things before it
@@ -72,7 +72,7 @@ mints a credential:
    is registering.
 2. Neither the peer ID nor the identity behind it is banned.
 3. The identity resolves, through the bindings in the mesh policy, to the
-   role being requested. `sam-node` requests `mesh:role:node` and `sam-router`
+   role being requested. `agentmesh-node` requests `mesh:role:node` and `agentmesh-router`
    requests `mesh:role:router`. If the policy binds nobody to `mesh:role:node`,
    no node can enroll.
 4. Every label the node declared is permitted by the `allowed_labels` of a
@@ -116,8 +116,8 @@ ones the node asked for and the policy allowed. Grants come from the policy.
 
 ### 2. Delegated Session Biscuit (`POST /token/exchange`, `/oauth/token`)
 
-When a workload or user calls through an enrolled `sam-node` (or an Envoy /
-Istio / `agentgateway` proxy integrated with `sam-node`), the node exchanges
+When a workload or user calls through an enrolled `agentmesh-node` (or an Envoy /
+Istio / `agentgateway` proxy integrated with `agentmesh-node`), the node exchanges
 the caller's platform JWT (OIDC ID token, Kubernetes projected SA JWT, or
 SPIFFE JWT-SVID) at `POST /token/exchange` on the control plane. The control
 plane verifies the node's credential and proof-of-possession signature,
@@ -135,7 +135,7 @@ database writes:
 
 ## Task attenuation (`tar_block`) and sealing
 
-Before starting a task or delegating to a sub-agent, any holder (`sam-node`,
+Before starting a task or delegating to a sub-agent, any holder (`agentmesh-node`,
 an orchestrator via `POST /oauth/token`, or an SDK caller via
 `session.attenuate(rule)`) can narrow a Biscuit offline by appending up to 8
 blocks.
@@ -156,7 +156,7 @@ further blocks can be appended.
 
 ## Outbound federation: the control plane as OIDC issuer
 
-External cloud providers do not accept Biscuits, and SAM never forwards a
+External cloud providers do not accept Biscuits, and Agent Mesh never forwards a
 caller's mesh token to an upstream API. Instead, the control plane acts as a
 standard OIDC issuer (`/.well-known/openid-configuration` and `/jwks`, signed
 with ES256).
@@ -165,8 +165,8 @@ When an egress node serves a destination configured with `oidc_federation` or
 `aws_assume_role`, it verifies the caller's Biscuit and `tar_block` chain and
 calls `POST /sts/token` on the control plane. The control plane re-verifies
 the token and mints a short-lived ES256 border JWT (`sub` = caller principal,
-`act.sub` = egress node peer ID, `aud` = destination audience, `sam_roles` =
-caller mesh roles, `sam_task` = innermost task name), which the egress node
+`act.sub` = egress node peer ID, `aud` = destination audience, `mesh_roles` =
+caller mesh roles, `mesh_task` = innermost task name), which the egress node
 exchanges at the cloud provider's STS endpoint (such as Google Workload or
 Workforce Identity Federation or AWS `AssumeRoleWithWebIdentity`).
 
@@ -217,7 +217,7 @@ depends on how it enrolled:
 
 - An OIDC node with a refresh token re-enrolls on its own.
 - A bootstrap node needs an operator to mint a new token and run
-  `sam-node join` again (or to restart the router with the new token). The
+  `agentmesh-node join` again (or to restart the router with the new token). The
   node keeps its peer ID. The control plane recognises the approved peer and
   mints a new credential without going through the approval queue.
 - A bootstrap node whose record has `autonomous_recovery` set may refresh on
@@ -230,7 +230,7 @@ depends on how it enrolled:
 Revocation operates at two levels:
 
 1. **Mesh-wide node, identity, and root-prefix Biscuit revocation:**
-   `POST /admin/revoke` with a peer ID (or `sam-one admin ban`, or the console)
+   `POST /admin/revoke` with a peer ID (or `agentmesh-one admin ban`, or the console)
    marks the node as banned. Its next refresh is refused and the node daemon
    exits. The control plane publishes banned peer IDs in `/info` and
    `GET /revocations`, together with revoked root Biscuit revocation IDs
@@ -242,7 +242,7 @@ Revocation operates at two levels:
    reverses both bans.
 2. **Local task token revocation (`POST /oauth/revoke`):**
    When an orchestrator or sandbox finishes a task before its TTL expires, it
-   calls `POST /oauth/revoke` (RFC 7009) on the local `sam-node`, which records
+   calls `POST /oauth/revoke` (RFC 7009) on the local `agentmesh-node`, which records
    the leaf token's `RevocationIds()[last]` in its local revocation cache until
    the token's `expire_time`.
 

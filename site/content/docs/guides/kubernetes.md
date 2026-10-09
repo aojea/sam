@@ -7,8 +7,8 @@ aliases:
 ---
 
 This guide deploys a control plane, a router and a console into a cluster
-with the `sam-mesh` Helm chart, then puts services on the mesh with the
-`sam-node` chart. The last section lists the settings to change when you
+with the `agentmesh-p2p` Helm chart, then puts services on the mesh with the
+`agentmesh-node` chart. The last section lists the settings to change when you
 move from a test cluster to one that you keep. The public testnets run this
 setup on GKE. Their manifests are in `.github/k8s/` in the repository.
 
@@ -16,10 +16,10 @@ setup on GKE. Their manifests are in `.github/k8s/` in the repository.
 
 | Component | Kind | Notes |
 |---|---|---|
-| `sam-control-plane` | Deployment (2 replicas) | Stateless. All state is in PostgreSQL. |
+| `agentmesh-control-plane` | Deployment (2 replicas) | Stateless. All state is in PostgreSQL. |
 | PostgreSQL | StatefulSet | In-cluster by default (`database.postgres.deployInternal`). You can point the chart at your own database instead. |
-| `sam-router` | StatefulSet | A PVC holds `router.key`, so the peer ID survives rescheduling. |
-| `sam-console` | Deployment | Optional (`console.enabled`). |
+| `agentmesh-router` | StatefulSet | A PVC holds `router.key`, so the peer ID survives rescheduling. |
+| `agentmesh-console` | Deployment | Optional (`console.enabled`). |
 | bootstrap Job | Job (post-install hook) | Seeds the mesh policy and mints the router's bootstrap token. |
 | Gateway + HTTPRoute | Gateway API | Optional (`gateway.enabled`). Routes the enrollment paths and the console. |
 
@@ -33,12 +33,12 @@ to be distributed.
 ```bash
 ISSUER=$(kubectl get --raw /.well-known/openid-configuration | jq -r .issuer)
 
-helm upgrade --install sam-mesh ./charts/sam-mesh \
-  --namespace sam --create-namespace \
+helm upgrade --install agentmesh ./charts/agentmesh \
+  --namespace agentmesh --create-namespace \
   --set controlPlane.oidcIssuer="$ISSUER" \
   --set controlPlane.workloadIssuer="$ISSUER" \
   --set controlPlane.insecureSkipTlsVerify=true \
-  --set bootstrap.nodeMembers='{user:system:serviceaccount:sam-nodes:calc-mcp-sam-node}' \
+  --set bootstrap.nodeMembers='{user:system:serviceaccount:agentmesh-nodes:calc-mcp-agentmesh-node}' \
   --set bootstrap.nodeServices='{mcp://calculator,system://mesh.catalog}'
 ```
 
@@ -67,23 +67,23 @@ install and on upgrade, but once the database has a policy, the database is
 the source of truth.
 
 The chart generates an admin token and a database password and stores them
-in the `sam-mesh-secrets` Secret. The release notes print the command to
+in the `agentmesh-secrets` Secret. The release notes print the command to
 read them:
 
 ```bash
-kubectl -n sam get secret sam-mesh-secrets -o jsonpath='{.data.admin-token}' | base64 -d
+kubectl -n agentmesh get secret agentmesh-secrets -o jsonpath='{.data.admin-token}' | base64 -d
 ```
 
 The router enrolls with a bootstrap token that the job writes into
-`sam-mesh-router-token`, with `max_usages` equal to `router.replicaCount`.
+`agentmesh-router-token`, with `max_usages` equal to `router.replicaCount`.
 Set `router.useOidcToken=true` to make it use a projected service account
 token instead.
 
 ## 2. Expose it
 
 Inside the cluster, the control plane answers at
-`http://sam-mesh-control-plane.sam.svc:8080` and the router at
-`sam-mesh-router.sam.svc:4501`. That is enough for nodes in the same cluster.
+`http://agentmesh-control-plane.agentmesh.svc:8080` and the router at
+`agentmesh-router.agentmesh.svc:4501`. That is enough for nodes in the same cluster.
 
 Nodes outside the cluster need two things: the control plane over HTTPS
 (nodes refuse to fetch their trust root over plaintext from a remote
@@ -99,7 +99,7 @@ gateway:
       protocol: HTTPS
       port: 443
       tls:
-        certificateRefs: [{ name: sam-mesh-tls }]
+        certificateRefs: [{ name: agentmesh-tls }]
       allowedRoutes: { namespaces: { from: Same } }
   hostnames: [mesh.example.com]
 ```
@@ -132,14 +132,14 @@ current works.
 ## 3. Put a service on the mesh
 
 A service on Kubernetes is a pod with your backend container and a
-`sam-node` sidecar, both deployed by the `sam-node` chart. The node enrolls
+`agentmesh-node` sidecar, both deployed by the `agentmesh-node` chart. The node enrolls
 with the pod's projected service account token, so its identity is
-`user:system:serviceaccount:<namespace>:<release>-sam-node`. This is the
+`user:system:serviceaccount:<namespace>:<release>-agentmesh-node`. This is the
 identity that the binding in step 1 named.
 
 ```yaml
 # calc-mcp.values.yaml
-controlPlaneUrl: http://sam-mesh-control-plane.sam.svc:8080
+controlPlaneUrl: http://agentmesh-control-plane.agentmesh.svc:8080
 config:
   version: v1alpha1
   services:
@@ -154,13 +154,13 @@ service:
 ```
 
 ```bash
-helm upgrade --install calc-mcp ./charts/sam-node \
-  --namespace sam-nodes --create-namespace -f calc-mcp.values.yaml
+helm upgrade --install calc-mcp ./charts/agentmesh-node \
+  --namespace agentmesh-nodes --create-namespace -f calc-mcp.values.yaml
 ```
 
-`config` is the node's `sam-node.yaml`. The pod restarts when it changes.
+`config` is the node's `agentmesh-node.yaml`. The pod restarts when it changes.
 The sidecar and the backend share the pod's network, so `target_url` is
-always `127.0.0.1`. `extraArgs` passes additional `sam-node run` flags. The
+always `127.0.0.1`. `extraArgs` passes additional `agentmesh-node run` flags. The
 chart adds `--insecure-control-plane` for you when the control plane URL is
 plain `http` inside the cluster. With a `replicaCount` above one, each
 replica enrolls as its own node and offers the same service name.
@@ -172,7 +172,7 @@ kind cluster. See [Contributing](../../contributing/#a-local-mesh-in-kind).
 ## 4. Check it
 
 ```bash
-kubectl -n sam-nodes logs deploy/calc-mcp -c sam-node | grep -E "Online|PeerID"
+kubectl -n agentmesh-nodes logs deploy/calc-mcp -c agentmesh-node | grep -E "Online|PeerID"
 ```
 
 From a node enrolled anywhere in the mesh:
@@ -184,7 +184,7 @@ mcp-client -url http://127.0.0.1:8080/mcp -token "$TOKEN" \
 
 The console shows the same information: enrolled nodes, their reported
 services, the router, and the policy. It is at `/console/` behind the
-gateway, or you can port-forward `svc/sam-mesh-console`.
+gateway, or you can port-forward `svc/agentmesh-console`.
 
 ## Keeping it
 
@@ -193,7 +193,7 @@ keep, review these settings:
 
 - **Database.** Set `database.postgres.deployInternal=false` and give the
   control plane the DSN of a managed PostgreSQL through `--db-dsn-path` or
-  the `SAM_DB_DSN` environment variable. The DSN contains a password, so it
+  the `AGENTMESH_DB_DSN` environment variable. The DSN contains a password, so it
   should not be a flag value.
 - **Enrollment.** `controlPlane.autoApproveEnrollment` defaults to `true`.
   That is fine when every enrollee holds an OIDC token from an issuer that
@@ -214,7 +214,7 @@ keep, review these settings:
   scrape the control plane and the router. Both metrics endpoints are
   unauthenticated, so keep them inside the cluster.
 
-The chart's [README](https://github.com/google/sam/blob/main/charts/sam-mesh/README.md)
+The chart's [README](https://github.com/google/agentmesh/blob/main/charts/agentmesh/README.md)
 documents every value. The [control plane](../../reference/control-plane/)
 and [router](../../reference/router/) references list the flags the chart
 sets.

@@ -9,9 +9,9 @@ from mcp.client.streamable_http import streamable_http_client
 
 async def main():
     # Connect to the local Agent Mesh node's MCP endpoint.
-    # By default, sam-node listens at 127.0.0.1:8080.
-    url = os.environ.get("SAM_MCP_URL", "http://127.0.0.1:8080/mcp")
-    token = os.environ.get("SAM_API_TOKEN", "")
+    # By default, agentmesh-node listens at 127.0.0.1:8080.
+    url = os.environ.get("AGENTMESH_MCP_URL", "http://127.0.0.1:8080/mcp")
+    token = os.environ.get("AGENTMESH_API_TOKEN", "")
     print(f"Connecting to Agent Mesh Node at {url}")
 
     headers = {"X-Mesh-Authentication": f"Bearer {token}"} if token else {}
@@ -35,7 +35,7 @@ async def main():
                         print(getattr(block, "text", block))
 
     except Exception as e:
-        print(f"Error connecting to SAM Node: {e}")
+        print(f"Error connecting to Agent Mesh Node: {e}")
         sys.exit(1)
 
 

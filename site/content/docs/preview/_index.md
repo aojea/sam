@@ -15,7 +15,7 @@ you find.
 - [Agent architecture](agent-architecture/): the design behind the
   sandbox: why the boundary uses named HTTP tunnels, how an agent gets an
   identity, and how an agent serves.
-- [SAM Connect](mobile/): the Android and iOS app that turns a phone into a
+- [Agent Mesh Connect](mobile/): the Android and iOS app that turns a phone into a
   node.
 - [Scale report](scale-report/) and [how to reproduce it](scale-experiment/):
   what a sandboxed agent costs, measured up to a thousand agents on one host.

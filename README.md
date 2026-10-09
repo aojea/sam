@@ -1,8 +1,8 @@
-# Agent Mesh (SAM)
+# Agent Mesh
 
-<img alt="Agent Mesh (SAM)" src="site/content/docs/sam_logo.png" width="160" />
+<img alt="Agent Mesh" src="site/content/docs/agentmesh_logo.png" width="160" />
 
-**Agent Mesh** (`SAM` — OSS Agent Mesh) is a private network for AI agents. A
+**Agent Mesh** is a private network for AI agents. A
 node runs next to an agent and gives it three things: a way to publish tools
 and models to the network, a way to find and call what other nodes publish,
 and an identity every other node can verify. Nodes connect directly when they
@@ -20,22 +20,22 @@ Two properties hold everywhere:
   turns that into a short-lived, offline-verifiable credential bound to the
   node's own key.
 
-<img src="site/static/demo.gif" alt="Installing sam-node, adding the skill, and an agent discovering and calling tools across the mesh" width="100%" />
+<img src="site/static/demo.gif" alt="Installing agentmesh-node, adding the skill, and an agent discovering and calling tools across the mesh" width="100%" />
 
 ## Try it
 
 ```bash
-curl -sL https://sam-mesh.dev/install.sh | bash   # sam-node, mcp-client and friends
-sam-node join https://bananas.sam-mesh.dev        # one-time login
-sam-node run --daemonize                          # local MCP server on 127.0.0.1:8080
-sam-node skill install                            # teach your agent to use it
+curl -sL https://__PROTECT_Agent Mesh_MESH_DEV__/install.sh | bash   # agentmesh-node, mcp-client and friends
+agentmesh-node join https://bananas.__PROTECT_Agent Mesh_MESH_DEV__        # one-time login
+agentmesh-node run --daemonize                          # local MCP server on 127.0.0.1:8080
+agentmesh-node skill install                            # teach your agent to use it
 ```
 
 Your agent now has tools that discover and call services across the mesh,
 and an OpenAI-compatible endpoint that routes model requests to whoever
-serves the model. `bananas.sam-mesh.dev` is a shared developer testnet with
-no uptime promise; the [quick start](https://sam-mesh.dev/docs/getting-started/quickstart/)
-walks through it, and [your own mesh](https://sam-mesh.dev/docs/getting-started/your-own-mesh/)
+serves the model. `bananas.__PROTECT_Agent Mesh_MESH_DEV__` is a shared developer testnet with
+no uptime promise; the [quick start](https://__PROTECT_Agent Mesh_MESH_DEV__/docs/getting-started/quickstart/)
+walks through it, and [your own mesh](https://__PROTECT_Agent Mesh_MESH_DEV__/docs/getting-started/your-own-mesh/)
 runs a control plane on your laptop in one command.
 
 To run a control plane of your own without installing anything, open a
@@ -43,40 +43,40 @@ GitHub codespace with the released binaries and run `make testnet`. It
 starts on a public `https` URL that your laptop and phone can enroll into,
 on your GitHub account's free quota:
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/google/sam?quickstart=1&devcontainer_path=.devcontainer%2Ftestnet%2Fdevcontainer.json)
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/google/agentmesh?quickstart=1&devcontainer_path=.devcontainer%2Ftestnet%2Fdevcontainer.json)
 
-The [Codespaces guide](https://sam-mesh.dev/docs/guides/codespaces/) has the
+The [Codespaces guide](https://__PROTECT_Agent Mesh_MESH_DEV__/docs/guides/codespaces/) has the
 steps, what persists and what stops.
 
 ## What is in a mesh
 
 | Program | Role |
 |---|---|
-| `sam-control-plane` | Verifies who is joining, issues each node a signed credential, and holds the policy that says who may call what. |
-| `sam-router` | A well-known peer that nodes connect to first. Relays traffic between nodes that cannot reach each other and hosts the discovery table. |
-| `sam-node` | Runs next to your agent or service. Enrolls, connects, serves your local backends to the mesh, and exposes the mesh to your agent as a local MCP server and OpenAI-compatible API. |
-| `sam-one` | The control plane, a router and a web console in one binary, for laptops and small deployments. |
+| `agentmesh-control-plane` | Verifies who is joining, issues each node a signed credential, and holds the policy that says who may call what. |
+| `agentmesh-router` | A well-known peer that nodes connect to first. Relays traffic between nodes that cannot reach each other and hosts the discovery table. |
+| `agentmesh-node` | Runs next to your agent or service. Enrolls, connects, serves your local backends to the mesh, and exposes the mesh to your agent as a local MCP server and OpenAI-compatible API. |
+| `agentmesh-one` | The control plane, a router and a web console in one binary, for laptops and small deployments. |
 
 ## Documentation
 
-[sam-mesh.dev/docs](https://sam-mesh.dev/docs/) is built from `site/`.
+[__PROTECT_Agent Mesh_MESH_DEV__/docs](https://__PROTECT_Agent Mesh_MESH_DEV__/docs/) is built from `site/`.
 
-- [Getting started](https://sam-mesh.dev/docs/getting-started/): one node on the testnet, then a mesh of your own.
-- [Concepts](https://sam-mesh.dev/docs/concepts/): architecture, identity and enrollment, authorization, networking.
-- [Guides](https://sam-mesh.dev/docs/guides/): exposing services, connecting agent clients, headless enrollment, Kubernetes, Cloud Run.
-- [Reference](https://sam-mesh.dev/docs/reference/): every flag, configuration key, HTTP route and policy field.
-- [Preview](https://sam-mesh.dev/docs/preview/): sandboxed agents and the mobile app, which work but are still settling.
-- [Contributing](https://sam-mesh.dev/docs/contributing/): building, testing and the local kind environment.
+- [Getting started](https://__PROTECT_Agent Mesh_MESH_DEV__/docs/getting-started/): one node on the testnet, then a mesh of your own.
+- [Concepts](https://__PROTECT_Agent Mesh_MESH_DEV__/docs/concepts/): architecture, identity and enrollment, authorization, networking.
+- [Guides](https://__PROTECT_Agent Mesh_MESH_DEV__/docs/guides/): exposing services, connecting agent clients, headless enrollment, Kubernetes, Cloud Run.
+- [Reference](https://__PROTECT_Agent Mesh_MESH_DEV__/docs/reference/): every flag, configuration key, HTTP route and policy field.
+- [Preview](https://__PROTECT_Agent Mesh_MESH_DEV__/docs/preview/): sandboxed agents and the mobile app, which work but are still settling.
+- [Contributing](https://__PROTECT_Agent Mesh_MESH_DEV__/docs/contributing/): building, testing and the local kind environment.
 
 The repository has a dev container with the Go, Node and Python toolchains
 and Docker, so you can build and test in a codespace or in VS Code without
 installing anything:
 
-[![Develop in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/google/sam?quickstart=1)
+[![Develop in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/google/agentmesh?quickstart=1)
 
 ## Status
 
-SAM is pre-1.0. The node, routers, control plane, identity and policy model
+Agent Mesh is pre-1.0. The node, routers, control plane, identity and policy model
 are stable in shape and exercised by the test suite and two public testnets;
 see [ROADMAP.md](ROADMAP.md) for the release plan. Sandboxed agent blueprints
 and the mobile app are in preview.

@@ -7,10 +7,10 @@ weight: 5
 A codespace is a container that GitHub runs for you, with a terminal, an
 editor and an `https` URL for every port you forward. Started from this
 repository, it gives you a control plane of your own with nothing installed
-on your machine and no cloud account. `sam-one` runs inside it, your laptop
+on your machine and no cloud account. `agentmesh-one` runs inside it, your laptop
 and your phone enroll over the public URL, and your GitHub account pays with
 its free Codespaces quota (120 core-hours a month on a Free plan; a 2-core
-machine is enough). The same setup lets you develop SAM, or a program that
+machine is enough). The same setup lets you develop Agent Mesh, or a program that
 uses one of its SDKs, against a mesh that external clients can reach.
 
 ## 1. Open a codespace
@@ -20,11 +20,11 @@ badge, or from **Code → Codespaces → New with options** on GitHub:
 
 | Configuration | Contents | For |
 |---|---|---|
-| **testnet** (default badge in the README) | The released `sam-one` and `sam-node` binaries, copied from the `stable` images that also run `hub.sam-mesh.dev`. No toolchain. | Trying SAM, enrolling your devices. |
-| **testnet-latest** | The same, from the `latest` images built from `main`, which also run `bananas.sam-mesh.dev`. | Trying what is not released yet. |
+| **testnet** (default badge in the README) | The released `agentmesh-one` and `agentmesh-node` binaries, copied from the `stable` images that also run `hub.__PROTECT_Agent Mesh_MESH_DEV__`. No toolchain. | Trying Agent Mesh, enrolling your devices. |
+| **testnet-latest** | The same, from the `latest` images built from `main`, which also run `bananas.__PROTECT_Agent Mesh_MESH_DEV__`. | Trying what is not released yet. |
 | **develop** (`.devcontainer/devcontainer.json`) | Go, Node, Python and Docker. `make build` runs when the codespace is created, so `./bin` holds the binaries of the branch you opened. | Contributing, or developing an SDK program against your own branch. |
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/google/sam?quickstart=1&devcontainer_path=.devcontainer%2Ftestnet%2Fdevcontainer.json)
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/google/agentmesh?quickstart=1&devcontainer_path=.devcontainer%2Ftestnet%2Fdevcontainer.json)
 
 The codespace opens with this page in the editor and a terminal at the
 repository root.
@@ -37,68 +37,68 @@ make testnet
 
 The target runs one command, which is the same command you would run
 anywhere else (the codespace checks the repository out under
-`/workspaces/sam`):
+`/workspaces/agentmesh`):
 
 ```bash
-sam-one --data-dir /workspaces/sam/.sam-one --port 8080 --tunnel codespaces
+agentmesh-one --data-dir /workspaces/agentmesh/.agentmesh-one --port 8080 --tunnel codespaces
 ```
 
-`--tunnel codespaces` tells `sam-one` that GitHub already forwards the port:
+`--tunnel codespaces` tells `agentmesh-one` that GitHub already forwards the port:
 it reads the codespace name and the forwarding domain from the environment,
 advertises `https://<codespace>-8080.app.github.dev` as the mesh URL, and
 starts nothing. After a moment the banner appears:
 
 ```text
 ══════════════════════════════════════════════════════════════════
-SAM standalone mesh is ready!
+Agent Mesh standalone mesh is ready!
 
-API URL:      https://octocat-sam-abc123-8080.app.github.dev
-Tunnel:       https://octocat-sam-abc123-8080.app.github.dev -> http://0.0.0.0:8080
-Web Console:  https://octocat-sam-abc123-8080.app.github.dev/console
+API URL:      https://octocat-agentmesh-abc123-8080.app.github.dev
+Tunnel:       https://octocat-agentmesh-abc123-8080.app.github.dev -> http://0.0.0.0:8080
+Web Console:  https://octocat-agentmesh-abc123-8080.app.github.dev/console
 Router Peer:  12D3KooWBzUDQCkZhz2rWrYBhpjcCH8VnrRNcwCW6DoF36iADYrY
-Admin Token:  sam_adm_…
+Admin Token:  mesh_adm_…
 Join Token:   mesh_tok_…
 
 To enroll a node:
-  sam-node join https://octocat-sam-abc123-8080.app.github.dev --bootstrap-token-path /workspaces/sam/.sam-one/join-token
+  agentmesh-node join https://octocat-agentmesh-abc123-8080.app.github.dev --bootstrap-token-path /workspaces/agentmesh/.agentmesh-one/join-token
 ══════════════════════════════════════════════════════════════════
 ```
 
 A QR code for the [mobile app](../../preview/mobile/) follows the banner.
 
-Any `sam-one` flag passes through `ARGS`. To let people log in with an
+Any `agentmesh-one` flag passes through `ARGS`. To let people log in with an
 identity provider instead of the join token, for example:
 
 ```bash
 make testnet ARGS="--issuer https://accounts.google.com --allowed-audiences <client-id>"
 ```
 
-The [sam-one reference](../../reference/sam-one/) lists every flag. Outside
-a codespace, `make testnet` starts a plain local `sam-one` on port 8080.
+The [agentmesh-one reference](../../reference/agentmesh-one/) lists every flag. Outside
+a codespace, `make testnet` starts a plain local `agentmesh-one` on port 8080.
 
 ## 3. Make the port public
 
 Every forwarded port starts **private**: GitHub's proxy lets your own
 browser through and answers everyone else with its login page. Open the
 **Web Console** URL from the banner in your browser now and it works. A
-`sam-node` on your laptop or the app on your phone cannot log in to GitHub,
-so `sam-one` tells you in its log, after a few seconds:
+`agentmesh-node` on your laptop or the app on your phone cannot log in to GitHub,
+so `agentmesh-one` tells you in its log, after a few seconds:
 
 ```text
-WARN  tunnel  GitHub answers for https://octocat-sam-abc123-8080.app.github.dev: port 8080 is private, so only your own browser can open it. To let devices enroll, make it public: PORTS tab -> right-click 8080 -> Port Visibility -> Public (or `gh codespace ports visibility 8080:public -c octocat-sam-abc123`)
+WARN  tunnel  GitHub answers for https://octocat-agentmesh-abc123-8080.app.github.dev: port 8080 is private, so only your own browser can open it. To let devices enroll, make it public: PORTS tab -> right-click 8080 -> Port Visibility -> Public (or `gh codespace ports visibility 8080:public -c octocat-agentmesh-abc123`)
 ```
 
 Do that once, in the **PORTS** tab next to the terminal, or from your own
 machine with the `gh` command from the message (the codespace image does
-not include `gh`). `sam-one` keeps checking and confirms within a few
+not include `gh`). `agentmesh-one` keeps checking and confirms within a few
 seconds:
 
 ```text
-INFO  tunnel  https://octocat-sam-abc123-8080.app.github.dev answers from the internet; devices can enroll
+INFO  tunnel  https://octocat-agentmesh-abc123-8080.app.github.dev answers from the internet; devices can enroll
 ```
 
 A public port is reachable by anyone who has the URL, with the same exposure
-as a `sam-one` on Cloud Run: `/healthz`, `/info` and the console login page
+as a `agentmesh-one` on Cloud Run: `/healthz`, `/info` and the console login page
 answer without credentials, enrollment needs the join token or a token you
 minted, the console and the admin API need the admin token, and every
 router connection needs a credential the control plane issued. The first
@@ -107,34 +107,34 @@ before you share the URL, as described in
 [Your own mesh](../../getting-started/your-own-mesh/#5-before-you-share-it).
 
 If your organization forbids public ports, keep the port private and let
-`sam-one` publish itself through a Cloudflare quick tunnel instead:
+`agentmesh-one` publish itself through a Cloudflare quick tunnel instead:
 `make testnet ARGS="--tunnel cloudflare --tunnel-install"`.
 
 ## 4. Enroll your devices
 
-On your laptop, install `sam-node` ([quick start](../../getting-started/quickstart/#1-install)),
+On your laptop, install `agentmesh-node` ([quick start](../../getting-started/quickstart/#1-install)),
 save the join token from the banner to a file, and join:
 
 ```bash
-URL=https://octocat-sam-abc123-8080.app.github.dev
+URL=https://octocat-agentmesh-abc123-8080.app.github.dev
 echo -n 'mesh_tok_…' > join-token
 
-sam-node join "$URL" --bootstrap-token-path join-token
-sam-node run --daemonize
+agentmesh-node join "$URL" --bootstrap-token-path join-token
+agentmesh-node run --daemonize
 ```
 
 The node appears in the console under **Nodes**. From here the
 [Your own mesh](../../getting-started/your-own-mesh/#2-put-a-member-on-it)
 walkthrough applies unchanged: publish a model or an MCP server from one
 device and call it from another. The second device can be the codespace
-itself, where `sam-node` is installed too. It reaches `sam-one` over
+itself, where `agentmesh-node` is installed too. It reaches `agentmesh-one` over
 loopback, which `--allow-loopback` permits, and `--bind-addr=` keeps its
-local API on a Unix socket so it does not compete with `sam-one` for port
+local API on a Unix socket so it does not compete with `agentmesh-one` for port
 8080:
 
 ```bash
-sam-node run --control-plane http://127.0.0.1:8080 \
-  --bootstrap-token-path .sam-one/join-token \
+agentmesh-node run --control-plane http://127.0.0.1:8080 \
+  --bootstrap-token-path .agentmesh-one/join-token \
   --data-dir ~/node-a --bind-addr= --allow-loopback
 ```
 
@@ -142,7 +142,7 @@ Scan the QR code under the banner with the mobile app to enroll a phone.
 
 ## 5. Develop against it
 
-In the **develop** configuration, `make testnet` runs `./bin/sam-one`, the
+In the **develop** configuration, `make testnet` runs `./bin/agentmesh-one`, the
 binary built from your branch. Edit, `make build`, stop the mesh with
 `Ctrl-C` and start it again; the data directory keeps the identity and the
 tokens, and enrolled devices reconnect on their own as long as the mesh is
@@ -158,25 +158,25 @@ CI.
 
 - **The URL.** The codespace name is fixed for the codespace's lifetime, so
   the URL survives stop and start.
-- **The mesh state.** `.sam-one` in the checkout holds the database (members,
+- **The mesh state.** `.agentmesh-one` in the checkout holds the database (members,
   policy, bootstrap tokens), the router key and the two tokens. Git ignores
   it, and it survives stops, starts and container rebuilds, so the router
   keeps its peer ID and devices keep their identity: nothing enrolls twice.
 - **The idle stop.** A codespace stops after 30 minutes without activity by
   default; you can raise that to four hours in your GitHub settings. While it
-  is stopped nothing answers at the URL. A `sam-node` that finds no router
+  is stopped nothing answers at the URL. A `agentmesh-node` that finds no router
   for about three minutes exits on purpose, so after a longer stop you start
-  your nodes again (`sam-node run --daemonize`; they need no new
+  your nodes again (`agentmesh-node run --daemonize`; they need no new
   enrollment) or run them under a service manager that restarts them.
   Resume the codespace from [github.com/codespaces](https://github.com/codespaces),
   the README badge, or by connecting to it with `gh codespace code`, and run
   `make testnet` again.
-- **Port visibility.** A restart makes the port private again. `sam-one`
+- **Port visibility.** A restart makes the port private again. `agentmesh-one`
   says so in its log, and you set it to public once more.
 - **Deletion.** A stopped codespace is deleted after 30 days by default. The
   mesh is gone with it, and devices enroll elsewhere.
 - **One mesh per codespace.** The router's relay and discovery state live in
-  the single `sam-one` process. A second codespace is a second mesh.
+  the single `agentmesh-one` process. A second codespace is a second mesh.
 
 When you want the mesh to stay up, take the same command and its flags to
 [Cloud Run](../cloud-run/), [SkyPilot](../skypilot/) or

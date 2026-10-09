@@ -77,8 +77,8 @@ The programs below read the mesh from two environment variables. Set them in
 every terminal you use:
 
 ```bash
-export SAM_CONTROL_PLANE_URL=http://127.0.0.1:33775   # the API URL from the banner
-export SAM_BOOTSTRAP_TOKEN_PATH=~/agentmesh-one/join-token
+export AGENTMESH_CONTROL_PLANE_URL=http://127.0.0.1:33775   # the API URL from the banner
+export AGENTMESH_BOOTSTRAP_TOKEN_PATH=~/agentmesh-one/join-token
 ```
 
 A plain `http://` URL is accepted only for a control plane on the same
@@ -86,15 +86,15 @@ machine. Anything else needs `https://`, because the control plane is the
 trust root of every member and the SDK refuses to fetch it over plaintext
 from a remote address. Inside a network you already trust, such as a
 Kubernetes cluster where the control plane is a cluster-local service, set
-`SAM_INSECURE_CONTROL_PLANE=true` (`allowInsecure` in code), the same choice
+`AGENTMESH_INSECURE_CONTROL_PLANE=true` (`allowInsecure` in code), the same choice
 as `agentmesh-node --insecure-control-plane`.
 
 On a platform that issues workload identity tokens, a program needs no
 bootstrap token. A mesh whose control plane trusts the platform's issuer
 enrolls the program from that token instead; on Kubernetes that is a
 projected service account token, as [Headless enrollment](../headless-enrollment/)
-shows for `agentmesh-node`. Set `SAM_JWT_PATH` (`jwtPath` / `jwt_path`) to the
-token file rather than `SAM_BOOTSTRAP_TOKEN_PATH`, or pass a `jwt` callback
+shows for `agentmesh-node`. Set `AGENTMESH_JWT_PATH` (`jwtPath` / `jwt_path`) to the
+token file rather than `AGENTMESH_BOOTSTRAP_TOKEN_PATH`, or pass a `jwt` callback
 (`() => string | Promise<string>` in JS, `Callable[[], str]` in Python) that
 fetches a fresh token (for example, from a cloud metadata server). On every
 credential refresh, the SDK re-reads `jwtPath` or invokes the `jwt` callback

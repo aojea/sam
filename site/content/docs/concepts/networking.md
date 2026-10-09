@@ -10,12 +10,12 @@ agent sees at each end.
 
 ## The node's local API
 
-An agent does not speak to the mesh directly. It speaks to the `sam-node` on
+An agent does not speak to the mesh directly. It speaks to the `agentmesh-node` on
 its own machine, through one of two listeners:
 
 - **TCP**, `127.0.0.1:8080` by default (`--bind-addr`). Every request must
   carry the node's API token as `X-Mesh-Authentication: Bearer <token>`.
-- **A Unix socket**, `<data-dir>/sam.sock` by default (`--socket-path`),
+- **A Unix socket**, `<data-dir>/agentmesh.sock` by default (`--socket-path`),
   created with mode `0600`. No token is needed, because only the user who
   owns the socket can open it. `docker.sock` works the same way.
 
@@ -138,5 +138,5 @@ frame and body they read. Routers cap inbound connections per source address
 total connections (`--low-watermark`, `--high-watermark`). Members behind a
 NAT or a cluster's SNAT share one address, and the handshake, not the
 per-address cap, is what keeps strangers out; the cap bounds how much of a
-router one address can occupy. `sam-one` sets it to the whole budget for its
+router one address can occupy. `agentmesh-one` sets it to the whole budget for its
 embedded router, which sits behind a proxy and sees one address.

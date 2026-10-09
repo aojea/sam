@@ -13,17 +13,17 @@ supported product surface.
 {{% /alert %}}
 
 The report says what was measured and what it means. This page says how to
-run it again. The setup is one host, one `sam-node`, and *N* agents. Each
+run it again. The setup is one host, one `agentmesh-node`, and *N* agents. Each
 agent is a Firecracker microVM with no network device, and its only way out
-is a vsock to its own `sam-box`. A thousand agents have been run on one
+is a vsock to its own `agentmesh-box`. A thousand agents have been run on one
 `n2-standard-64`.
 
 | Component | Role |
 |---|---|
-| host VM | `n2-standard-64` on GCP with nested virtualisation; runs the node and one `sam-box` per agent |
+| host VM | `n2-standard-64` on GCP with nested virtualisation; runs the node and one `agentmesh-box` per agent |
 | guest | Firecracker microVM, Alpine, about 160 MiB, no network device |
 | `nano-init` | PID 1 in the guest: builds `tun0`, carries its own TCP stack, keeps the mesh name on every flow |
-| agent | the [example harness](https://github.com/google/sam/tree/main/development/examples/agent-harness), holding no credentials |
+| agent | the [example harness](https://github.com/google/agentmesh/tree/main/development/examples/agent-harness), holding no credentials |
 
 ## Prerequisites
 
@@ -31,7 +31,7 @@ is a vsock to its own `sam-box`. A thousand agents have been run on one
   6.1 CI kernels do not have it. 6.18.41 does. `startup-script.sh` downloads
   a TUN-capable kernel, and fails with a clear error instead of booting a
   guest whose agent can never get a route.
-- A bootstrap token at `/etc/sam-bootstrap-token` on the host. The launcher
+- A bootstrap token at `/etc/agentmesh-bootstrap-token` on the host. The launcher
   refuses to start without one.
 - KVM, with `/dev/kvm` writable by the invoking user.
 
@@ -40,7 +40,7 @@ is a vsock to its own `sam-box`. A thousand agents have been run on one
 Build once, locally, then upload:
 
 ```bash
-./scripts/build-rootfs.sh gs://my-sam-bucket/scale-test
+./scripts/build-rootfs.sh gs://my-agentmesh-bucket/scale-test
 ```
 
 The image holds Alpine, Python, `nano-init` and the example harness as an
@@ -57,9 +57,9 @@ ROOTFS_MB=2048 AGENT_SRC=cmd/chaos-agent ./scripts/build-rootfs.sh
 
 ```bash
 ./scripts/provision-scale-vm.sh \
-  --prefix sam-minions --count 1 \
+  --prefix agentmesh-minions --count 1 \
   --machine-type n2-standard-64 \
-  --local-binaries gs://my-sam-bucket/scale-test \
+  --local-binaries gs://my-agentmesh-bucket/scale-test \
   --no-spot
 ```
 
@@ -86,15 +86,15 @@ speed, against a working set of about 206 MiB.
 ## 4. Launch
 
 ```bash
-gcloud compute ssh sam-minions-1 --zone us-central1-c
+gcloud compute ssh agentmesh-minions-1 --zone us-central1-c
 
 sudo tests/scale/validate-launcher.sh          # check that one works before asking for a thousand
 sudo SANDBOX_LINGER=2400 /opt/microvm/launch-microvms.sh 1000
 ```
 
 The launcher checks Firecracker, KVM, the kernel, the rootfs, the binaries
-and the token. It then starts one `sam-box` per agent and one microVM per
-`sam-box`, all against one node. The rootfs is shared read-only. A private
+and the token. It then starts one `agentmesh-box` per agent and one microVM per
+`agentmesh-box`, all against one node. The rootfs is shared read-only. A private
 copy per agent would be half a terabyte at a thousand agents.
 
 `SANDBOX_LINGER` keeps each sandbox open after its agent finishes. A density
@@ -107,7 +107,7 @@ for real work.
 |---|---|
 | `VM_MEM_MIB` | guest memory, default 160 |
 | `SANDBOX_LINGER` | seconds to keep a sandbox after the agent exits, default 0 |
-| `SAM_MODEL` | model to ask the mesh for; when unset, the first model in the catalog is used |
+| `AGENTMESH_MODEL` | model to ask the mesh for; when unset, the first model in the catalog is used |
 | `CONTROL_PLANE` | defaults to the `bananas` testnet |
 | `AGENT_DOMAIN` | the domain under which agents are named |
 
@@ -119,14 +119,14 @@ rejects values that do.
 
 ```bash
 sudo tests/scale/collect-fleet.sh \
-  --node-socket /var/run/sam-node.sock --duration 1500 --out fleet.jsonl
+  --node-socket /var/run/agentmesh-node.sock --duration 1500 --out fleet.jsonl
 ```
 
 The headline number is how many agents the *node* is serving, and not how
 many microVMs were started. A guest that booted and never reached its
 boundary is a process, not an agent. The script asks the node and samples
 over time, because the shape of the curve shows whether the population came
-up smoothly. Watch `sam_node_agents_untracked_total`. If it is not zero, the
+up smoothly. Watch `agentmesh_node_agents_untracked_total`. If it is not zero, the
 agent count is a lower bound and not a measurement.
 
 ## 6. Drive load
@@ -145,7 +145,7 @@ one boundary would measure a socket, not a mesh.
 ```bash
 sudo tail -f /var/log/startup-script.log        # host setup
 sudo tail -f /var/log/fc-vm-1.log               # one guest's console, agent output included
-sudo curl -s --unix-socket /var/run/sam-node.sock http://localhost/metrics | grep sam_node_agents_seen
+sudo curl -s --unix-socket /var/run/agentmesh-node.sock http://localhost/metrics | grep agentmesh_node_agents_seen
 ```
 
 ## The boundary sweep
@@ -170,7 +170,7 @@ it never issues the same request twice.
 ```bash
 ROOTFS_MB=2048 AGENT_SRC=cmd/chaos-agent ./scripts/build-rootfs.sh
 
-sudo SAM_MODEL=google/gemma-2-2b-it CHAOS_SLEEP=30 VM_MEM_MIB=512 \
+sudo AGENTMESH_MODEL=google/gemma-2-2b-it CHAOS_SLEEP=30 VM_MEM_MIB=512 \
      /opt/microvm/launch-microvms.sh 25
 ```
 

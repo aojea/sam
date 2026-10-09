@@ -7,13 +7,13 @@ aliases:
 ---
 
 A node does not publish any service by default. You declare the services it
-offers in `sam-node.yaml`. This guide covers the three kinds of service a
+offers in `agentmesh-node.yaml`. This guide covers the three kinds of service a
 node can serve and what the mesh policy must contain before anyone can reach
 them.
 
 ## The configuration file
 
-`sam-node` reads `sam-node.yaml` from the working directory, or the file
+`agentmesh-node` reads `agentmesh-node.yaml` from the working directory, or the file
 named by `--config`. Both `join` and `run` read it, because labels are
 declared at enrollment. A minimal file with one service:
 
@@ -118,7 +118,7 @@ credential, the node checks the policy, and the proxy adds the key on the way
 out. If the backend itself requires a credential, put it in a file and name
 the file in `target_auth_path`. A bare token is sent as
 `Authorization: Bearer`, and a `user:pass` pair as HTTP Basic. This is a
-file and not an inline value because `sam-node.yaml` is copied into
+file and not an inline value because `agentmesh-node.yaml` is copied into
 ConfigMaps and repositories. For the same reason, a URL with embedded
 credentials is refused.
 
@@ -173,7 +173,7 @@ Post it to the control plane, or paste it into the console's policy editor:
 
 ```bash
 curl -fsS -X POST https://mesh.example.com/policies \
-  -H "Authorization: Bearer $SAM_ADMIN_TOKEN" \
+  -H "Authorization: Bearer $AGENTMESH_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   --data @policy.json
 ```
@@ -247,6 +247,6 @@ target is wrong. The node's log names the check that failed.
 ## Kubernetes
 
 On Kubernetes a service is a pod with your backend container and a
-`sam-node` sidecar, deployed with the `charts/sam-node` Helm chart; the
+`agentmesh-node` sidecar, deployed with the `charts/agentmesh-node` Helm chart; the
 `config:` value is this file. The [Kubernetes guide](../kubernetes/) covers
 it.

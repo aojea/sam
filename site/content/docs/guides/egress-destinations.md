@@ -6,7 +6,7 @@ weight: 3
 
 An agentic application calls APIs that are not on the mesh: a source
 forge, a ticketing system, an internal REST service, a model provider. This
-guide puts a `sam-node` in front of such a destination as a policy
+guide puts a `agentmesh-node` in front of such a destination as a policy
 enforcement point. The application changes one base URL. The admin writes
 one policy document. The node decides every request on the method, the
 path and the caller, holds the credential the destination needs, and keeps
@@ -57,7 +57,7 @@ may call it and how.
 - `egress[].name` is the destination hostname. It is the service name in
   grants (`egress://api.github.com`) and the name a caller looks up.
 - `egress[].credential` is a name, never a value. The serving node reads
-  the file `/etc/sam/secrets/github-eu` (or under `--secrets-dir`) and
+  the file `/etc/agentmesh/secrets/github-eu` (or under `--secrets-dir`) and
   presents its content as `Authorization: Bearer <content>`; `user:pass`
   is sent as HTTP Basic. Whatever puts secrets in files on the host, a
   Kubernetes Secret volume, a vault agent, a secrets-store CSI driver,
@@ -80,7 +80,7 @@ curl -sS -X POST "$CONTROL_PLANE/policies" \
 
 ## What the node does
 
-Nothing in `sam-node.yaml` changes, and `type: egress` is refused there. A
+Nothing in `agentmesh-node.yaml` changes, and `type: egress` is refused there. A
 node holding the `pep` role pulls its assignments from the control plane on
 the same schedule as the mesh policy, and sooner when the policy changes.
 For each destination that selects it, the node registers the service,
@@ -107,7 +107,7 @@ bearer, in the place it would hold a provider key:
 
 ```bash
 export GITHUB_API_URL=http://127.0.0.1:8080/egress/api.github.com
-export GITHUB_TOKEN=$(cat /etc/sam/api-token)
+export GITHUB_TOKEN=$(cat /etc/agentmesh/api-token)
 ```
 
 A request then travels like this:
@@ -120,13 +120,13 @@ node       accepts the API token; drops it
                   path("/repos/acme/dubbing/pulls") host("api.github.com") port(443)
            authorizes on its own credential, with its attenuation
            GET https://api.github.com/repos/acme/dubbing/pulls?state=open
-           Authorization: Bearer <content of /etc/sam/secrets/github-eu>
+           Authorization: Bearer <content of /etc/agentmesh/secrets/github-eu>
 ```
 
 The destination sees the node's credential and none of the application's
 headers (`Authorization`, `Cookie`, `X-*`). A `403` is a policy decision; a
 `404` is a destination this node was not assigned. Both carry
-`Proxy-Status: sam-node; error=...`, so your client can tell them from an
+`Proxy-Status: agentmesh-node; error=...`, so your client can tell them from an
 answer the destination sent.
 
 Every decision, allowed or denied, is one `Audit Traceability` line in the
@@ -140,10 +140,10 @@ without reading logs:
 
 | Metric | Labels | Counts |
 |---|---|---|
-| `sam_node_egress_decisions_total` | `destination`, `outcome` | requests for a destination, by outcome: `allow`, `deny`, `not_assigned` (the node does not serve that name) and `credential_unavailable` (the credential file could not be read when the request arrived) |
-| `sam_node_egress_assignments_total` | `outcome` | assignments applied from the control plane: `registered`, `withdrawn` and `refused` |
+| `agentmesh_node_egress_decisions_total` | `destination`, `outcome` | requests for a destination, by outcome: `allow`, `deny`, `not_assigned` (the node does not serve that name) and `credential_unavailable` (the credential file could not be read when the request arrived) |
+| `agentmesh_node_egress_assignments_total` | `outcome` | assignments applied from the control plane: `registered`, `withdrawn` and `refused` |
 
-`sam_node_services_registered{type="egress"}` is the number of destinations
+`agentmesh_node_services_registered{type="egress"}` is the number of destinations
 the node serves right now. A `refused` assignment or a `credential_unavailable`
 decision means the platform did not deliver a credential the policy names.
 
@@ -168,7 +168,7 @@ the same path, and `403` on `GET /user`.
 ## Narrowing on the node
 
 The serving node's operator can refuse what the mesh policy allows, in
-`sam-node.yaml`. The request facts are available there. The dialect has no
+`agentmesh-node.yaml`. The request facts are available there. The dialect has no
 `!=`; a negation is `!`:
 
 ```yaml

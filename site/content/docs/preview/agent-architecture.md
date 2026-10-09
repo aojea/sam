@@ -6,7 +6,7 @@ aliases:
   - /docs/agent-architecture/
 ---
 
-This page explains how SAM authenticates workloads and users, scopes authority
+This page explains how Agent Mesh authenticates workloads and users, scopes authority
 to individual tasks and sub-agent hops, integrates with existing gateways and
 sandbox runtimes, and brokers short-lived credentials to external cloud APIs
 without placing standing cloud credentials inside the agent environment.
@@ -15,23 +15,23 @@ without placing standing cloud credentials inside the agent environment.
 
 ![The Agent Mesh as a courier network](/images/agent-mesh-courier.svg)
 
-SAM moves tasks between environments that trust nothing on arrival, the way a
+Agent Mesh moves tasks between environments that trust nothing on arrival, the way a
 courier network moves parcels between post offices:
 
-| In the picture | In SAM |
+| In the picture | In Agent Mesh |
 |---|---|
 | **Parcel** | One request: an MCP tool call, a chat completion, a BigQuery query, an A2A message. |
 | **Sender** | The agent wherever it runs: a developer laptop, Kubernetes on premises or in a cloud, a SaaS platform, or a sandbox runtime. |
-| **Local post office** | The `sam-node` next to the agent, or the native SDK (`@sam-mesh/sdk`, `sam-mesh`) inside its process. It verifies the sender's platform credential and obtains a task waybill from the control plane. |
-| **Your gateway** | Istio, `agentgateway`, Envoy AI Gateway, or `kgateway` where a cluster already runs one. It stays in the data path and consults `sam-node` over Envoy `ext_proc`, `ext_authz`, or RFC 8693 `/oauth/token`. |
-| **Waybill** | The SAM Biscuit credential: who the subject is, through which actor node it travels, which roles it holds, and when it expires. |
+| **Local post office** | The `agentmesh-node` next to the agent, or the native SDK (`@agentmesh-p2p/sdk`, `agentmesh-p2p`) inside its process. It verifies the sender's platform credential and obtains a task waybill from the control plane. |
+| **Your gateway** | Istio, `agentgateway`, Envoy AI Gateway, or `kgateway` where a cluster already runs one. It stays in the data path and consults `agentmesh-node` over Envoy `ext_proc`, `ext_authz`, or RFC 8693 `/oauth/token`. |
+| **Waybill** | The Agent Mesh Biscuit credential: who the subject is, through which actor node it travels, which roles it holds, and when it expires. |
 | **Stamp** | An offline attenuation block (`tar_block`) appended at a task or sub-agent hop. Each stamp carries a serialized `TaskAuthorizationRule` and can only narrow authority. |
 | **Sealed bag** | The mutually authenticated, encrypted libp2p stream between two nodes. Routers relay ciphertext across NATs, clusters, and clouds and cannot inspect it. |
-| **Registry** | `sam-control-plane`: verifies identities, issues Biscuits (`POST /token/exchange`), distributes Datalog policy, and acts as an OIDC issuer (`POST /sts/token`, `/.well-known/openid-configuration`, `/jwks`) for outbound cloud federation. |
-| **Destination office** | The serving or egress `sam-node` for `mcp://`, `inference://`, `a2a://`, or `egress://`: verifies the Biscuit and every `tar_block` stamp, runs content inspection, brokers the upstream credential, and delivers the request. |
+| **Registry** | `agentmesh-control-plane`: verifies identities, issues Biscuits (`POST /token/exchange`), distributes Datalog policy, and acts as an OIDC issuer (`POST /sts/token`, `/.well-known/openid-configuration`, `/jwks`) for outbound cloud federation. |
+| **Destination office** | The serving or egress `agentmesh-node` for `mcp://`, `inference://`, `a2a://`, or `egress://`: verifies the Biscuit and every `tar_block` stamp, runs content inspection, brokers the upstream credential, and delivers the request. |
 | **Customs** | Content inspection at the egress node: built-in policy facts, Google Cloud Model Armor, and Envoy `ext_proc` callout processors. |
 | **Permit** | The upstream destination credential: a federated cloud token exchanged via `CloudTokenExchanger` or a secret from the node's vault, never held by the agent. |
-| **Receipts** | Structured audit logs at the control plane, the origin and egress nodes, and the cloud provider, joined by principal and `sam_task`. |
+| **Receipts** | Structured audit logs at the control plane, the origin and egress nodes, and the cloud provider, joined by principal and `mesh_task`. |
 
 ## Why workload identity alone is not enough
 
@@ -52,7 +52,7 @@ SPIFFE SVID). Workload identity is necessary, but insufficient for AI agents:
    (`Token_2 = Attenuate(Token_1, TaskRule)`) without minting a new identity at
    the identity provider on every hop.
 
-SAM separates the two layers:
+Agent Mesh separates the two layers:
 
 | Layer | Question answered | Primitive |
 |---|---|---|
@@ -64,16 +64,16 @@ SAM separates the two layers:
 OS and container confinement belongs to the sandbox platform (**Kubernetes
 `agent-sandbox`**, **NVIDIA OpenShell**, **Docker Sandbox `docker sbx`**).
 Local traffic interception belongs to the proxy (**`agentgateway`**, **Istio**,
-**Envoy**, or **`sam-node`**). SAM provides:
+**Envoy**, or **`agentmesh-node`**). Agent Mesh provides:
 
-- **`sam-control-plane`**: the mesh authority, Datalog policy distributor,
+- **`agentmesh-control-plane`**: the mesh authority, Datalog policy distributor,
   OAuth 2.1 Authorization Server, stateless token exchanger
   (`POST /token/exchange`), and OIDC issuer (`POST /sts/token`) for cloud
   federation.
-- **`sam-node`**: the Policy Decision Point (PDP), RFC 8693 Security Token
+- **`agentmesh-node`**: the Policy Decision Point (PDP), RFC 8693 Security Token
   Service (`POST /oauth/token`), Envoy `ext_authz` and `ext_proc` server, mesh
   router client, and egress credential broker.
-- **Native SDKs (`@sam-mesh/sdk`, `sam-mesh`)**: in-process mesh clients for
+- **Native SDKs (`@agentmesh-p2p/sdk`, `agentmesh-p2p`)**: in-process mesh clients for
   TypeScript and Python that enroll, open authenticated streams, verify peers,
   and attenuate and seal task credentials in memory (`session.attenuate(rule)`,
   `session.seal()`).
@@ -81,11 +81,11 @@ Local traffic interception belongs to the proxy (**`agentgateway`**, **Istio**,
 ## The two-token model: Biscuit inside, JWT at both borders
 
 Inside the mesh, every credential is a Biscuit. External identity providers and
-cloud APIs speak standard JWTs and OAuth 2.1 / RFC 8693. SAM translates at both
+cloud APIs speak standard JWTs and OAuth 2.1 / RFC 8693. Agent Mesh translates at both
 borders:
 
 1. **Inbound border (`POST /token/exchange` on the control plane, `POST /oauth/token` on the node):**
-   The origin `sam-node` presents its own node Biscuit, a proof-of-possession
+   The origin `agentmesh-node` presents its own node Biscuit, a proof-of-possession
    signature over `mesh:token-exchange:<peer_id>:<challenge_unix_ms>`, and the
    caller's `subject_token` (an OIDC JWT, Kubernetes projected SA token, or
    SPIFFE JWT-SVID). The control plane verifies both, resolves the caller's
@@ -102,19 +102,19 @@ borders:
    optionally seals the token (`Seal()`) so downstream leaf processes cannot
    append further blocks.
 3. **Outbound border (`POST /sts/token` + `CloudTokenExchanger`):**
-   When a request reaches an egress `sam-node` (`egress://<destination>`), the
+   When a request reaches an egress `agentmesh-node` (`egress://<destination>`), the
    node verifies the Biscuit signature, channel binding, standing Datalog
    policy, and every appended `TaskAuthorizationRule`. On a cache miss for the
    Biscuit digest, it calls `POST /sts/token` on the control plane, which
    re-verifies the token and mints a short-lived **ES256 JWT** (`iss` = control
    plane, `sub` = caller principal, `act.sub` = egress node peer ID, `aud` =
-   destination audience, `sam_roles` = caller roles, `sam_task` = innermost
+   destination audience, `mesh_roles` = caller roles, `mesh_task` = innermost
    task name). The egress node's `CloudTokenExchanger` exchanges that JWT at
    the cloud provider's STS endpoint.
 
 ## Safe Biscuit attenuation (`tar_block`)
 
-SAM never evaluates holder-authored Datalog rules or checks. In `biscuit-go`,
+Agent Mesh never evaluates holder-authored Datalog rules or checks. In `biscuit-go`,
 Datalog `check if` queries are not bounded by rule-iteration limits, and
 allowing both Datalog checks and a serialized protobuf in an appended block
 would let a crafted token make the mesh PEP and the cloud STS adapter disagree.
@@ -154,13 +154,13 @@ Each `TaskRule` scopes:
 
 ## Gateway integration (`agentgateway`, Istio, Envoy)
 
-Where a cluster already runs Envoy, Istio, or `agentgateway`, `sam-node` acts
+Where a cluster already runs Envoy, Istio, or `agentgateway`, `agentmesh-node` acts
 as their external Policy Decision Point and Token Service over three standard
 interfaces:
 
 1. **Envoy `ext_authz` (on the local API listeners):** evaluates standing
    policy and `tar_block` chains on incoming `CheckRequest` calls. The caller
-   presents a Biscuit, or a platform JWT that `sam-node` exchanges at the
+   presents a Biscuit, or a platform JWT that `agentmesh-node` exchanges at the
    control plane into a delegated Biscuit. On `OK` it returns `X-Mesh-Biscuit`,
    `X-Mesh-Principal`, `X-Mesh-Roles`, `X-Mesh-Task-Id` and, for `egress://`
    targets with a credential broker, the brokered `Authorization` header.
@@ -216,7 +216,7 @@ reach an external service:
 - **Named TCP tunnels (`mode: EGRESS_MODE_TCP`):**
   For non-HTTP TLS protocols (PostgreSQL, Cloud SQL, AlloyDB, Redis, SSH), the
   egress node exposes named `CONNECT host:port` tunnels and the local
-  `sam-node forward egress://<name>:<port> <local-addr>` port forwarder. The
+  `agentmesh-node forward egress://<name>:<port> <local-addr>` port forwarder. The
   egress node enforces the destination's `ports` allow-list and inspects the
   TLS `ClientHello` before splicing, refusing connections whose SNI does not
   match the authorized destination name or that hide the SNI with Encrypted
@@ -224,13 +224,13 @@ reach an external service:
 
 ## Control-plane STS sizing
 
-`sam-node` caches exchanged Delegated Biscuits by `SHA-256(subject_jwt + tar)`
+`agentmesh-node` caches exchanged Delegated Biscuits by `SHA-256(subject_jwt + tar)`
 and caches minted border JWTs and upstream cloud tokens by Biscuit digest,
 keeping the control plane off the per-request hot path. You can measure raw
 control-plane mint throughput and node cache hit rates on your hardware with:
 
 ```bash
-sam-bench sts --requests 200 --concurrency 8 --warmup 10
+agentmesh-bench sts --requests 200 --concurrency 8 --warmup 10
 ```
 
 On a standard development workstation (8 concurrent workers, SQLite store):

@@ -10,7 +10,7 @@ The mesh policy is one document held by the control plane: a list of roles,
 a list of bindings and a list of egress destinations. It is posted as JSON
 (protojson of `PolicyConfig` in `api/agentmesh.proto`) to `POST /policies`, read
 back from `GET /admin/policy`, edited in the console, or given to
-`sam-one --policy-file` for first boot.
+`agentmesh-one --policy-file` for first boot.
 
 ```json
 {
@@ -36,7 +36,7 @@ back from `GET /admin/policy`, edited in the console, or given to
     }
   ],
   "bindings": [
-    { "role": "mesh:role:node", "members": ["group:engineering", "user:system:serviceaccount:sam-nodes:calc-mcp-sam-node"] },
+    { "role": "mesh:role:node", "members": ["group:engineering", "user:system:serviceaccount:agentmesh-nodes:calc-mcp-agentmesh-node"] },
     { "role": "developer",     "members": ["group:engineering"] },
     { "role": "analyst",       "members": ["group:analytics"] }
   ],
@@ -47,7 +47,7 @@ back from `GET /admin/policy`, edited in the console, or given to
       "broker": {
         "oidc_federation": {
           "token_endpoint": "https://sts.googleapis.com/v1/token",
-          "audience": "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/sam/providers/sam-cp",
+          "audience": "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/agentmesh/providers/agentmesh-cp",
           "scopes": ["https://www.googleapis.com/auth/bigquery.readonly"]
         }
       }
@@ -193,7 +193,7 @@ a single trailing `*` (prefix match, compiled to `$v.starts_with("<prefix>")`)
 or a single leading `*` (suffix match, compiled to `$v.ends_with("<suffix>")`),
 for example:
 
-- `user:system:serviceaccount:sam-nodes:*`
+- `user:system:serviceaccount:agentmesh-nodes:*`
 - `user:spiffe://acme.example/ns/prod/*`
 - `email:*@my-project.iam.gserviceaccount.com`
 
@@ -214,7 +214,7 @@ An entry of `egress` is a destination outside the mesh that selected nodes
 serve as `egress://<name>`. The admin writes it once; each selected node
 receives it at `GET /egress`, registers the service, announces it on the DHT
 and forwards requests to it. Nodes hold no egress configuration of their
-own, and `type: egress` in `sam-node.yaml` is refused.
+own, and `type: egress` in `agentmesh-node.yaml` is refused.
 
 | Field | Meaning |
 |---|---|
@@ -234,7 +234,7 @@ own, and `type: egress` in `sam-node.yaml` is refused.
 None of the fields in `broker` is a secret value:
 
 - **`static_secret`** (`string`): name of a file in the node's `--secrets-dir`
-  (default `/etc/sam/secrets`). `TOKEN` is sent as `Authorization: Bearer TOKEN`,
+  (default `/etc/agentmesh/secrets`). `TOKEN` is sent as `Authorization: Bearer TOKEN`,
   `user:pass` as HTTP Basic. Read on every request so file rotations apply
   immediately.
 - **`oidc_federation`** (`OIDCFederation`): mints a short-lived ES256 border
@@ -336,7 +336,7 @@ At the destination node, in this order:
 
 ## Datalog vocabulary
 
-Every fact name used by SAM, for writing `custom_datalog` or `attenuation`
+Every fact name used by Agent Mesh, for writing `custom_datalog` or `attenuation`
 statements.
 
 | Fact | Terms | Minted by |

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="google/sam"
+REPO="google/agentmesh"
 INSTALL_DIR="/usr/local/bin"
 
-echo "Installing SAM from $REPO..."
+echo "Installing Agent Mesh from $REPO..."
 
 # Get OS and Arch
 OS="$(uname -s)"
@@ -37,7 +37,7 @@ fi
 echo "Found latest version: ${VERSION}"
 
 # Construct download URL (matches goreleaser name template)
-TAR_NAME="sam_${OS_NAME}_${ARCH_NAME}.tar.gz"
+TAR_NAME="agentmesh_${OS_NAME}_${ARCH_NAME}.tar.gz"
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${TAR_NAME}"
 CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
 
@@ -82,14 +82,14 @@ tar -xzf "${TAR_NAME}"
 
 echo "Installing to ${INSTALL_DIR} (may require sudo)..."
 INSTALLED_BINS=()
-for b in sam-one sam-node sam-control-plane sam-router mcp-client sam-console; do
+for b in agentmesh-one agentmesh-node agentmesh-control-plane agentmesh-router mcp-client agentmesh-console; do
     if [ -f "$b" ]; then
         INSTALLED_BINS+=("$b")
     fi
 done
 
 if [ ${#INSTALLED_BINS[@]} -eq 0 ]; then
-    echo "Error: No SAM binaries found in release archive."
+    echo "Error: No Agent Mesh binaries found in release archive."
     exit 1
 fi
 
@@ -103,5 +103,5 @@ fi
 cd - > /dev/null
 rm -rf "$TMP_DIR"
 
-echo "Successfully installed SAM (${VERSION}) to ${INSTALL_DIR}"
-echo "Run 'sam-node --help' to get started."
+echo "Successfully installed Agent Mesh (${VERSION}) to ${INSTALL_DIR}"
+echo "Run 'agentmesh-node --help' to get started."

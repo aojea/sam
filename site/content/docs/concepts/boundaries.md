@@ -25,7 +25,7 @@ deployment and the mechanism that enforces each of them.
 - **Revocation.** A ban takes effect on the next credential refresh (within
   the credential TTL, 24 hours by default) and, through the mesh event
   channel, immediately on every connected node.
-- **Where the software runs.** SAM is Apache-2.0, sends no telemetry, and
+- **Where the software runs.** Agent Mesh is Apache-2.0, sends no telemetry, and
   does not depend on any hosted service. The control plane, routers and
   nodes run wherever you put them: a laptop, a private cluster, an
   air-gapped network.

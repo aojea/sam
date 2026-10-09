@@ -6,10 +6,10 @@ aliases:
   - /docs/development/testnet-validation/
 ---
 
-The local API that `sam-node run` serves to agents, gateways, and scripts on
+The local API that `agentmesh-node run` serves to agents, gateways, and scripts on
 the same machine or cluster. It is available on TCP (`--bind-addr`, default
 `127.0.0.1:8080`) and on a Unix socket (`--socket-path`, default
-`<data-dir>/sam.sock`). The Envoy `ext_authz` and `ext_proc` endpoints are
+`<data-dir>/agentmesh.sock`). The Envoy `ext_authz` and `ext_proc` endpoints are
 served on the same listeners.
 
 ## Authentication
@@ -17,26 +17,26 @@ served on the same listeners.
 | Listener | Requirement |
 |---|---|
 | TCP (`--bind-addr`) | `X-Mesh-Authentication: Bearer <token>` on every request, or `Authorization: Bearer <token>` on non-proxy endpoints (`/mcp`, `/v1/*`, `/egress/*`, `/oauth/*`), or a client certificate when `--tls-ca` is set. |
-| Unix socket (`--socket-path`) | None required for node-level access (the socket has mode `0600`). A caller may still pass a SAM Task Biscuit or platform JWT in `X-Mesh-Authentication` or `Authorization` to scope the request to that caller's identity and task rules. |
+| Unix socket (`--socket-path`) | None required for node-level access (the socket has mode `0600`). A caller may still pass a Agent Mesh Task Biscuit or platform JWT in `X-Mesh-Authentication` or `Authorization` to scope the request to that caller's identity and task rules. |
 
-The bearer `<token>` accepted by `sam-node` can be:
+The bearer `<token>` accepted by `agentmesh-node` can be:
 
-1. **The node's static API token** (`--api-token-path` or `SAM_API_TOKEN`),
+1. **The node's static API token** (`--api-token-path` or `AGENTMESH_API_TOKEN`),
    which exercises the node's own enrolled credential.
-2. **A SAM Biscuit** (a Member Biscuit, a Delegated Session Biscuit, or a
+2. **A Agent Mesh Biscuit** (a Member Biscuit, a Delegated Session Biscuit, or a
    task-attenuated Biscuit with `tar_block` blocks), base64-encoded.
 3. **An external platform JWT** (an OIDC ID token, Kubernetes projected service
-   account token, or SPIFFE JWT-SVID). On `/mcp`, `/v1/*`, `/sam/*` (via
-   `X-Mesh-Authentication`), and `/egress/*`, `sam-node` exchanges the JWT via
+   account token, or SPIFFE JWT-SVID). On `/mcp`, `/v1/*`, `/mesh/*` (via
+   `X-Mesh-Authentication`), and `/egress/*`, `agentmesh-node` exchanges the JWT via
    the control plane's stateless `POST /token/exchange` endpoint (cached until
    expiry) and forwards the resulting Delegated Session Biscuit.
 
 On `/mesh/{peer-id}/{type}/{name}/...`, the `Authorization` header is reserved
 exclusively for the destination service's own credential and passes through
-untouched; callers of `/sam/...` pass their SAM token or platform JWT in
+untouched; callers of `/mesh/...` pass their Agent Mesh token or platform JWT in
 `X-Mesh-Authentication: Bearer <token>`.
 
-When a request on TCP fails authentication with `401 Unauthorized`, `sam-node`
+When a request on TCP fails authentication with `401 Unauthorized`, `agentmesh-node`
 includes `WWW-Authenticate: Bearer resource_metadata="http://<host>/.well-known/oauth-protected-resource"`
 per RFC 9728 so standard MCP OAuth 2.1 clients can discover the control plane
 Authorization Server.
@@ -46,10 +46,10 @@ Authorization Server.
 | Route | Auth | Purpose |
 |---|---|---|
 | `GET /healthz`, `GET /readyz` | none | `200` while the process is up. Every other route except `/debug/*` and `/.well-known/*` answers `503` until the node is connected to the mesh. |
-| `GET /.well-known/oauth-protected-resource` | none | RFC 9728 OAuth 2.1 Protected Resource Metadata naming the SAM control plane in `authorization_servers`. |
+| `GET /.well-known/oauth-protected-resource` | none | RFC 9728 OAuth 2.1 Protected Resource Metadata naming the Agent Mesh control plane in `authorization_servers`. |
 | `POST /oauth/token` | token | RFC 8693 Token Exchange: exchanges a platform JWT or Biscuit into a Delegated or Task-Attenuated Biscuit. See [Token exchange (`/oauth/token`)](#token-exchange-oauthtoken). |
 | `POST /oauth/revoke` | token | RFC 7009 Token Revocation: revokes a task Biscuit in this node's local revocation cache. |
-| `GET /metrics` | token | Prometheus metrics (`sam_node_*`). |
+| `GET /metrics` | token | Prometheus metrics (`agentmesh_node_*`). |
 | `POST /mcp` | token | The MCP server (Streamable HTTP, sessionless: no `Mcp-Session-Id`, `GET` answers `405`). `/` is an alias. |
 | `GET /v1/models` | token | Models served by every reachable inference provider. |
 | `POST /v1/chat/completions`, `POST /v1/completions` | token | OpenAI-compatible inference, routed to a provider of the requested model. |
@@ -85,7 +85,7 @@ revocation ID in the node's local revocation cache until the token expires.
 
 ## Envoy `ext_authz` and `ext_proc` gateway integration
 
-On the local API listeners, `sam-node` serves:
+On the local API listeners, `agentmesh-node` serves:
 
 - **Envoy HTTP `ext_authz` (`/ext_authz`, `/ext_authz/*`)** and **gRPC
   `envoy.service.auth.v3.Authorization/Check`**: evaluates standing Datalog
@@ -173,7 +173,7 @@ Returns `description`, `input_schema` and `output_schema`.
 | `required_labels` | `key=value[,key=value]`. The call is refused unless the peer's credential attests every one of them. |
 
 Returns the tool's result content. If the caller authenticated with a
-Delegated or Task-Attenuated Biscuit, `sam-node` forwards that Biscuit on the
+Delegated or Task-Attenuated Biscuit, `agentmesh-node` forwards that Biscuit on the
 mesh stream so the provider enforces the caller's roles and `tar_block` tool
 restrictions. A policy denial comes back as a tool error that the caller can
 read, not as a transport failure.
@@ -182,7 +182,7 @@ read, not as a transport failure.
 
 A node that starts without a credential and without a way to enroll serves
 a reduced MCP server with one tool, `get_login_instructions`, and one
-prompt, `help_user_login`. Both tell the client to run `sam-node join`.
+prompt, `help_user_login`. Both tell the client to run `agentmesh-node join`.
 
 ## Service discovery over HTTP
 
@@ -217,7 +217,7 @@ and `.well-known/agent-card.json` is rewritten for the mesh.
 An MCP session with a remote service, without using the node's own tools:
 
 ```bash
-SOCK=~/.config/sam-mesh/sam.sock
+SOCK=~/.config/agentmesh/agentmesh.sock
 URL=http://localhost/mesh/<peer-id>/mcp/everything
 
 # initialize; the Mcp-Session-Id response header identifies the session
@@ -307,7 +307,7 @@ control plane assigned to this node (an entry of the
 curl -s --unix-socket $SOCK "http://localhost/egress/api.github.com/repos/acme/dubbing/pulls?state=open"
 ```
 
-`403` is a policy or inspection decision (`Proxy-Status: sam-node; error=http_request_denied`).
+`403` is a policy or inspection decision (`Proxy-Status: agentmesh-node; error=http_request_denied`).
 `404` is a destination the control plane did not assign to this node
 (`error=destination_not_found`). A destination whose broker cannot obtain a
 credential answers `502` with `error=proxy_configuration_error`. The same
@@ -315,16 +315,16 @@ destination is reachable from another mesh member at
 `/mesh/<peer-id>/egress/<destination>/<path>` on that member's node, authorized
 on the caller's Biscuit.
 
-### Named TCP tunnels (`CONNECT` and `sam-node forward`)
+### Named TCP tunnels (`CONNECT` and `agentmesh-node forward`)
 
 For destinations with `mode: EGRESS_MODE_TCP` and an allowed `ports` list, the
 node accepts HTTP `CONNECT <destination>:<port>` on its local listener and
 verifies that the TLS `ClientHello` SNI matches `<destination>` (and does not
 use Encrypted Client Hello) before splicing the stream to the remote egress
-node. Clients that do not speak `CONNECT` can use `sam-node forward`:
+node. Clients that do not speak `CONNECT` can use `agentmesh-node forward`:
 
 ```bash
-sam-node forward egress://pg.internal.example:5432 127.0.0.1:15432
+agentmesh-node forward egress://pg.internal.example:5432 127.0.0.1:15432
 ```
 
 ## Identity evidence
@@ -341,5 +341,5 @@ material is meant for the node's owner and for auditors, not for agents.
 `GET /debug/mesh-info`, `GET /debug/connectivity`, `GET /debug/network-info`,
 `GET /debug/token-info`, `GET /debug/logs` and `POST /debug/connect-peer`
 report and probe the node's view of the mesh for troubleshooting, and answer
-even while the mesh is unreachable. `sam-node debug` on the command line
+even while the mesh is unreachable. `agentmesh-node debug` on the command line
 wraps them. Their output is not stable across releases.

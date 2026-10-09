@@ -6,45 +6,45 @@ aliases:
   - /docs/user/cloud-run-deployment/
 ---
 
-`sam-one` serves its HTTP API, the web console, and the router's WebSocket
+`agentmesh-one` serves its HTTP API, the web console, and the router's WebSocket
 transport on a single port (`8080`), and ships as a pre-built container image
-(`ghcr.io/google/sam-one:latest`). Because `sam-one` automatically infers its
+(`ghcr.io/google/agentmesh-one:latest`). Because `agentmesh-one` automatically infers its
 public `wss://` router address from Cloud Run's `Host` and `X-Forwarded-Proto`
 headers on `/info` and `/enroll` and derives a deterministic router `PeerID`
-from `SAM_ADMIN_TOKEN`, you can deploy a standalone control plane and router to
+from `AGENTMESH_ADMIN_TOKEN`, you can deploy a standalone control plane and router to
 Google Cloud Run in a single command.
 
 *(Note: For multi-cloud VM deployments on GCP, AWS, Azure, OCI, or Kubernetes,
 see the [SkyPilot guide](../skypilot/).)*
 
-## 1. Deploy `sam-one` to Cloud Run
+## 1. Deploy `agentmesh-one` to Cloud Run
 
 ```bash
 PROJECT=my-gcp-project
 REGION=us-central1
 JOIN_TOKEN="mesh_tok_$(openssl rand -hex 16)"
-ADMIN_TOKEN="sam_adm_$(openssl rand -hex 16)"
+ADMIN_TOKEN="mesh_adm_$(openssl rand -hex 16)"
 
-gcloud run deploy sam-one \
+gcloud run deploy agentmesh-one \
   --project "$PROJECT" --region "$REGION" \
-  --image ghcr.io/google/sam-one:latest \
+  --image ghcr.io/google/agentmesh-one:latest \
   --allow-unauthenticated \
   --min-instances 1 --max-instances 1 \
   --port 8080 \
   --no-cpu-throttling \
   --timeout 3600 \
-  --set-env-vars "SAM_TOKEN=${JOIN_TOKEN},SAM_ADMIN_TOKEN=${ADMIN_TOKEN}"
+  --set-env-vars "AGENTMESH_TOKEN=${JOIN_TOKEN},AGENTMESH_ADMIN_TOKEN=${ADMIN_TOKEN}"
 ```
 
 ### Production persistence with PostgreSQL
 
 By default, Cloud Run's container filesystem is in-memory. When an instance
-restarts, `sam-one` preserves its router `PeerID` (derived from
-`SAM_ADMIN_TOKEN`) and pinned tokens (`SAM_TOKEN`, `SAM_ADMIN_TOKEN`), and
+restarts, `agentmesh-one` preserves its router `PeerID` (derived from
+`AGENTMESH_ADMIN_TOKEN`) and pinned tokens (`AGENTMESH_TOKEN`, `AGENTMESH_ADMIN_TOKEN`), and
 active nodes re-enroll automatically.
 
 For full state durability across container revisions and restarts (preserving
-enrolled peers, minted tokens, and console policy edits), connect `sam-one` to
+enrolled peers, minted tokens, and console policy edits), connect `agentmesh-one` to
 a PostgreSQL database (such as Cloud SQL, AlloyDB, or a serverless Postgres
 instance for testing):
 
@@ -70,14 +70,14 @@ Why each Cloud Run flag matters:
 `gcloud run deploy` prints your `Service URL` when deployment completes:
 
 ```text
-Service [sam-one] revision [sam-one-00001-xxx] has been deployed and is serving 100 percent of traffic.
-Service URL: https://sam-one-628944397724.us-central1.run.app
+Service [agentmesh-one] revision [agentmesh-one-00001-xxx] has been deployed and is serving 100 percent of traffic.
+Service URL: https://agentmesh-one-628944397724.us-central1.run.app
 ```
 
 You can also query it at any time:
 
 ```bash
-URL=$(gcloud run services describe sam-one --project "$PROJECT" --region "$REGION" \
+URL=$(gcloud run services describe agentmesh-one --project "$PROJECT" --region "$REGION" \
   --format='value(status.url)')
 curl -s "$URL/readyz"   # {"status":"ready"}
 ```
@@ -87,7 +87,7 @@ curl -s "$URL/readyz"   # {"status":"ready"}
 Once your control plane URL (`$URL`) is ready, verify end-to-end service
 discovery, Biscuit authorization, and WebSocket relay routing across two nodes:
 
-1. **Save the bootstrap token** (or mint one with `sam-one token create`):
+1. **Save the bootstrap token** (or mint one with `agentmesh-one token create`):
    ```bash
    echo -n "$JOIN_TOKEN" > join-token
    ```
@@ -101,31 +101,31 @@ discovery, Biscuit authorization, and WebSocket relay routing across two nodes:
        target_url: "http://127.0.0.1:11434"
    EOF
 
-   sam-node run --control-plane "$URL" \
+   agentmesh-node run --control-plane "$URL" \
      --bootstrap-token-path join-token \
      --config node-a.yaml --data-dir ~/node-a --bind-addr=
    ```
 3. **Start Node B and call Node A's service through the mesh**:
    ```bash
-   sam-node run --control-plane "$URL" \
+   agentmesh-node run --control-plane "$URL" \
      --bootstrap-token-path join-token \
      --data-dir ~/node-b --bind-addr=
 
-   curl -s --unix-socket ~/node-b/sam.sock http://localhost/v1/models
-   curl -s --unix-socket ~/node-b/sam.sock http://localhost/v1/chat/completions \
+   curl -s --unix-socket ~/node-b/agentmesh.sock http://localhost/v1/models
+   curl -s --unix-socket ~/node-b/agentmesh.sock http://localhost/v1/chat/completions \
      -H 'Content-Type: application/json' \
      -d '{"model":"gemma3:1b","messages":[{"role":"user","content":"Ping across the mesh"}]}'
    ```
 
 ## 4. Administer from your workstation
 
-`sam-one` is also the admin client. With `SAM_ADMIN_TOKEN` exported:
+`agentmesh-one` is also the admin client. With `AGENTMESH_ADMIN_TOKEN` exported:
 
 ```bash
-export SAM_ADMIN_TOKEN="$ADMIN_TOKEN"
-sam-one token create --server "$URL" --role mesh:role:node --max-usages 1
-sam-one token qr     --server "$URL"
-sam-one token list   --server "$URL"
-sam-one token revoke <token-id> --server "$URL"
-sam-one admin ban <peer-id>     --server "$URL"
+export AGENTMESH_ADMIN_TOKEN="$ADMIN_TOKEN"
+agentmesh-one token create --server "$URL" --role mesh:role:node --max-usages 1
+agentmesh-one token qr     --server "$URL"
+agentmesh-one token list   --server "$URL"
+agentmesh-one token revoke <token-id> --server "$URL"
+agentmesh-one admin ban <peer-id>     --server "$URL"
 ```

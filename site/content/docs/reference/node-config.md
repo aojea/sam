@@ -6,10 +6,10 @@ aliases:
   - /docs/user/node-configuration/
 ---
 
-`sam-node.yaml` declares what a node is (labels), what it publishes
+`agentmesh-node.yaml` declares what a node is (labels), what it publishes
 (services), what it requires from callers (attenuation) and what it requires
-from providers (egress). Both `sam-node join` and `sam-node run` read it from
-`--config`, by default `./sam-node.yaml`. A missing file means an empty
+from providers (egress). Both `agentmesh-node join` and `agentmesh-node run` read it from
+`--config`, by default `./agentmesh-node.yaml`. A missing file means an empty
 configuration. Unknown keys are an error, because a typo under `attenuation`
 would otherwise weaken the node without notice.
 
@@ -33,7 +33,7 @@ services:
   - type: inference
     name: vllm
     target_url: "http://127.0.0.1:8000"
-    target_auth_path: /etc/sam/vllm-key
+    target_auth_path: /etc/agentmesh/vllm-key
   - type: a2a
     name: triage
     target_url: "http://127.0.0.1:9999"
@@ -154,6 +154,6 @@ floor.
 
 ## Kubernetes
 
-The `sam-node` Helm chart renders its `config:` value as this file and
+The `agentmesh-node` Helm chart renders its `config:` value as this file and
 restarts the pod when it changes. Because the backend runs in the same pod,
 `target_url` there is always `http://127.0.0.1:<port>`.

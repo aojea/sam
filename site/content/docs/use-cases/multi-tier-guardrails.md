@@ -14,9 +14,9 @@ When every developer and team starts shipping AI agents, organizations hit a gov
 2. **Platform & Networking Engineers** want persistent logical service names (`a2a://support.acme`) that survive replica swaps across environments without static proxy limits.
 3. **Central Security (CISO)** wants an organization-wide policy floor, automated quality gates before an agent can serve production (`env=staging` $\rightarrow$ `env=prod`), and zero raw API credentials inside agent containers.
 4. **Department Leads & Individual End-Users** want to narrow what an agent can do on *their* infrastructure or on *their* behalf—even when the organization's baseline policy allows it.
-5. **Day-2 Operations (SRE)** needs a correlated audit trail across every hop and a 1-command kill-switch (`sam-one admin ban`) if a peer misbehaves.
+5. **Day-2 Operations (SRE)** needs a correlated audit trail across every hop and a 1-command kill-switch (`agentmesh-one admin ban`) if a peer misbehaves.
 
-The runnable example in [`development/examples/multi-tier-guardrails/`](https://github.com/google/sam/tree/main/development/examples/multi-tier-guardrails) walks through all five personas in four acts using **real backends** and zero changes to SAM's core code:
+The runnable example in [`development/examples/multi-tier-guardrails/`](https://github.com/google/agentmesh/tree/main/development/examples/multi-tier-guardrails) walks through all five personas in four acts using **real backends** and zero changes to Agent Mesh's core code:
 
 - **Real Local LLM (`gemma3:1b` via Ollama):** Powers the Support A2A replicas (`support_agent.py`) over an OpenAI-compatible `/v1/chat/completions` endpoint.
 - **Real A2A 1.0 SDK (`a2a-sdk`):** Both `support_agent.py` (server) and `a2a_client.py` (client) use the official [`a2a-sdk`](https://pypi.org/project/a2a-sdk/) with SQLite-backed conversation history keyed by `contextId`.
@@ -27,13 +27,13 @@ The runnable example in [`development/examples/multi-tier-guardrails/`](https://
 
 ## The 5 Personas in One Mesh
 
-| Persona | What They Control in SAM | Mechanism Used in This Example |
+| Persona | What They Control in Agent Mesh | Mechanism Used in This Example |
 | :--- | :--- | :--- |
-| **1. Agent Developer (Alice)** | Onboarding & iterating on `a2a://support.acme` (`support_agent.py`) | Enrolls `sam-node` in `env=staging` quarantine; zero code changes to promote to `env=prod` |
+| **1. Agent Developer (Alice)** | Onboarding & iterating on `a2a://support.acme` (`support_agent.py`) | Enrolls `agentmesh-node` in `env=staging` quarantine; zero code changes to promote to `env=prod` |
 | **2. Platform / Networking** | Service discovery, outbound floor & replica lifecycle | Input-node `egress.require_labels: {env: prod}`, logical URI `a2a://support.acme`, and `contextId` continuity from Laptop (`v1`) to Cloud Run (`v2`) |
 | **3. Central Security (CISO)** | Org-wide baseline RBAC, Quality Gate & Secret Brokering | Control-plane `policy.json` (`allowed_labels`, HTTP method/path rules on `egress://api.github.com`, `secret_ref: github-ro`) |
 | **4. Department Lead & End-User** | Local team gate + per-task tool narrowing | Egress-node `attenuation` (`check if label("team", "support");`) + RFC 8693 `/oauth/token` minting a sealed Task Biscuit (`tar_block`) |
-| **5. Day-2 Operations (SRE)** | Real-time audit correlation & incident response | Structured `ALLOW`/`DENY` audit stream (`audit.py`) + instant mesh-wide revocation (`sam-one admin ban`) |
+| **5. Day-2 Operations (SRE)** | Real-time audit correlation & incident response | Structured `ALLOW`/`DENY` audit stream (`audit.py`) + instant mesh-wide revocation (`agentmesh-one admin ban`) |
 
 ---
 
@@ -41,7 +41,7 @@ The runnable example in [`development/examples/multi-tier-guardrails/`](https://
 
 When watching Alice configure `labels:` in `node-v1.yaml` or a caller send `X-Mesh-Required-Labels`, a natural question arises: *"Can a developer or agent just set arbitrary labels to influence security policy?"*
 
-No. In SAM, labels operate at **three distinct points** with clear separation of authority:
+No. In Agent Mesh, labels operate at **three distinct points** with clear separation of authority:
 
 1. **Mesh Enforcement (Control Plane `policy.json` $\rightarrow$ `allowed_labels`):**
    A node's YAML file (`labels:`) is only a **request** at enrollment time. The Control Plane validates every requested label against the role's `allowed_labels` in `policy.json` before cryptographically signing `label("k", "v")` facts into the node's authority Biscuit. If Alice tries to self-assert `env: prod` before passing the Quality Gate, enrollment is rejected (`Label not permitted: label "env=prod" is not permitted by this role's allowed_labels`).
@@ -73,7 +73,7 @@ Pass `--interactive` to step through the four acts one `ENTER` at a time during 
 ### Act 1: Developer Onboarding into Quarantine (`env=staging`) & Quality Gate Promotion
 *(Personas: Agent Developer Alice + Central Security / Platform)*
 
-Alice starts her `sam-node` fronting `a2a://support.acme` (`support_agent.py` backed by `gemma3:1b`) and `mcp://orders-db` (`orders_mcp.py` backed by SQLite). Her node config (`node-v1.yaml`) declares `env: staging`, and the initial control-plane policy (`policy.json`) only permits `env=staging`.
+Alice starts her `agentmesh-node` fronting `a2a://support.acme` (`support_agent.py` backed by `gemma3:1b`) and `mcp://orders-db` (`orders_mcp.py` backed by SQLite). Her node config (`node-v1.yaml`) declares `env: staging`, and the initial control-plane policy (`policy.json`) only permits `env=staging`.
 
 Right here, the demo shows both **Mesh Enforcement** and **Input Node Enforcement**:
 - If Alice tries to join with `env: prod` in her YAML before passing the Quality Gate, the Control Plane rejects enrollment:
@@ -81,7 +81,7 @@ Right here, the demo shows both **Mesh Enforcement** and **Input Node Enforcemen
 - While Alice's node is in `env=staging`, a plain request through the Input Node (`node-caller.yaml`, which enforces `egress.require_labels: { env: prod }`) is blocked even when the app sends no label headers:
   `HTTP 403 — Required labels not attested by provider`
 
-Next, the automated Quality Gate fetches Alice's Agent Card in `env=staging`, verifies that it conforms to the A2A 1.0 schema and declares the expected skills (`order_lookup`, `refund_triage`), and promotes the policy and node to `env=prod`. Retrying the exact same production request now succeeds with `200 OK` and rewrites `supportedInterfaces[0].url` to point at the caller's local SAM proxy.
+Next, the automated Quality Gate fetches Alice's Agent Card in `env=staging`, verifies that it conforms to the A2A 1.0 schema and declares the expected skills (`order_lookup`, `refund_triage`), and promotes the policy and node to `env=prod`. Retrying the exact same production request now succeeds with `200 OK` and rewrites `supportedInterfaces[0].url` to point at the caller's local Agent Mesh proxy.
 
 ---
 
@@ -99,7 +99,7 @@ Callers address the agent by its logical mesh name (`a2a://support.acme`), never
 ### Act 3: The 3-Tier Guardrail Hierarchy
 *(Personas: Central Security, Department Lead, and Individual End-User)*
 
-SAM enforces the **strict intersection** of three independent guardrail layers:
+Agent Mesh enforces the **strict intersection** of three independent guardrail layers:
 
 ```
 Effective Permission = (Layer 1: Central Security Block 0 Policy)
@@ -108,10 +108,10 @@ Effective Permission = (Layer 1: Central Security Block 0 Policy)
 ```
 
 #### Layer 1 — Central Security (Org Baseline & Secret Broker)
-In `policy.json`, Central Security assigns `egress://api.github.com` (`https://api.github.com`) to nodes labelled `team=support` with `secret_ref: "github-ro"`, and restricts callers to `GET /repos/google/sam/pulls*`:
+In `policy.json`, Central Security assigns `egress://api.github.com` (`https://api.github.com`) to nodes labelled `team=support` with `secret_ref: "github-ro"`, and restricts callers to `GET /repos/google/agentmesh/pulls*`:
 
-* `GET /repos/google/sam/pulls?state=open&per_page=1` $\rightarrow$ **`200 OK`** (the hosting node injects the read-only GitHub token from `secrets/github-ro`; the caller never holds the credential).
-* `POST /repos/google/sam/pulls` $\rightarrow$ **`403 Forbidden`** (blocked by the Block 0 HTTP rule before GitHub ever receives the request).
+* `GET /repos/google/agentmesh/pulls?state=open&per_page=1` $\rightarrow$ **`200 OK`** (the hosting node injects the read-only GitHub token from `secrets/github-ro`; the caller never holds the credential).
+* `POST /repos/google/agentmesh/pulls` $\rightarrow$ **`403 Forbidden`** (blocked by the Block 0 HTTP rule before GitHub ever receives the request).
 
 #### Layer 2 — Department Lead (Egress-Node Positive Label Enforcement)
 Central Security's org-wide policy allows `mesh:role:node` to reach `mcp://orders-db`. However, the Support Department Lead adds a local positive label check in `node-v1.yaml`:
@@ -158,8 +158,8 @@ Every `ALLOW` and `DENY` across all three layers is emitted as a structured JSON
 ```text
 ALLOW mesh:role:node 12D3KooW… GET /.well-known/agent-card.json   a2a://support.acme
 ALLOW mesh:role:node 12D3KooW… POST /                             a2a://support.acme
-ALLOW mesh:role:node 12D3KooW… GET /repos/google/sam/pulls        egress://api.github.com
-DENY  -             12D3KooW… POST /repos/google/sam/pulls       egress://api.github.com
+ALLOW mesh:role:node 12D3KooW… GET /repos/google/agentmesh/pulls        egress://api.github.com
+DENY  -             12D3KooW… POST /repos/google/agentmesh/pulls       egress://api.github.com
 DENY  -             12D3KooW… /mesh/mcp/1.0.0                     mcp://orders-db
 ALLOW mesh:role:node 12D3KooW… /mesh/mcp/1.0.0                     mcp://orders-db
 ```
@@ -167,5 +167,5 @@ ALLOW mesh:role:node 12D3KooW… /mesh/mcp/1.0.0                     mcp://order
 Finally, if Day-2 Operations detects repeated policy violations from the contractor peer, a single command revokes that peer's identity across the entire mesh:
 
 ```bash
-./bin/sam-one admin ban <contractor-peer-id> --server $CP_URL --data-dir $WORK_DIR/one
+./bin/agentmesh-one admin ban <contractor-peer-id> --server $CP_URL --data-dir $WORK_DIR/one
 ```

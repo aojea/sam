@@ -13,14 +13,14 @@ one safely, you need two things that work together:
 1. **OS and network confinement**, provided by a dedicated sandbox runtime
    (NVIDIA OpenShell, Kubernetes `agent-sandbox` with gVisor or Kata, or Docker
    Sandbox `docker sbx`), so the process can only talk to the local gateway.
-2. **Task-scoped authorization and credential brokering**, provided by SAM
-   (`sam-node` or `agentgateway` + `sam-node`), so the sandbox never holds a
+2. **Task-scoped authorization and credential brokering**, provided by Agent Mesh
+   (`agentmesh-node` or `agentgateway` + `agentmesh-node`), so the sandbox never holds a
    standing cloud credential or ambient workload token and can only call the
    services, MCP tools, HTTP paths, and cloud resources permitted for its
    current task.
 
 This page shows the four deployment blueprints for connecting sandboxed agents
-and multi-hop sub-agents to a SAM mesh.
+and multi-hop sub-agents to a Agent Mesh.
 
 ## Blueprint 1: NVIDIA OpenShell (zero credentials inside the sandbox)
 
@@ -35,32 +35,32 @@ flowchart LR
   end
   subgraph Host["Host / Orchestrator Boundary"]
     OSProxy["OpenShell Egress Proxy<br/>& Secret Injector"]
-    SamNode["Local sam-node Gateway"]
+    AgentMeshNode["Local agentmesh-node Gateway"]
   end
-  Mesh(["SAM Mesh & Cloud Egress"])
+  Mesh(["Agent Mesh Mesh & Cloud Egress"])
 
-  Harness -- "Plain HTTP to sam-node:8080/mcp & /v1" --> OSProxy
-  OSProxy -- "Injects X-Mesh-Authentication:<br/>Bearer <Sealed-Task-Biscuit>" --> SamNode
-  SamNode -- "Verified Task Biscuit" --> Mesh
+  Harness -- "Plain HTTP to agentmesh-node:8080/mcp & /v1" --> OSProxy
+  OSProxy -- "Injects X-Mesh-Authentication:<br/>Bearer <Sealed-Task-Biscuit>" --> AgentMeshNode
+  AgentMeshNode -- "Verified Task Biscuit" --> Mesh
 ```
 
 1. **Mint and seal a task token before starting the task:**
-   The orchestrator calls `POST /oauth/token` on the local `sam-node` with a
+   The orchestrator calls `POST /oauth/token` on the local `agentmesh-node` with a
    `TaskAuthorizationRule` (and `seal=true`), receiving a **sealed Task
    Biscuit** scoped to the single task:
    ```bash
-   TASK_TOKEN=$(curl -sS --unix-socket ~/.config/sam-mesh/sam.sock \
+   TASK_TOKEN=$(curl -sS --unix-socket ~/.config/agentmesh/agentmesh.sock \
      http://localhost/oauth/token \
      -d 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
      -d 'subject_token_type=urn:agentmesh:params:oauth:token-type:biscuit' \
-     -d "subject_token=$(jq -r .biscuit ~/.config/sam-mesh/credential.json 2>/dev/null || true)" \
+     -d "subject_token=$(jq -r .biscuit ~/.config/agentmesh/credential.json 2>/dev/null || true)" \
      -d 'seal=true' \
      --data-urlencode 'options={"name":"tasks/pr-review-42","rules":[{"allowed_services":["mcp://github","inference://*"],"operation":{"allowed_tools":["get_pull_request","list_PullRequest_files"]}}]}' \
      | jq -r .access_token)
    ```
 2. **Register the sealed token in OpenShell's proxy:**
    Configure OpenShell's secret injector to attach
-   `X-Mesh-Authentication: Bearer $TASK_TOKEN` on requests to `sam-node:8080`.
+   `X-Mesh-Authentication: Bearer $TASK_TOKEN` on requests to `agentmesh-node:8080`.
    The sandboxed process has no credential in its environment variables or
    filesystem.
 
@@ -68,39 +68,39 @@ flowchart LR
 
 In `docker sbx` (local microVM) and Kubernetes `agent-sandbox`
 (`RuntimeClass: gvisor` or `kata`) without an external header-injecting proxy,
-the sandbox container authenticates to `sam-node` using a task token passed as
+the sandbox container authenticates to `agentmesh-node` using a task token passed as
 `OPENAI_API_KEY` / `Authorization: Bearer <token>` (for `/mcp` and `/v1/*`) or
-`X-Mesh-Authentication: Bearer <token>` (for `/sam/*` and `/egress/*`).
+`X-Mesh-Authentication: Bearer <token>` (for `/mesh/*` and `/egress/*`).
 
-### How SAM bounds the token held by the sandbox
+### How Agent Mesh bounds the token held by the sandbox
 
 1. **Sealed leaf token (`Seal()`):** The orchestrator hands the sandbox a
    sealed, task-attenuated Biscuit. The sandbox cannot append blocks or widen
    its permissions.
 2. **Channel binding (`client_peer_id`):** The Biscuit's authority block binds
-   `client_peer_id` to the local or cluster `sam-node`'s `peer_id`. If a
+   `client_peer_id` to the local or cluster `agentmesh-node`'s `peer_id`. If a
    prompt-injected agent exfiltrates the token to an external attacker, the
    token is rejected by every other node in the mesh because the attacker
    cannot authenticate over libp2p as that `peer_id`.
 3. **Short TTL and explicit revocation on exit:** Scope the task's
    `expire_time` to the expected task duration (for example, 15 minutes) and
-   revoke it on `sam-node` (`POST /oauth/revoke`) as soon as the sandbox exits:
+   revoke it on `agentmesh-node` (`POST /oauth/revoke`) as soon as the sandbox exits:
    ```bash
-   curl -sS --unix-socket ~/.config/sam-mesh/sam.sock \
+   curl -sS --unix-socket ~/.config/agentmesh/agentmesh.sock \
      http://localhost/oauth/revoke \
      -d "token=$TASK_TOKEN"
    ```
 4. **Standard Kubernetes isolation (`RuntimeClass: gvisor` + `NetworkPolicy`):**
    No `/dev/net/tun`, `CAP_NET_ADMIN`, or custom PID 1 wrapper is needed. The
    sandbox pod runs unprivileged under `gvisor` or `kata`, and a standard
-   Kubernetes `NetworkPolicy` restricts its egress to the cluster `sam-node`
+   Kubernetes `NetworkPolicy` restricts its egress to the cluster `agentmesh-node`
    (or `agentgateway`) Service:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: sandbox-to-sam-node-only
+  name: sandbox-to-agentmesh-node-only
   namespace: agents
 spec:
   podSelector:
@@ -111,10 +111,10 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: sam-system
+              kubernetes.io/metadata.name: agentmesh-system
           podSelector:
             matchLabels:
-              app: sam-node
+              app: agentmesh-node
       ports:
         - protocol: TCP
           port: 8080
@@ -124,20 +124,20 @@ spec:
 
 In clusters that already route agent traffic through **`agentgateway`**,
 **Istio Ambient** (waypoints or sidecars), or **Envoy AI Gateway**, traffic
-continues to flow through those proxies while `sam-node` serves as the Policy
+continues to flow through those proxies while `agentmesh-node` serves as the Policy
 Decision Point and Token Service:
 
 - **Envoy `ext_authz` and `ext_proc` (on the local API listeners):**
   Istio `AuthorizationPolicy (action: CUSTOM)` or `agentgateway` calls
-  `sam-node` with the caller's Biscuit, or with a platform JWT that
-  `sam-node` exchanges at the control plane into a delegated Biscuit.
-  `sam-node` evaluates the standing Datalog policy and any
+  `agentmesh-node` with the caller's Biscuit, or with a platform JWT that
+  `agentmesh-node` exchanges at the control plane into a delegated Biscuit.
+  `agentmesh-node` evaluates the standing Datalog policy and any
   `TaskAuthorizationRule` chain (including MCP tool names in JSON-RPC bodies
   via `ext_proc`), and for `egress://` targets injects the brokered upstream
   credential into `Authorization` before the gateway forwards the request.
 - **RFC 8693 backend token exchange (`POST /oauth/token`):**
   `agentgateway`'s built-in RFC 8693 token exchange policy can point directly
-  at `http://sam-node:8080/oauth/token` to exchange workload JWTs or narrow
+  at `http://agentmesh-node:8080/oauth/token` to exchange workload JWTs or narrow
   existing Biscuits per route.
 
 ## Blueprint 4: Multi-hop sub-agent delegation and cloud egress
@@ -145,7 +145,7 @@ Decision Point and Token Service:
 When an agent delegates work to a sub-agent or calls a cloud API through an
 egress node (`egress://bigquery.googleapis.com`), it attenuates its credential
 offline in memory using the TypeScript or Python SDK (or `POST /oauth/token` on
-`sam-node`).
+`agentmesh-node`).
 
 ### Example: two-hop attenuation in Python
 
@@ -214,7 +214,7 @@ hop2_session = hop1_session.attenuate(
 ```typescript
 import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
-import { TaskAuthorizationRuleSchema } from "@sam-mesh/sdk/gen/agentmesh_pb.ts";
+import { TaskAuthorizationRuleSchema } from "@agentmesh-p2p/sdk/gen/agentmesh_pb.ts";
 
 const hop1 = session.attenuate(
   create(TaskAuthorizationRuleSchema, {
@@ -245,7 +245,7 @@ const leafSession = hop1
 ```
 
 When `hop2_session` calls `egress://bigquery.googleapis.com`, the egress
-`sam-node` verifies the Control Plane signature, the standing policy, and the
+`agentmesh-node` verifies the Control Plane signature, the standing policy, and the
 intersection of `TAR_1` and `TAR_2`, mints an ES256 border JWT at the control
 plane (`POST /sts/token`), and exchanges it via `CloudTokenExchanger` for a
 downscoped cloud token.

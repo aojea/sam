@@ -38,9 +38,9 @@ on one host.
 One real mesh (control plane, router, node) on a kind cluster, as in the
 end-to-end suite. Boundaries were attached to the node one at a time, as
 host processes and not as containers, because the question is what
-`sam-box` costs. A container would measure the container runtime.
+`agentmesh-box` costs. A container would measure the container runtime.
 
-The load generator, `sam-bench`, issues the same request every time
+The load generator, `agentmesh-bench`, issues the same request every time
 (`GET /v1/models`) and enters the mesh in the same way an agent does,
 through the boundary's socket. Each step of the sweep was measured in four
 conditions:
@@ -127,23 +127,23 @@ dialled.
 
 ## Experiment 2: a thousand agents on one host
 
-One `n2-standard-64`, one `sam-node` enrolled in the public `bananas`
+One `n2-standard-64`, one `agentmesh-node` enrolled in the public `bananas`
 testnet, and a thousand agents. Each agent is a Firecracker microVM with no
-network device, and it reaches the mesh through its own `sam-box` over
+network device, and it reaches the mesh through its own `agentmesh-box` over
 vsock. The agent is the example harness: connect, discover tools, attempt a
 model call, stop. Raw samples are in
-[`tests/scale/results/fleet-1k`](https://github.com/google/sam/tree/main/tests/scale/results/fleet-1k).
+[`tests/scale/results/fleet-1k`](https://github.com/google/agentmesh/tree/main/tests/scale/results/fleet-1k).
 
 ### Cost
 
 | | total | per agent |
 |---|---|---|
 | guest microVMs | 162.7 GiB | **167 MiB** |
-| boundaries (`sam-box`) | 24.6 GiB | **25 MiB** |
+| boundaries (`agentmesh-box`) | 24.6 GiB | **25 MiB** |
 | node (one, for all) | 386 MiB | 0.4 MiB |
 | **together** | **187 GiB of 251 GiB** | **192 MiB** |
 
-The node figure is the one that matters for the design. One `sam-node`
+The node figure is the one that matters for the design. One `agentmesh-node`
 served a thousand distinct agent principals in 386 MB, because an agent is
 not a peer. It has no enrollment, no key and no place in the DHT. The mesh
 gained a thousand principals and no members.
@@ -164,7 +164,7 @@ as it was started:
 
 Agents trail microVMs by a few seconds and never by more than about fifty.
 That gap is a guest booting and resolving its first mesh name, and not a
-queue forming. `sam_node_agents_untracked_total` was 0, so the thousand is a
+queue forming. `agentmesh_node_agents_untracked_total` was 0, so the thousand is a
 count and not a limit.
 
 ### Throughput
@@ -211,7 +211,7 @@ instead of sharing one.
 
 Separately, one sandbox was booted and asked what the mesh would give it. The
 sandbox was a microVM with no network device, no API key, no model endpoint
-and no tool server address. It had only `mesh.sam.alt` to ask.
+and no tool server address. It had only `mesh.alt` to ask.
 
 | | |
 |---|---|
@@ -273,10 +273,10 @@ short:
 ./tests/scale/run-density.sh --steps 1,2,4,8,16,32,64 --requests 500
 
 # Experiment 2: a host with KVM, a TUN-capable guest kernel, a bootstrap token
-./scripts/provision-scale-vm.sh --no-spot --local-binaries gs://your-bucket/sam
+./scripts/provision-scale-vm.sh --no-spot --local-binaries gs://your-bucket/agentmesh
 # then on the host
 SANDBOX_LINGER=2400 /opt/microvm/launch-microvms.sh 1000
-/opt/microvm/collect-fleet.sh --node-socket /var/run/sam-node.sock --duration 1500
+/opt/microvm/collect-fleet.sh --node-socket /var/run/agentmesh-node.sock --duration 1500
 ```
 
 Results land in `tests/scale/results/` with `environment.json`, the raw
@@ -284,10 +284,10 @@ observations and a rendered `table.md`. Single measurements by hand:
 
 ```bash
 # through a boundary, as an agent would
-sam-bench run --socket /run/agent.sock --target http://mesh.sam.alt/v1/models \
+agentmesh-bench run --socket /run/agent.sock --target http://mesh.alt/v1/models \
   --requests 500 --concurrency 4 --scrape http://127.0.0.1:9600/metrics
 
 # the same request with no boundary, for the baseline
-sam-bench run --target-unix /run/node.sock --target http://localhost/v1/models \
+agentmesh-bench run --target-unix /run/node.sock --target http://localhost/v1/models \
   --requests 500 --concurrency 4
 ```

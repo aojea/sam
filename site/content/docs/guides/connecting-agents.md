@@ -12,26 +12,26 @@ aliases:
   - /docs/integrations/vscode-copilot/
 ---
 
-An agent uses the mesh through the `sam-node` that runs on its own machine.
+An agent uses the mesh through the `agentmesh-node` that runs on its own machine.
 The node is an MCP server, so you can point any MCP client at it. This guide
 gives the configuration for the common clients and explains what the agent
 gets.
 
 ## What every client needs
 
-Three values, all printed by `sam-node run --daemonize`:
+Three values, all printed by `agentmesh-node run --daemonize`:
 
 - **The endpoint**: `http://127.0.0.1:8080/mcp` (Streamable HTTP).
-- **The token**: the contents of `~/.config/sam-mesh/api-token`, or the
-  `SAM_API_TOKEN` you started the node with. It goes in the header
+- **The token**: the contents of `~/.config/agentmesh/api-token`, or the
+  `AGENTMESH_API_TOKEN` you started the node with. It goes in the header
   `X-Mesh-Authentication: Bearer <token>`.
-- **The socket**: `~/.config/sam-mesh/sam.sock`. Anything the agent runs in a
+- **The socket**: `~/.config/agentmesh/agentmesh.sock`. Anything the agent runs in a
   shell can use the socket without a token. This is the easier way to reach
   the node's `/v1` inference endpoint from scripts.
 
 The node must be running before the client starts. MCP clients start and
-manage stdio servers themselves, but `sam-node` is an HTTP server that they
-connect to. You can run `sam-node run --daemonize` as often as you like, so it
+manage stdio servers themselves, but `agentmesh-node` is an HTTP server that they
+connect to. You can run `agentmesh-node run --daemonize` as often as you like, so it
 is safe to put it in a shell profile or to let the agent run it.
 
 ## What the agent gets
@@ -69,24 +69,24 @@ come back with an `error` field next to the good ones.
 ## The skill
 
 Tools tell an agent what it can do. A skill tells it when and how to use
-them. `sam-node` ships one:
+them. `agentmesh-node` ships one:
 
 ```bash
-sam-node skill install            # ~/.claude/skills/sam-mesh/ and ~/.gemini/config/skills/sam-mesh/
-sam-node skill install --project  # ./.claude/skills/ and ./.agents/skills/ in the current repository
-sam-node skill install --dir DIR  # anywhere else
-sam-node skill list               # where it is installed and whether it is current
-sam-node skill show               # print it, for a harness with its own layout
+agentmesh-node skill install            # ~/.claude/skills/agentmesh/ and ~/.gemini/config/skills/agentmesh/
+agentmesh-node skill install --project  # ./.claude/skills/ and ./.agents/skills/ in the current repository
+agentmesh-node skill install --dir DIR  # anywhere else
+agentmesh-node skill list               # where it is installed and whether it is current
+agentmesh-node skill show               # print it, for a harness with its own layout
 ```
 
-Reinstall the skill after you upgrade `sam-node`. `list` says `outdated` when
+Reinstall the skill after you upgrade `agentmesh-node`. `list` says `outdated` when
 the installed copy differs from the one in the binary. Restart the client
 afterwards so that it loads both the skill and the tools.
 
 ## Claude Code
 
 ```bash
-claude mcp add --transport http sam-mesh http://127.0.0.1:8080/mcp \
+claude mcp add --transport http agentmesh http://127.0.0.1:8080/mcp \
   --header "X-Mesh-Authentication: Bearer <token>"
 ```
 
@@ -97,7 +97,7 @@ The equivalent file entry, where `type` is required:
 ```json
 {
   "mcpServers": {
-    "sam-mesh": {
+    "agentmesh": {
       "type": "http",
       "url": "http://127.0.0.1:8080/mcp",
       "headers": { "X-Mesh-Authentication": "Bearer <token>" }
@@ -108,7 +108,7 @@ The equivalent file entry, where `type` is required:
 
 `claude mcp list` should report the server as connected. Tools load at
 session start. `/mcp` inside a session shows them, and `/skills` shows
-`sam-mesh` once the skill is installed.
+`agentmesh-p2p` once the skill is installed.
 
 ## Google Antigravity
 
@@ -117,7 +117,7 @@ Add to `~/.gemini/config/mcp_config.json`:
 ```json
 {
   "mcpServers": {
-    "sam-mesh": {
+    "agentmesh": {
       "serverUrl": "http://127.0.0.1:8080/mcp",
       "headers": { "X-Mesh-Authentication": "Bearer <token>" }
     }
@@ -125,7 +125,7 @@ Add to `~/.gemini/config/mcp_config.json`:
 }
 ```
 
-Antigravity picks up the change without a restart. `sam-node skill install`
+Antigravity picks up the change without a restart. `agentmesh-node skill install`
 writes the skill to Antigravity's global skills directory. `--project` writes
 it to `.agents/skills/` in the workspace instead.
 
@@ -137,14 +137,14 @@ and keeps it in its secret store, so the file is safe to commit:
 ```json
 {
   "inputs": [
-    { "type": "promptString", "id": "sam-api-token",
-      "description": "SAM node API token", "password": true }
+    { "type": "promptString", "id": "agentmesh-api-token",
+      "description": "Agent Mesh node API token", "password": true }
   ],
   "servers": {
-    "sam-mesh": {
+    "agentmesh": {
       "type": "http",
       "url": "http://127.0.0.1:8080/mcp",
-      "headers": { "X-Mesh-Authentication": "Bearer ${input:sam-api-token}" }
+      "headers": { "X-Mesh-Authentication": "Bearer ${input:agentmesh-api-token}" }
     }
   }
 }
@@ -155,7 +155,7 @@ use the **Start** action shown above the entry, or run **MCP: List Servers**
 from the command palette. A server listed as stopped was read correctly and
 is waiting to be started. If you entered a wrong token, clear it with
 **MCP: Reset Cached Tokens**. New tools may not appear in a chat that is
-already in progress. Start a new chat and check that `sam-mesh` is ticked in
+already in progress. Start a new chat and check that `agentmesh-p2p` is ticked in
 the tools picker. To use the server in all workspaces, put the same JSON in
 the user-level configuration (**MCP: Open User Configuration**). Copilot
 reads `~/.claude/skills/`, so the default skill install applies.
@@ -171,7 +171,7 @@ macOS, `%APPDATA%\Claude\` on Windows):
 ```json
 {
   "mcpServers": {
-    "sam-mesh": {
+    "agentmesh": {
       "command": "npx",
       "args": [
         "mcp-remote", "http://127.0.0.1:8080/mcp", "--allow-http",
@@ -190,7 +190,7 @@ connectors" cannot reach a node on your machine, so use the bridge.
 ## OpenClaw
 
 ```bash
-openclaw mcp set sam-mesh '{
+openclaw mcp set agentmesh '{
   "url": "http://127.0.0.1:8080/mcp",
   "headers": { "X-Mesh-Authentication": "Bearer <token>" }
 }'
@@ -221,7 +221,7 @@ version of this example. For inference, point any OpenAI SDK at
 no key.
 
 Native SDKs that join the mesh from inside the agent process, without a
-`sam-node` sidecar, are being built under `sdk/` in the repository; see
+`agentmesh-node` sidecar, are being built under `sdk/` in the repository; see
 `sdk/README.md` for their status.
 
 ## A note on trust

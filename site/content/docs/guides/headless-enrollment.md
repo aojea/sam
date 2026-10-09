@@ -26,17 +26,17 @@ plane's audience:
 
 ```yaml
 volumes:
-  - name: sam-token
+  - name: agentmesh-token
     projected:
       sources:
         - serviceAccountToken:
-            path: sam-token
+            path: agentmesh-token
             expirationSeconds: 3600
             audience: agentmesh-audience
 ```
 
 ```bash
-sam-node run --control-plane https://mesh.example.com --jwt-path /var/run/secrets/tokens/sam-token
+agentmesh-node run --control-plane https://mesh.example.com --jwt-path /var/run/secrets/tokens/agentmesh-token
 ```
 
 List the cluster's issuer in `--issuer` (`controlPlane.oidcIssuer` in the Helm
@@ -45,17 +45,17 @@ chart) and the audience in `--allowed-audiences`; add the cluster issuer to
 tokens off `/user/*` and `/oauth/authorize`. Bind either a specific service
 account (`user:system:serviceaccount:<namespace>:<name>`) or a namespace prefix
 (`user:system:serviceaccount:<namespace>:*`) to `mesh:role:node`. Routers enroll
-the same way with `sam-router --jwt-path`. The [Kubernetes guide](../kubernetes/)
+the same way with `agentmesh-router --jwt-path`. The [Kubernetes guide](../kubernetes/)
 shows the complete setup.
 
 ### GCE VMs and Cloud Run (`--cloud-provider`)
 
 On Compute Engine and Cloud Run there is no Kubernetes projected volume, so
-`sam-node` can fetch an OIDC identity token directly from the instance
+`agentmesh-node` can fetch an OIDC identity token directly from the instance
 metadata server (`.../computeMetadata/v1/instance/service-accounts/default/identity?audience=<aud>&format=full`):
 
 ```bash
-sam-node run --control-plane https://mesh.example.com --cloud-provider gcp
+agentmesh-node run --control-plane https://mesh.example.com --cloud-provider gcp
 ```
 
 `--cloud-provider auto` probes the metadata server at startup and uses it
@@ -68,7 +68,7 @@ both GCE and Cloud Run are treated as workload tokens while human Google
 accounts remain able to use `/user/*` and `/oauth/authorize`:
 
 ```bash
-sam-control-plane \
+agentmesh-control-plane \
   --issuer https://accounts.google.com \
   --workload-issuer https://accounts.google.com=.gserviceaccount.com \
   --allowed-audiences agentmesh-audience
@@ -81,18 +81,18 @@ example, `email:*@my-project.iam.gserviceaccount.com`) to `mesh:role:node`.
 
 For VMs and bare metal running SPIRE (or multi-cluster meshes sharing a
 SPIFFE trust domain), run [`spiffe-helper`](https://github.com/spiffe/spiffe-helper)
-beside `sam-node` to fetch a JWT-SVID from the SPIFFE Workload API and keep
+beside `agentmesh-node` to fetch a JWT-SVID from the SPIFFE Workload API and keep
 the file at `--jwt-path` rotated across the SVID's lifetime:
 
 ```hcl
 # spiffe-helper.conf
 agent_address = "/run/spire/sockets/agent.sock"
-cert_dir      = "/run/sam"
+cert_dir      = "/run/agentmesh"
 jwt_svids     = [{ jwt_audience = "agentmesh-audience", jwt_svid_file_name = "jwt_svid.token" }]
 ```
 
 ```bash
-sam-node run --control-plane https://mesh.example.com --jwt-path /run/sam/jwt_svid.token
+agentmesh-node run --control-plane https://mesh.example.com --jwt-path /run/agentmesh/jwt_svid.token
 ```
 
 List the SPIRE OIDC Discovery Provider URL in `--issuer` and `--workload-issuer`
@@ -103,7 +103,7 @@ on the control plane, and bind the SPIFFE ID or path prefix
 
 A workload with an OAuth client ID and secret can use the client-credentials
 grant instead, with `--oidc-issuer`, `--client-id` and
-`--client-secret-path` (or `SAM_CLIENT_SECRET`).
+`--client-secret-path` (or `AGENTMESH_CLIENT_SECRET`).
 
 ## With a bootstrap token
 
@@ -111,26 +111,26 @@ For a machine that has no identity of its own, an operator mints a token.
 
 ### 1. Mint
 
-Call the control plane API with the admin token. `sam-one` prints the admin
+Call the control plane API with the admin token. `agentmesh-one` prints the admin
 token at start and writes it to its data directory. A separate
-`sam-control-plane` reads it from the file given by `--admin-token-path` or
-from the `SAM_ADMIN_TOKEN` environment variable.
+`agentmesh-control-plane` reads it from the file given by `--admin-token-path` or
+from the `AGENTMESH_ADMIN_TOKEN` environment variable.
 
 ```bash
 curl -fsS -X POST https://mesh.example.com/admin/bootstrap-tokens \
-  -H "Authorization: Bearer $SAM_ADMIN_TOKEN" \
+  -H "Authorization: Bearer $AGENTMESH_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"role":"mesh:role:node","ttl_hours":24,"max_usages":1,"description":"build-runner-3"}'
 ```
 
 ```json
-{"id":"62e92ffca…","token":"sam-bt-72fb0175788dee0…","role":"mesh:role:node","expire_time":"2026-09-20T15:00:00Z"}
+{"id":"62e92ffca…","token":"mesh-bt-72fb0175788dee0…","role":"mesh:role:node","expire_time":"2026-09-20T15:00:00Z"}
 ```
 
 The plaintext `token` is shown once. The control plane keeps only its hash.
 `role` is the role that the token enrolls into (`mesh:role:router` for a
 router). `ttl_hours` defaults to 24 and `max_usages` to 1. The Bootstrap
-Tokens view in the console and `sam-one token create` do the same thing. An
+Tokens view in the console and `agentmesh-one token create` do the same thing. An
 OIDC user who is already enrolled can mint tokens for their own machines
 through `POST /user/bootstrap-tokens` with their ID token. Such tokens
 record the user as owner, and banning the user disables them.
@@ -142,27 +142,27 @@ the shell history.
 ### 2. Enroll
 
 ```bash
-sam-node join https://mesh.example.com --bootstrap-token-path /etc/sam/bootstrap-token
+agentmesh-node join https://mesh.example.com --bootstrap-token-path /etc/agentmesh/bootstrap-token
 ```
 
 or, to enroll and start in one step:
 
 ```bash
-sam-node run --control-plane https://mesh.example.com --bootstrap-token-path /etc/sam/bootstrap-token
+agentmesh-node run --control-plane https://mesh.example.com --bootstrap-token-path /etc/agentmesh/bootstrap-token
 ```
 
 The node submits its public key, the token, and a signature over a fresh
 challenge to `POST /enroll`. If the control plane runs with
-`--auto-approve-enrollment` (the default in the Helm chart and in `sam-one`),
+`--auto-approve-enrollment` (the default in the Helm chart and in `agentmesh-one`),
 the credential comes back immediately. Otherwise the request is queued and
 the node polls until an administrator decides.
 
 ### 3. Approve
 
 ```bash
-curl -fsS https://mesh.example.com/admin/enrollments -H "Authorization: Bearer $SAM_ADMIN_TOKEN"
+curl -fsS https://mesh.example.com/admin/enrollments -H "Authorization: Bearer $AGENTMESH_ADMIN_TOKEN"
 curl -fsS -X POST https://mesh.example.com/admin/enrollments/<request-id>/approve \
-  -H "Authorization: Bearer $SAM_ADMIN_TOKEN"
+  -H "Authorization: Bearer $AGENTMESH_ADMIN_TOKEN"
 ```
 
 `.../reject` refuses the request. The console lists pending requests with
@@ -182,7 +182,7 @@ The grant decides which labels a node may carry.
 
 ```bash
 curl -fsS -X DELETE https://mesh.example.com/admin/bootstrap-tokens/<id> \
-  -H "Authorization: Bearer $SAM_ADMIN_TOKEN"
+  -H "Authorization: Bearer $AGENTMESH_ADMIN_TOKEN"
 ```
 
 The token stays in the list, marked as revoked, so the record of what it
@@ -210,7 +210,7 @@ again on start when its `enroll` call is given a token, and otherwise
 fails with `CredentialRetiredError` naming the state directory. There are
 three ways out, in order of preference.
 
-**Enroll again.** Mint a new token and run `sam-node join` with it. The
+**Enroll again.** Mint a new token and run `agentmesh-node join` with it. The
 control plane already knows the peer ID, so it mints a new credential
 directly instead of queueing a new approval, as long as the token's role
 matches and the node is not banned. Each re-enrollment spends one token
@@ -233,7 +233,7 @@ afterwards:
 
 # on an enrolled node
 curl -fsS -X POST https://mesh.example.com/admin/nodes/<peer-id>/autonomous-recovery \
-  -H "Authorization: Bearer $SAM_ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $AGENTMESH_ADMIN_TOKEN" -H "Content-Type: application/json" \
   -d '{"enabled":true}'
 ```
 
@@ -246,11 +246,11 @@ machines are controlled in other ways.
 
 ```bash
 curl -fsS -X POST https://mesh.example.com/admin/revoke \
-  -H "Authorization: Bearer $SAM_ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $AGENTMESH_ADMIN_TOKEN" -H "Content-Type: application/json" \
   -d '{"peer_id":"12D3KooW…"}'
 ```
 
 The node's next refresh fails and its daemon exits. Connected peers drop it
 as soon as the ban event reaches them. `POST /admin/nodes/<peer-id>/unban`
-reverses the ban. `sam-control-plane admin ban --peer <id>` and `unban` do
+reverses the ban. `agentmesh-control-plane admin ban --peer <id>` and `unban` do
 the same directly in the database, for cases where the API is not reachable.

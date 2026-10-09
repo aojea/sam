@@ -1,16 +1,16 @@
 ---
-title: "sam-router"
-linkTitle: "sam-router"
+title: "agentmesh-router"
+linkTitle: "agentmesh-router"
 weight: 3
 ---
 
-`sam-router` is a libp2p peer with a stable identity that new nodes connect
+`agentmesh-router` is a libp2p peer with a stable identity that new nodes connect
 to first. It hosts the DHT, relays traffic between nodes that cannot reach
 each other, and forwards the control plane's signed events. It has no policy
 of its own.
 
 ```text
-sam-router [flags]
+agentmesh-router [flags]
 ```
 
 ## Enrollment
@@ -24,7 +24,7 @@ A router enrolls like a node, requesting `mesh:role:router`, with one of:
 | `--oidc-token`, `--bootstrap-token` | The same tokens as values. Visible in process listings. The file forms are preferred. |
 
 The mesh policy must bind the router's identity to `mesh:role:router`. The
-`sam-mesh` Helm chart handles this: its bootstrap job binds the router's
+`agentmesh-p2p` Helm chart handles this: its bootstrap job binds the router's
 service account and mints a bootstrap token with `max_usages` equal to the
 replica count.
 
@@ -80,20 +80,20 @@ The metrics address exposes, next to the Go runtime metrics:
 
 | Metric | Meaning |
 |---|---|
-| `sam_router_ready` | `1` once the router is enrolled and the host is up. |
-| `sam_router_draining` | `1` from the moment the router starts stopping until the process exits. |
-| `sam_router_connections{direction}` | Open connections, `inbound` and `outbound`. |
-| `sam_router_connection_watermark{level}` | The `low` and `high` watermarks in force. The gap between `inbound` connections and the `high` watermark is the free capacity. |
-| `sam_router_conns_per_source_ip_limit` | The per-address cap in force. |
-| `sam_router_relay_limit{limit}` | The relay budget in force: `reservations`, `reservations_per_ip` and `circuits_per_peer`. |
-| `sam_router_connected_peers`, `sam_router_authenticated_peers`, `sam_router_banned_peers` | Peers in each state. |
-| `sam_router_dht_routing_table_size` | DHT routing table size. |
-| `sam_router_auth_handshakes_total{result}`, `sam_router_lease_renewals_total{result}` | Handshakes and lease renewals by outcome. |
-| `sam_router_inbound_connections_refused_total` | Inbound connections refused by the per-address cap. |
-| `libp2p_relaysvc_*` | The relay service's own counters: `reservations_total{type}` and `connections_total{type}` (`opened`, `closed`, `renewed`), requests by response status, rejections and bytes relayed. The difference between `opened` and `closed` is the number in use; read it against `sam_router_relay_limit` to see how close the relay is to its budget. |
+| `agentmesh_router_ready` | `1` once the router is enrolled and the host is up. |
+| `agentmesh_router_draining` | `1` from the moment the router starts stopping until the process exits. |
+| `agentmesh_router_connections{direction}` | Open connections, `inbound` and `outbound`. |
+| `agentmesh_router_connection_watermark{level}` | The `low` and `high` watermarks in force. The gap between `inbound` connections and the `high` watermark is the free capacity. |
+| `agentmesh_router_conns_per_source_ip_limit` | The per-address cap in force. |
+| `agentmesh_router_relay_limit{limit}` | The relay budget in force: `reservations`, `reservations_per_ip` and `circuits_per_peer`. |
+| `agentmesh_router_connected_peers`, `agentmesh_router_authenticated_peers`, `agentmesh_router_banned_peers` | Peers in each state. |
+| `agentmesh_router_dht_routing_table_size` | DHT routing table size. |
+| `agentmesh_router_auth_handshakes_total{result}`, `agentmesh_router_lease_renewals_total{result}` | Handshakes and lease renewals by outcome. |
+| `agentmesh_router_inbound_connections_refused_total` | Inbound connections refused by the per-address cap. |
+| `libp2p_relaysvc_*` | The relay service's own counters: `reservations_total{type}` and `connections_total{type}` (`opened`, `closed`, `renewed`), requests by response status, rejections and bytes relayed. The difference between `opened` and `closed` is the number in use; read it against `agentmesh_router_relay_limit` to see how close the relay is to its budget. |
 
-A fleet is at capacity when `sam_router_connections{direction="inbound"}`
+A fleet is at capacity when `agentmesh_router_connections{direction="inbound"}`
 approaches the `high` watermark or open relay reservations approach
-`sam_router_relay_limit{limit="reservations"}` on every router that is not
+`agentmesh_router_relay_limit{limit="reservations"}` on every router that is not
 draining; both are the inputs for an autoscaler. `/healthz` and `/readyz`
 on the same address are the probes to use in a pod spec.

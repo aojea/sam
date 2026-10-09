@@ -1,6 +1,6 @@
 ---
-title: "SAM Connect (Android)"
-linkTitle: "SAM Connect"
+title: "Agent Mesh Connect (Android)"
+linkTitle: "Agent Mesh Connect"
 weight: 3
 aliases:
   - /docs/user/mobile-app/
@@ -8,12 +8,12 @@ aliases:
 ---
 
 {{% alert title="Preview" color="warning" %}}
-SAM Connect currently supports Android only. There is no iOS app.
+Agent Mesh Connect currently supports Android only. There is no iOS app.
 The app is tested in CI on an Android emulator. Its screens, the on-device
 tools it exposes and the FFI surface may change.
 {{% /alert %}}
 
-SAM Connect is a Flutter app that runs `sam-node` on an Android phone. The Go node is
+Agent Mesh Connect is a Flutter app that runs `agentmesh-node` on an Android phone. The Go node is
 compiled into a shared library and driven over Dart FFI. The app is the UI
 around it, plus a small MCP server that exposes the phone's sensors to the
 mesh. A phone enrolled this way is a node like any other. It has a key, a
@@ -23,13 +23,13 @@ credential and a peer ID, and it appears in discovery with its
 ## Android tester tutorial
 
 You need an Android 10 or newer phone and an internet connection. You can
-join a public testnet through browser login, or join your own `sam-one`
+join a public testnet through browser login, or join your own `agentmesh-one`
 mesh by scanning its QR code. Choose one enrollment path, then follow the
 same connection checks.
 
 Keep **Location** off throughout this tutorial, and leave external MCP
 bridging unconfigured. Other participants may be able to call services you
-expose. The public testnets have no uptime commitment. A new `sam-one`
+expose. The public testnets have no uptime commitment. A new `agentmesh-one`
 mesh uses an open development policy that lets enrolled nodes call each
 other's services. Share enrollment codes only with people you intend to
 admit.
@@ -38,14 +38,14 @@ admit.
 
 1. Open the Google Play testing invitation supplied by the test coordinator.
   Use the invited Google account, join the test, and install or update
-  **SAM Connect**. If you were given an APK instead, download it from the
+  **Agent Mesh Connect**. If you were given an APK instead, download it from the
   supplied build link and open it on the phone. Android may ask you to
   allow installation from that source.
 2. Check that you have the build requested in the invitation. Record its
   version and build number, along with your phone model and Android
   version. The coordinator can identify the build number from the APK
   link if Android's app information only shows the version name.
-3. Open **SAM Connect**. A new installation shows **Welcome to SAM**.
+3. Open **Agent Mesh Connect**. A new installation shows **Welcome to Agent Mesh**.
   If you already see the dashboard, the app has a saved enrollment. Keep
   it for an upgrade test, or use step 7 to change meshes.
 
@@ -54,25 +54,25 @@ update because its signature differs from the installed app, report it to
 the coordinator. Uninstalling or clearing app storage deletes the saved
 identity and settings.
 
-{{< figure src="/images/sam-connect-welcome.png" alt="SAM Connect welcome screen with Scan enrollment code and Enter details manually buttons" caption="The welcome screen offers both paths: Enter details manually for a public testnet, or Scan enrollment code for your own mesh." width="320" >}}
+{{< figure src="/images/sam-connect-welcome.png" alt="Agent Mesh Connect welcome screen with Scan enrollment code and Enter details manually buttons" caption="The welcome screen offers both paths: Enter details manually for a public testnet, or Scan enrollment code for your own mesh." width="320" >}}
 
 ### 2. Choose your mesh
 
 | Option | What you need | Enrollment path |
 | --- | --- | --- |
 | Public testnet | A Google or GitHub account and a browser. You do not need to run a server. | [Option A: Public testnet](#option-a-public-testnet) |
-| Your own mesh | A computer running `sam-one`, or a QR code from a trusted operator who runs it. No Google or GitHub login is needed for enrollment. | [Option B: Your own mesh with a QR code](#option-b-your-own-mesh-with-a-qr-code) |
+| Your own mesh | A computer running `agentmesh-one`, or a QR code from a trusted operator who runs it. No Google or GitHub login is needed for enrollment. | [Option B: Your own mesh with a QR code](#option-b-your-own-mesh-with-a-qr-code) |
 
 For the public-testnet option, choose one of these URLs:
 
 | Testnet | Control plane URL | When to use it |
 | --- | --- | --- |
-| Bananas | `https://bananas.sam-mesh.dev` | Recommended for testing current development code. Its servers follow `main`. |
-| Hub | `https://hub.sam-mesh.dev` | Compare against servers running the latest release. |
+| Bananas | `https://bananas.__PROTECT_Agent Mesh_MESH_DEV__` | Recommended for testing current development code. Its servers follow `main`. |
+| Hub | `https://hub.__PROTECT_Agent Mesh_MESH_DEV__` | Compare against servers running the latest release. |
 
 See [Testnets](../../contributing/testnets/) for their access policy and
 availability details. For your own mesh, use the HTTPS URL printed by
-`sam-one`, as described in option B.
+`agentmesh-one`, as described in option B.
 
 Record the control plane URL you use. It is not an app download link.
 The dashboard currently shows **Mesh: public-mesh** for either enrollment
@@ -95,8 +95,8 @@ Then follow option A or option B.
 3. Leave **Enrollment token** empty. Public-testnet browser login does not
   require a token or QR code.
 4. Tap **Login & Enroll (Browser)**. Complete the Google or GitHub sign-in
-  offered by `auth.sam-mesh.dev` in the browser on this phone.
-5. When the browser shows **Authorization successful!**, return to SAM
+  offered by `auth.__PROTECT_Agent Mesh_MESH_DEV__` in the browser on this phone.
+5. When the browser shows **Authorization successful!**, return to Agent Mesh
   Connect using the app switcher. Keep the app open while enrollment
   finishes. The browser message only confirms the login callback.
 
@@ -104,7 +104,7 @@ Then follow option A or option B.
 
 If you need to sign in on another device, choose **Device Login (TV / Other
 Device)** instead. Open the displayed verification URL on that device,
-enter the code shown by the app, and complete sign-in. Keep SAM Connect
+enter the code shown by the app, and complete sign-in. Keep Agent Mesh Connect
 open while it waits for approval. Treat the verification URL and code as
 private login information.
 
@@ -113,17 +113,17 @@ Once the dashboard appears, continue to step 4.
 #### Option B: Your own mesh with a QR code
 
 The [Your own mesh guide](../../getting-started/your-own-mesh/#reaching-it-from-other-machines)
-covers running `sam-one` and reaching it from a phone. For this enrollment
+covers running `agentmesh-one` and reaching it from a phone. For this enrollment
 test, you only need the server and its QR code. You can skip that guide's
 model-serving steps.
 
 Use this command to start the mesh and print its enrollment QR code:
 
 ```bash
-sam-one --data-dir ~/sam-one --tunnel cloudflare --enroll-qr
+agentmesh-one --data-dir ~/agentmesh-one --tunnel cloudflare --enroll-qr
 ```
 
-1. On your computer, install `sam-one` using the
+1. On your computer, install `agentmesh-one` using the
    [installation instructions](../../getting-started/quickstart/#1-install).
    If a trusted operator already has a mesh running, ask them for an
    enrollment code and its expected hostname, then continue at item 4.
@@ -131,7 +131,7 @@ sam-one --data-dir ~/sam-one --tunnel cloudflare --enroll-qr
 3. If prompted, approve the download of `cloudflared`. Wait for the HTTPS
    API URL and enrollment QR code in the terminal. The tunnel provides a
    temporary `trycloudflare.com` address without requiring a Cloudflare
-   account. Keep `sam-one` running and the computer awake during the test.
+   account. Keep `agentmesh-one` running and the computer awake during the test.
 
 4. On the phone, return to **Dashboard** and tap **Scan enrollment code**.
    Allow camera access when asked and scan the code from the computer's
@@ -143,14 +143,14 @@ sam-one --data-dir ~/sam-one --tunnel cloudflare --enroll-qr
    of the tutorial. This enrollment path does not open Google or GitHub
    login.
 
-The following output was captured from a temporary `sam-one` instance.
+The following output was captured from a temporary `agentmesh-one` instance.
 Its QR token successfully enrolled a test node and was consumed. The server
 and tunnel were then stopped and their state deleted. Token values and the
 temporary directory path are redacted below. Use the URL and QR code from
 your own terminal, not this example.
 
 ```text
-SAM standalone mesh is ready!
+Agent Mesh standalone mesh is ready!
 
 API URL:      https://used-encryption-assumptions-miller.trycloudflare.com
 Tunnel:       https://used-encryption-assumptions-miller.trycloudflare.com -> http://127.0.0.1:46289
@@ -160,10 +160,10 @@ Admin Token:  [redacted]
 Join Token:   [redacted]
 
 To enroll a node:
-  sam-node join https://used-encryption-assumptions-miller.trycloudflare.com --bootstrap-token-path <temporary-data-dir>/join-token
+  agentmesh-node join https://used-encryption-assumptions-miller.trycloudflare.com --bootstrap-token-path <temporary-data-dir>/join-token
 ══════════════════════════════════════════════════════════════════
 
-Scan with the SAM app to enroll a device into used-encryption-assumptions-miller.trycloudflare.com
+Scan with the Agent Mesh app to enroll a device into used-encryption-assumptions-miller.trycloudflare.com
 (single use, valid for 1h0m0s):
 
 █████████████████████████████████████████████████████████
@@ -197,7 +197,7 @@ Scan with the SAM app to enroll a device into used-encryption-assumptions-miller
 ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
 
 mesh://enroll?server=https%3A%2F%2Fused-encryption-assumptions-miller.trycloudflare.com&token=[redacted]
-Token ID: 2542ac5fa60e (revoke early with: sam-one token revoke 2542ac5fa60e)
+Token ID: 2542ac5fa60e (revoke early with: agentmesh-one token revoke 2542ac5fa60e)
 ```
 
 {{< figure src="/images/sam-connect-join.png" alt="Join this mesh confirmation dialog showing a control plane hostname and Cancel and Join buttons" caption="After scanning, check the control plane hostname before tapping Join. This screenshot shows an example tunnel address and the app's shortened token hint; your values will differ." width="320" >}}
@@ -214,7 +214,7 @@ a fresh code in another terminal. Replace the example hostname with the
 HTTPS API hostname from the server's banner:
 
 ```bash
-sam-one token qr --data-dir ~/sam-one \
+agentmesh-one token qr --data-dir ~/agentmesh-one \
   --server https://YOUR-HOSTNAME.trycloudflare.com
 ```
 
@@ -247,14 +247,14 @@ or shows an error, record the status text before retrying.
 **Node is Running** alone does not prove a mesh connection. Report a peer
 count that remains zero, even if the app shows no error.
 
-{{< figure src="/images/sam-connect-running.png" alt="SAM Connect dashboard showing Node is Running, one connected peer, DHT size one, and a Node ID" caption="A connected node shows Node is Running, a Node ID, and at least one Connected Peer. Your Node ID and peer counts will differ from this example." width="320" >}}
+{{< figure src="/images/sam-connect-running.png" alt="Agent Mesh Connect dashboard showing Node is Running, one connected peer, DHT size one, and a Node ID" caption="A connected node shows Node is Running, a Node ID, and at least one Connected Peer. Your Node ID and peer counts will differ from this example." width="320" >}}
 
 ### 5. Check restart and reconnection
 
 1. Tap **Stop**. Confirm **Node is Stopped**, then tap **Start** again.
   Check that peers reconnect and **Node ID** is unchanged.
 2. With the node running, lock the phone for one minute. Unlock it and
-  return to SAM Connect. Check the running state and peer count. Record
+  return to Agent Mesh Connect. Check the running state and peer count. Record
   any stop, crash, or failure to reconnect.
 3. If mobile data is available, switch from Wi-Fi to mobile data while the
   node is running, then switch back. Allow up to a minute after each
@@ -309,11 +309,11 @@ Use it only when the coordinator explicitly asks for a fresh-identity test.
 
 | Symptom | What to check or report |
 | --- | --- |
-| The testnet URL shows `404` in a browser | The root page is not a health check. Enter the URL in the app. Check the [testnet health workflow](https://github.com/google/sam/actions/workflows/testnet-health.yaml) for service incidents. |
+| The testnet URL shows `404` in a browser | The root page is not a health check. Enter the URL in the app. Check the [testnet health workflow](https://github.com/google/agentmesh/actions/workflows/testnet-health.yaml) for service incidents. |
 | Login finishes but the app stays on enrollment | Return to the app on the same phone. Report the full status text and whether the browser showed the success message. |
-| No enrollment QR appears | Check that `sam-one` printed an HTTPS API URL and is running in an interactive terminal. You can generate a code with `sam-one token qr` using that HTTPS URL. |
-| A QR code or enrollment link is rejected | Confirm it is a SAM enrollment code from your operator and points to the expected HTTPS hostname. Request a fresh code if it expired or has already been used. |
-| Your own mesh is unreachable | Check that the computer is awake and `sam-one` and its tunnel are still running. Compare the recorded URL with the current banner. |
+| No enrollment QR appears | Check that `agentmesh-one` printed an HTTPS API URL and is running in an interactive terminal. You can generate a code with `agentmesh-one token qr` using that HTTPS URL. |
+| A QR code or enrollment link is rejected | Confirm it is a Agent Mesh enrollment code from your operator and points to the expected HTTPS hostname. Request a fresh code if it expired or has already been used. |
+| Your own mesh is unreachable | Check that the computer is awake and `agentmesh-one` and its tunnel are still running. Compare the recorded URL with the current banner. |
 | `no good addresses` or `[::1]:53` | Report the app build and testnet. These were symptoms of the Android DNS bootstrap bug; confirm you installed the requested fixed build. |
 | Enrollment is denied | Record the denial text and any configured labels. Do not paste a login token into the enrollment-token field. |
 | Peers remain at zero or disappear after a network change | Report the network type, VPN/Private DNS state, and whether a manual stop/start recovers. |
@@ -327,9 +327,9 @@ status and the approximate time with time zone.
 App version and build number:
 Installation source or build link:
 Phone model and Android version:
-Mesh (Bananas, Hub, or your own sam-one):
+Mesh (Bananas, Hub, or your own agentmesh-one):
 Control plane URL:
-sam-one version and tunnel/proxy type (if applicable):
+agentmesh-one version and tunnel/proxy type (if applicable):
 Date, time, and time zone:
 Wi-Fi or mobile data; VPN/Private DNS enabled:
 Fresh enrollment or upgrade with saved identity:
@@ -349,7 +349,7 @@ reports. You do not need to share the **Local API Token** for these tests.
 
 ## Configuration
 
-The Config tab holds what `sam-node.yaml` holds on a desktop: labels
+The Config tab holds what `agentmesh-node.yaml` holds on a desktop: labels
 (comma-separated `key=value`) and the attenuation rules, policies and checks
 (one Datalog statement per line, with the same syntax and the same errors as
 the file). Labels are attested at enrollment, so changing them requires
@@ -385,15 +385,15 @@ further.
 ## How it is built
 
 ```text
-Flutter app (mobile/sam-node-app)
+Flutter app (mobile/agentmesh-node-app)
   lib/main.dart      the UI; talks to the node's local API over 127.0.0.1
   lib/sam_ffi.dart   Dart FFI wrapper
         │ C calls
-Go FFI library (mobile/sam-node-ffi)
+Go FFI library (mobile/agentmesh-node-ffi)
   StartNode, StopNode, EnrollNode, EnrollNodeBootstrap, ReEnrollNode,
   UnenrollNode, IsEnrolled, GetNodeID, GetMeshInfo, CallRemoteTool, ...
         │
-sam-node (internal/node), unchanged
+agentmesh-node (internal/node), unchanged
 ```
 
 The FFI package is a thin export layer over the same node code that the CLI
@@ -415,15 +415,15 @@ For an edit-run loop on a device:
 
 ```bash
 make mobile-ffi-android
-mkdir -p mobile/sam-node-app/android/app/src/main/jniLibs/arm64-v8a
-cp bin/android/libsam.so mobile/sam-node-app/android/app/src/main/jniLibs/arm64-v8a/
-cd mobile/sam-node-app && flutter run
+mkdir -p mobile/agentmesh-node-app/android/app/src/main/jniLibs/arm64-v8a
+cp bin/android/libsam.so mobile/agentmesh-node-app/android/app/src/main/jniLibs/arm64-v8a/
+cd mobile/agentmesh-node-app && flutter run
 ```
 
 Release builds read signing material from `ANDROID_KEYSTORE_PATH`,
 `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`,
 and Firebase configuration from `GOOGLE_SERVICES_JSON` or its base64 form.
-`mobile/sam-node-app/README.md` covers the toolchain setup.
+`mobile/agentmesh-node-app/README.md` covers the toolchain setup.
 
 ## Testing
 

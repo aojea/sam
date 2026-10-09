@@ -1,18 +1,18 @@
 ---
-title: "sam-control-plane"
-linkTitle: "sam-control-plane"
+title: "agentmesh-control-plane"
+linkTitle: "agentmesh-control-plane"
 weight: 2
 aliases:
   - /docs/user/control-plane-configuration/
 ---
 
-`sam-control-plane` admits nodes, mints credentials, holds the mesh policy
+`agentmesh-control-plane` admits nodes, mints credentials, holds the mesh policy
 and tracks routers. It is an HTTP server over SQLite or PostgreSQL.
 
 ```text
-sam-control-plane [flags]                     run the server
-sam-control-plane admin ban   --peer <id>     ban a node directly in the database
-sam-control-plane admin unban --peer <id>     lift a ban
+agentmesh-control-plane [flags]                     run the server
+agentmesh-control-plane admin ban   --peer <id>     ban a node directly in the database
+agentmesh-control-plane admin unban --peer <id>     lift a ban
 ```
 
 ## Flags
@@ -27,14 +27,14 @@ sam-control-plane admin unban --peer <id>     lift a ban
 | `--bind-address` | `0.0.0.0:8080` | HTTP listen address. |
 | `--db-driver` | `sqlite` | `sqlite` or `postgres`. |
 | `--db-dsn` | `control-plane.db` | Database DSN. A PostgreSQL DSN contains a password, so the next two options are preferred for PostgreSQL. |
-| `--db-dsn-path` | | File containing the DSN. Overrides `--db-dsn`. Can also be set with `SAM_DB_DSN`. |
-| `--admin-token-path` | | File containing the bearer token for `/admin/*` and `POST /policies`. Can also be set with `SAM_ADMIN_TOKEN`. Without a token, the admin API cannot be used. |
+| `--db-dsn-path` | | File containing the DSN. Overrides `--db-dsn`. Can also be set with `AGENTMESH_DB_DSN`. |
+| `--admin-token-path` | | File containing the bearer token for `/admin/*` and `POST /policies`. Can also be set with `AGENTMESH_ADMIN_TOKEN`. Without a token, the admin API cannot be used. |
 | `--auto-approve-enrollment` | `false` | Issue credentials for valid bootstrap-token enrollments immediately instead of queueing them for approval. |
 | `--biscuit-ttl` | `24h` | Lifetime of each credential. If the OIDC token expires sooner, the credential expires with it. |
 | `--oidc-session-ttl` | `2160h` (90 days) | How long a human OIDC enrollment may keep refreshing before the identity must log in again. |
 | `--workload-session-ttl` | `48h` | How long a workload OIDC enrollment (`--workload-issuer`) may refresh without presenting a fresh platform JWT in `TokenRefreshRequest.jwt`. |
 | `--key-rotation-interval` | `24h` | How often a new signing key is generated. `0` disables rotation. |
-| `--key-grace-period` | `1h` | How long a rotated-out key stays accepted. Credentials signed by a retired key cannot be verified or refreshed. Nodes and routers must pull `/keys` well within this window (`sam-node --control-plane-sync-interval`, `sam-router --keys-sync-interval`). |
+| `--key-grace-period` | `1h` | How long a rotated-out key stays accepted. Credentials signed by a retired key cannot be verified or refreshed. Nodes and routers must pull `/keys` well within this window (`agentmesh-node --control-plane-sync-interval`, `agentmesh-router --keys-sync-interval`). |
 | `--lease-duration` | `15m` | How long a router lease lasts without renewal. |
 | `--node-retention` | `720h` (30 days) | How long the record of an enrolled node is kept after its session expires. Banned nodes are kept forever. `0` keeps every record. |
 | `--mesh-reconnect-interval` | `30s` | How often the event publisher re-reads the router leases and dials any router it is not connected to. |
@@ -67,7 +67,7 @@ Responses that carry credentials are sent with `Cache-Control: no-store`.
 ### Enrollment, refresh, and STS
 
 Every request below carries a `challenge_unix_ms` and a `challenge_signature`.
-The enrollee signs `sam:<endpoint>:<peer_id>:<challenge_unix_ms>` with its
+The enrollee signs `mesh:<endpoint>:<peer_id>:<challenge_unix_ms>` with its
 key, and the control plane accepts the signature within five minutes of that
 instant. This proves that the caller holds the key behind the peer ID it
 names. Every instant in a response (`expire_time` and the like) is a
@@ -80,7 +80,7 @@ names. Every instant in a response (`expire_time` and the like) is a
 | `GET /enroll/status?peer_id=` | headers `X-Mesh-Challenge-Ts`, `X-Mesh-Challenge-Sig` | Poll a pending enrollment. Any authentication failure answers `401`, so the credential is released only to the enrollee. |
 | `POST /refresh` | `TokenRefreshRequest` (optional `jwt`), current credential as `Authorization: Bearer <base64>` | Exchange a credential for a new one. When `jwt` is present and its `iss|sub` matches the enrolled node record, re-attests the node in place, updates stored claims and extends the session. Refuses a replayed (superseded) credential, a banned node, an expired session without a matching `jwt`, and a credential signed by a retired key unless the node has `autonomous_recovery`. |
 | `POST /token/exchange` | `TokenExchangeRequest` (`subject_token`, optional `task_rule` and `seal`, challenge signature), node credential as bearer | Stateless JWT-to-Biscuit exchange. Mints a Delegated Session Biscuit bound to the calling node (`actor_node`, `client_peer_id`) with zero database writes. |
-| `POST /sts/token` | `STSTokenRequest` (`biscuit`, `destination`, optional `audience`, challenge signature), node credential as bearer | Stateless Biscuit-to-JWT minting. Verifies the Biscuit and `tar_block` chain against `egress://<destination>` and mints a short-lived ES256 border JWT (`sub`, `act.sub`, `aud`, `sam_roles`, `sam_task`). |
+| `POST /sts/token` | `STSTokenRequest` (`biscuit`, `destination`, optional `audience`, challenge signature), node credential as bearer | Stateless Biscuit-to-JWT minting. Verifies the Biscuit and `tar_block` chain against `egress://<destination>` and mints a short-lived ES256 border JWT (`sub`, `act.sub`, `aud`, `mesh_roles`, `mesh_task`). |
 | `GET /revocations` | credential as `Authorization: Bearer <base64>` | `RevocationsResponse`: revoked root Biscuit revocation IDs (`revocation_ids`) and banned peer IDs (`banned_peer_ids`). |
 | `POST /routers/lease` | `RouterLeaseRequest` (credential, addresses, telemetry) | Register or renew a router lease. Requires `role("mesh:role:router")`. Announced addresses must end in the router's own peer ID. |
 | `GET /policies` | credential as `Authorization: Bearer <base64>` | The mesh policy as `PolicyConfigGetResponse`: the Datalog rules a member adds to its authorizer, one per entry. Operators read the document at `GET /admin/policy`. |
@@ -141,6 +141,6 @@ with `403`). The console uses these routes.
 
 ## Metrics
 
-`/metrics` exposes `sam_control_plane_*` counters and gauges: enrolled nodes
+`/metrics` exposes `agentmesh_control_plane_*` counters and gauges: enrolled nodes
 by role and state, active routers, mesh-connected peers as reported by
 router leases, per-route request counts and latencies, and the Go runtime.

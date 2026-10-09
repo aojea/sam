@@ -4,7 +4,7 @@ linkTitle: "Authorization"
 weight: 3
 ---
 
-Authorization in SAM answers one question: may this caller perform this
+Authorization in Agent Mesh answers one question: may this caller perform this
 operation on this service on this node right now? Four sources contribute to
 the answer, and the destination node combines them:
 
@@ -37,7 +37,7 @@ IAM permissions and resources (`operation.allowed_permissions`,
 ## Mesh policy: roles and bindings
 
 The mesh policy is a document held by the control plane. You edit it through
-`POST /policies` or the console. `sam-one` can also seed it on first boot
+`POST /policies` or the console. `agentmesh-one` can also seed it on first boot
 from a file (`--policy-file`).
 
 **Roles** name a set of standing permissions:
@@ -183,7 +183,7 @@ roles, grants, labels, and `client_peer_id`. The facts about the request
 are added by the node that received the request, from what arrived on the
 wire. A caller writes neither.
 
-When a holder attenuates a token by appending a block, SAM never evaluates
+When a holder attenuates a token by appending a block, Agent Mesh never evaluates
 holder-authored Datalog rules or checks. Appended blocks are restricted to a
 single `tar_block("<base64url-proto>")` fact, which is invisible to Block 0's
 Datalog rules and is evaluated by the verifier's own `TaskAuthorizationRule`
@@ -196,7 +196,7 @@ matcher. This guarantees that:
 
 ## Workloads and agents acting through a node or gateway
 
-When multiple workloads, users, or sandboxed agents share a `sam-node` (or
+When multiple workloads, users, or sandboxed agents share a `agentmesh-node` (or
 call through `agentgateway` / Istio), they do not share the node's own
 permissions:
 
@@ -204,7 +204,7 @@ permissions:
   `ext_authz` / `ext_proc`), the caller presents its own platform JWT (OIDC ID
   token, Kubernetes projected SA JWT, or SPIFFE JWT-SVID) or a task-attenuated
   Biscuit.
-- `sam-node` exchanges platform JWTs via `POST /token/exchange` into a
+- `agentmesh-node` exchanges platform JWTs via `POST /token/exchange` into a
   **Delegated Session Biscuit** carrying the caller's own `user()`, `email()`,
   `group()`, and `role()` facts, bound to the node via `client_peer_id()` and
   `actor_node()`.
@@ -213,7 +213,7 @@ permissions:
 
 ## Local rules
 
-The `attenuation` block in `sam-node.yaml` gives the hosting node the final
+The `attenuation` block in `agentmesh-node.yaml` gives the hosting node the final
 say. Use it for constraints that the operator of that node wants regardless
 of what the mesh policy grants:
 
@@ -239,7 +239,7 @@ node without notice.
 Labels are `key=value` pairs. A node declares them in its configuration, and
 the control plane writes them into the node's credential as `label(k, v)`
 facts, one per label, if a role the node holds allows them. Labels let
-policy describe where a node is or what it is for. SAM does not define a
+policy describe where a node is or what it is for. Agent Mesh does not define a
 fixed set of keys: `region`, `jurisdiction`, `team`, `compliance`, or
 whatever the operator needs.
 

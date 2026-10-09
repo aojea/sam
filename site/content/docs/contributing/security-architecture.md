@@ -7,12 +7,12 @@ aliases:
   - /docs/development/sts/
 ---
 
-This document describes the security architecture and posture of SAM for
-developers and security reviewers. It covers how SAM acts as an authority,
+This document describes the security architecture and posture of Agent Mesh for
+developers and security reviewers. It covers how Agent Mesh acts as an authority,
 Policy Decision Point (PDP), and task-scoped credential layer across
 environments, what problems it solves, what responsibilities remain with the
 surrounding platform, how its cryptographic and policy mechanisms work across
-`sam-control-plane`, `sam-node`, `sam-router`, and the native SDKs, and which
+`agentmesh-control-plane`, `agentmesh-node`, `agentmesh-router`, and the native SDKs, and which
 extensions are deferred on purpose.
 
 ---
@@ -21,27 +21,27 @@ extensions are deferred on purpose.
 
 ![The Agent Mesh as a courier network](/images/agent-mesh-courier.svg)
 
-SAM moves tasks between environments that trust nothing on arrival, the way a
+Agent Mesh moves tasks between environments that trust nothing on arrival, the way a
 courier network moves parcels between post offices:
 
-| In the picture | In SAM |
+| In the picture | In Agent Mesh |
 | :--- | :--- |
 | **Parcel** | One request: an MCP tool call, a chat completion, a BigQuery query, an A2A message. |
 | **Sender** | The agent wherever it runs: a developer laptop, Kubernetes on premises or in a cloud, a SaaS platform, or a sandbox runtime. |
-| **Local post office** | The `sam-node` next to the agent, or the native SDK (`@sam-mesh/sdk`, `sam-mesh`) inside its process. It checks the sender's platform identity (projected service account token, GCE/Cloud Run metadata token, SPIFFE JWT-SVID, OIDC login) and obtains the waybill from the Registry. |
-| **Your gateway** | Istio, `agentgateway`, Envoy AI Gateway, or `kgateway` where a cluster already runs one. It stays in the data path and asks the `sam-node` office over Envoy `ext_proc`, `ext_authz`, or RFC 8693 `/oauth/token`; the office issues the waybill, the gateway carries. |
-| **Waybill** | The SAM Biscuit credential: who the sender (subject) is, through which office (`actor_node`) it travels, what standing roles it holds, and when it expires. |
+| **Local post office** | The `agentmesh-node` next to the agent, or the native SDK (`@agentmesh-p2p/sdk`, `agentmesh-p2p`) inside its process. It checks the sender's platform identity (projected service account token, GCE/Cloud Run metadata token, SPIFFE JWT-SVID, OIDC login) and obtains the waybill from the Registry. |
+| **Your gateway** | Istio, `agentgateway`, Envoy AI Gateway, or `kgateway` where a cluster already runs one. It stays in the data path and asks the `agentmesh-node` office over Envoy `ext_proc`, `ext_authz`, or RFC 8693 `/oauth/token`; the office issues the waybill, the gateway carries. |
+| **Waybill** | The Agent Mesh Biscuit credential: who the sender (subject) is, through which office (`actor_node`) it travels, what standing roles it holds, and when it expires. |
 | **Mandate** | An offline attenuation block (`tar_block`) appended at a task or sub-agent hop. It can only restrict; a sub-agent's parcel carries one mandate more than its parent's. |
 | **Sealed bag** | The mutually authenticated, encrypted libp2p stream between two offices. Routers relay ciphertext across NAT, clusters, sites, and clouds and cannot open it. |
-| **Registry** | `sam-control-plane`: verifies senders, stamps waybills (`POST /register`, `POST /enroll`, `POST /token/exchange`), distributes Datalog policy (`GET /policies`), issues the permits foreign borders recognize (`POST /sts/token`, `/.well-known/openid-configuration`, `/jwks`), and keeps the receipts. It never touches a parcel. |
-| **Destination office** | The serving or egress `sam-node` for `mcp://`, `inference://`, `a2a://`, or `egress://`: verifies the waybill and every mandate again, runs customs, obtains the permit, and delivers. The operator chooses where it runs, hence from which network or jurisdiction traffic leaves. |
+| **Registry** | `agentmesh-control-plane`: verifies senders, stamps waybills (`POST /register`, `POST /enroll`, `POST /token/exchange`), distributes Datalog policy (`GET /policies`), issues the permits foreign borders recognize (`POST /sts/token`, `/.well-known/openid-configuration`, `/jwks`), and keeps the receipts. It never touches a parcel. |
+| **Destination office** | The serving or egress `agentmesh-node` for `mcp://`, `inference://`, `a2a://`, or `egress://`: verifies the waybill and every mandate again, runs customs, obtains the permit, and delivers. The operator chooses where it runs, hence from which network or jurisdiction traffic leaves. |
 | **Customs** | Content inspection at the destination office: built-in policy facts, Google Cloud Model Armor, and Envoy `ext_proc` processors. |
 | **Permit** | The destination credential: a federated cloud token exchanged from the Registry's ES256 JWT for this sender and task, or a secret from the office vault. The agent never holds it. |
-| **Receipts** | Structured audit logs at the Registry, at both offices, and at the cloud destination, joined by principal and `sam_task`. |
+| **Receipts** | Structured audit logs at the Registry, at both offices, and at the cloud destination, joined by principal and `mesh_task`. |
 
 ---
 
-## 2. What problems SAM solves
+## 2. What problems Agent Mesh solves
 
 In traditional cloud and service-mesh architectures, permissions are granted
 ambiently to a workload identity (a Kubernetes Service Account, a cloud service
@@ -69,24 +69,24 @@ caller, but AI agents need finer boundaries across five dimensions:
    cloud audit log records the actual user or workload principal rather than a
    shared node service account.
 5. Agents and tools run across laptops, on-premises clusters, and multiple
-   clouds behind NATs and firewalls. SAM routes and authorizes every call on the
+   clouds behind NATs and firewalls. Agent Mesh routes and authorizes every call on the
    service name (`mcp://`, `inference://`, `a2a://`, `egress://`), never on an
    IP address.
 
 ### Two-layer identity and authorization model
 
-SAM separates caller attestation from task authorization:
+Agent Mesh separates caller attestation from task authorization:
 
-| Layer | Question answered | Primitive | Role in SAM |
+| Layer | Question answered | Primitive | Role in Agent Mesh |
 | :--- | :--- | :--- | :--- |
 | **1. Workload / Subject & Channel Attestation** | *"Which workload or user initiated this request, and through which node is it travelling?"* | **OIDC ID tokens**, **Kubernetes projected SA JWTs**, **GCE/Cloud Run identity tokens**, or **SPIFFE JWT-SVIDs**. | Verified at `POST /register` (node enrollment) or `POST /token/exchange` (caller delegation) to mint a Biscuit bound to the transport channel (`client_peer_id`, `actor_node`). |
-| **2. Task / Session Authorization (TAR)** | *"What subset of standing permissions may this specific task or sub-agent hop exercise right now?"* | **SAM Task Biscuit** (Block 0 Authority + appended `tar_block` blocks carrying `api.TaskAuthorizationRule`). | Attenuated offline across hops, enforced at every SAM Policy Enforcement Point (PEP), and translated into downscoped upstream cloud credentials by `CloudTokenExchanger` at egress. |
+| **2. Task / Session Authorization (TAR)** | *"What subset of standing permissions may this specific task or sub-agent hop exercise right now?"* | **Agent Mesh Task Biscuit** (Block 0 Authority + appended `tar_block` blocks carrying `api.TaskAuthorizationRule`). | Attenuated offline across hops, enforced at every Agent Mesh Policy Enforcement Point (PEP), and translated into downscoped upstream cloud credentials by `CloudTokenExchanger` at egress. |
 
 ---
 
-## 3. What SAM does not solve
+## 3. What Agent Mesh does not solve
 
-SAM leaves several responsibilities to the surrounding platform.
+Agent Mesh leaves several responsibilities to the surrounding platform.
 
 ### 3.1 OS, kernel, and container sandboxing
 
@@ -96,7 +96,7 @@ namespaces, and its external secret-injecting proxy), Docker Sandbox
 (`docker sbx`), or Kubernetes `agent-sandbox` (`RuntimeClass: gvisor` or `kata`
 paired with a Kubernetes `NetworkPolicy`).
 
-SAM provides the cryptographic task authority that those sandboxes consume:
+Agent Mesh provides the cryptographic task authority that those sandboxes consume:
 control-plane-signed Delegated Session Biscuits (`POST /token/exchange`) and
 sealed offline task attenuations (`tar_block` + `Seal()`).
 
@@ -104,24 +104,24 @@ sealed offline task attenuations (`tar_block` + `Seal()`).
 
 Where a cluster already runs `agentgateway`, Istio, Envoy AI Gateway, or
 `kgateway`, that proxy stays in place. Cluster gateways validate flat JWTs and
-route local traffic, while `sam-node` plugs into them over Envoy `ext_authz`,
+route local traffic, while `agentmesh-node` plugs into them over Envoy `ext_authz`,
 Envoy `ext_proc`, and RFC 8693 `/oauth/token` to add offline multi-hop task
 attenuation, cross-network peer-to-peer routing, and cloud credential
 brokering.
 
 ### 3.3 Using SPIFFE X509-SVID keys as libp2p member keys
 
-Every mesh member (`sam-node`, `sam-router`, and native SDK peers) generates and
+Every mesh member (`agentmesh-node`, `agentmesh-router`, and native SDK peers) generates and
 persists its own Ed25519 libp2p key pair. The peer ID derived from that key is
 the primary key of the enrollment record, the value of `node()` and
 `client_peer_id()`, the member in `node:<peer_id>` bindings, the holder of
 router leases and discovery announcements, and the suffix of `/p2p/<peer_id>`
 addresses.
 
-SAM never uses an X509-SVID private key from the SPIFFE Workload API as the
+Agent Mesh never uses an X509-SVID private key from the SPIFFE Workload API as the
 libp2p key:
 
-| Property | SVID key as the libp2p key | SAM design |
+| Property | SVID key as the libp2p key | Agent Mesh design |
 | :--- | :--- | :--- |
 | **Algorithm** | SPIRE issues EC P-256 or RSA keys, not Ed25519. The TypeScript/Python SDKs, mobile FFI, and portable `MemberCredential` state directories are Ed25519-only. | Ed25519 for every member. |
 | **Rotation** | SPIRE rotates X509-SVIDs with a fresh key pair (every 30 minutes by default) and accepts no CSR on the Workload API. Every rotation would change the peer ID, drop active streams, and break `node:<peer_id>` bindings. | The Ed25519 key is stable for the life of the enrollment; the Biscuit is the rotating credential (`POST /refresh`). |
@@ -134,14 +134,14 @@ Where each layer enforces depends on what the destination cloud API supports:
 
 | Destination class | Border credential | Per-task narrowing enforced today | Residual boundary |
 | :--- | :--- | :--- | :--- |
-| **Google Cloud APIs** (BigQuery, Vertex AI, Cloud Storage) | Control-plane ES256 JWT federated via Workload or Workforce Identity Pool (`oidc_federation`), optional SA impersonation with narrowed `scopes` | Mesh PEP on host, HTTP method, and REST path (BigQuery REST paths carry project, dataset, and table; Vertex paths carry the model); OAuth scopes; CEL attribute conditions on `act.sub`; `principalSet` bindings on `google.groups` (`sam_roles`); Credential Access Boundaries for Cloud Storage. | A body-level reference inside an allowed REST path (for example, a SQL string in BigQuery `jobs.insert` referencing a second table) is bounded by the federated principal's standing IAM ceiling until a public Google per-task token API exists. |
+| **Google Cloud APIs** (BigQuery, Vertex AI, Cloud Storage) | Control-plane ES256 JWT federated via Workload or Workforce Identity Pool (`oidc_federation`), optional SA impersonation with narrowed `scopes` | Mesh PEP on host, HTTP method, and REST path (BigQuery REST paths carry project, dataset, and table; Vertex paths carry the model); OAuth scopes; CEL attribute conditions on `act.sub`; `principalSet` bindings on `google.groups` (`mesh_roles`); Credential Access Boundaries for Cloud Storage. | A body-level reference inside an allowed REST path (for example, a SQL string in BigQuery `jobs.insert` referencing a second table) is bounded by the federated principal's standing IAM ceiling until a public Google per-task token API exists. |
 | **AWS** (`aws_assume_role`) | Control-plane ES256 JWT via `AssumeRoleWithWebIdentity` | Inline AWS session policy compiled from the intersected `TaskAuthorizationRule` chain (`allowed_permissions` $\rightarrow$ `Action`, `allowed_resources` $\rightarrow$ `Resource`) intersected with the role's standing IAM policy. | AWS 1-hour role-chaining limit (sub-agent hops re-assume from the egress node rather than chaining AWS STS credentials) and packed session policy size limit. |
 | **API-key services** (Gemini Developer API, OpenAI, Anthropic, GitHub PATs) | `static_secret` from the egress node's `--secrets-dir` | Mesh PEP on service name, HTTP method, REST path (model name), MCP tool name, and task TTL. | Static API keys cannot be downscoped at the upstream provider; the egress node never exposes the key to the caller. |
-| **External agents (`a2a://`) & third-party MCP servers** | Control-plane JWT if the party federates with the SAM OIDC issuer; otherwise `static_secret` | Mesh PEP plus whatever scope/claim checks the remote authorization server enforces. | Depends on the remote party's authorization server. |
+| **External agents (`a2a://`) & third-party MCP servers** | Control-plane JWT if the party federates with the Agent Mesh OIDC issuer; otherwise `static_secret` | Mesh PEP plus whatever scope/claim checks the remote authorization server enforces. | Depends on the remote party's authorization server. |
 
 ### 3.5 Non-HTTP protocols without TLS SNI
 
-SAM terminates and inspects HTTP/1.1 and HTTP/2 (REST, JSON-RPC MCP, A2A, SSE)
+Agent Mesh terminates and inspects HTTP/1.1 and HTTP/2 (REST, JSON-RPC MCP, A2A, SSE)
 and supports raw TCP carrying TLS (PostgreSQL, Cloud SQL, AlloyDB, Redis, SSH)
 via named `CONNECT` tunnels (`EGRESS_MODE_TCP`). It does not proxy raw UDP,
 QUIC/HTTP/3, ICMP, or raw IP frames, and it does not inject brokered credentials
@@ -151,15 +151,15 @@ allow-list and TLS `ClientHello` SNI match.
 
 ---
 
-## 4. How SAM solves it
+## 4. How Agent Mesh solves it
 
 ### 4.1 Platform attestation, binding wildcards, and workload containment
 
 #### Node attestation sources (`TokenSource`)
 
-`sam-node` and `sam-router` consolidate headless enrollment and continuous
+`agentmesh-node` and `agentmesh-router` consolidate headless enrollment and continuous
 refresh re-attestation behind the
-[`TokenSource`](https://github.com/google/sam/blob/main/internal/controlplane/client/tokensource.go)
+[`TokenSource`](https://github.com/google/agentmesh/blob/main/internal/controlplane/client/tokensource.go)
 interface (`FetchToken(ctx)`):
 
 | Environment | Token source | How it works |
@@ -184,8 +184,8 @@ a single leading `*` (`$v.ends_with("<suffix>")`), evaluated identically in
 control-plane role resolution (`resolveRoles`) and node-side Datalog generation
 (`api.BuildPolicyRules`):
 
-- `user:system:serviceaccount:sam-nodes:*` matches any service account in
-  namespace `sam-nodes`.
+- `user:system:serviceaccount:agentmesh-nodes:*` matches any service account in
+  namespace `agentmesh-nodes`.
 - `user:spiffe://acme.example/ns/prod/*` matches any SPIFFE workload under that
   path prefix.
 - `email:*@my-project.iam.gserviceaccount.com` matches any Google Cloud service
@@ -225,7 +225,7 @@ verifier pool) classifies tokens as workload identities:
 
 #### Continuous attestation on `POST /refresh` and `--workload-session-ttl`
 
-When `sam-node`, `sam-router`, or an SDK member has a continuous token source,
+When `agentmesh-node`, `agentmesh-router`, or an SDK member has a continuous token source,
 it includes a fresh platform JWT in `TokenRefreshRequest.jwt` on every Biscuit
 refresh:
 
@@ -250,7 +250,7 @@ appended block carried both Datalog checks and a serialized protobuf, a
 malicious holder could craft a token where the Datalog check passes at the mesh
 PEP while a broader protobuf is forwarded to `CloudTokenExchanger`.
 
-SAM never evaluates holder-authored Datalog rules or checks.
+Agent Mesh never evaluates holder-authored Datalog rules or checks.
 
 Every appended block (`block_idx >= 1`) contains `0` Datalog rules, `0` Datalog
 checks, and `1` Datalog fact of the form
@@ -290,7 +290,7 @@ least one `TaskRule` in every appended block.
 
 ### 4.3 Subject vs. actor (`actor_node`), stateless exchange, and revocation
 
-When a `sam-node` exchanges a caller's platform token on their behalf, the
+When a `agentmesh-node` exchanges a caller's platform token on their behalf, the
 resulting Biscuit separates the node that owns the transport channel
 (`actor_node`) from the subject whose identity is being exercised (`user`,
 `email`, `role`), matching RFC 8693 (`sub` vs. `act`).
@@ -323,7 +323,7 @@ uses `b.RevocationIds()[0]` to identify the authority block, so revoking a root
 token or banning a peer or user at the control plane invalidates both the root
 Biscuit and every offline-attenuated child derived from it across the mesh.
 Local task revocation (`POST /oauth/revoke`) lets an orchestrator revoke a
-specific child Task Biscuit at the local `sam-node` as soon as a task finishes,
+specific child Task Biscuit at the local `agentmesh-node` as soon as a task finishes,
 caching `RevocationIds()[last]` in the node's revocation LRU until the token's
 `expire_time`.
 
@@ -332,7 +332,7 @@ caching `RevocationIds()[last]` in the node's revocation LRU until the token's
 ### 4.4 Two-token model: the control plane as OIDC issuer
 
 Inside the mesh, credentials are Biscuits; at both external borders,
-credentials are standard JWTs. For the outbound border, `sam-control-plane` acts
+credentials are standard JWTs. For the outbound border, `agentmesh-control-plane` acts
 as a standard OIDC issuer:
 
 | Element | Implementation |
@@ -340,8 +340,8 @@ as a standard OIDC issuer:
 | **Signing key** | **ES256** (P-256 ECDSA), rotated with overlap and `kid` (`internal/controlplane/sts.go`). Google Cloud and AWS STS accept RS256 and ES256, not Ed25519; Ed25519 remains the Biscuit authority key. |
 | **Discovery & JWKS** | `GET /.well-known/openid-configuration` and `GET /jwks` on the control plane. For air-gapped or private control planes, the JWKS can be uploaded directly to the cloud workload identity pool. |
 | **Mint endpoint** | `POST /sts/token` (protobuf over HTTP): accepts the caller's Biscuit and `destination` name, verifies the Biscuit and the full `tar_block` chain against `egress://<destination>`, writes a `Border Crossing` audit log, and returns a short-lived ES256 JWT. |
-| **JWT claims** | `iss` = control plane URL; `sub` = caller principal (`email` or `issuer#subject`); `act` = `{"sub": "<egress_node_peer_id>"}`; `aud` = destination audience from `EgressDestination` (one audience per destination); `sam_roles` = authority-block roles (mapped to `google.groups` for `principalSet` bindings); `sam_task` = innermost `TaskAuthorizationRule.name` (audit-only). |
-| **TAR narrows, never selects** | Nothing in a holder-appended `tar_block` can select a broker, role ARN, service account, or audience; every claim that cloud IAM binds on (`sub`, `sam_roles`, `act.sub`, `aud`) comes from Block 0 or the control plane's `EgressDestination` policy. |
+| **JWT claims** | `iss` = control plane URL; `sub` = caller principal (`email` or `issuer#subject`); `act` = `{"sub": "<egress_node_peer_id>"}`; `aud` = destination audience from `EgressDestination` (one audience per destination); `mesh_roles` = authority-block roles (mapped to `google.groups` for `principalSet` bindings); `mesh_task` = innermost `TaskAuthorizationRule.name` (audit-only). |
+| **TAR narrows, never selects** | Nothing in a holder-appended `tar_block` can select a broker, role ARN, service account, or audience; every claim that cloud IAM binds on (`sub`, `mesh_roles`, `act.sub`, `aud`) comes from Block 0 or the control plane's `EgressDestination` policy. |
 | **Caching** | The egress node caches minted border JWTs and upstream cloud tokens by Biscuit SHA-256 digest, keeping the control plane off the per-request hot path. |
 
 ---
@@ -351,7 +351,7 @@ as a standard OIDC issuer:
 | Surface | Mechanism | What it binds | Replay defense |
 | :--- | :--- | :--- | :--- |
 | **libp2p data path** (node-to-node, node-to-router) | Channel binding: Block 0 `client_peer_id` must equal the `connection_peer_id` authenticated by the libp2p Noise or TLS handshake. | The transport private key | None needed; the token is unusable on any other connection. |
-| **Control plane mesh protocol** (`/enroll`, `/enroll/status`, `/register`, `/refresh`, `/routers/lease`, `/token/exchange`, `/sts/token`) | Ed25519 signature over `sam:<endpoint>:<peer_id>:<challenge_unix_ms>`, carried in protobuf fields (`challenge_unix_ms`, `challenge_signature`) or `X-Mesh-Challenge-Ts` / `X-Mesh-Challenge-Sig` on `GET /enroll/status`. | Endpoint name, peer ID, timestamp | 5-minute freshness window (`challengeMaxAge`) with one-shot `Date`-header clock-skew recovery on `401`; `/refresh` additionally redeems only the last Biscuit issued to the peer. |
+| **Control plane mesh protocol** (`/enroll`, `/enroll/status`, `/register`, `/refresh`, `/routers/lease`, `/token/exchange`, `/sts/token`) | Ed25519 signature over `mesh:<endpoint>:<peer_id>:<challenge_unix_ms>`, carried in protobuf fields (`challenge_unix_ms`, `challenge_signature`) or `X-Mesh-Challenge-Ts` / `X-Mesh-Challenge-Sig` on `GET /enroll/status`. | Endpoint name, peer ID, timestamp | 5-minute freshness window (`challengeMaxAge`) with one-shot `Date`-header clock-skew recovery on `401`; `/refresh` additionally redeems only the last Biscuit issued to the peer. |
 | **Control plane read & report endpoints** (`GET /policies`, `GET /egress`, `GET /revocations`, `POST /nodes/catalog`) | Bearer Member Biscuit of an admitted node (`admittedNodeWithChallenge`) plus `X-Mesh-Challenge-Ts` / `X-Mesh-Challenge-Sig` signed over `sam:<endpoint>:<peer_id>:<ts>` (`policies`, `egress`, `revocations`, `nodes-catalog`), verified against the node's stored Ed25519 public key via `verifyFreshChallenge`. | Enrolled node credential, endpoint name, peer ID, timestamp | 5-minute freshness window (`challengeMaxAge`) with one-shot `Date`-header clock-skew recovery on `401`, bounded by Biscuit TTL and ban/revocation list. |
 | **OAuth 2.1 external client surface** (`/oauth/authorize`, `/oauth/token`, `/mcp` over HTTPS) | Authorization Code + PKCE (`S256`) on the code grant. The `client_peer_id` of the minted Biscuit is the calling node's when a node calls, otherwise the `actor_peer_id` form parameter or the control plane's own peer ID (`resolveDefaultActorPeer`). | A claimed peer ID (the Biscuit is a bearer token on the HTTPS `/mcp` hop unless sender-constrained with DPoP; see §5.2) | Single-use authorization codes with PKCE verifier check on the code exchange; none on the resulting bearer Biscuit. |
 
@@ -359,9 +359,9 @@ as a standard OIDC issuer:
 
 ### 4.6 Gateways, egress credential brokers, content inspection, and TCP tunnels
 
-#### Gateway integration (`sam-node`)
+#### Gateway integration (`agentmesh-node`)
 
-`sam-node` exposes three standard gateway interfaces on its HTTP listener
+`agentmesh-node` exposes three standard gateway interfaces on its HTTP listener
 (`--bind-addr`):
 
 1. Envoy `ext_authz` (`/ext_authz` and
@@ -369,7 +369,7 @@ as a standard OIDC issuer:
    policy and `tar_block` rules on incoming Envoy `CheckRequest` calls. The
    caller presents a Biscuit (`X-Mesh-Biscuit`, or a Bearer value in
    `X-Mesh-Authentication` or `Authorization`) or a platform JWT, which
-   `sam-node` exchanges at the control plane into a delegated Biscuit. On `OK`
+   `agentmesh-node` exchanges at the control plane into a delegated Biscuit. On `OK`
    it returns `X-Mesh-Biscuit`, `X-Mesh-Principal`, `X-Mesh-Roles`,
    `X-Mesh-Task-Id` and, for `egress://` targets with a credential broker, the
    brokered upstream `Authorization` header.
@@ -385,7 +385,7 @@ as a standard OIDC issuer:
 
 On `/mesh/{peer}/{type}/{svc}/...`, the `Authorization` header is reserved for
 the destination service's own credential and passes through untouched; callers
-pass their SAM Biscuit or JWT in `X-Mesh-Authentication`. Transparent JWT
+pass their Agent Mesh Biscuit or JWT in `X-Mesh-Authentication`. Transparent JWT
 exchange on `Authorization: Bearer <JWT>` applies only to `/mcp` and `/v1/*`.
 
 #### Content inspection at the egress node (`inspection.inspectors`)
@@ -419,7 +419,7 @@ inspector never sees destination credentials:
 
 When `mode: EGRESS_MODE_TCP` and a non-empty `ports` allow-list are set on an
 `EgressDestination`, the node accepts `CONNECT <name>:<port>` and
-`sam-node forward egress://<name>:<port> <local-addr>`. Before splicing the TCP
+`agentmesh-node forward egress://<name>:<port> <local-addr>`. Before splicing the TCP
 stream, the egress node peeks at the TLS `ClientHello` and refuses the
 connection if the SNI does not match `<name>` or if Encrypted Client Hello (ECH)
 hides the SNI.
@@ -437,13 +437,13 @@ flowchart LR
   end
   subgraph Host["Host / Orchestrator Boundary"]
     OSProxy["OpenShell Egress Proxy<br/>& Secret Injector"]
-    SamNode["Local sam-node Gateway"]
+    AgentMeshNode["Local agentmesh-node Gateway"]
   end
-  Mesh(["SAM Mesh & Providers"])
+  Mesh(["Agent Mesh Mesh & Providers"])
 
-  Harness -- "Plain HTTP to sam-node:8080/mcp & /v1" --> OSProxy
-  OSProxy -- "Injects X-Mesh-Authentication:<br/>Bearer <Sealed-Task-Biscuit>" --> SamNode
-  SamNode -- "X-Mesh-Biscuit: <Sealed-Task-Biscuit>" --> Mesh
+  Harness -- "Plain HTTP to agentmesh-node:8080/mcp & /v1" --> OSProxy
+  OSProxy -- "Injects X-Mesh-Authentication:<br/>Bearer <Sealed-Task-Biscuit>" --> AgentMeshNode
+  AgentMeshNode -- "X-Mesh-Biscuit: <Sealed-Task-Biscuit>" --> Mesh
 ```
 
 The orchestrator exchanges and attenuates a Task Biscuit via `POST /oauth/token`
@@ -452,13 +452,13 @@ The sandboxed process holds zero credentials in its environment or filesystem.
 
 #### Blueprint 2: Docker Sandbox (`docker sbx`) & Kubernetes `agent-sandbox`
 
-When the sandbox container holds a token (`SAM_TASK_TOKEN` or a Kubernetes
+When the sandbox container holds a token (`AGENTMESH_TASK_TOKEN` or a Kubernetes
 projected service account JWT) to authenticate to a local or cluster
-`sam-node`:
+`agentmesh-node`:
 
 1. The token is sealed (`Seal()`) and narrowed to the single task's
    `TaskAuthorizationRule`.
-2. Channel binding (`client_peer_id`) ties the token to the origin `sam-node`'s
+2. Channel binding (`client_peer_id`) ties the token to the origin `agentmesh-node`'s
    peer ID, so an exfiltrated token cannot be used from another host or node.
 3. A short `expire_time` and explicit revocation (`POST /oauth/revoke` on
    container exit) bound the lifetime to the task run.
@@ -466,25 +466,25 @@ projected service account JWT) to authenticate to a local or cluster
 #### Blueprint 3: `agentgateway` / Istio service mesh
 
 Workloads authenticate to `agentgateway` or Istio with a platform JWT (for
-example a SPIFFE JWT-SVID) or a Task Biscuit; the gateway calls `sam-node` over `ext_authz`, `ext_proc`, or RFC
+example a SPIFFE JWT-SVID) or a Task Biscuit; the gateway calls `agentmesh-node` over `ext_authz`, `ext_proc`, or RFC
 8693 `/oauth/token` for local policy enforcement and routes cross-cluster MCP,
-A2A, and cloud egress calls through `sam-node`.
+A2A, and cloud egress calls through `agentmesh-node`.
 
 #### Blueprint 4: End-to-end cloud egress (BigQuery read-only task & sub-agent hop)
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Origin as Origin sam-node / SDK agent
-    participant Egress as Egress sam-node (egress://bigquery.googleapis.com)
-    participant CP as SAM Control Plane (OIDC issuer)
+    participant Origin as Origin agentmesh-node / SDK agent
+    participant Egress as Egress agentmesh-node (egress://bigquery.googleapis.com)
+    participant CP as Agent Mesh Control Plane (OIDC issuer)
     participant STS as Provider STS (sts.googleapis.com / sts.amazonaws.com)
     participant API as Destination API
 
     Origin->>Egress: libp2p stream GET /egress/bigquery.googleapis.com/bigquery/v2/...<br/>AuthFrame.biscuit = <Task Biscuit (authority + tar_block 1..k)>
     Note over Egress: 1. Authorize: CP signature, actor binding,<br/>standing policy for the subject, TAR chain on<br/>service(), host(), port(), method(), path()
     Egress->>CP: 2. POST /sts/token { biscuit, destination } (cache miss on biscuit digest)
-    Note over CP: Verifies the Biscuit and TAR chain again;<br/>mints ES256 JWT: sub=principal, act=egress node,<br/>aud=destination audience, sam_task, exp=minutes
+    Note over CP: Verifies the Biscuit and TAR chain again;<br/>mints ES256 JWT: sub=principal, act=egress node,<br/>aud=destination audience, mesh_task, exp=minutes
     CP-->>Egress: 3. JWT
     Egress->>STS: 4. RFC 8693 exchange: subject_token=JWT<br/>(Google: pool provider; AWS: AssumeRoleWithWebIdentity + session Policy from TAR)
     STS-->>Egress: 5. Short-lived destination credential (cached by biscuit digest)
@@ -504,7 +504,7 @@ Every authenticated mesh-protocol endpoint on the control plane (`POST /enroll`,
 `GET /enroll/status`, `POST /register`, `POST /refresh`, `POST /routers/lease`,
 `POST /token/exchange`, `POST /sts/token`, `GET /policies`, `GET /egress`,
 `GET /revocations`, and `POST /nodes/catalog`) verifies an Ed25519 signature
-over `sam:<endpoint>:<peer_id>:<challenge_unix_ms>` within a 5-minute clock
+over `mesh:<endpoint>:<peer_id>:<challenge_unix_ms>` within a 5-minute clock
 window (`challengeMaxAge`). When a client's clock has drifted outside that
 window, the control plane answers `401` (`"stale or invalid challenge timestamp"`)
 with the standard HTTP `Date` header (`Access-Control-Expose-Headers: Date` on
@@ -568,11 +568,11 @@ response directly).
 
 ## 6. Summary of security invariants
 
-1. `sam-control-plane` is the customer-owned OIDC issuer for cloud egress,
+1. `agentmesh-control-plane` is the customer-owned OIDC issuer for cloud egress,
    using a KMS/HSM-attributable ES256 signing key, short JWT lifetimes, one
    audience per destination, CEL attribute conditions restricting `act.sub` to
-   enrolled egress nodes, and joined audit logs (`sub` + `sam_task`).
-2. `sam-control-plane` stays off the per-request hot path: nodes cache
+   enrolled egress nodes, and joined audit logs (`sub` + `mesh_task`).
+2. `agentmesh-control-plane` stays off the per-request hot path: nodes cache
    unattenuated, unsealed Delegated Session Biscuits by
    `SHA-256(subject_token_type + "|" + subject_token)` and cache minted border
    JWTs and upstream cloud tokens by Biscuit SHA-256 digest.

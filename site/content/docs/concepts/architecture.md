@@ -12,14 +12,14 @@ and call each other's services on behalf of the agents next to them.
 ```mermaid
 flowchart LR
   subgraph cp["control plane"]
-    CP["sam-control-plane<br/>identity · policy · signing key"]
+    CP["agentmesh-control-plane<br/>identity · policy · signing key"]
     DB[("database")]
     CP --- DB
   end
   IDP["identity provider<br/>(OIDC)"]
-  R["sam-router<br/>bootstrap · relay · DHT"]
-  A["sam-node A"]
-  B["sam-node B"]
+  R["agentmesh-router<br/>bootstrap · relay · DHT"]
+  A["agentmesh-node A"]
+  B["agentmesh-node B"]
   AG["agent"]
   SVC["your tool or model"]
 
@@ -36,7 +36,7 @@ flowchart LR
 
 ## The control plane
 
-`sam-control-plane` is an HTTP service backed by SQLite or PostgreSQL. It is
+`agentmesh-control-plane` is an HTTP service backed by SQLite or PostgreSQL. It is
 the only component that has to be trusted. It is not on the data path: tool
 calls and model requests never pass through it.
 
@@ -62,7 +62,7 @@ covers all of that.
 
 ## Routers
 
-`sam-router` is a libp2p peer with a stable address. It runs the mesh's
+`agentmesh-router` is a libp2p peer with a stable address. It runs the mesh's
 Kademlia DHT (a distributed hash table), where nodes advertise their services
 and look up who provides what. It also relays traffic for nodes that cannot
 accept inbound
@@ -76,7 +76,7 @@ and connect to the ones that answer.
 
 ## Nodes
 
-`sam-node` runs as one process per host or per pod, next to the service it
+`agentmesh-node` runs as one process per host or per pod, next to the service it
 serves or the agent that uses it. On the mesh side it is a libp2p peer with
 its own Ed25519 key. Its peer ID is derived from that key, and every other
 component refers to the node by that ID.
@@ -145,13 +145,13 @@ The same three programs ship in several forms:
 
 - **Binaries** for Linux, macOS and Windows, from the releases page or the
   install script.
-- **Container images**: `ghcr.io/google/sam-control-plane`,
-  `sam-router`, `sam-node`, `sam-console` and `sam-one`.
-- **`sam-one`**, a single binary that runs the control plane, a router and
+- **Container images**: `ghcr.io/google/agentmesh-control-plane`,
+  `agentmesh-router`, `agentmesh-node`, `agentmesh-console` and `agentmesh-one`.
+- **`agentmesh-one`**, a single binary that runs the control plane, a router and
   the console in one process on one port, for laptops, Cloud Run and small
   meshes.
-- **Helm charts**: `sam-mesh` deploys the control plane, router, console and
-  PostgreSQL. `sam-node` deploys a node beside a service container.
+- **Helm charts**: `agentmesh-p2p` deploys the control plane, router, console and
+  PostgreSQL. `agentmesh-node` deploys a node beside a service container.
 
-The web console (`sam-console`) is a separate program that talks to the
+The web console (`agentmesh-console`) is a separate program that talks to the
 control plane's admin API. It is not required to run a mesh.
