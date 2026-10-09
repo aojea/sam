@@ -30,6 +30,11 @@ const (
 	DefaultDiscoveryInterval    = "30s"
 	DefaultConfigFile           = "sam-node.yaml"
 	DefaultRouterConnectTimeout = 5 * time.Second
+	// A router pod that restarts is back in well under a minute; the first
+	// redial waits a moment for it, and six doublings reach past where the
+	// connection monitor's own interval takes over.
+	DefaultRouterRedialDelay    = 2 * time.Second
+	DefaultRouterRedialAttempts = 6
 	// DefaultSocketName is the local API socket the node creates in its data directory.
 	DefaultSocketName = "sam.sock"
 )
@@ -60,6 +65,13 @@ type Options struct {
 	AutoRelayBackoff     time.Duration
 	// RouterConnectTimeout bounds each router address's dial (connect + stream open).
 	RouterConnectTimeout time.Duration
+	// RouterRedialDelay is how long after a router session drops the node
+	// waits before dialing that router again; each further attempt waits
+	// twice as long, up to RouterRedialAttempts of them. Zero uses the
+	// default; negative disables the redial, leaving a dropped router to the
+	// connection monitor.
+	RouterRedialDelay    time.Duration
+	RouterRedialAttempts int
 	// BiscuitTimeout bounds Datalog evaluation when verifying biscuit tokens.
 	BiscuitTimeout time.Duration
 	// DHT Options
@@ -133,6 +145,12 @@ func (o *Options) Default() {
 	}
 	if o.RouterConnectTimeout == 0 {
 		o.RouterConnectTimeout = DefaultRouterConnectTimeout
+	}
+	if o.RouterRedialDelay == 0 {
+		o.RouterRedialDelay = DefaultRouterRedialDelay
+	}
+	if o.RouterRedialAttempts <= 0 {
+		o.RouterRedialAttempts = DefaultRouterRedialAttempts
 	}
 	if o.BiscuitTimeout <= 0 {
 		o.BiscuitTimeout = identity.DefaultAuthorizerTimeout

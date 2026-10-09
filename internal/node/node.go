@@ -29,6 +29,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -161,14 +162,16 @@ func (n *SamNode) isAdmitted(p peer.ID) bool {
 }
 
 type SamNode struct {
-	config                Options
-	Host                  host.Host
-	DHT                   *dht.IpfsDHT
-	PubSub                *pubsub.PubSub
-	Discovery             *samdiscovery.Discovery
-	Store                 *Store
-	RouterPeerID          peer.ID
-	authenticatedRouters  map[peer.ID]bool
+	config               Options
+	Host                 host.Host
+	DHT                  *dht.IpfsDHT
+	PubSub               *pubsub.PubSub
+	Discovery            *samdiscovery.Discovery
+	Store                *Store
+	RouterPeerID         peer.ID
+	authenticatedRouters map[peer.ID]bool
+	// redialing holds the routers a redialRouter goroutine is working on.
+	redialing             map[peer.ID]bool
 	peerLastEventTime     map[string]int64
 	mu                    sync.Mutex
 	nodeConfig            *NodeConfigComplete
@@ -231,20 +234,11 @@ func (n *SamNode) getTokenSource() TokenSource {
 
 // UpdateRelays updates the current relays used by AutoRelay.
 func (n *SamNode) UpdateRelays(addrs []multiaddr.Multiaddr) {
+	newRelays := routerPeers(context.Background(), addrs)
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	var newRelays []peer.AddrInfo
-	for _, addr := range addrs {
-		resolvedAddrs, err := resolveAddrIfNeeded(context.Background(), addr)
-		if err != nil {
-			resolvedAddrs = []multiaddr.Multiaddr{addr}
-		}
-		for _, resolved := range resolvedAddrs {
-			if addrInfo, err := peer.AddrInfoFromP2pAddr(resolved); err == nil && addrInfo.ID != "" {
-				newRelays = append(newRelays, *addrInfo)
-				n.Host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, peerstore.PermanentAddrTTL)
-			}
-		}
+	for _, relay := range newRelays {
+		n.Host.Peerstore().AddAddrs(relay.ID, relay.Addrs, peerstore.PermanentAddrTTL)
 	}
 	n.currentRelays = newRelays
 	logger.Infof("[Relay] Updated current relays for AutoRelay: %v", newRelays)
@@ -356,6 +350,46 @@ func resolveAddrIfNeeded(ctx context.Context, addr multiaddr.Multiaddr) ([]multi
 		return []multiaddr.Multiaddr{addr}, nil
 	}
 	return madns.DefaultResolver.Resolve(ctx, stripP2pFromDnsaddr(addr))
+}
+
+// routerPeers resolves router addresses and groups them by peer, in first-seen
+// order. A router is advertised under one multiaddr per interface, and a
+// dnsaddr entry resolves to every router behind the name, so the same peer
+// arrives several times; it is one peer with all of its addresses, dialed
+// once and handshaken once. An address that cannot be resolved is kept as
+// written for libp2p to resolve at dial time.
+func routerPeers(ctx context.Context, addrs []multiaddr.Multiaddr) []peer.AddrInfo {
+	var order []peer.ID
+	byPeer := map[peer.ID]*peer.AddrInfo{}
+	for _, addr := range addrs {
+		resolved, err := resolveAddrIfNeeded(ctx, addr)
+		if err != nil {
+			resolved = []multiaddr.Multiaddr{addr}
+		}
+		for _, r := range resolved {
+			info, err := peer.AddrInfoFromP2pAddr(r)
+			if err != nil || info.ID == "" {
+				logger.Warnf("Failed to parse router addr %s: %v", r, err)
+				continue
+			}
+			known, seen := byPeer[info.ID]
+			if !seen {
+				byPeer[info.ID] = info
+				order = append(order, info.ID)
+				continue
+			}
+			for _, a := range info.Addrs {
+				if !slices.ContainsFunc(known.Addrs, a.Equal) {
+					known.Addrs = append(known.Addrs, a)
+				}
+			}
+		}
+	}
+	out := make([]peer.AddrInfo, 0, len(order))
+	for _, id := range order {
+		out = append(out, *byPeer[id])
+	}
+	return out
 }
 
 // NewSamNode creates a new Agent instance secured with the 4-layer pipeline.
@@ -498,23 +532,11 @@ func (n *SamNode) Start(ctx context.Context) error {
 	// Layer 2: Attach the Bouncer (Gater)
 	gater := &nodeConnGate{node: n}
 
-	// Convert router multiaddrs to peer.AddrInfo to use as static relays
-	var staticRelays []peer.AddrInfo
-	for _, addr := range n.config.RouterAddrs {
-		resolvedAddrs, err := resolveAddrIfNeeded(ctx, addr)
-		if err != nil {
-			resolvedAddrs = []multiaddr.Multiaddr{addr}
-		}
-		for _, resolved := range resolvedAddrs {
-			if addrInfo, err := peer.AddrInfoFromP2pAddr(resolved); err == nil && addrInfo.ID != "" {
-				staticRelays = append(staticRelays, *addrInfo)
-				if n.RouterPeerID == "" {
-					n.RouterPeerID = addrInfo.ID
-				}
-			} else {
-				logger.Warnf("Failed to parse static relay addr %s: %v", resolved, err)
-			}
-		}
+	// The routers, one entry per peer with every address it is known by;
+	// they double as the static relays.
+	staticRelays := routerPeers(ctx, n.config.RouterAddrs)
+	if n.RouterPeerID == "" && len(staticRelays) > 0 {
+		n.RouterPeerID = staticRelays[0].ID
 	}
 	logger.Infof("Configured %d static relays: %v", len(staticRelays), staticRelays)
 
@@ -618,6 +640,7 @@ func (n *SamNode) Start(ctx context.Context) error {
 			n.mu.Unlock()
 			if wasAuthenticated {
 				logger.Warnf("[AuthN] Router %s disconnected; clearing authenticated session so the next check re-handshakes", remotePeer)
+				n.redialRouter(ctx, remotePeer)
 			}
 		},
 	})
@@ -658,21 +681,8 @@ func (n *SamNode) Start(ctx context.Context) error {
 	n.services.reprovideNow = n.triggerReprovide
 	n.applyPendingEgress(ctx)
 
-	var authenticated bool
-	var fatalAuthErr error
-
-	for _, addr := range n.config.RouterAddrs {
-		if err := n.ConnectAndAuthWithRouter(ctx, addr); err != nil {
-			logger.Warnf("[AuthN] Failed to bootstrap and auth with router %s: %v", addr, err)
-			if errors.Is(err, ErrFatalAuth) {
-				fatalAuthErr = err
-			}
-		} else {
-			authenticated = true
-		}
-	}
-
-	if len(n.config.RouterAddrs) > 0 && !authenticated {
+	authenticated, fatalAuthErr := n.authWithRouters(ctx, staticRelays)
+	if len(staticRelays) > 0 && !authenticated {
 		if fatalAuthErr != nil {
 			return fmt.Errorf("fatal auth failure: %w", fatalAuthErr)
 		}
@@ -980,73 +990,184 @@ dhtLoop:
 	return nil
 }
 
-func (n *SamNode) ConnectAndAuthWithRouter(ctx context.Context, addr multiaddr.Multiaddr) error {
-	resolvedAddrs, err := resolveAddrIfNeeded(ctx, addr)
-	if err != nil {
-		resolvedAddrs = []multiaddr.Multiaddr{addr}
+// authWithRouters dials every router at once and returns as soon as one has
+// admitted this node, or once all have refused. A router that is down costs
+// its dial timeout; paid up front and one router after another, that was
+// every member's cold-join cost for as long as the control plane still
+// listed a router that had gone. The dials still in flight finish in the
+// background and record their sessions as they land; the connection monitor
+// re-handshakes whatever drops later.
+func (n *SamNode) authWithRouters(ctx context.Context, routers []peer.AddrInfo) (authenticated bool, fatal error) {
+	if len(routers) == 0 {
+		return false, nil
 	}
+	biscuitBytes, err := n.loadIdentityForAuth()
+	if err != nil {
+		return false, err
+	}
+	results := n.dialRouters(ctx, routers, biscuitBytes)
+	for range routers {
+		err := <-results
+		if err == nil {
+			return true, nil
+		}
+		if errors.Is(err, ErrFatalAuth) {
+			fatal = err
+		}
+	}
+	return false, fatal
+}
 
-	// Load biscuit from store once before the loop
+// dialRouters runs authRouter against every router at once and delivers one
+// outcome per router on the returned channel, in completion order. The
+// channel is buffered for all of them, so a caller may stop reading early.
+func (n *SamNode) dialRouters(ctx context.Context, routers []peer.AddrInfo, biscuitBytes []byte) <-chan error {
+	results := make(chan error, len(routers))
+	for _, router := range routers {
+		go func() {
+			err := n.authRouter(ctx, router, biscuitBytes)
+			if err != nil {
+				logger.Warnf("[AuthN] Failed to bootstrap and auth with router %s: %v", router.ID, err)
+			}
+			results <- err
+		}()
+	}
+	return results
+}
+
+// redialRouter re-handshakes a router whose session just dropped, in the
+// background, with a doubling delay between attempts. The connection monitor
+// only acts once no router is left and only on its own interval, so without
+// this a rollout that restarts the routers one after another, each faster
+// than that interval, takes every session a member has before any is back;
+// and a router that restarts alone is never re-handshaken at all, the
+// member keeping one router fewer after each rollout. One redial per router
+// runs at a time, and a router that stays away is left to the monitor.
+func (n *SamNode) redialRouter(ctx context.Context, router peer.ID) {
+	if n.config.RouterRedialDelay < 0 {
+		return
+	}
+	n.mu.Lock()
+	if n.redialing == nil {
+		n.redialing = map[peer.ID]bool{}
+	}
+	if n.redialing[router] {
+		n.mu.Unlock()
+		return
+	}
+	n.redialing[router] = true
+	n.mu.Unlock()
+
+	go func() {
+		defer func() {
+			n.mu.Lock()
+			delete(n.redialing, router)
+			n.mu.Unlock()
+		}()
+		biscuitBytes, err := n.loadIdentityForAuth()
+		if err != nil {
+			return
+		}
+		delay := n.config.RouterRedialDelay
+		for attempt := 1; attempt <= n.config.RouterRedialAttempts; attempt++ {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+			}
+			if n.isAuthenticatedAndConnected(router) {
+				return
+			}
+			addrs := n.Host.Peerstore().Addrs(router)
+			if len(addrs) == 0 {
+				logger.Warnf("[AuthN] Router %s dropped and no address for it is known; leaving it to the connection monitor", router)
+				return
+			}
+			err := n.authRouter(ctx, peer.AddrInfo{ID: router, Addrs: addrs}, biscuitBytes)
+			if err == nil {
+				logger.Infof("[AuthN] Router %s re-admitted this node on redial %d", router, attempt)
+				n.triggerReprovide()
+				return
+			}
+			if errors.Is(err, ErrFatalAuth) {
+				logger.Warnf("[AuthN] Router %s refused this node's credential on redial: %v", router, err)
+				return
+			}
+			logger.Debugf("[AuthN] Redial %d of router %s failed: %v", attempt, router, err)
+			delay *= 2
+		}
+		logger.Warnf("[AuthN] Router %s did not come back within %d redials; leaving it to the connection monitor", router, n.config.RouterRedialAttempts)
+	}()
+}
+
+func (n *SamNode) loadIdentityForAuth() ([]byte, error) {
 	biscuitBytes, err := n.Store.LoadIdentity()
 	if err != nil {
-		return fmt.Errorf("%w: failed to load identity from store: %w", ErrFatalAuth, err)
+		return nil, fmt.Errorf("%w: failed to load identity from store: %w", ErrFatalAuth, err)
 	}
 	if len(biscuitBytes) == 0 {
-		return fmt.Errorf("%w: no identity biscuit found in store", ErrFatalAuth)
+		return nil, fmt.Errorf("%w: no identity biscuit found in store", ErrFatalAuth)
+	}
+	return biscuitBytes, nil
+}
+
+// authRouter connects to one router over whichever of its addresses answers
+// and runs the handshake, unless a live authenticated session to it already
+// exists: Host.Connect is a no-op on an existing connection, but the
+// handshake is not, and repeating it trips the router's per-peer handshake
+// limiter. The dial is bounded by RouterConnectTimeout so a router that is
+// down does not hold its caller for long.
+func (n *SamNode) authRouter(ctx context.Context, router peer.AddrInfo, biscuitBytes []byte) error {
+	if n.isAuthenticatedAndConnected(router.ID) {
+		return nil
+	}
+	routerCtx, cancel := context.WithTimeout(ctx, n.config.RouterConnectTimeout)
+	defer cancel()
+	if err := n.Host.Connect(routerCtx, router); err != nil {
+		if strings.Contains(err.Error(), "peer id mismatch") {
+			return fmt.Errorf("%w: %w", ErrFatalAuth, err)
+		}
+		return fmt.Errorf("failed to connect to router %s at %v: %w", router.ID, router.Addrs, err)
+	}
+	if err := n.authenticateRouterSession(routerCtx, router.ID, biscuitBytes); err != nil {
+		return fmt.Errorf("router %s: %w", router.ID, err)
+	}
+	n.authOnce.Do(func() {
+		close(n.authSuccess)
+	})
+	return nil
+}
+
+// ConnectAndAuthWithRouter connects to and authenticates with every router
+// behind addr: one peer for a direct address, every router behind the name
+// for a dnsaddr. They are dialed at once and all are waited for; it succeeds
+// when at least one admitted this node.
+func (n *SamNode) ConnectAndAuthWithRouter(ctx context.Context, addr multiaddr.Multiaddr) error {
+	biscuitBytes, err := n.loadIdentityForAuth()
+	if err != nil {
+		return err
 	}
 
+	routers := routerPeers(ctx, []multiaddr.Multiaddr{addr})
 	var connected bool
 	var lastFatalErr error
 	var errs []error
-
-	for _, resolved := range resolvedAddrs {
-		addrInfo, err := peer.AddrInfoFromP2pAddr(resolved)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("failed to get AddrInfo from multiaddr %s: %w", resolved, err))
-			continue
-		}
-
-		// A router advertises one multiaddr per interface, all the same peer.
-		// Host.Connect is a no-op on an existing connection, but the
-		// handshake is not: repeating it per address trips the router's
-		// per-peer handshake limiter and logs a failure for every extra
-		// address. One live authenticated session per router is enough.
-		if n.isAuthenticatedAndConnected(addrInfo.ID) {
+	results := n.dialRouters(ctx, routers, biscuitBytes)
+	for range routers {
+		err := <-results
+		if err == nil {
 			connected = true
 			continue
 		}
-
-		// Create a per-replica timeout context to prevent blocking on offline replicas
-		replicaCtx, cancel := context.WithTimeout(ctx, n.config.RouterConnectTimeout)
-
-		if err := n.Host.Connect(replicaCtx, *addrInfo); err != nil {
-			cancel()
-			if strings.Contains(err.Error(), "peer id mismatch") {
-				lastFatalErr = fmt.Errorf("%w: %w", ErrFatalAuth, err)
-			}
-			errs = append(errs, fmt.Errorf("failed to connect to router %s: %w", resolved, err))
-			continue
+		errs = append(errs, err)
+		if errors.Is(err, ErrFatalAuth) {
+			lastFatalErr = err
 		}
-
-		err = n.authenticateRouterSession(replicaCtx, addrInfo.ID, biscuitBytes)
-		cancel()
-		if err != nil {
-			errs = append(errs, fmt.Errorf("router %s: %w", resolved, err))
-			if errors.Is(err, ErrFatalAuth) {
-				lastFatalErr = err
-			}
-			continue
-		}
-		connected = true
 	}
 
 	if connected {
-		n.authOnce.Do(func() {
-			close(n.authSuccess)
-		})
 		return nil
 	}
-
 	if lastFatalErr != nil {
 		return lastFatalErr
 	}

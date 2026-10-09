@@ -18,7 +18,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -28,6 +30,7 @@ import (
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -117,7 +120,8 @@ func newFakeRouter(t *testing.T, listenAddrs ...string) *fakeRouter {
 }
 
 // startNode brings up a node enrolled against this router and authenticated.
-func (r *fakeRouter) startNode(t *testing.T, ctx context.Context, routerAddrs []multiaddr.Multiaddr) *SamNode {
+// Each tweak may adjust the options before the node is built.
+func (r *fakeRouter) startNode(t *testing.T, ctx context.Context, routerAddrs []multiaddr.Multiaddr, tweaks ...func(*Options)) *SamNode {
 	t.Helper()
 	store, err := NewStore(t.TempDir())
 	if err != nil {
@@ -133,14 +137,18 @@ func (r *fakeRouter) startNode(t *testing.T, ctx context.Context, routerAddrs []
 		t.Fatal(err)
 	}
 
-	node, err := NewSamNode(Options{
+	opts := Options{
 		PrivKey:            privKey,
 		Store:              store,
 		ControlPlanePubKey: r.cpPub,
 		RouterAddrs:        routerAddrs,
 		ListenAddrs:        []string{"/ip4/127.0.0.1/tcp/0"},
 		AllowLoopback:      true,
-	})
+	}
+	for _, tweak := range tweaks {
+		tweak(&opts)
+	}
+	node, err := NewSamNode(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +243,10 @@ func TestRouterDisconnectClearsAuthenticatedSession(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	node := r.startNode(t, ctx, r.routerAddrs)
+	// The redial would restore the session on its own; this is about the
+	// state in between, so it is off here and TestRouterDropIsRedialed
+	// covers the redial.
+	node := r.startNode(t, ctx, r.routerAddrs, func(o *Options) { o.RouterRedialDelay = -1 })
 
 	if !node.IsConnected() {
 		t.Fatal("node does not report an authenticated router connection after Start")
@@ -322,4 +333,155 @@ func TestRefreshEnrollmentReadmitsConnectedRouters(t *testing.T) {
 		t.Fatal("node does not report an authenticated router connection after refresh")
 	}
 	waitForConnectedness(t, node, r.h.ID(), network.Connected)
+}
+
+// The control plane keeps advertising a router for as long as its lease
+// lasts, so after a rollout every joiner is handed a router that is gone.
+// Start must not pay that router's dial timeout before the node is ready:
+// the live router admits the node and the dead one is still being dialed
+// when Start returns.
+func TestStartIsReadyOnceOneRouterAdmitsTheNode(t *testing.T) {
+	live := newFakeRouter(t, "/ip4/127.0.0.1/tcp/0")
+
+	// A listener that accepts and never speaks: the dial completes at the
+	// TCP level, the security handshake then waits out the timeout.
+	deadListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = deadListener.Close() }()
+	go func() {
+		for {
+			c, err := deadListener.Accept()
+			if err != nil {
+				return
+			}
+			defer func() { _ = c.Close() }()
+		}
+	}()
+	_, deadPub, err := crypto.GenerateEd25519Key(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadID, err := peer.IDFromPublicKey(deadPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadAddr := multiaddr.StringCast(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s", deadListener.Addr().(*net.TCPAddr).Port, deadID))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	// The dead router first, where a sequential dial would have waited on it.
+	routerAddrs := append([]multiaddr.Multiaddr{deadAddr}, live.routerAddrs...)
+
+	const connectTimeout = 3 * time.Second
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	privKey := GetOrGenerateKey(store)
+	pid, _ := peer.IDFromPrivateKey(privKey)
+	if err := store.SaveIdentity(live.mint(pid.String(), api.RoleNode)); err != nil {
+		t.Fatal(err)
+	}
+	node, err := NewSamNode(Options{
+		PrivKey:              privKey,
+		Store:                store,
+		ControlPlanePubKey:   live.cpPub,
+		RouterAddrs:          routerAddrs,
+		ListenAddrs:          []string{"/ip4/127.0.0.1/tcp/0"},
+		AllowLoopback:        true,
+		RouterConnectTimeout: connectTimeout,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = node.Teardown() })
+
+	started := time.Now()
+	if err := node.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	took := time.Since(started)
+	if !node.IsConnected() {
+		t.Fatal("Start returned without an authenticated router")
+	}
+	if took >= connectTimeout {
+		t.Fatalf("Start took %v, at least the dead router's %v dial timeout; the live router should have made the node ready", took, connectTimeout)
+	}
+	if got := live.handshakes.Load(); got != 1 {
+		t.Fatalf("live router saw %d handshakes, want 1", got)
+	}
+}
+
+// Three entries for one router, as a control plane hands out when a dnsaddr
+// resolves to every address behind the name: one peer, one dial, one
+// handshake, and one static relay.
+func TestRouterPeersGroupsAddressesByPeer(t *testing.T) {
+	r := newFakeRouter(t, "/ip4/127.0.0.1/tcp/0", "/ip4/127.0.0.1/tcp/0")
+	addrs := append(append([]multiaddr.Multiaddr{}, r.routerAddrs...), r.routerAddrs[0])
+
+	peers := routerPeers(context.Background(), addrs)
+	if len(peers) != 1 {
+		t.Fatalf("routerPeers = %d peers for %d addresses of one router, want 1", len(peers), len(addrs))
+	}
+	if peers[0].ID != r.h.ID() {
+		t.Fatalf("peer = %s, want the router %s", peers[0].ID, r.h.ID())
+	}
+	if len(peers[0].Addrs) != 2 {
+		t.Fatalf("peer carries %d addresses, want its 2 distinct ones: %v", len(peers[0].Addrs), peers[0].Addrs)
+	}
+}
+
+// A router that restarts drops every member's session. The connection
+// monitor only acts once a member has no router left, and only on its own
+// interval, so a rollout that restarts the routers one after another took
+// every session before any came back, and a router restarting alone was
+// never re-handshaken. The member must redial a dropped router by itself.
+func TestRouterDropIsRedialed(t *testing.T) {
+	r := newFakeRouter(t, "/ip4/127.0.0.1/tcp/0")
+	h, handshakes := r.h, r.handshakes
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	// The monitor is kept out of the way: the redial must do this alone.
+	node := r.startNode(t, ctx, r.routerAddrs, func(o *Options) {
+		o.RouterRedialDelay = 100 * time.Millisecond
+		o.MonitorBootstrap = time.Hour
+	})
+	if got := handshakes.Load(); got != 1 {
+		t.Fatalf("handshakes after Start = %d, want 1", got)
+	}
+
+	// The router side closes, as a restarting pod does.
+	if err := h.Network().ClosePeer(node.Host.ID()); err != nil {
+		t.Fatal(err)
+	}
+	waitForConnectedness(t, node, h.ID(), network.NotConnected)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && (!node.IsConnected() || handshakes.Load() != 2) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := handshakes.Load(); got != 2 {
+		t.Fatalf("handshakes after the drop = %d, want 2: the node must handshake the router again", got)
+	}
+	if !node.IsConnected() {
+		t.Fatal("node does not report an authenticated session after the redial")
+	}
+
+	// Dropping it again while the first redial has finished starts another;
+	// the session comes back a second time.
+	if err := h.Network().ClosePeer(node.Host.ID()); err != nil {
+		t.Fatal(err)
+	}
+	waitForConnectedness(t, node, h.ID(), network.NotConnected)
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && handshakes.Load() < 3 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := handshakes.Load(); got != 3 {
+		t.Fatalf("handshakes after the second drop = %d, want 3", got)
+	}
 }
