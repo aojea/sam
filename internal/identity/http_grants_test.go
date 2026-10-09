@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // TestMintNarrowedGrant pins what a role with PolicyRole.http mints: the

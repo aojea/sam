@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // Every record here is taken apart into named columns on the way in and put

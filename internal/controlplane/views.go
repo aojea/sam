@@ -19,8 +19,8 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/storage"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/storage"
 )
 
 // The operator plane (/admin/*, /user/*) serves api.proto messages; these

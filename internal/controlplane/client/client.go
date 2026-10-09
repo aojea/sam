@@ -34,8 +34,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/version"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/version"
 )
 
 // MaxBodyBytes caps every response body read from a control plane: a

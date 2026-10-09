@@ -23,7 +23,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/google/sam/internal/skill"
+	"github.com/google/agentmesh/internal/skill"
 	"github.com/spf13/cobra"
 )
 

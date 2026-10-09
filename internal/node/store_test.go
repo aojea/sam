@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 	"go.etcd.io/bbolt"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"

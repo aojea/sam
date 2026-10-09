@@ -31,8 +31,8 @@ import (
 	"time"
 
 	extprocv3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/envoy"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/envoy"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 

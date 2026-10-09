@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // testService is a minimal Service implementation for test setup. Tests use

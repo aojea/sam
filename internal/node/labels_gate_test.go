@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/identity"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/identity"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"

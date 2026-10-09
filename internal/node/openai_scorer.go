@@ -19,7 +19,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // providerBackoff is how long a provider is skipped after a retryable failure.

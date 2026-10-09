@@ -19,7 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	cpclient "github.com/google/sam/internal/controlplane/client"
+	cpclient "github.com/google/agentmesh/internal/controlplane/client"
 )
 
 // allowInsecureControlPlane is process-wide because the control-plane URL

@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/storage"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/storage"
 	dto "github.com/prometheus/client_model/go"
 )
 

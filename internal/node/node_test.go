@@ -24,9 +24,9 @@ import (
 	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/identity"
-	"github.com/google/sam/internal/ratelimit"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/identity"
+	"github.com/google/agentmesh/internal/ratelimit"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"

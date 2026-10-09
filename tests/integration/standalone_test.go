@@ -26,9 +26,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/node"
-	"github.com/google/sam/internal/standalone"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/node"
+	"github.com/google/agentmesh/internal/standalone"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"

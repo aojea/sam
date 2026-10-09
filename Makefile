@@ -1,7 +1,7 @@
 REPO_ROOT:=${CURDIR}
 OUT_DIR=$(REPO_ROOT)/bin
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo devel)
-VERSION_LDFLAGS = -X github.com/google/sam/internal/version.Version=$(VERSION)
+VERSION_LDFLAGS = -X github.com/google/agentmesh/internal/version.Version=$(VERSION)
 
 .DEFAULT_GOAL := build
 

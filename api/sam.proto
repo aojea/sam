@@ -14,7 +14,7 @@
 
 syntax = "proto3";
 package sam.v1;
-option go_package = "github.com/google/sam/api";
+option go_package = "github.com/google/agentmesh/api";
 
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";

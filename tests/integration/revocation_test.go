@@ -25,8 +25,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/storage"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/storage"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"

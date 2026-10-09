@@ -28,11 +28,11 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/router"
-	"github.com/google/sam/internal/standalone"
-	"github.com/google/sam/internal/tunnel"
-	"github.com/google/sam/internal/version"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/router"
+	"github.com/google/agentmesh/internal/standalone"
+	"github.com/google/agentmesh/internal/tunnel"
+	"github.com/google/agentmesh/internal/version"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
 )

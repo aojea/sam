@@ -18,8 +18,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/node/discovery"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/node/discovery"
 )
 
 // discoverySourceProbeTimeout bounds each backend model probe per tick.

@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // TestOpenAIFacadeCUJ covers the "point an OpenAI client at the sidecar" CUJ:

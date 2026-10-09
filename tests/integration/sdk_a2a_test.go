@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // TestNativeSDKA2A runs the examples written with the official A2A SDKs

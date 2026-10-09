@@ -24,8 +24,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/ratelimit"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/ratelimit"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsub_pb "github.com/libp2p/go-libp2p-pubsub/pb"

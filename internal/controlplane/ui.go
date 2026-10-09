@@ -18,7 +18,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // HandleAdminStatus HTTP GET `/admin/status`: the whole mesh as the console

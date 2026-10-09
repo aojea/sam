@@ -31,7 +31,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // A density run says how many agents one member can carry. This asks the

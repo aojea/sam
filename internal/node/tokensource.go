@@ -24,8 +24,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/sam/api"
-	cpclient "github.com/google/sam/internal/controlplane/client"
+	"github.com/google/agentmesh/api"
+	cpclient "github.com/google/agentmesh/internal/controlplane/client"
 )
 
 const (

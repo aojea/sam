@@ -26,7 +26,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // TestAttenuationBlockFactsAreInvisibleToTheAuthorizer records a property of

@@ -22,8 +22,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/google/sam/internal/router"
-	"github.com/google/sam/internal/version"
+	"github.com/google/agentmesh/internal/router"
+	"github.com/google/agentmesh/internal/version"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
 )

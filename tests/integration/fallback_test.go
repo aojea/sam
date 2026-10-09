@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
-	"github.com/google/sam/internal/node"
+	"github.com/google/agentmesh/internal/node"
 )
 
 // init forces the biscuit-go parser to build its underlying participle

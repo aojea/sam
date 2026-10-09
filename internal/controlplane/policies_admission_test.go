@@ -27,8 +27,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
-	cpclient "github.com/google/sam/internal/controlplane/client"
+	"github.com/google/agentmesh/api"
+	cpclient "github.com/google/agentmesh/internal/controlplane/client"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"google.golang.org/protobuf/proto"

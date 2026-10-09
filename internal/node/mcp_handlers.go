@@ -23,8 +23,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/sam/api"
-	samdiscovery "github.com/google/sam/internal/node/discovery"
+	"github.com/google/agentmesh/api"
+	samdiscovery "github.com/google/agentmesh/internal/node/discovery"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )

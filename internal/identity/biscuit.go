@@ -30,7 +30,7 @@ import (
 	"github.com/biscuit-auth/biscuit-go/v2/pb"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"google.golang.org/protobuf/proto"
 )

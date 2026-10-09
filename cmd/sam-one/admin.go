@@ -24,8 +24,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/standalone"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/standalone"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/encoding/protojson"
 )

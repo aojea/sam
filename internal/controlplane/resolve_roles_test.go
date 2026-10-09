@@ -18,7 +18,7 @@ import (
 	"testing"
 
 	jwt "github.com/golang-jwt/jwt/v5"
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // TestResolveRolesCoversEveryMappedClaim walks api.OIDCClaimToFact instead of a

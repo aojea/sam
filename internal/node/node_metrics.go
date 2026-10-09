@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )

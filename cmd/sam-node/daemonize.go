@@ -31,7 +31,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/sam/internal/node"
+	"github.com/google/agentmesh/internal/node"
 )
 
 const (

@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 	"go.etcd.io/bbolt"
 )
 

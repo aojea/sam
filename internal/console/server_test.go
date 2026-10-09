@@ -31,8 +31,8 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/version"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/version"
 	"google.golang.org/protobuf/proto"
 )
 

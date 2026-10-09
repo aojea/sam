@@ -25,7 +25,7 @@ import (
 	"testing"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 func TestA2AServiceInitRejectsCommand(t *testing.T) {

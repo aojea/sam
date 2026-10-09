@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/identity"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/identity"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/multiformats/go-multiaddr"
 )

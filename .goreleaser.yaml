@@ -17,7 +17,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X github.com/google/sam/internal/version.Version={{ .Tag }}
+      - -s -w -X github.com/google/agentmesh/internal/version.Version={{ .Tag }}
   - id: sam-control-plane
     main: ./cmd/sam-control-plane
     binary: sam-control-plane
@@ -31,7 +31,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X github.com/google/sam/internal/version.Version={{ .Tag }}
+      - -s -w -X github.com/google/agentmesh/internal/version.Version={{ .Tag }}
   - id: sam-router
     main: ./cmd/sam-router
     binary: sam-router
@@ -45,7 +45,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X github.com/google/sam/internal/version.Version={{ .Tag }}
+      - -s -w -X github.com/google/agentmesh/internal/version.Version={{ .Tag }}
   - id: mcp-client
     main: ./cmd/mcp-client
     binary: mcp-client
@@ -59,7 +59,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X github.com/google/sam/internal/version.Version={{ .Tag }}
+      - -s -w -X github.com/google/agentmesh/internal/version.Version={{ .Tag }}
   - id: sam-console
     main: ./cmd/sam-console
     binary: sam-console
@@ -73,7 +73,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X github.com/google/sam/internal/version.Version={{ .Tag }}
+      - -s -w -X github.com/google/agentmesh/internal/version.Version={{ .Tag }}
   - id: sam-one
     main: ./cmd/sam-one
     binary: sam-one
@@ -87,7 +87,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X github.com/google/sam/internal/version.Version={{ .Tag }}
+      - -s -w -X github.com/google/agentmesh/internal/version.Version={{ .Tag }}
 archives:
   - formats:
       - tar.gz

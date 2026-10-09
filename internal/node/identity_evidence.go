@@ -26,8 +26,8 @@ import (
 	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/identity"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/identity"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"

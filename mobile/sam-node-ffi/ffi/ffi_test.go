@@ -25,8 +25,8 @@ import (
 	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/node"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/node"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/network"

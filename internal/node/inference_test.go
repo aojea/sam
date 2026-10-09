@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 	dto "github.com/prometheus/client_model/go"
 )
 

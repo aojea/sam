@@ -68,7 +68,7 @@ contentDir = "content"
     weight = 6
 
 [params]
-  github_repo = "https://github.com/google/sam"
+  github_repo = "https://github.com/google/agentmesh"
   github_subdir = "site"
   github_branch = "main"
 

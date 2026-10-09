@@ -21,7 +21,7 @@ import (
 
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 	"gopkg.in/yaml.v2"
 )
 

@@ -20,7 +20,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 	"google.golang.org/protobuf/proto"
 )
 

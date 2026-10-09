@@ -39,8 +39,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/google/sam/internal/bench"
-	"github.com/google/sam/internal/version"
+	"github.com/google/agentmesh/internal/bench"
+	"github.com/google/agentmesh/internal/version"
 )
 
 // observation is one complete, self-describing measurement.

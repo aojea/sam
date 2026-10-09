@@ -22,9 +22,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/credprovider"
-	"github.com/google/sam/internal/identity"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/credprovider"
+	"github.com/google/agentmesh/internal/identity"
 )
 
 type exchangerFunc func(ctx context.Context, principal string, rules []*api.TaskAuthorizationRule) (string, time.Time, error)

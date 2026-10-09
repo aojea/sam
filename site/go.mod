@@ -1,4 +1,4 @@
-module github.com/google/sam/site
+module github.com/google/agentmesh/site
 
 go 1.23.4
 

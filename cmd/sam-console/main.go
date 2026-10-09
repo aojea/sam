@@ -25,9 +25,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/google/sam/internal/console"
-	"github.com/google/sam/internal/secrets"
-	"github.com/google/sam/internal/version"
+	"github.com/google/agentmesh/internal/console"
+	"github.com/google/agentmesh/internal/secrets"
+	"github.com/google/agentmesh/internal/version"
 )
 
 func main() {

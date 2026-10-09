@@ -26,8 +26,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/internal/bench"
-	"github.com/google/sam/internal/standalone"
+	"github.com/google/agentmesh/internal/bench"
+	"github.com/google/agentmesh/internal/standalone"
 )
 
 // TestMemberBurstJoinsConcurrently pins the join path under concurrency, the

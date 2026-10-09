@@ -1,4 +1,4 @@
-module github.com/google/sam
+module github.com/google/agentmesh
 
 go 1.26.6
 

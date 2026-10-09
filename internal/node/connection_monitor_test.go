@@ -19,7 +19,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 	"github.com/multiformats/go-multiaddr"
 )
 

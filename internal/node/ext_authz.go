@@ -22,8 +22,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/envoy"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/envoy"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"google.golang.org/protobuf/encoding/protojson"
 )

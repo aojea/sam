@@ -25,9 +25,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/node"
-	"github.com/google/sam/internal/storage"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/node"
+	"github.com/google/agentmesh/internal/storage"
 )
 
 // These tests cover how a node comes to hold, keep and lose its mesh

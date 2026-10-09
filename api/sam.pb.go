@@ -5745,7 +5745,7 @@ const file_api_sam_proto_rawDesc = "" +
 	"\x0fEGRESS_MODE_TCP\x10\x01*\\\n" +
 	"\x12ResponseInspection\x12 \n" +
 	"\x1cRESPONSE_INSPECTION_BUFFERED\x10\x00\x12$\n" +
-	" RESPONSE_INSPECTION_REQUEST_ONLY\x10\x01B\x1bZ\x19github.com/google/sam/apib\x06proto3"
+	" RESPONSE_INSPECTION_REQUEST_ONLY\x10\x01B!Z\x1fgithub.com/google/agentmesh/apib\x06proto3"
 
 var (
 	file_api_sam_proto_rawDescOnce sync.Once

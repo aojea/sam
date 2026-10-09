@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // TestEgressDestinationCUJ is the egress story end to end, with real

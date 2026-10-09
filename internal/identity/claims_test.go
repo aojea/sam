@@ -18,7 +18,7 @@ import (
 	"testing"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // TestEveryMappedClaimBecomesAFact walks api.OIDCClaimToFact rather than a

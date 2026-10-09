@@ -37,7 +37,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/internal/standalone"
+	"github.com/google/agentmesh/internal/standalone"
 )
 
 // TestStandaloneSDKAgents pins that both SDKs work with sam-one. Its

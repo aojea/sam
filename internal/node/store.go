@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 	"go.etcd.io/bbolt"
 	bbolterrors "go.etcd.io/bbolt/errors"
 	"google.golang.org/protobuf/proto"

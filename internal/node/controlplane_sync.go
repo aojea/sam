@@ -22,7 +22,7 @@ import (
 	"math/rand"
 	"time"
 
-	cpclient "github.com/google/sam/internal/controlplane/client"
+	cpclient "github.com/google/agentmesh/internal/controlplane/client"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 )

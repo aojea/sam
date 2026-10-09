@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 func TestLocalPolicyCanGrantPermissions(t *testing.T) {

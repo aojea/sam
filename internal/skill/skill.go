@@ -22,7 +22,7 @@ import (
 	"os"
 	"path/filepath"
 
-	samskill "github.com/google/sam/agents/skills/sam-mesh"
+	samskill "github.com/google/agentmesh/agents/skills/sam-mesh"
 )
 
 const (

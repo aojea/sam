@@ -23,7 +23,7 @@ package discovery
 import (
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 	golog "github.com/ipfs/go-log/v2"
 )
 

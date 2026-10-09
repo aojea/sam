@@ -29,8 +29,8 @@ import (
 	"github.com/libp2p/go-libp2p"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/storage"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/storage"
 )
 
 func TestNopMeshAdapter(t *testing.T) {

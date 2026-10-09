@@ -30,8 +30,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/tlsinspect"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/tlsinspect"
 	gostream "github.com/libp2p/go-libp2p-gostream"
 	"github.com/libp2p/go-libp2p/core/peer"
 )

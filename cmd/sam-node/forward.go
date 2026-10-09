@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/sam/internal/node"
+	"github.com/google/agentmesh/internal/node"
 	"github.com/spf13/cobra"
 )
 

@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // TestRouterGracefulShutdownWithdrawsLease covers a router stopping on

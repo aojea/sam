@@ -19,8 +19,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/identity"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/identity"
 )
 
 // DefaultShutdownLeaseTTL is the CLI default for Options.ShutdownLeaseTTL:

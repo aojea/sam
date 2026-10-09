@@ -20,7 +20,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 var (

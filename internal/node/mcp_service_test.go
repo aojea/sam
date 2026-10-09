@@ -21,7 +21,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

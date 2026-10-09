@@ -24,7 +24,7 @@ import (
 	"strings"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 

@@ -29,7 +29,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 func TestIntegrationStdioDatapath(t *testing.T) {

@@ -24,7 +24,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // StdioBridge backs the POST HTTP ingress route for a command-backed service

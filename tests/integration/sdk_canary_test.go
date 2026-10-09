@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 const sdkCanaryTemplate = ".github/k8s/sam-sdk-canary-template.yaml"

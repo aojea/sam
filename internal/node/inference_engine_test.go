@@ -22,7 +22,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 func TestOpenAIEngine_Models(t *testing.T) {

@@ -26,8 +26,8 @@ import (
 
 	"github.com/biscuit-auth/biscuit-go/v2/datalog"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/identity"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/identity"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 )

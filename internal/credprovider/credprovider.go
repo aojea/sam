@@ -41,7 +41,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 const (

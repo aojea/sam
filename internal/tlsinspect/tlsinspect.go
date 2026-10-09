@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 const (

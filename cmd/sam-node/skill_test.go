@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/sam/internal/skill"
+	"github.com/google/agentmesh/internal/skill"
 )
 
 func TestSkillCmdInstallAndList(t *testing.T) {

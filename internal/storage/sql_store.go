@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 	log "github.com/ipfs/go-log/v2"
 	"google.golang.org/protobuf/encoding/protojson"
 

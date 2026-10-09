@@ -21,8 +21,8 @@ import "C"
 import (
 	"unsafe"
 
-	"github.com/google/sam/internal/version"
-	"github.com/google/sam/mobile/sam-node-ffi/ffi"
+	"github.com/google/agentmesh/internal/version"
+	"github.com/google/agentmesh/mobile/sam-node-ffi/ffi"
 )
 
 func main() {}

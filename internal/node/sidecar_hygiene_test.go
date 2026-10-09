@@ -19,7 +19,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // L32: a ".." after the authorized /{type}/{name} prefix travelled to the

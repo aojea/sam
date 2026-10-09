@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/internal/node"
+	"github.com/google/agentmesh/internal/node"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )

@@ -22,7 +22,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 	qrcode "github.com/skip2/go-qrcode"
 )
 

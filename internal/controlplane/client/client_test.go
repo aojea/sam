@@ -28,8 +28,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/version"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/version"
 )
 
 func writeProto(t *testing.T, w http.ResponseWriter, msg proto.Message) {

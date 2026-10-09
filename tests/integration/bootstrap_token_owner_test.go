@@ -24,9 +24,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/controlplane"
-	"github.com/google/sam/internal/storage"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/controlplane"
+	"github.com/google/agentmesh/internal/storage"
 )
 
 // startTokenTestControlPlane brings up a control plane wired to a mock OIDC provider

@@ -25,7 +25,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // connectPeerWithToken dials POST /debug/connect-peer, the REST endpoint that

@@ -28,7 +28,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/a2aproject/a2a-go/v2/a2aclient/agentcard"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 )
 
 // headerRoundTripper stamps fixed headers (mesh auth, labels) on every

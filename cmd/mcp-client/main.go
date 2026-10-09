@@ -31,8 +31,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/google/sam/api"
-	"github.com/google/sam/internal/version"
+	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/version"
 )
 
 func main() {

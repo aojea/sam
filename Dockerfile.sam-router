@@ -9,7 +9,7 @@ ARG TARGETOS=linux
 ARG TARGETARCH
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -buildvcs=false -ldflags="-X github.com/google/sam/internal/version.Version=${VERSION}" -o sam-router ./cmd/sam-router
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -buildvcs=false -ldflags="-X github.com/google/agentmesh/internal/version.Version=${VERSION}" -o sam-router ./cmd/sam-router
 # Pre-create the keys/data dir owned by the nonroot UID so that a fresh
 # named/anonymous volume mounted over it inherits writable ownership instead
 # of defaulting to root.

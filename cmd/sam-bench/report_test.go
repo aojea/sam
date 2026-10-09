@@ -24,7 +24,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/sam/internal/bench"
+	"github.com/google/agentmesh/internal/bench"
 )
 
 func TestSortByOrdersNumericLabelsNumerically(t *testing.T) {

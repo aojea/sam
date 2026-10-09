@@ -24,7 +24,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/google/sam/api"
+	"github.com/google/agentmesh/api"
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multihash"
 )
