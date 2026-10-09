@@ -125,7 +125,7 @@ func main() {
 	rootCmd.Flags().StringVar(&jwtPath, "jwt-path", "", "Path to file containing OIDC JWT token")
 	rootCmd.Flags().StringVar(&keysPath, "keys-path", "router.key", "Path to save/load persistent private key")
 	rootCmd.Flags().BoolVar(&allowLoopback, "allow-loopback", false, "Allow loopback and link-local addresses for discovery")
-	rootCmd.Flags().IntVar(&connsPerSourceIP, "conns-per-source-ip", 0, "Max inbound connections per source IP (0 keeps libp2p's default of 8); raise behind TLS-terminating proxies or NAT where many peers share source IPs")
+	rootCmd.Flags().IntVar(&connsPerSourceIP, "conns-per-source-ip", 0, "Max inbound connections per source IP; 0 is a quarter of --high-watermark, so filling the router takes at least four addresses. Raise it where more members share one address")
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	rootCmd.Flags().DurationVar(&dhtProviderAddrTTL, "dht-provider-addr-ttl", router.DefaultDHTProviderAddrTTL, "How long a DHT provider record lives after its last announcement")
 	rootCmd.Flags().DurationVar(&dhtMaxRecordAge, "dht-max-record-age", 0, "Maximum age for DHT records (0s uses library default)")

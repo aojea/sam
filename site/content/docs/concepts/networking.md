@@ -133,8 +133,10 @@ forwards it.
 ## Resource limits
 
 Nodes rate-limit authentication attempts per peer and cap the size of every
-frame and body they read. Routers cap inbound connections per source IP
-(`--conns-per-source-ip`) and total connections (`--low-watermark`,
-`--high-watermark`). A router behind a TLS-terminating proxy, or behind a NAT
-that puts many peers on one address, needs a higher per-source limit.
-`sam-one` raises it automatically for its embedded router.
+frame and body they read. Routers cap inbound connections per source address
+(`--conns-per-source-ip`, by default a quarter of the connection budget) and
+total connections (`--low-watermark`, `--high-watermark`). Members behind a
+NAT or a cluster's SNAT share one address, and the handshake, not the
+per-address cap, is what keeps strangers out; the cap bounds how much of a
+router one address can occupy. `sam-one` sets it to the whole budget for its
+embedded router, which sits behind a proxy and sees one address.

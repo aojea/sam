@@ -323,9 +323,9 @@ func (r *Router) transportOptions() libp2p.Option {
 // per-source-IP inbound connection cap, the per-subnet connection rate limit
 // and the system/transient scopes scaled to carry limit connections; see
 // Options.ConnsPerSourceIP. All three matter behind a proxy or NAT: every
-// peer shares a few source IPs, so the default per-IP cap (8), the default
-// per-IP rate (0.2 conns/s, burst 16) and the small transient scope each
-// take down the whole listener under normal reconnect churn.
+// peer shares a few source IPs, so libp2p's per-IP cap (8), its per-IP rate
+// (0.2 conns/s, burst 16) and the small transient scope each take down the
+// whole listener under normal reconnect churn.
 func perIPConnResourceManager(limit int) (network.ResourceManager, error) {
 	limits := rcmgr.DefaultLimits
 	libp2p.SetDefaultServiceLimits(&limits)
@@ -373,14 +373,6 @@ func perIPConnResourceManager(limit int) (network.ResourceManager, error) {
 		),
 		rcmgr.WithConnRateLimiters(connRateLimiter),
 	)
-}
-
-// defaultResourceManager is what libp2p installs when none is given, built
-// here so it can be wrapped.
-func defaultResourceManager() (network.ResourceManager, error) {
-	limits := rcmgr.DefaultLimits
-	libp2p.SetDefaultServiceLimits(&limits)
-	return rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(limits.AutoScale()))
 }
 
 // Start performs enrollment, syncs keys, launches libp2p host, and starts tasks.
@@ -466,14 +458,8 @@ func (r *Router) Start() (retErr error) {
 	}
 
 	// Every refusal the resource manager makes is counted and logged with
-	// its source, whether the per-IP cap is the configured one or libp2p's
-	// default; a refused dialer only sees its connection close before TLS.
-	var mgr network.ResourceManager
-	if r.config.ConnsPerSourceIP > 0 {
-		mgr, err = perIPConnResourceManager(r.config.ConnsPerSourceIP)
-	} else {
-		mgr, err = defaultResourceManager()
-	}
+	// its source; a refused dialer only sees its connection close before TLS.
+	mgr, err := perIPConnResourceManager(r.config.ConnsPerSourceIP)
 	if err != nil {
 		return fmt.Errorf("failed to create resource manager: %w", err)
 	}

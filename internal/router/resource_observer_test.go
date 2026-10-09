@@ -139,8 +139,8 @@ func TestPerPeerLogLimiter(t *testing.T) {
 }
 
 func TestEffectiveConnsPerSourceIP(t *testing.T) {
-	if got := effectiveConnsPerSourceIP(0); got != defaultConnsPerSourceIP {
-		t.Errorf("unset = %d, want libp2p's default %d", got, defaultConnsPerSourceIP)
+	if got := effectiveConnsPerSourceIP(0); got != DefaultHighWaterMark/4 {
+		t.Errorf("unset = %d, want a quarter of the default high watermark, %d", got, DefaultHighWaterMark/4)
 	}
 	if got := effectiveConnsPerSourceIP(64); got != 64 {
 		t.Errorf("configured = %d, want 64", got)

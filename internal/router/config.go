@@ -55,9 +55,15 @@ type Options struct {
 	// HTTP requests arriving on the router's WebSocket listen addrs, letting a
 	// single port carry both libp2p and REST traffic (single-port mode).
 	HTTPFallbackHandler http.Handler
-	// ConnsPerSourceIP overrides libp2p's per-source-IP inbound connection
-	// cap (default: 8) when > 0. Raise it when the listener sits behind a
-	// TLS-terminating proxy or NAT, where many peers share a few source IPs.
+	// ConnsPerSourceIP is the inbound connection cap per source address,
+	// and scales the per-address connection rate limit with it. Zero
+	// derives it from HighWaterMark: one address may hold at most a
+	// quarter of the router's inbound budget, so filling a router takes
+	// at least four addresses. libp2p's own default is 8, sized for a
+	// public DHT where one IP is one peer; members of a mesh share
+	// addresses (pods behind a node's SNAT, a cluster behind a NAT, an
+	// office), and the handshake, not this cap, is what keeps strangers
+	// out.
 	ConnsPerSourceIP int
 	// AllowInsecureControlPlane accepts a plaintext http:// ControlPlaneURL
 	// to a non-loopback host. Off by default: whoever answers that URL is
@@ -88,6 +94,9 @@ func (o *Options) Default() {
 	}
 	if o.HighWaterMark <= 0 {
 		o.HighWaterMark = 4000
+	}
+	if o.ConnsPerSourceIP <= 0 {
+		o.ConnsPerSourceIP = DefaultConnsPerSourceIP(o.HighWaterMark)
 	}
 	if o.KeysDBPath == "" {
 		o.KeysDBPath = "router.key"

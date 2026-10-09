@@ -799,11 +799,25 @@ func TestRouterConnectionManagerWatermarks(t *testing.T) {
 	if opts.LowWaterMark != 500 || opts.HighWaterMark != 1500 {
 		t.Fatalf("expected explicit watermarks to be preserved, got Low: %d, High: %d", opts.LowWaterMark, opts.HighWaterMark)
 	}
+	// The per-address cap follows the budget it is a share of: libp2p's 8
+	// assumes one peer per IP, which a cluster behind SNAT or a NAT is not.
+	if opts.ConnsPerSourceIP != 375 {
+		t.Fatalf("ConnsPerSourceIP = %d, want a quarter of the high watermark, 375", opts.ConnsPerSourceIP)
+	}
 
 	defaultOpts := Options{}
 	defaultOpts.Default()
 	if defaultOpts.LowWaterMark != 1000 || defaultOpts.HighWaterMark != 4000 {
 		t.Fatalf("expected default watermarks 1000/4000, got Low: %d, High: %d", defaultOpts.LowWaterMark, defaultOpts.HighWaterMark)
+	}
+	if defaultOpts.ConnsPerSourceIP != 1000 {
+		t.Fatalf("default ConnsPerSourceIP = %d, want 1000", defaultOpts.ConnsPerSourceIP)
+	}
+
+	pinned := Options{ConnsPerSourceIP: 8}
+	pinned.Default()
+	if pinned.ConnsPerSourceIP != 8 {
+		t.Fatalf("explicit ConnsPerSourceIP = %d, want it kept at 8", pinned.ConnsPerSourceIP)
 	}
 }
 

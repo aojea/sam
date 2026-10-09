@@ -137,8 +137,15 @@ var connsPerSourceIPDesc = prometheus.NewDesc(
 	"Inbound connections allowed from one source IP",
 	nil, nil)
 
-// defaultConnsPerSourceIP is libp2p's cap when --conns-per-source-ip is unset.
-const defaultConnsPerSourceIP = 8
+// connsPerSourceIPShare is the fraction of the inbound connection budget one
+// source address may hold when no cap is configured.
+const connsPerSourceIPShare = 4
+
+// DefaultConnsPerSourceIP is the per-source-address cap derived from a
+// connection manager high watermark.
+func DefaultConnsPerSourceIP(highWaterMark int) int {
+	return max(highWaterMark/connsPerSourceIPShare, 1)
+}
 
 var _ connmgr.GetConnLimiter = (*observedResourceManager)(nil)
 
@@ -147,7 +154,7 @@ func effectiveConnsPerSourceIP(configured int) int {
 	if configured > 0 {
 		return configured
 	}
-	return defaultConnsPerSourceIP
+	return DefaultConnsPerSourceIP(DefaultHighWaterMark)
 }
 
 // perPeerLogLimiter admits one log line per peer per interval. Entries older
