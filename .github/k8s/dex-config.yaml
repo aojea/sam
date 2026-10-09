@@ -42,10 +42,24 @@ data:
         redirectURI: https://auth.sam-mesh.dev/callback
         
     staticClients:
-    # This ID becomes the 'aud' claim in the JWT consumed by sam-hub
+    # This ID becomes the 'aud' claim in the JWT consumed by agentmesh-control-plane
     - id: agentmesh-audience
       name: 'Agent Mesh CLI'
       public: true # Allows PKCE flow for CLIs without exposing the secret
+      redirectURIs:
+      - 'http://127.0.0.1:13000/callback'
+      - 'http://127.0.0.1:13001/callback'
+      - 'http://127.0.0.1:13002/callback'
+      - 'http://127.0.0.1/callback'
+      - 'http://localhost/callback'
+      - 'https://bananas.sam-mesh.dev/console/auth/callback'
+      - 'https://hub.sam-mesh.dev/console/auth/callback'
+      - 'https://auth.sam-mesh.dev/device/callback'
+      - 'urn:ietf:wg:oauth:2.0:oob'
+      - '/device/callback'
+    - id: sam-mesh-audience
+      name: 'Agent Mesh CLI (Legacy)'
+      public: true
       redirectURIs:
       - 'http://127.0.0.1:13000/callback'
       - 'http://127.0.0.1:13001/callback'

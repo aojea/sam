@@ -181,3 +181,94 @@ func TestMigrationCreatesIndexes(t *testing.T) {
 		t.Fatalf("indexes = %v, want %v", got, want)
 	}
 }
+
+func TestMigrationRenamesSamPrefixesToMesh(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cp.db")
+	now := time.Now().UnixMilli()
+
+	db := openAtSchemaVersion(t, path, 16)
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+
+	exec(`INSERT INTO roles (name, description, created_at) VALUES ('sam:role:node', '', ?), ('sam:role:router', '', ?)`, now, now)
+	exec(`INSERT INTO role_permissions (role_name, resource_type, resource_value) VALUES
+		('sam:role:node', 'service', 'system://sam.catalog'),
+		('sam:role:router', 'service', '*')`)
+	exec(`INSERT INTO role_bindings (role_name, member) VALUES
+		('sam:role:node', 'sam:system:authenticated'),
+		('sam:role:router', 'group:routers')`)
+	exec(`INSERT INTO nodes (peer_id, public_key, biscuit_token, role, enrollment_type, enrolled_at, expires_at, banned)
+		VALUES ('12D3KooWNode', X'01', X'02', 'sam:role:node', 'OIDC', ?, ?, 0)`, now, now+3600000)
+	exec(`INSERT INTO bootstrap_tokens (id, token_hash, role, max_usages, usages_count, description, created_at, expires_at)
+		VALUES ('tok1', 'tok1', 'sam:role:router', 1, 0, 'legacy router token', ?, ?)`, now, now+3600000)
+	exec(`INSERT INTO egress_destinations (name, target_url, credential, served_by, config_json)
+		VALUES ('api.example.com', 'https://api.example.com', 'TOKEN', '["sam:role:node"]', '{"name":"api.example.com","target_url":"https://api.example.com","credential":"TOKEN","served_by":["sam:role:node"]}')`)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := NewSQLStore("sqlite", path)
+	if err != nil {
+		t.Fatalf("NewSQLStore: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	ctx := context.Background()
+
+	roles, bindings, err := store.GetMeshPolicy(ctx)
+	if err != nil {
+		t.Fatalf("GetMeshPolicy: %v", err)
+	}
+	roleMap := make(map[string]*api.PolicyRole)
+	for _, r := range roles {
+		roleMap[r.Name] = r
+	}
+	if _, ok := roleMap["sam:role:node"]; ok {
+		t.Errorf("legacy sam:role:node still present in roles")
+	}
+	nodeRole, ok := roleMap["mesh:role:node"]
+	if !ok {
+		t.Fatalf("mesh:role:node missing from migrated roles: %+v", roleMap)
+	}
+	if !reflect.DeepEqual(nodeRole.AllowedServices, []string{"system://mesh.catalog"}) {
+		t.Errorf("mesh:role:node AllowedServices = %v, want [system://mesh.catalog]", nodeRole.AllowedServices)
+	}
+
+	bindingMap := make(map[string][]string)
+	for _, b := range bindings {
+		bindingMap[b.Role] = b.Members
+	}
+	if !reflect.DeepEqual(bindingMap["mesh:role:node"], []string{"mesh:system:authenticated"}) {
+		t.Errorf("mesh:role:node members = %v, want [mesh:system:authenticated]", bindingMap["mesh:role:node"])
+	}
+	if !reflect.DeepEqual(bindingMap["mesh:role:router"], []string{"group:routers"}) {
+		t.Errorf("mesh:role:router members = %v, want [group:routers]", bindingMap["mesh:role:router"])
+	}
+
+	node, err := store.GetNode(ctx, "12D3KooWNode")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if node.Role != "mesh:role:node" {
+		t.Errorf("node.Role = %q, want mesh:role:node", node.Role)
+	}
+
+	tok, err := store.GetBootstrapToken(ctx, "tok1")
+	if err != nil {
+		t.Fatalf("GetBootstrapToken: %v", err)
+	}
+	if tok.Role != "mesh:role:router" {
+		t.Errorf("tok.Role = %q, want mesh:role:router", tok.Role)
+	}
+
+	egress, err := store.GetEgressDestinations(ctx)
+	if err != nil {
+		t.Fatalf("GetEgressDestinations: %v", err)
+	}
+	if len(egress) != 1 || !reflect.DeepEqual(egress[0].GetServedBy(), []string{"mesh:role:node"}) {
+		t.Errorf("egress ServedBy = %+v, want [mesh:role:node]", egress)
+	}
+}

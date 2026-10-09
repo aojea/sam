@@ -535,6 +535,29 @@ var migrations = []migration{
 		postgres: indexMigration,
 		sqlite:   indexMigration,
 	},
+	{
+		// Migrate persisted roles, bindings, catalog service grants, enrolled
+		// nodes, bootstrap tokens, and egress selectors from the legacy "sam:"
+		// wire prefix to "mesh:".
+		version:  17,
+		postgres: meshPrefixMigration,
+		sqlite:   meshPrefixMigration,
+	},
+}
+
+var meshPrefixMigration = []string{
+	`INSERT INTO roles (name, description, created_at)
+		SELECT 'mesh:role:' || SUBSTR(name, 10), description, created_at
+		FROM roles WHERE name LIKE 'sam:role:%'
+		ON CONFLICT (name) DO NOTHING`,
+	`UPDATE role_permissions SET role_name = 'mesh:role:' || SUBSTR(role_name, 10) WHERE role_name LIKE 'sam:role:%'`,
+	`UPDATE role_bindings SET role_name = 'mesh:role:' || SUBSTR(role_name, 10) WHERE role_name LIKE 'sam:role:%'`,
+	`DELETE FROM roles WHERE name LIKE 'sam:role:%'`,
+	`UPDATE role_bindings SET member = 'mesh:system:authenticated' WHERE member = 'sam:system:authenticated'`,
+	`UPDATE role_permissions SET resource_value = 'system://mesh.catalog' WHERE resource_type = 'service' AND resource_value = 'system://sam.catalog'`,
+	`UPDATE nodes SET role = 'mesh:role:' || SUBSTR(role, 10) WHERE role LIKE 'sam:role:%'`,
+	`UPDATE bootstrap_tokens SET role = 'mesh:role:' || SUBSTR(role, 10) WHERE role LIKE 'sam:role:%'`,
+	`UPDATE egress_destinations SET served_by = REPLACE(served_by, '"sam:role:', '"mesh:role:'), config_json = REPLACE(config_json, '"sam:role:', '"mesh:role:') WHERE served_by LIKE '%"sam:role:%' OR config_json LIKE '%"sam:role:%'`,
 }
 
 var indexMigration = []string{
