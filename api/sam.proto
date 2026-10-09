@@ -208,6 +208,12 @@ message RouterLeaseRequest {
   // not proof: routers hand theirs to every peer they authenticate.
   int64 challenge_unix_ms = 6;
   bytes challenge_signature = 7;
+  // How long this lease stays valid. Unset means the control plane's lease
+  // duration. A router may shorten its lease, never lengthen it: on its last
+  // renewal before stopping it sets the time it expects to be away, zero to
+  // be withdrawn at once, so a joiner is not handed a router that is gone
+  // and a router back within that time is still listed.
+  google.protobuf.Duration ttl = 8;
 }
 
 message RouterLeaseResponse {

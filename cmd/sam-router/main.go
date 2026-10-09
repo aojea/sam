@@ -49,6 +49,7 @@ var (
 	metricsAddr          string
 	relayLimitDuration   time.Duration
 	relayLimitData       router.ByteSize
+	shutdownLeaseTTL     time.Duration
 )
 
 var logger = golog.Logger("sam-router-cli")
@@ -92,6 +93,7 @@ func main() {
 				MetricsAddr:               metricsAddr,
 				RelayLimitDuration:        relayLimitDuration,
 				RelayLimitData:            int64(relayLimitData),
+				ShutdownLeaseTTL:          shutdownLeaseTTL,
 			}
 
 			r, err := router.NewRouter(cmd.Context(), opts)
@@ -134,6 +136,7 @@ func main() {
 	rootCmd.Flags().StringVar(&metricsAddr, "metrics-addr", "", "Serve Prometheus /metrics, /healthz and /readyz on this address (e.g. 0.0.0.0:9090); unauthenticated, off by default")
 	rootCmd.Flags().DurationVar(&relayLimitDuration, "relay-limit-duration", router.DefaultRelayLimitDuration, "Lifetime of each relayed connection (0 = no limit)")
 	rootCmd.Flags().Var(&relayLimitData, "relay-limit-data", "Bytes relayed per direction on each relayed connection, e.g. 512MiB (0 = no limit)")
+	rootCmd.Flags().DurationVar(&shutdownLeaseTTL, "shutdown-lease-ttl", router.DefaultShutdownLeaseTTL, "Sent in this router's last lease when it stops: how long it expects to be away, which is how long the control plane keeps listing it. 0 sends nothing and the lease expires on the control plane's schedule")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

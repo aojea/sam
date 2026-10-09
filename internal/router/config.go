@@ -23,6 +23,11 @@ import (
 	"github.com/google/sam/internal/identity"
 )
 
+// DefaultShutdownLeaseTTL is the CLI default for Options.ShutdownLeaseTTL:
+// about the time a pod takes to come back in place, and a pod's default
+// termination grace period.
+const DefaultShutdownLeaseTTL = 30 * time.Second
+
 // Options holds configuration details for the sam-router.
 type Options struct {
 	ControlPlaneURL    string
@@ -49,6 +54,12 @@ type Options struct {
 	// no limit, so Default() leaves them alone.
 	RelayLimitDuration time.Duration
 	RelayLimitData     int64
+	// ShutdownLeaseTTL is the lease the router asks for as it stops: how
+	// long the control plane keeps listing it, which is the time the router
+	// expects to be away. Zero sends no last lease and the entry expires on
+	// the control plane's schedule. The CLIs default to
+	// DefaultShutdownLeaseTTL.
+	ShutdownLeaseTTL time.Duration
 	// RequiredRole restricts enrollment and startup to only accept tokens containing this role.
 	RequiredRole string
 	// HTTPFallbackHandler, when set, serves ordinary (non-WebSocket-upgrade)
@@ -113,6 +124,9 @@ func (o *Options) Default() {
 func (o *Options) Validate() error {
 	if o.ControlPlaneURL == "" {
 		return fmt.Errorf("ControlPlaneURL must be specified")
+	}
+	if o.ShutdownLeaseTTL < 0 {
+		return fmt.Errorf("ShutdownLeaseTTL must not be negative, got %s", o.ShutdownLeaseTTL)
 	}
 	return api.ValidateControlPlaneTransport(o.ControlPlaneURL, o.AllowInsecureControlPlane)
 }

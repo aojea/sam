@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -558,6 +559,95 @@ func TestRouterLeaseRenewalRepeated401Terminates(t *testing.T) {
 
 	if serverCalls > 2 {
 		t.Errorf("renewLease made %d HTTP calls; expected at most 2 calls before terminating", serverCalls)
+	}
+}
+
+// TestRouterCloseWithdrawsLease covers graceful shutdown: Close sends one
+// last lease carrying ShutdownLeaseTTL, a renewal that races the shutdown
+// sends nothing, and a zero ShutdownLeaseTTL leaves the lease to expire.
+func TestRouterCloseWithdrawsLease(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		ttl     time.Duration
+		wantTTL *time.Duration
+	}{
+		{name: "default", ttl: DefaultShutdownLeaseTTL, wantTTL: ptrDuration(30 * time.Second)},
+		{name: "announce time away", ttl: 90 * time.Second, wantTTL: ptrDuration(90 * time.Second)},
+		{name: "off", ttl: 0, wantTTL: nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var leases []*api.RouterLeaseRequest
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				body, _ := io.ReadAll(req.Body)
+				var lease api.RouterLeaseRequest
+				if err := proto.Unmarshal(body, &lease); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				mu.Lock()
+				leases = append(leases, &lease)
+				mu.Unlock()
+				out, _ := proto.Marshal(&api.RouterLeaseResponse{Success: true})
+				w.Header().Set("Content-Type", "application/x-protobuf")
+				_, _ = w.Write(out)
+			}))
+			defer ts.Close()
+
+			h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+			if err != nil {
+				t.Fatalf("failed to create libp2p host: %v", err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			r := &Router{
+				Host:       h,
+				ctx:        ctx,
+				cancel:     cancel,
+				privKey:    h.Peerstore().PrivKey(h.ID()),
+				credential: credential{biscuit: []byte("dummy-biscuit")},
+				config: Options{
+					ControlPlaneURL:  ts.URL,
+					ShutdownLeaseTTL: tc.ttl,
+				},
+			}
+
+			if err := r.Close(); err != nil {
+				t.Fatalf("close: %v", err)
+			}
+			// A renewal tick that lost the race with Close must not
+			// re-advertise the router.
+			r.renewLease()
+
+			mu.Lock()
+			defer mu.Unlock()
+			if tc.wantTTL == nil {
+				if len(leases) != 0 {
+					t.Fatalf("got %d leases on close, want none", len(leases))
+				}
+				return
+			}
+			if len(leases) != 1 {
+				t.Fatalf("got %d leases on close, want 1", len(leases))
+			}
+			if leases[0].Ttl == nil {
+				t.Fatal("lease on close carries no ttl")
+			}
+			if got := leases[0].Ttl.AsDuration(); got != *tc.wantTTL {
+				t.Fatalf("lease ttl on close: got %s, want %s", got, *tc.wantTTL)
+			}
+			if leases[0].PeerId != h.ID().String() {
+				t.Fatalf("lease peer id: got %s, want %s", leases[0].PeerId, h.ID())
+			}
+		})
+	}
+}
+
+func ptrDuration(d time.Duration) *time.Duration { return &d }
+
+func TestOptionsRejectNegativeShutdownLeaseTTL(t *testing.T) {
+	o := Options{ControlPlaneURL: "http://127.0.0.1:8080", ShutdownLeaseTTL: -time.Second}
+	if err := o.Validate(); err == nil || !strings.Contains(err.Error(), "ShutdownLeaseTTL") {
+		t.Fatalf("negative ShutdownLeaseTTL: err = %v, want rejection", err)
 	}
 }
 

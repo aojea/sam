@@ -48,6 +48,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 func startCustomMockOIDC(t *testing.T) (string, func(claims map[string]interface{}) string) {
@@ -1645,6 +1646,136 @@ func TestRouterLeaseRevocation(t *testing.T) {
 	orphanPriv, orphanPeer, orphanBiscuit := enrollLeaseRouter(time.Time{}, true)
 	if got := postLease(orphanPriv, orphanPeer, orphanBiscuit); got != http.StatusUnauthorized {
 		t.Fatalf("lease without enrollment record: got %d, want 401", got)
+	}
+}
+
+// TestRouterLeaseTTL covers the ttl a router sends on its way down: it may
+// shorten its lease to the time it expects to be away, zero takes it out of
+// the active set with that request, and it can never lengthen the lease.
+func TestRouterLeaseTTL(t *testing.T) {
+	issuer, _ := startCustomMockOIDC(t)
+	srv, store, baseURL := setupTestServer(t, issuer)
+	defer func() {
+		_ = srv.Close()
+		_ = store.Close()
+	}()
+	srv.config.LeaseDuration = 15 * time.Minute
+
+	ctx := context.Background()
+	cpPriv, _, err := store.GetCurrentKey(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routerPeer, _ := peer.IDFromPrivateKey(priv)
+	pubBytes, _ := crypto.MarshalPublicKey(pub)
+	routerBiscuit, err := identity.MintBootstrapBiscuitToken(cpPriv, routerPeer, api.RoleRouter, time.Now().Add(time.Hour), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.EnrollNode(ctx, &storage.EnrolledNode{
+		PeerID:         routerPeer.String(),
+		PublicKey:      pubBytes,
+		Biscuit:        routerBiscuit,
+		Role:           api.RoleRouter,
+		EnrollmentType: "BOOTSTRAP",
+		EnrolledAt:     time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	postLease := func(ttl *time.Duration) (int, time.Time) {
+		t.Helper()
+		ts, sig := leasePoP(t, priv, routerPeer.String())
+		req := &api.RouterLeaseRequest{
+			PeerId:             routerPeer.String(),
+			Addresses:          []string{"/ip4/127.0.0.1/tcp/4001/p2p/" + routerPeer.String()},
+			Biscuit:            routerBiscuit,
+			ChallengeUnixMs:    ts,
+			ChallengeSignature: sig,
+		}
+		if ttl != nil {
+			req.Ttl = durationpb.New(*ttl)
+		}
+		leaseData, _ := proto.Marshal(req)
+		resp, err := client.Post(baseURL+"/routers/lease", "application/x-protobuf", bytes.NewReader(leaseData))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			return resp.StatusCode, time.Time{}
+		}
+		body, _ := io.ReadAll(resp.Body)
+		var leaseResp api.RouterLeaseResponse
+		if err := proto.Unmarshal(body, &leaseResp); err != nil {
+			t.Fatal(err)
+		}
+		return resp.StatusCode, leaseResp.ExpireTime.AsTime()
+	}
+	activeRouters := func() int {
+		t.Helper()
+		active, err := store.GetActiveRouters(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(active)
+	}
+	within := func(got time.Time, want time.Duration) bool {
+		d := time.Until(got)
+		return d > want-10*time.Second && d <= want
+	}
+
+	// No ttl: the control plane's duration.
+	status, expires := postLease(nil)
+	if status != http.StatusOK || !within(expires, 15*time.Minute) {
+		t.Fatalf("plain lease: status %d, expires in %s, want 200 and ~15m", status, time.Until(expires))
+	}
+	if got := activeRouters(); got != 1 {
+		t.Fatalf("active routers after plain lease: got %d, want 1", got)
+	}
+
+	// Shorter than the control plane's duration is honoured as sent.
+	ttl := 2 * time.Minute
+	if status, expires = postLease(&ttl); status != http.StatusOK || !within(expires, 2*time.Minute) {
+		t.Fatalf("shortened lease: status %d, expires in %s, want 200 and ~2m", status, time.Until(expires))
+	}
+
+	// Longer is capped: a router cannot hold its slot past the control plane's
+	// own expiry.
+	ttl = 3 * time.Hour
+	if status, expires = postLease(&ttl); status != http.StatusOK || !within(expires, 15*time.Minute) {
+		t.Fatalf("lengthened lease: status %d, expires in %s, want 200 and ~15m", status, time.Until(expires))
+	}
+
+	// Negative is a malformed request.
+	ttl = -time.Second
+	if status, _ = postLease(&ttl); status != http.StatusBadRequest {
+		t.Fatalf("negative ttl: got %d, want 400", status)
+	}
+	if got := activeRouters(); got != 1 {
+		t.Fatalf("active routers after rejected ttl: got %d, want 1", got)
+	}
+
+	// Zero withdraws the router at once.
+	ttl = 0
+	if status, _ = postLease(&ttl); status != http.StatusOK {
+		t.Fatalf("withdrawal: got %d, want 200", status)
+	}
+	if got := activeRouters(); got != 0 {
+		t.Fatalf("active routers after withdrawal: got %d, want 0", got)
+	}
+
+	// The router comes back with a plain renewal.
+	if status, _ = postLease(nil); status != http.StatusOK {
+		t.Fatalf("lease after withdrawal: got %d, want 200", status)
+	}
+	if got := activeRouters(); got != 1 {
+		t.Fatalf("active routers after return: got %d, want 1", got)
 	}
 }
 

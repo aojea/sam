@@ -1399,12 +1399,31 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Expose lease renewal
-	expiresAt := time.Now().Add(s.config.LeaseDuration)
+	// The lease lasts the control plane's duration unless the router asked
+	// for less: a router that is stopping says how long it expects to be
+	// away, and zero takes it out of /info with this very request.
+	ttl := s.config.LeaseDuration
+	if req.Ttl != nil {
+		requested := req.Ttl.AsDuration()
+		if requested < 0 {
+			http.Error(w, "Invalid ttl: must not be negative", http.StatusBadRequest)
+			return
+		}
+		if requested < ttl {
+			ttl = requested
+		}
+		if requested == 0 {
+			logger.Infow("Router withdrew its lease", "peer_id", canonical)
+		} else if requested < s.config.LeaseDuration {
+			logger.Infow("Router shortened its lease", "peer_id", canonical, "ttl", requested)
+		}
+	}
+	now := time.Now()
+	expiresAt := now.Add(ttl)
 	lease := &storage.RouterLease{
 		PeerID:         canonical,
 		Addresses:      req.Addresses,
-		LastRenewal:    time.Now(),
+		LastRenewal:    now,
 		ExpiresAt:      expiresAt,
 		ConnectedPeers: req.ConnectedPeers,
 		DHTSize:        int(req.DhtSize),

@@ -670,7 +670,7 @@ class RouterLease(_message.Message):
     def __init__(self, peer_id: _Optional[str] = ..., addresses: _Optional[_Iterable[str]] = ..., last_renewal_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., connected_peers: _Optional[_Iterable[str]] = ..., dht_size: _Optional[int] = ...) -> None: ...
 
 class RouterLeaseRequest(_message.Message):
-    __slots__ = ["addresses", "biscuit", "challenge_signature", "challenge_unix_ms", "connected_peers", "dht_size", "peer_id"]
+    __slots__ = ["addresses", "biscuit", "challenge_signature", "challenge_unix_ms", "connected_peers", "dht_size", "peer_id", "ttl"]
     ADDRESSES_FIELD_NUMBER: _ClassVar[int]
     BISCUIT_FIELD_NUMBER: _ClassVar[int]
     CHALLENGE_SIGNATURE_FIELD_NUMBER: _ClassVar[int]
@@ -678,6 +678,7 @@ class RouterLeaseRequest(_message.Message):
     CONNECTED_PEERS_FIELD_NUMBER: _ClassVar[int]
     DHT_SIZE_FIELD_NUMBER: _ClassVar[int]
     PEER_ID_FIELD_NUMBER: _ClassVar[int]
+    TTL_FIELD_NUMBER: _ClassVar[int]
     addresses: _containers.RepeatedScalarFieldContainer[str]
     biscuit: bytes
     challenge_signature: bytes
@@ -685,7 +686,8 @@ class RouterLeaseRequest(_message.Message):
     connected_peers: _containers.RepeatedScalarFieldContainer[str]
     dht_size: int
     peer_id: str
-    def __init__(self, peer_id: _Optional[str] = ..., addresses: _Optional[_Iterable[str]] = ..., biscuit: _Optional[bytes] = ..., connected_peers: _Optional[_Iterable[str]] = ..., dht_size: _Optional[int] = ..., challenge_unix_ms: _Optional[int] = ..., challenge_signature: _Optional[bytes] = ...) -> None: ...
+    ttl: _duration_pb2.Duration
+    def __init__(self, peer_id: _Optional[str] = ..., addresses: _Optional[_Iterable[str]] = ..., biscuit: _Optional[bytes] = ..., connected_peers: _Optional[_Iterable[str]] = ..., dht_size: _Optional[int] = ..., challenge_unix_ms: _Optional[int] = ..., challenge_signature: _Optional[bytes] = ..., ttl: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ...) -> None: ...
 
 class RouterLeaseResponse(_message.Message):
     __slots__ = ["error", "expire_time", "success"]

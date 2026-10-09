@@ -45,6 +45,7 @@ replica count.
 | `--dht-provider-addr-ttl` | `15m` | How long a service announcement lives after a node last made it. Nodes re-announce every 5 minutes, so a node that is gone drops out of discovery within this time. `0` keeps the default. |
 | `--dht-max-record-age` | library default | DHT value record lifetime. |
 | `--relay-limit-duration`, `--relay-limit-data` | `1h`, `0` | Caps on each relayed connection: lifetime, and bytes per direction (`512MiB`, `1GB`). The relay cuts the connection when either is reached. `0` means no limit. |
+| `--shutdown-lease-ttl` | `30s` | Sent in the router's last lease when it stops: how long it expects to be away, which is how long the control plane keeps listing it. The default covers a pod that restarts in place. A router that is being removed for good can send `1s`. `0` sends nothing and the lease expires on the control plane's schedule. |
 | `--metrics-addr` | off | Serve `/metrics`, `/healthz` and `/readyz` without authentication on this address. `/readyz` returns `200` once the router is enrolled and the libp2p host is up. Keep this address separate from the libp2p ports and inside the cluster. |
 | `--log-level` | `info` | `debug`, `info`, `warn`, `error`. `LOG_FORMAT=json` selects JSON output. |
 
@@ -60,6 +61,13 @@ replica count.
 4. Runs the mutual credential handshake on every inbound connection and
    refuses peers whose credential does not verify and peers on the ban list.
 5. Refreshes its own credential before it expires, like a node.
+6. On `SIGTERM` or `SIGINT`, sends a last lease with `--shutdown-lease-ttl`
+   and then closes its connections. The control plane lists the router for
+   that long and no longer, so a router that restarts in place is still
+   there when its members redial it, and joiners are sent to the routers
+   that remain once the time has passed. The operator states the time the
+   router will be down, the way BGP graceful shutdown announces a
+   maintenance window.
 
 A router stores nothing except its key. Restarting a router loses no
 important state. Nodes reconnect and publish their services again.

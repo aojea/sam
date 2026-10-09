@@ -1437,8 +1437,14 @@ type RouterLeaseRequest struct {
 	// not proof: routers hand theirs to every peer they authenticate.
 	ChallengeUnixMs    int64  `protobuf:"varint,6,opt,name=challenge_unix_ms,json=challengeUnixMs,proto3" json:"challenge_unix_ms,omitempty"`
 	ChallengeSignature []byte `protobuf:"bytes,7,opt,name=challenge_signature,json=challengeSignature,proto3" json:"challenge_signature,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// How long this lease stays valid. Unset means the control plane's lease
+	// duration. A router may shorten its lease, never lengthen it: on its last
+	// renewal before stopping it sets the time it expects to be away, zero to
+	// be withdrawn at once, so a joiner is not handed a router that is gone
+	// and a router back within that time is still listed.
+	Ttl           *durationpb.Duration `protobuf:"bytes,8,opt,name=ttl,proto3" json:"ttl,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RouterLeaseRequest) Reset() {
@@ -1516,6 +1522,13 @@ func (x *RouterLeaseRequest) GetChallengeUnixMs() int64 {
 func (x *RouterLeaseRequest) GetChallengeSignature() []byte {
 	if x != nil {
 		return x.ChallengeSignature
+	}
+	return nil
+}
+
+func (x *RouterLeaseRequest) GetTtl() *durationpb.Duration {
+	if x != nil {
+		return x.Ttl
 	}
 	return nil
 }
@@ -5385,7 +5398,7 @@ const file_api_sam_proto_rawDesc = "" +
 	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x1a\n" +
 	"\baudience\x18\x03 \x01(\tR\baudience\x12)\n" +
 	"\x10router_addresses\x18\x04 \x03(\tR\x0frouterAddresses\x12&\n" +
-	"\x0fbanned_peer_ids\x18\x05 \x03(\tR\rbannedPeerIds\"\x86\x02\n" +
+	"\x0fbanned_peer_ids\x18\x05 \x03(\tR\rbannedPeerIds\"\xb3\x02\n" +
 	"\x12RouterLeaseRequest\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x1c\n" +
 	"\taddresses\x18\x02 \x03(\tR\taddresses\x12\x18\n" +
@@ -5393,7 +5406,8 @@ const file_api_sam_proto_rawDesc = "" +
 	"\x0fconnected_peers\x18\x04 \x03(\tR\x0econnectedPeers\x12\x19\n" +
 	"\bdht_size\x18\x05 \x01(\x05R\adhtSize\x12*\n" +
 	"\x11challenge_unix_ms\x18\x06 \x01(\x03R\x0fchallengeUnixMs\x12/\n" +
-	"\x13challenge_signature\x18\a \x01(\fR\x12challengeSignature\"\x82\x01\n" +
+	"\x13challenge_signature\x18\a \x01(\fR\x12challengeSignature\x12+\n" +
+	"\x03ttl\x18\b \x01(\v2\x19.google.protobuf.DurationR\x03ttl\"\x82\x01\n" +
 	"\x13RouterLeaseResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12;\n" +
@@ -5846,85 +5860,86 @@ var file_api_sam_proto_depIdxs = []int32{
 	1,  // 11: sam.v1.ServiceAnnounce.type:type_name -> sam.v1.ServiceType
 	75, // 12: sam.v1.ServiceAnnounce.labels:type_name -> sam.v1.ServiceAnnounce.LabelsEntry
 	80, // 13: sam.v1.ServiceAnnounce.announce_time:type_name -> google.protobuf.Timestamp
-	80, // 14: sam.v1.RouterLeaseResponse.expire_time:type_name -> google.protobuf.Timestamp
-	23, // 15: sam.v1.PolicyRole.http:type_name -> sam.v1.HTTPGrant
-	30, // 16: sam.v1.EgressDestination.broker:type_name -> sam.v1.CredentialBroker
-	25, // 17: sam.v1.EgressDestination.inspection:type_name -> sam.v1.Inspection
-	2,  // 18: sam.v1.EgressDestination.mode:type_name -> sam.v1.EgressMode
-	26, // 19: sam.v1.Inspection.inspectors:type_name -> sam.v1.Inspector
-	27, // 20: sam.v1.Inspector.model_armor:type_name -> sam.v1.ModelArmor
-	28, // 21: sam.v1.Inspector.ext_proc:type_name -> sam.v1.ExtProc
-	3,  // 22: sam.v1.ModelArmor.response:type_name -> sam.v1.ResponseInspection
-	81, // 23: sam.v1.ModelArmor.timeout:type_name -> google.protobuf.Duration
-	29, // 24: sam.v1.ExtProc.processing_mode:type_name -> sam.v1.ExtProcProcessingMode
-	81, // 25: sam.v1.ExtProc.message_timeout:type_name -> google.protobuf.Duration
-	5,  // 26: sam.v1.ExtProcProcessingMode.request_header_mode:type_name -> sam.v1.ExtProcProcessingMode.HeaderMode
-	5,  // 27: sam.v1.ExtProcProcessingMode.response_header_mode:type_name -> sam.v1.ExtProcProcessingMode.HeaderMode
-	6,  // 28: sam.v1.ExtProcProcessingMode.request_body_mode:type_name -> sam.v1.ExtProcProcessingMode.BodyMode
-	6,  // 29: sam.v1.ExtProcProcessingMode.response_body_mode:type_name -> sam.v1.ExtProcProcessingMode.BodyMode
-	5,  // 30: sam.v1.ExtProcProcessingMode.request_trailer_mode:type_name -> sam.v1.ExtProcProcessingMode.HeaderMode
-	5,  // 31: sam.v1.ExtProcProcessingMode.response_trailer_mode:type_name -> sam.v1.ExtProcProcessingMode.HeaderMode
-	31, // 32: sam.v1.CredentialBroker.oidc_federation:type_name -> sam.v1.OIDCFederation
-	32, // 33: sam.v1.CredentialBroker.aws_assume_role:type_name -> sam.v1.AWSAssumeRole
-	33, // 34: sam.v1.CredentialBroker.platform_identity:type_name -> sam.v1.PlatformIdentity
-	22, // 35: sam.v1.PolicyConfig.roles:type_name -> sam.v1.PolicyRole
-	34, // 36: sam.v1.PolicyConfig.bindings:type_name -> sam.v1.PolicyBinding
-	24, // 37: sam.v1.PolicyConfig.egress:type_name -> sam.v1.EgressDestination
-	24, // 38: sam.v1.EgressAssignmentsResponse.egress:type_name -> sam.v1.EgressDestination
-	80, // 39: sam.v1.KeysResponse.sign_time:type_name -> google.protobuf.Timestamp
-	80, // 40: sam.v1.TokenRefreshResponse.expire_time:type_name -> google.protobuf.Timestamp
-	14, // 41: sam.v1.NodeCatalogReport.services:type_name -> sam.v1.ServiceInfo
-	80, // 42: sam.v1.BootstrapTokenCreateResponse.expire_time:type_name -> google.protobuf.Timestamp
-	80, // 43: sam.v1.BootstrapToken.create_time:type_name -> google.protobuf.Timestamp
-	80, // 44: sam.v1.BootstrapToken.expire_time:type_name -> google.protobuf.Timestamp
-	80, // 45: sam.v1.BootstrapToken.revoke_time:type_name -> google.protobuf.Timestamp
-	49, // 46: sam.v1.BootstrapTokenListResponse.tokens:type_name -> sam.v1.BootstrapToken
-	0,  // 47: sam.v1.EnrollmentRequest.status:type_name -> sam.v1.EnrollmentStatus
-	76, // 48: sam.v1.EnrollmentRequest.labels:type_name -> sam.v1.EnrollmentRequest.LabelsEntry
-	80, // 49: sam.v1.EnrollmentRequest.create_time:type_name -> google.protobuf.Timestamp
-	80, // 50: sam.v1.EnrollmentRequest.resolve_time:type_name -> google.protobuf.Timestamp
-	51, // 51: sam.v1.EnrollmentRequestListResponse.requests:type_name -> sam.v1.EnrollmentRequest
-	80, // 52: sam.v1.User.create_time:type_name -> google.protobuf.Timestamp
-	77, // 53: sam.v1.EnrolledNode.labels:type_name -> sam.v1.EnrolledNode.LabelsEntry
-	80, // 54: sam.v1.EnrolledNode.enroll_time:type_name -> google.protobuf.Timestamp
-	80, // 55: sam.v1.EnrolledNode.expire_time:type_name -> google.protobuf.Timestamp
-	80, // 56: sam.v1.RouterLease.last_renewal_time:type_name -> google.protobuf.Timestamp
-	80, // 57: sam.v1.RouterLease.expire_time:type_name -> google.protobuf.Timestamp
-	14, // 58: sam.v1.NodeServices.services:type_name -> sam.v1.ServiceInfo
-	80, // 59: sam.v1.NodeServices.report_time:type_name -> google.protobuf.Timestamp
-	53, // 60: sam.v1.AdminStatusResponse.users:type_name -> sam.v1.User
-	55, // 61: sam.v1.AdminStatusResponse.active_routers:type_name -> sam.v1.RouterLease
-	54, // 62: sam.v1.AdminStatusResponse.enrolled_nodes:type_name -> sam.v1.EnrolledNode
-	51, // 63: sam.v1.AdminStatusResponse.enrollment_requests:type_name -> sam.v1.EnrollmentRequest
-	49, // 64: sam.v1.AdminStatusResponse.bootstrap_tokens:type_name -> sam.v1.BootstrapToken
-	35, // 65: sam.v1.AdminStatusResponse.policy:type_name -> sam.v1.PolicyConfig
-	78, // 66: sam.v1.AdminStatusResponse.node_catalog:type_name -> sam.v1.AdminStatusResponse.NodeCatalogEntry
-	53, // 67: sam.v1.UserStatusResponse.user:type_name -> sam.v1.User
-	54, // 68: sam.v1.UserStatusResponse.enrolled_nodes:type_name -> sam.v1.EnrolledNode
-	49, // 69: sam.v1.UserStatusResponse.bootstrap_tokens:type_name -> sam.v1.BootstrapToken
-	55, // 70: sam.v1.UserStatusResponse.active_routers:type_name -> sam.v1.RouterLease
-	35, // 71: sam.v1.UserStatusResponse.policy:type_name -> sam.v1.PolicyConfig
-	80, // 72: sam.v1.IdentityEvidenceResponse.biscuit_expire_time:type_name -> google.protobuf.Timestamp
-	80, // 73: sam.v1.IdentityEvidenceResponse.check_time:type_name -> google.protobuf.Timestamp
-	79, // 74: sam.v1.PeerEvidenceResponse.labels:type_name -> sam.v1.PeerEvidenceResponse.LabelsEntry
-	80, // 75: sam.v1.PeerEvidenceResponse.expire_time:type_name -> google.protobuf.Timestamp
-	80, // 76: sam.v1.PeerEvidenceResponse.check_time:type_name -> google.protobuf.Timestamp
-	80, // 77: sam.v1.MemberCredential.expire_time:type_name -> google.protobuf.Timestamp
-	62, // 78: sam.v1.MemberCredential.trusted_keys:type_name -> sam.v1.TrustedSigningKey
-	63, // 79: sam.v1.MemberCredential.oidc_session:type_name -> sam.v1.OIDCSession
-	80, // 80: sam.v1.TrustedSigningKey.receive_time:type_name -> google.protobuf.Timestamp
-	65, // 81: sam.v1.TaskAuthorizationRule.rules:type_name -> sam.v1.TaskRule
-	80, // 82: sam.v1.TaskAuthorizationRule.expire_time:type_name -> google.protobuf.Timestamp
-	66, // 83: sam.v1.TaskRule.operation:type_name -> sam.v1.TaskOperation
-	64, // 84: sam.v1.TokenExchangeRequest.task_rule:type_name -> sam.v1.TaskAuthorizationRule
-	80, // 85: sam.v1.TokenExchangeResponse.expire_time:type_name -> google.protobuf.Timestamp
-	80, // 86: sam.v1.STSTokenResponse.expire_time:type_name -> google.protobuf.Timestamp
-	56, // 87: sam.v1.AdminStatusResponse.NodeCatalogEntry.value:type_name -> sam.v1.NodeServices
-	88, // [88:88] is the sub-list for method output_type
-	88, // [88:88] is the sub-list for method input_type
-	88, // [88:88] is the sub-list for extension type_name
-	88, // [88:88] is the sub-list for extension extendee
-	0,  // [0:88] is the sub-list for field type_name
+	81, // 14: sam.v1.RouterLeaseRequest.ttl:type_name -> google.protobuf.Duration
+	80, // 15: sam.v1.RouterLeaseResponse.expire_time:type_name -> google.protobuf.Timestamp
+	23, // 16: sam.v1.PolicyRole.http:type_name -> sam.v1.HTTPGrant
+	30, // 17: sam.v1.EgressDestination.broker:type_name -> sam.v1.CredentialBroker
+	25, // 18: sam.v1.EgressDestination.inspection:type_name -> sam.v1.Inspection
+	2,  // 19: sam.v1.EgressDestination.mode:type_name -> sam.v1.EgressMode
+	26, // 20: sam.v1.Inspection.inspectors:type_name -> sam.v1.Inspector
+	27, // 21: sam.v1.Inspector.model_armor:type_name -> sam.v1.ModelArmor
+	28, // 22: sam.v1.Inspector.ext_proc:type_name -> sam.v1.ExtProc
+	3,  // 23: sam.v1.ModelArmor.response:type_name -> sam.v1.ResponseInspection
+	81, // 24: sam.v1.ModelArmor.timeout:type_name -> google.protobuf.Duration
+	29, // 25: sam.v1.ExtProc.processing_mode:type_name -> sam.v1.ExtProcProcessingMode
+	81, // 26: sam.v1.ExtProc.message_timeout:type_name -> google.protobuf.Duration
+	5,  // 27: sam.v1.ExtProcProcessingMode.request_header_mode:type_name -> sam.v1.ExtProcProcessingMode.HeaderMode
+	5,  // 28: sam.v1.ExtProcProcessingMode.response_header_mode:type_name -> sam.v1.ExtProcProcessingMode.HeaderMode
+	6,  // 29: sam.v1.ExtProcProcessingMode.request_body_mode:type_name -> sam.v1.ExtProcProcessingMode.BodyMode
+	6,  // 30: sam.v1.ExtProcProcessingMode.response_body_mode:type_name -> sam.v1.ExtProcProcessingMode.BodyMode
+	5,  // 31: sam.v1.ExtProcProcessingMode.request_trailer_mode:type_name -> sam.v1.ExtProcProcessingMode.HeaderMode
+	5,  // 32: sam.v1.ExtProcProcessingMode.response_trailer_mode:type_name -> sam.v1.ExtProcProcessingMode.HeaderMode
+	31, // 33: sam.v1.CredentialBroker.oidc_federation:type_name -> sam.v1.OIDCFederation
+	32, // 34: sam.v1.CredentialBroker.aws_assume_role:type_name -> sam.v1.AWSAssumeRole
+	33, // 35: sam.v1.CredentialBroker.platform_identity:type_name -> sam.v1.PlatformIdentity
+	22, // 36: sam.v1.PolicyConfig.roles:type_name -> sam.v1.PolicyRole
+	34, // 37: sam.v1.PolicyConfig.bindings:type_name -> sam.v1.PolicyBinding
+	24, // 38: sam.v1.PolicyConfig.egress:type_name -> sam.v1.EgressDestination
+	24, // 39: sam.v1.EgressAssignmentsResponse.egress:type_name -> sam.v1.EgressDestination
+	80, // 40: sam.v1.KeysResponse.sign_time:type_name -> google.protobuf.Timestamp
+	80, // 41: sam.v1.TokenRefreshResponse.expire_time:type_name -> google.protobuf.Timestamp
+	14, // 42: sam.v1.NodeCatalogReport.services:type_name -> sam.v1.ServiceInfo
+	80, // 43: sam.v1.BootstrapTokenCreateResponse.expire_time:type_name -> google.protobuf.Timestamp
+	80, // 44: sam.v1.BootstrapToken.create_time:type_name -> google.protobuf.Timestamp
+	80, // 45: sam.v1.BootstrapToken.expire_time:type_name -> google.protobuf.Timestamp
+	80, // 46: sam.v1.BootstrapToken.revoke_time:type_name -> google.protobuf.Timestamp
+	49, // 47: sam.v1.BootstrapTokenListResponse.tokens:type_name -> sam.v1.BootstrapToken
+	0,  // 48: sam.v1.EnrollmentRequest.status:type_name -> sam.v1.EnrollmentStatus
+	76, // 49: sam.v1.EnrollmentRequest.labels:type_name -> sam.v1.EnrollmentRequest.LabelsEntry
+	80, // 50: sam.v1.EnrollmentRequest.create_time:type_name -> google.protobuf.Timestamp
+	80, // 51: sam.v1.EnrollmentRequest.resolve_time:type_name -> google.protobuf.Timestamp
+	51, // 52: sam.v1.EnrollmentRequestListResponse.requests:type_name -> sam.v1.EnrollmentRequest
+	80, // 53: sam.v1.User.create_time:type_name -> google.protobuf.Timestamp
+	77, // 54: sam.v1.EnrolledNode.labels:type_name -> sam.v1.EnrolledNode.LabelsEntry
+	80, // 55: sam.v1.EnrolledNode.enroll_time:type_name -> google.protobuf.Timestamp
+	80, // 56: sam.v1.EnrolledNode.expire_time:type_name -> google.protobuf.Timestamp
+	80, // 57: sam.v1.RouterLease.last_renewal_time:type_name -> google.protobuf.Timestamp
+	80, // 58: sam.v1.RouterLease.expire_time:type_name -> google.protobuf.Timestamp
+	14, // 59: sam.v1.NodeServices.services:type_name -> sam.v1.ServiceInfo
+	80, // 60: sam.v1.NodeServices.report_time:type_name -> google.protobuf.Timestamp
+	53, // 61: sam.v1.AdminStatusResponse.users:type_name -> sam.v1.User
+	55, // 62: sam.v1.AdminStatusResponse.active_routers:type_name -> sam.v1.RouterLease
+	54, // 63: sam.v1.AdminStatusResponse.enrolled_nodes:type_name -> sam.v1.EnrolledNode
+	51, // 64: sam.v1.AdminStatusResponse.enrollment_requests:type_name -> sam.v1.EnrollmentRequest
+	49, // 65: sam.v1.AdminStatusResponse.bootstrap_tokens:type_name -> sam.v1.BootstrapToken
+	35, // 66: sam.v1.AdminStatusResponse.policy:type_name -> sam.v1.PolicyConfig
+	78, // 67: sam.v1.AdminStatusResponse.node_catalog:type_name -> sam.v1.AdminStatusResponse.NodeCatalogEntry
+	53, // 68: sam.v1.UserStatusResponse.user:type_name -> sam.v1.User
+	54, // 69: sam.v1.UserStatusResponse.enrolled_nodes:type_name -> sam.v1.EnrolledNode
+	49, // 70: sam.v1.UserStatusResponse.bootstrap_tokens:type_name -> sam.v1.BootstrapToken
+	55, // 71: sam.v1.UserStatusResponse.active_routers:type_name -> sam.v1.RouterLease
+	35, // 72: sam.v1.UserStatusResponse.policy:type_name -> sam.v1.PolicyConfig
+	80, // 73: sam.v1.IdentityEvidenceResponse.biscuit_expire_time:type_name -> google.protobuf.Timestamp
+	80, // 74: sam.v1.IdentityEvidenceResponse.check_time:type_name -> google.protobuf.Timestamp
+	79, // 75: sam.v1.PeerEvidenceResponse.labels:type_name -> sam.v1.PeerEvidenceResponse.LabelsEntry
+	80, // 76: sam.v1.PeerEvidenceResponse.expire_time:type_name -> google.protobuf.Timestamp
+	80, // 77: sam.v1.PeerEvidenceResponse.check_time:type_name -> google.protobuf.Timestamp
+	80, // 78: sam.v1.MemberCredential.expire_time:type_name -> google.protobuf.Timestamp
+	62, // 79: sam.v1.MemberCredential.trusted_keys:type_name -> sam.v1.TrustedSigningKey
+	63, // 80: sam.v1.MemberCredential.oidc_session:type_name -> sam.v1.OIDCSession
+	80, // 81: sam.v1.TrustedSigningKey.receive_time:type_name -> google.protobuf.Timestamp
+	65, // 82: sam.v1.TaskAuthorizationRule.rules:type_name -> sam.v1.TaskRule
+	80, // 83: sam.v1.TaskAuthorizationRule.expire_time:type_name -> google.protobuf.Timestamp
+	66, // 84: sam.v1.TaskRule.operation:type_name -> sam.v1.TaskOperation
+	64, // 85: sam.v1.TokenExchangeRequest.task_rule:type_name -> sam.v1.TaskAuthorizationRule
+	80, // 86: sam.v1.TokenExchangeResponse.expire_time:type_name -> google.protobuf.Timestamp
+	80, // 87: sam.v1.STSTokenResponse.expire_time:type_name -> google.protobuf.Timestamp
+	56, // 88: sam.v1.AdminStatusResponse.NodeCatalogEntry.value:type_name -> sam.v1.NodeServices
+	89, // [89:89] is the sub-list for method output_type
+	89, // [89:89] is the sub-list for method input_type
+	89, // [89:89] is the sub-list for extension type_name
+	89, // [89:89] is the sub-list for extension extendee
+	0,  // [0:89] is the sub-list for field type_name
 }
 
 func init() { file_api_sam_proto_init() }

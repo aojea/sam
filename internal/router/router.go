@@ -63,6 +63,7 @@ import (
 	"github.com/multiformats/go-multiaddr"
 	madns "github.com/multiformats/go-multiaddr-dns"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -1022,8 +1023,39 @@ func (r *Router) runLeaseRenewalLoop() {
 	}
 }
 
+// renewLease extends the lease for the control plane's duration. Once the
+// router is shutting down it does nothing: the withdrawal sent by Close is
+// the last word, and a renewal racing it would re-advertise a router that
+// is leaving.
 func (r *Router) renewLease() {
-	for attempt := 0; attempt < 2; attempt++ {
+	if r.shutdown.Load() {
+		return
+	}
+	r.sendLease(r.ctx, nil, 2)
+}
+
+// withdrawLease is the router's last lease before it stops: one with the
+// ttl the operator set for a shutdown, so the control plane keeps the
+// router listed for as long as it expects to be away and no longer. Off
+// when the ttl is zero. Its own context, since Close cancels the router's;
+// a failure only means the lease expires as it always did.
+func (r *Router) withdrawLease() {
+	if r.config.ShutdownLeaseTTL <= 0 || r.Host == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	ttl := r.config.ShutdownLeaseTTL
+	logger.Infof("Withdrawing router lease (ttl %s)", ttl)
+	r.sendLease(ctx, &ttl, 1)
+}
+
+// sendLease posts one lease to the control plane: the router's addresses
+// and telemetry under proof of possession of its key, and the ttl it asks
+// for when ttl is not nil. attempts allows one retry after a 401 for the
+// credential recovery the renewal loop relies on.
+func (r *Router) sendLease(ctx context.Context, ttl *time.Duration, attempts int) {
+	for attempt := 0; attempt < attempts; attempt++ {
 		r.keysMu.RLock()
 		biscuit := r.credential.biscuit
 		r.keysMu.RUnlock()
@@ -1072,11 +1104,14 @@ func (r *Router) renewLease() {
 				ChallengeUnixMs:    ts,
 				ChallengeSignature: sig,
 			}
+			if ttl != nil {
+				req.Ttl = durationpb.New(*ttl)
+			}
 			data, err := proto.Marshal(req)
 			if err != nil {
 				return nil, err
 			}
-			httpReq, err := http.NewRequestWithContext(r.ctx, http.MethodPost, r.config.ControlPlaneURL+"/routers/lease", bytes.NewReader(data))
+			httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, r.config.ControlPlaneURL+"/routers/lease", bytes.NewReader(data))
 			if err != nil {
 				return nil, err
 			}
@@ -1097,7 +1132,7 @@ func (r *Router) renewLease() {
 			return
 		}
 
-		if resp.StatusCode == http.StatusUnauthorized && attempt == 0 {
+		if resp.StatusCode == http.StatusUnauthorized && attempt == 0 && attempts > 1 {
 			logger.Warnf("Control plane lease renewal rejected (401 Unauthorized: %s), attempting recovery...", string(body))
 			leaseRenewalsTotal.WithLabelValues(leaseUnauthorized).Inc()
 			if err := r.recoverAfterLease401(); err != nil {
@@ -1447,7 +1482,10 @@ func (r *Router) performMutualAuth(s network.Stream) error {
 // Close closes the underlying p2p host and keyring db.
 func (r *Router) Close() error {
 	r.isReady.Store(false)
+	// Draining: no renewal may extend the lease past the withdrawal below,
+	// which goes out while the host and the credential are still there.
 	r.shutdown.Store(true)
+	r.withdrawLease()
 	r.cancel()
 
 	var errs []error
