@@ -1066,6 +1066,7 @@ func (n *SamNode) redialRouter(ctx context.Context, router peer.ID) {
 		}()
 		biscuitBytes, err := n.loadIdentityForAuth()
 		if err != nil {
+			logger.Errorf("[AuthN] Cannot redial router %s without an identity: %v", router, err)
 			return
 		}
 		delay := n.config.RouterRedialDelay
@@ -1149,6 +1150,9 @@ func (n *SamNode) ConnectAndAuthWithRouter(ctx context.Context, addr multiaddr.M
 	}
 
 	routers := routerPeers(ctx, []multiaddr.Multiaddr{addr})
+	if len(routers) == 0 {
+		return fmt.Errorf("no router peer behind %s", addr)
+	}
 	var connected bool
 	var lastFatalErr error
 	var errs []error
