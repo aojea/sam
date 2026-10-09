@@ -1,5 +1,5 @@
 title = "Agent Mesh"
-baseURL = "https://__PROTECT_Agent Mesh_MESH_DEV__"
+baseURL = "https://sam-mesh.dev"
 languageCode = "en-us"
 
 enableRobotsTXT = true

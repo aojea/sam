@@ -2,17 +2,17 @@
   "inputs": [
     {
       "type": "promptString",
-      "id": "sam-api-token",
-      "description": "SAM node API token (the SAM_API_TOKEN the node was started with)",
+      "id": "agentmesh-api-token",
+      "description": "Agent Mesh node API token (the AGENTMESH_API_TOKEN the node was started with)",
       "password": true
     }
   ],
   "servers": {
-    "sam-mesh": {
+    "agentmesh": {
       "type": "http",
       "url": "http://localhost:8080/mcp",
       "headers": {
-        "X-Mesh-Authentication": "Bearer ${input:sam-api-token}"
+        "X-Mesh-Authentication": "Bearer ${input:agentmesh-api-token}"
       }
     }
   }

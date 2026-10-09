@@ -136,7 +136,7 @@ The site is Hugo with the Docsy theme, under `site/`. The deploy workflow
 pins Hugo 0.136.5, and newer Hugo releases do not build the current Docsy
 version, so use that release locally too. Run `npm ci` once in `site/` for
 the CSS pipeline, then `hugo server`. The site deploys from `main` to
-`__PROTECT_Agent Mesh_MESH_DEV__`. When a page moves, keep its old URL with `aliases` in the
+`sam-mesh.dev`. When a page moves, keep its old URL with `aliases` in the
 front matter. `tests/e2e/docs_snippets.bats` runs the Python snippet under
 `site/content/docs/snippets/` against a live node, so a change to that
 snippet is a change to a test.
@@ -144,6 +144,6 @@ snippet is a change to a test.
 ## Releases and testnets
 
 A `v*` tag produces a GitHub release with binaries and images through
-`goreleaser`, and deploys to the `hub.__PROTECT_Agent Mesh_MESH_DEV__` testnet. Every push to
-`main` deploys to `bananas.__PROTECT_Agent Mesh_MESH_DEV__`. [Testnets](testnets/) describes
+`goreleaser`, and deploys to the `hub.sam-mesh.dev` testnet. Every push to
+`main` deploys to `bananas.sam-mesh.dev`. [Testnets](testnets/) describes
 both.

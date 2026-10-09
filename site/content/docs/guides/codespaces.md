@@ -20,8 +20,8 @@ badge, or from **Code → Codespaces → New with options** on GitHub:
 
 | Configuration | Contents | For |
 |---|---|---|
-| **testnet** (default badge in the README) | The released `agentmesh-one` and `agentmesh-node` binaries, copied from the `stable` images that also run `hub.__PROTECT_Agent Mesh_MESH_DEV__`. No toolchain. | Trying Agent Mesh, enrolling your devices. |
-| **testnet-latest** | The same, from the `latest` images built from `main`, which also run `bananas.__PROTECT_Agent Mesh_MESH_DEV__`. | Trying what is not released yet. |
+| **testnet** (default badge in the README) | The released `agentmesh-one` and `agentmesh-node` binaries, copied from the `stable` images that also run `hub.sam-mesh.dev`. No toolchain. | Trying Agent Mesh, enrolling your devices. |
+| **testnet-latest** | The same, from the `latest` images built from `main`, which also run `bananas.sam-mesh.dev`. | Trying what is not released yet. |
 | **develop** (`.devcontainer/devcontainer.json`) | Go, Node, Python and Docker. `make build` runs when the codespace is created, so `./bin` holds the binaries of the branch you opened. | Contributing, or developing an SDK program against your own branch. |
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/google/agentmesh?quickstart=1&devcontainer_path=.devcontainer%2Ftestnet%2Fdevcontainer.json)

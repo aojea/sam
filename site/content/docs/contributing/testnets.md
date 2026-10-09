@@ -9,7 +9,7 @@ aliases:
 The project runs two public meshes for its own testing and for anyone who
 wants to try the software without deploying anything.
 
-| | `bananas.__PROTECT_Agent Mesh_MESH_DEV__` | `hub.__PROTECT_Agent Mesh_MESH_DEV__` |
+| | `bananas.sam-mesh.dev` | `hub.sam-mesh.dev` |
 |---|---|---|
 | Built from | every push to `main` | every `v*` tag |
 | Image tag | the commit SHA | the release version |
@@ -18,10 +18,10 @@ wants to try the software without deploying anything.
 Both are deployed by `.github/workflows/deploy.yaml` to a GKE cluster from
 the templates in `.github/k8s/`. Each testnet has a control plane Deployment
 on PostgreSQL, a router StatefulSet that announces
-`/dnsaddr/bootstrap.<env>.__PROTECT_Agent Mesh_MESH_DEV__` (a DNS-sync CronJob keeps the record
+`/dnsaddr/bootstrap.<env>.sam-mesh.dev` (a DNS-sync CronJob keeps the record
 current), the console, and a few canary nodes that publish demo services:
 the MCP `everything` server, an OpenRouter proxy, and a vLLM instance when
-one is running. Identity comes from a Dex instance at `auth.__PROTECT_Agent Mesh_MESH_DEV__`
+one is running. Identity comes from a Dex instance at `auth.sam-mesh.dev`
 that accepts Google and GitHub logins, and from the cluster's own issuer for
 in-cluster workloads.
 

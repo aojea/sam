@@ -438,9 +438,9 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     # announce that name. Announcing a node IP instead is unroutable from an isolated test network.
     # bootstrap.nodeServices: policy.bats asserts the control plane denies an ungranted service, so
     # this lane pins the grants it tests rather than inheriting the chart default.
-    local helm_args=(--kube-context="${KUBECONTEXT}" upgrade --install sam ./charts/agentmesh
+    local helm_args=(--kube-context="${KUBECONTEXT}" upgrade --install agentmesh ./charts/agentmesh
       --namespace default
-      --set fullnameOverride="sam"
+      --set fullnameOverride="agentmesh"
       --set global.imageTag="local"
       --set controlPlane.oidcIssuer="${ISSUERS//,/\\,}"
       --set controlPlane.allowedAudiences="agentmesh-audience\,agentmesh-control-plane-audience"
@@ -458,13 +458,13 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     if ! "${helm_bin}" "${helm_args[@]}"; then
       # The reused cluster may hold StatefulSets whose immutable spec (e.g.
       # volumeClaimTemplates) changed; drop them (PVCs survive) and retry.
-      kubectl --context="${KUBECONTEXT}" delete statefulset agentmesh-router sam-db --ignore-not-found
+      kubectl --context="${KUBECONTEXT}" delete statefulset agentmesh-router agentmesh-db --ignore-not-found
       "${helm_bin}" "${helm_args[@]}"
     fi
 
-    mesh_wait_for_rollout statefulset/sam-db
+    mesh_wait_for_rollout statefulset/agentmesh-db
     mesh_wait_for_rollout deployment/agentmesh-control-plane
-    mesh_wait_for_job job/sam-bootstrap
+    mesh_wait_for_job job/agentmesh-bootstrap
     # A router surviving a reinstall holds a biscuit no current control plane key
     # verifies and a bootstrap token past its 24h default, so it can never lease
     # again. Restarting re-enrolls it against the state this run just installed.

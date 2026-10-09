@@ -22,17 +22,17 @@ cd "$REPO_ROOT"
 # Helper to kill background processes and docker containers on exit
 cleanup() {
   echo "[E2E] Cleaning up background processes and containers..."
-  echo "=== DOCKER LOGS: sam-control-plane ==="
-  docker logs sam-control-plane 2>&1 || true
-  echo "=== DOCKER LOGS: sam-router ==="
-  docker logs sam-router 2>&1 || true
+  echo "=== DOCKER LOGS: agentmesh-control-plane ==="
+  docker logs agentmesh-control-plane 2>&1 || true
+  echo "=== DOCKER LOGS: agentmesh-router ==="
+  docker logs agentmesh-router 2>&1 || true
   echo "=== DOCKER LOGS: host-node ==="
   docker logs host-node 2>&1 || true
   echo "=== DOCKER LOGS: host-mock-mcp ==="
   docker logs host-mock-mcp 2>&1 || true
   echo "==============================="
-  docker kill host-node sam-control-plane sam-router mock-oidc host-mock-mcp >/dev/null 2>&1 || true
-  docker network rm sam-net >/dev/null 2>&1 || true
+  docker kill host-node agentmesh-control-plane agentmesh-router mock-oidc host-mock-mcp >/dev/null 2>&1 || true
+  docker network rm agentmesh-net >/dev/null 2>&1 || true
   rm -rf /tmp/host-node-data /tmp/control-plane-data /tmp/router-data
   adb reverse --remove-all || true
 }
@@ -55,22 +55,22 @@ setup_env() {
 # docker images and the Android FFI library in one parallel make run.
 go build -v -o "$REPO_ROOT/bin/mcp-client" ./cmd/mcp-client
 make -j4 docker-build-control-plane docker-build-router docker-build-node docker-build-mock-oidc mobile-ffi-android-x86_64
-mkdir -p mobile/sam-node-app/android/app/src/main/jniLibs/x86_64
-cp bin/android-x86_64/libsam.so mobile/sam-node-app/android/app/src/main/jniLibs/x86_64/libsam.so
+mkdir -p mobile/agentmesh-node-app/android/app/src/main/jniLibs/x86_64
+cp bin/android-x86_64/libsam.so mobile/agentmesh-node-app/android/app/src/main/jniLibs/x86_64/libsam.so
 
 # Warm the app dependencies so the emulator-attached phase goes straight to
 # the gradle build.
-(cd mobile/sam-node-app && flutter pub get)
+(cd mobile/agentmesh-node-app && flutter pub get)
 
 # Create Docker bridge network
-docker network create sam-net || true
+docker network create agentmesh-net || true
 
 # 3. Start the mock OIDC server container
 docker run --name mock-oidc \
-  --network sam-net \
+  --network agentmesh-net \
   -p 18080:18080 \
   -d --rm \
-  sam-mock-oidc:local
+  agentmesh-mock-oidc:local
 
 # Wait for OIDC server to be ready
 timeout 15s bash -c 'until curl -s http://127.0.0.1:18080/ >/dev/null; do sleep 0.5; done'
@@ -79,38 +79,38 @@ timeout 15s bash -c 'until curl -s http://127.0.0.1:18080/ >/dev/null; do sleep 
 rm -rf /tmp/control-plane-data /tmp/router-data
 mkdir -p /tmp/control-plane-data /tmp/router-data
 
-docker run --name sam-control-plane \
-  --network sam-net \
+docker run --name agentmesh-control-plane \
+  --network agentmesh-net \
   -p 37001:37001 \
   --user "$(id -u):$(id -g)" \
   -v /tmp/control-plane-data:/data \
-  -e SAM_ADMIN_TOKEN=secret-admin-token \
+  -e AGENTMESH_ADMIN_TOKEN=secret-admin-token \
   -d --rm \
-  sam-control-plane:local \
+  agentmesh-control-plane:local \
   --bind-address 0.0.0.0:37001 \
   --db-driver sqlite \
   --db-dsn /data/control-plane.db \
   --issuer http://mock-oidc:18080 \
-  --allowed-audiences agentmesh-audience,sam-control-plane-audience \
+  --allowed-audiences agentmesh-audience,agentmesh-control-plane-audience,sam-mesh-audience,sam-control-plane-audience \
   --insecure-skip-tls-verify \
   --log-level debug
 
 ROUTER_JWT=$(curl -s -X POST -d "grant_type=client_credentials&client_id=router-client&client_secret=test-secret" http://127.0.0.1:18080/token | jq -r .access_token)
 
-docker run --name sam-router \
-  --network sam-net \
+docker run --name agentmesh-router \
+  --network agentmesh-net \
   -p 37002:37002 \
   --user "$(id -u):$(id -g)" \
   -v /tmp/router-data:/data \
   -d --rm \
-  sam-router:local \
-  --control-plane http://sam-control-plane:37001 \
+  agentmesh-router:local \
+  --control-plane http://agentmesh-control-plane:37001 \
   --insecure-control-plane \
   --listen /ip4/0.0.0.0/tcp/37002 \
   --listen /ip4/0.0.0.0/udp/37002/quic-v1 \
   --external-addr /ip4/10.0.2.2/tcp/37002 \
   --external-addr /ip4/127.0.0.1/tcp/37002 \
-  --external-addr /dns4/sam-router/tcp/37002 \
+  --external-addr /dns4/agentmesh-router/tcp/37002 \
   --oidc-token "$ROUTER_JWT" \
   --keys-path /data/router.key \
   --allow-loopback \
@@ -147,7 +147,7 @@ HOST_JWT=$(curl -s -X POST -d "grant_type=client_credentials&client_id=test-clie
 # before the node: services are declared in the node's configuration, there
 # is no runtime registration endpoint.
 docker run --name host-mock-mcp \
-  --network sam-net \
+  --network agentmesh-net \
   -p 9091:9091 \
   -d --rm \
   python:3.12 python3 -c '
@@ -240,17 +240,17 @@ services:
 EOF
 
 docker run --name host-node \
-  --network sam-net \
+  --network agentmesh-net \
   -p 8081:8081 \
   --user "$(id -u):$(id -g)" \
   -v /tmp/host-node-data:/data \
   --add-host=host.docker.internal:host-gateway \
-  -e SAM_API_TOKEN=host-token \
+  -e AGENTMESH_API_TOKEN=host-token \
   -d --rm \
-  sam-node:local \
+  agentmesh-node:local \
   run \
   --data-dir /data \
-  --control-plane http://sam-control-plane:37001 \
+  --control-plane http://agentmesh-control-plane:37001 \
   --insecure-control-plane \
   --jwt "$HOST_JWT" \
   --bind-addr 0.0.0.0:8081 \
@@ -272,7 +272,7 @@ adb reverse tcp:37002 tcp:37002
 # 7. Run the Flutter integration test against the running emulator.
 # On CI this phase runs inside ReactiveCircus/android-emulator-runner,
 # so the emulator is already started and adb is fully connected to it.
-cd mobile/sam-node-app
+cd mobile/agentmesh-node-app
 
 # Run Flutter integration test
 flutter test integration_test/e2e_test.dart &

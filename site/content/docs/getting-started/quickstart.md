@@ -6,7 +6,7 @@ aliases:
   - /docs/quickstart/
 ---
 
-This page installs `agentmesh-node`, enrolls it in the public `bananas.__PROTECT_Agent Mesh_MESH_DEV__`
+This page installs `agentmesh-node`, enrolls it in the public `bananas.sam-mesh.dev`
 testnet, and calls a tool hosted by another node. It takes a few minutes.
 
 The testnet is a shared developer playground with no uptime commitment. See
@@ -19,7 +19,7 @@ On Linux and macOS, the install script downloads the latest release and
 places the binaries in `/usr/local/bin`:
 
 ```bash
-curl -sL https://__PROTECT_Agent Mesh_MESH_DEV__/install.sh | bash
+curl -sL https://sam-mesh.dev/install.sh | bash
 ```
 
 With a Go toolchain, you can build from source instead:
@@ -38,13 +38,13 @@ on your `PATH`.
 Every node joins a mesh by enrolling with a running **control plane** at its
 **URL**:
 
-- **Shared public testnet (used below)**: `https://bananas.__PROTECT_Agent Mesh_MESH_DEV__` is an already-running control plane open to any developer; it authenticates in your browser.
+- **Shared public testnet (used below)**: `https://bananas.sam-mesh.dev` is an already-running control plane open to any developer; it authenticates in your browser.
 - **Your own control plane**: start your own control plane with `agentmesh-one` on your workstation or in the cloud ([Your own mesh](../your-own-mesh/), [Cloud Run](../../guides/cloud-run/), or [SkyPilot](../../guides/skypilot/)) and copy the `API URL` and `agentmesh-node join` command printed in the `agentmesh-one` startup banner.
 
 Enroll your node against the public testnet control plane:
 
 ```bash
-agentmesh-node join https://bananas.__PROTECT_Agent Mesh_MESH_DEV__
+agentmesh-node join https://bananas.sam-mesh.dev
 ```
 
 The command opens a browser for the login. If no browser is available, it

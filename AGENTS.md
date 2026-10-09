@@ -41,6 +41,6 @@ Enforce strict modularity in testing. The repository uses a defined testing pyra
 * Ensure e2e test passes `make e2e-test`
 
 ## 6. Environments
-* There are two public testnets available `hub.__PROTECT_Agent Mesh_MESH_DEV__` that is deployed from the latest released tag and `bananas.__PROTECT_Agent Mesh_MESH_DEV__` that is deployed from the `main` branch. 
+* There are two public testnets available `hub.sam-mesh.dev` that is deployed from the latest released tag and `bananas.sam-mesh.dev` that is deployed from the `main` branch. 
 * Their configurations can be found under `.github/k8s`.
 * Their deployments are managed under `.github/workflows/deploy.yaml`.

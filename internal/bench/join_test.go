@@ -326,10 +326,13 @@ func TestRunJoinCancelEndsTheHoldWithAReport(t *testing.T) {
 	opts.SampleInterval = 50 * time.Millisecond
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(1500 * time.Millisecond)
-		cancel()
-	}()
+	defer cancel()
+	opts.OnResident = func(*JoinReport) {
+		go func() {
+			time.Sleep(250 * time.Millisecond)
+			cancel()
+		}()
+	}
 	done := make(chan struct{})
 	var report *JoinReport
 	var err error

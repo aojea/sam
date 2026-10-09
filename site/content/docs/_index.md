@@ -51,7 +51,7 @@ Two rules apply to every mesh:
 
 ## About the public testnets
 
-`bananas.__PROTECT_Agent Mesh_MESH_DEV__` (built from `main`) and `hub.__PROTECT_Agent Mesh_MESH_DEV__` (built from
+`bananas.sam-mesh.dev` (built from `main`) and `hub.sam-mesh.dev` (built from
 the latest release tag) are shared developer testnets that run on donated
 resources. They exist for trying things out and for the project's own CI.
 They have no uptime commitment, and anyone who can log in with the

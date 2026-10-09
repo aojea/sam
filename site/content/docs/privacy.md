@@ -42,5 +42,5 @@ You can instantly erase all app data, destroy your local node identity, and revo
 
 If you have any questions about this Privacy Policy, architecture, or how your data is handled, please contact us at:
 
-* **Project Website:** [https://__PROTECT_Agent Mesh_MESH_DEV__/](https://__PROTECT_Agent Mesh_MESH_DEV__/)
+* **Project Website:** [https://sam-mesh.dev/](https://sam-mesh.dev/)
 * **GitHub Repository:** [https://github.com/google/agentmesh](https://github.com/google/agentmesh)

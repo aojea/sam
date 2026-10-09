@@ -67,8 +67,8 @@ For the public-testnet option, choose one of these URLs:
 
 | Testnet | Control plane URL | When to use it |
 | --- | --- | --- |
-| Bananas | `https://bananas.__PROTECT_Agent Mesh_MESH_DEV__` | Recommended for testing current development code. Its servers follow `main`. |
-| Hub | `https://hub.__PROTECT_Agent Mesh_MESH_DEV__` | Compare against servers running the latest release. |
+| Bananas | `https://bananas.sam-mesh.dev` | Recommended for testing current development code. Its servers follow `main`. |
+| Hub | `https://hub.sam-mesh.dev` | Compare against servers running the latest release. |
 
 See [Testnets](../../contributing/testnets/) for their access policy and
 availability details. For your own mesh, use the HTTPS URL printed by
@@ -95,7 +95,7 @@ Then follow option A or option B.
 3. Leave **Enrollment token** empty. Public-testnet browser login does not
   require a token or QR code.
 4. Tap **Login & Enroll (Browser)**. Complete the Google or GitHub sign-in
-  offered by `auth.__PROTECT_Agent Mesh_MESH_DEV__` in the browser on this phone.
+  offered by `auth.sam-mesh.dev` in the browser on this phone.
 5. When the browser shows **Authorization successful!**, return to Agent Mesh
   Connect using the app switcher. Keep the app open while enrollment
   finishes. The browser message only confirms the login callback.

@@ -34,7 +34,7 @@ dist/
 *.test
 *.out
 coverage.*
-mobile/sam-node-app/build/
+mobile/agentmesh-node-app/build/
 sdk/js/build/
 site/public/
 site/resources/
