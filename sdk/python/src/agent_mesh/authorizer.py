@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The provider-side authorizer, mirroring internal/node.(*SamNode).Authorize.
+"""The provider-side authorizer, mirroring internal/node.(*AgentMeshNode).Authorize.
 Every piece of Datalog it evaluates is text: the baseline generated from
 api/datalog.go (_gen/datalog.json) and the mesh policy rules the control
 plane renders (GET /policies). Nothing here derives rules from roles."""
@@ -43,7 +43,7 @@ class AuthorizationError(Exception):
 
 @dataclass(frozen=True)
 class AuthorizeRequest:
-    """What a caller asks for, as sam-node's RequestContext."""
+    """What a caller asks for, as agentmesh-node's RequestContext."""
 
     # The caller's biscuit, as it arrived in the AuthFrame or X-Mesh-Biscuit.
     biscuit: bytes
@@ -100,7 +100,7 @@ def authorize_caller(req: AuthorizeRequest, options: ProviderAuthorizerOptions) 
     b.set_limits(_limits())
 
     # The action: service(type, name). An empty target is the protocol itself
-    # in the system namespace, as sam-node scopes its own catalog.
+    # in the system namespace, as agentmesh-node scopes its own catalog.
     if req.target_service == "":
         svc_type, svc_name = BASELINE_DATALOG["system_namespace"], req.protocol
     else:

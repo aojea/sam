@@ -25,7 +25,7 @@
 import { A2A_PROTOCOL_VERSION, AGENT_CARD_PATH, Message, Role } from "@a2a-js/sdk";
 import { ClientFactory, DefaultAgentCardResolver, JsonRpcTransportFactory } from "@a2a-js/sdk/client";
 import { AgentEvent, DefaultRequestHandler, InMemoryTaskStore, JsonRpcTransportHandler, ServerCallContext } from "@a2a-js/sdk/server";
-import { AgentMesh, MeshSession } from "@sam-mesh/sdk";
+import { AgentMesh, MeshSession } from "@agentmesh-p2p/sdk";
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -173,4 +173,4 @@ $("call-form").addEventListener("submit", (event) => {
 });
 
 // For scripts and tests driving the page.
-window.sam = { join, call, get session() { return session; } };
+window.agentmesh = { join, call, get session() { return session; } };

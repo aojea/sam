@@ -146,7 +146,7 @@ function fakeControlPlane(
 }
 
 test("enroll persists identity and credential, load resumes them, refresh rotates", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sam-sdk-"));
+  const dir = await mkdtemp(join(tmpdir(), "agentmesh-sdk-"));
   try {
     const cp = fakeControlPlane();
     const tokenPath = join(dir, "bootstrap.token");
@@ -208,7 +208,7 @@ test("enroll resumes only a credential the control plane still vouches for", asy
   // /keys, so the credential is resumed and the new key adopted. Past it, the
   // control plane serves only keys the member never saw: the credential is
   // dead, and the member enrolls again with the token it has, or says so.
-  const dir = await mkdtemp(join(tmpdir(), "sam-sdk-"));
+  const dir = await mkdtemp(join(tmpdir(), "agentmesh-sdk-"));
   try {
     const cp = fakeControlPlane();
     const stateDir = join(dir, "state");
@@ -246,7 +246,7 @@ test("enroll resumes only a credential the control plane still vouches for", asy
 });
 
 test("load needs both the identity and the credential", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sam-sdk-"));
+  const dir = await mkdtemp(join(tmpdir(), "agentmesh-sdk-"));
   try {
     await assert.rejects(AgentMesh.load({ stateDir: dir }), /no identity/);
     await writeFile(join(dir, "identity.key"), Identity.generate().toLibp2pPrivateKey());
@@ -268,9 +268,9 @@ test("enroll works without a state directory and keeps the enrollment key when /
 // A session refreshes on its own schedule while a pull from the control
 // plane may refresh too. The control plane redeems only the last biscuit it
 // issued and both write the same state file, so refreshes must run one
-// after another (sam-node's refreshMu, the Python SDK's lock).
+// after another (agentmesh-node's refreshMu, the Python SDK's lock).
 test("concurrent refreshes run one after the other", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sam-sdk-"));
+  const dir = await mkdtemp(join(tmpdir(), "agentmesh-sdk-"));
   try {
     const opts = { strictRefresh: true, refreshDelayMs: 10, rejectNextRefresh: false };
     const cp = fakeControlPlane(true, opts);
@@ -303,7 +303,7 @@ test("enroll refuses ambiguous credentials", async () => {
 });
 
 test("enroll reads a workload identity token from jwtPath and re-reads on refresh", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sam-sdk-"));
+  const dir = await mkdtemp(join(tmpdir(), "agentmesh-sdk-"));
   try {
     const cp = fakeControlPlane();
     const jwtPath = join(dir, "token");

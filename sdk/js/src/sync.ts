@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // What a member keeps in step with the control plane while it runs, as
-// sam-node's controlplane_sync.go: the ban set, reconciled from /info, and
+// agentmesh-node's controlplane_sync.go: the ban set, reconciled from /info, and
 // the gossip events that bring the next pull forward.
 
 import { fromBinary, toBinary } from "@bufbuild/protobuf";
@@ -87,7 +87,7 @@ export class BanSet {
 export type VerifiedMeshEvent = MeshEvent & { eventTime: Timestamp };
 
 /**
- * Verifies a MeshEvent as sam-node's verifyEvent does: the signature covers
+ * Verifies a MeshEvent as agentmesh-node's verifyEvent does: the signature covers
  * the deterministic encoding of the event with the signature cleared, under
  * any trusted control plane key. Returns the event, or undefined when it
  * does not verify, is not fresh, or bans something that is not a peer ID.

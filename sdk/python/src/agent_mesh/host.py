@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The libp2p host a member joins the mesh with, configured the way sam-node's
+"""The libp2p host a member joins the mesh with, configured the way agentmesh-node's
 is (internal/node/node.go): TLS for the security protocol, which every peer
 offers first, Noise accepted beside it, and yamux the muxer. py-libp2p is
 trio-based, so everything here is trio async."""
@@ -71,7 +71,7 @@ def create_mesh_host(identity: Identity, listen_addrs: Sequence[str] = ()) -> tu
     listen_addrs are for direct connections, e.g. "/ip4/0.0.0.0/tcp/0" or
     "/ip4/0.0.0.0/tcp/0/ws"; an agent is normally reached through a router's
     relay instead. The host dials TCP and WebSocket: the testnets' routers
-    listen on TCP, sam-one's single port is a WebSocket listener."""
+    listen on TCP, agentmesh-one's single port is a WebSocket listener."""
     key_pair = create_new_key_pair(identity.seed)
     # No ALPN muxer list: py-libp2p's TLS transport advertises early muxer
     # negotiation but cannot complete it (Python's ssl has no ALPN select
@@ -109,7 +109,7 @@ def create_mesh_host(identity: Identity, listen_addrs: Sequence[str] = ()) -> tu
 def _dial_websockets_by_name(transport: WebsocketTransport) -> None:
     """py-libp2p resolves a `/dns4/<host>/tcp/443/wss` address to its IP
     before dialing and then names the IP in the TLS SNI and the Host header,
-    which a TLS-terminating edge (sam-one behind a tunnel) answers with 403.
+    which a TLS-terminating edge (agentmesh-one behind a tunnel) answers with 403.
     The transport's own dial of an unresolved address keeps the name; the
     dial here goes straight to it, as go-libp2p and js-libp2p do. Fixed
     upstream by libp2p/py-libp2p#1549, not in 0.8; drop this with the
@@ -123,7 +123,7 @@ def _dial_websockets_by_name(transport: WebsocketTransport) -> None:
     transport.dial = dial  # type: ignore[method-assign]
 
 
-# sam-node's swarm dial timeout. py-libp2p has none of its own: a SYN to an
+# agentmesh-node's swarm dial timeout. py-libp2p has none of its own: a SYN to an
 # address nobody answers waits on the kernel, about two minutes, and is then
 # retried, and a provider record can name a pod a rollout just replaced. A
 # router the control plane lists may be unreachable from where a member runs
@@ -192,7 +192,7 @@ async def dial_addrs(addr: multiaddr.Multiaddr) -> list[multiaddr.Multiaddr]:
     dialing; py-libp2p's TCP transport does not, and would report no
     transport for them. A WebSocket address keeps its DNS name: the name is
     the TLS server name and the Host header, which a TLS-terminating edge in
-    front of the router (sam-one behind a tunnel) selects the origin by.
+    front of the router (agentmesh-one behind a tunnel) selects the origin by.
     Addresses on transports this host lacks are left out."""
     protocols = [p.name for p in addr.protocols()]
     first = protocols[0] if protocols else ""

@@ -77,7 +77,7 @@ jobs:
           cache-dependency-path: sdk/js/package-lock.json
       - name: Stamp the release version on both SDKs
         run: ./hack/sdk-version.sh "${SDK_VERSION#v}"
-      - name: Build and publish @sam-mesh/sdk
+      - name: Build and publish @agentmesh-p2p/sdk
         # npm's trusted publishing needs npm 11.5 or later; Node 22 ships 10.
         # npm 11 refuses to publish a prerelease without an explicit dist-tag,
         # and "latest" must stay on stable versions.
@@ -85,8 +85,8 @@ jobs:
         working-directory: sdk/js
         run: |
           ver="${SDK_VERSION#v}"
-          if npm view "@sam-mesh/sdk@${ver}" version >/dev/null 2>&1; then
-            echo "@sam-mesh/sdk@${ver} is already published on npm; skipping."
+          if npm view "@agentmesh-p2p/sdk@${ver}" version >/dev/null 2>&1; then
+            echo "@agentmesh-p2p/sdk@${ver} is already published on npm; skipping."
             exit 0
           fi
           npm install -g npm@latest
@@ -118,12 +118,12 @@ jobs:
           python-version: "3.12"
       - name: Stamp the release version on both SDKs
         run: ./hack/sdk-version.sh "${SDK_VERSION#v}"
-      - name: Build sam-mesh
+      - name: Build agentmesh-p2p
         working-directory: sdk/python
         run: |
           python -m pip install --upgrade build
           python -m build
-      - name: Publish sam-mesh
+      - name: Publish agentmesh-p2p
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: sdk/python/dist/

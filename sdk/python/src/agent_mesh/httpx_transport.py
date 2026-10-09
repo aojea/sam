@@ -19,8 +19,8 @@ libp2p:
     client = httpx.AsyncClient(transport=MeshTransport(session))
     await client.post("http://mesh/mesh/<peer-id>/a2a/agent", json=...)
 
-The URL has the shape sam-node's egress proxy takes, /mesh/<peer-id>/<type>/
-<name>/<path>. The card of an agent behind a sam-node comes back rewritten to
+The URL has the shape agentmesh-node's egress proxy takes, /mesh/<peer-id>/<type>/
+<name>/<path>. The card of an agent behind a agentmesh-node comes back rewritten to
 that shape, as the node's egress proxy serves it, so a stock A2A client
 bootstraps from it unchanged. The host is ignored: httpx lowercases it, and a
 peer ID is not case-insensitive. Response bodies stream, so `message/stream`

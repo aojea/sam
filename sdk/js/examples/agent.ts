@@ -14,7 +14,7 @@
 // credential in AGENTMESH_STATE_DIR; later runs resume from there, as the same
 // peer, without it.
 import { homedir } from "node:os";
-import { AgentMesh } from "@sam-mesh/sdk";
+import { AgentMesh } from "@agentmesh-p2p/sdk";
 
 const [backendURL] = process.argv.slice(2);
 
@@ -22,7 +22,7 @@ const mesh = await AgentMesh.enroll({
   controlPlaneUrl: process.env.AGENTMESH_CONTROL_PLANE_URL ?? "https://mesh.example.com",
   bootstrapTokenPath: process.env.AGENTMESH_BOOTSTRAP_TOKEN_PATH,
   jwtPath: process.env.AGENTMESH_JWT_PATH,
-  stateDir: process.env.AGENTMESH_STATE_DIR ?? `${homedir()}/.config/sam-mesh/agent`,
+  stateDir: process.env.AGENTMESH_STATE_DIR ?? `${homedir()}/.config/agentmesh/agent`,
   // A plaintext http:// control plane is otherwise accepted only on loopback.
   allowInsecure: process.env.AGENTMESH_INSECURE_CONTROL_PLANE === "true",
 });

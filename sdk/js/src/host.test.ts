@@ -21,7 +21,7 @@ import { Identity } from "./identity.ts";
 
 const ECHO = "/test/echo/1.0.0";
 
-// A TLS-terminating edge in front of the router (sam-one behind a tunnel)
+// A TLS-terminating edge in front of the router (agentmesh-one behind a tunnel)
 // selects the origin by the name in the TLS SNI and the Host header, so a
 // /dns4 WebSocket address is dialed by its name, not by what it resolves to.
 // Pinned on the Host header of the upgrade request; the SNI is the same string.
@@ -52,7 +52,7 @@ test("a /dns4 WebSocket address is dialed by its name", async () => {
   }
 });
 
-// A mesh host reaches a peer over WebSocket as it does over TCP: sam-one's
+// A mesh host reaches a peer over WebSocket as it does over TCP: agentmesh-one's
 // router listens on /ws alone, on the port that also serves its HTTP API.
 for (const listen of ["/ip4/127.0.0.1/tcp/0", "/ip4/127.0.0.1/tcp/0/ws"]) {
   test(`a mesh host dials ${listen} and opens a TLS+yamux stream`, async () => {

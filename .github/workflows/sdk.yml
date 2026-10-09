@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # Native SDKs (sdk/): unit tests per language, then both SDKs on a mesh with
-# a real control plane, router and sam-node through tests/integration, and
+# a real control plane, router and agentmesh-node through tests/integration, and
 # the example programs the docs embed run the same way. api/agentmesh.proto is a
 # trigger because the SDKs ship bindings generated from it; the docs are
 # because they embed the examples.
@@ -30,7 +30,7 @@ on:
       - 'hack/verify-sdk-generated.sh'
       - 'site/content/docs/guides/native-sdks.md'
       - 'tests/integration/sdk_*_test.go'
-      - 'Dockerfile.sam-sdk-*'
+      - 'Dockerfile.agentmesh-sdk-*'
       - '.github/workflows/sdk.yml'
   pull_request:
     branches: [main]
@@ -42,7 +42,7 @@ on:
       - 'hack/verify-sdk-generated.sh'
       - 'site/content/docs/guides/native-sdks.md'
       - 'tests/integration/sdk_*_test.go'
-      - 'Dockerfile.sam-sdk-*'
+      - 'Dockerfile.agentmesh-sdk-*'
       - '.github/workflows/sdk.yml'
 
 permissions:
@@ -88,7 +88,7 @@ jobs:
       - name: Generated bindings, embedded examples and lockfile are current
         run: ./hack/verify-sdk-generated.sh
 
-      - name: Both SDKs and the documented examples on a mesh with a real control plane, router and sam-node
+      - name: Both SDKs and the documented examples on a mesh with a real control plane, router and agentmesh-node
         run: go test ./tests/integration -run TestNativeSDK -count=1 -v
 
       # The images the testnets run the examples from (deploy.yaml builds and
@@ -96,16 +96,16 @@ jobs:
       # pull request, not the deploy.
       - name: SDK canary images build
         run: |
-          docker build -f Dockerfile.sam-sdk-js -t sam-sdk-js:ci .
-          docker build -f Dockerfile.sam-sdk-python -t sam-sdk-python:ci .
+          docker build -f Dockerfile.agentmesh-sdk-js -t agentmesh-sdk-js:ci .
+          docker build -f Dockerfile.agentmesh-sdk-python -t agentmesh-sdk-python:ci .
           # Without a token every example stops at enrollment with this
           # message: the default command (the agent), the caller, and the
           # two written with the official A2A SDK.
-          docker run --rm sam-sdk-js:ci 2>&1 | grep -q 'exactly one of'
-          docker run --rm sam-sdk-python:ci 2>&1 | grep -q 'exactly one of'
-          docker run --rm sam-sdk-js:ci build/examples/call.js 2>&1 | grep -q 'exactly one of'
-          docker run --rm sam-sdk-python:ci examples/call.py 2>&1 | grep -q 'exactly one of'
-          docker run --rm sam-sdk-js:ci build/examples/a2a-agent.js 2>&1 | grep -q 'exactly one of'
-          docker run --rm sam-sdk-python:ci examples/a2a_agent.py 2>&1 | grep -q 'exactly one of'
-          docker run --rm sam-sdk-js:ci build/examples/a2a-call.js peer 2>&1 | grep -q 'exactly one of'
-          docker run --rm sam-sdk-python:ci examples/a2a_call.py peer 2>&1 | grep -q 'exactly one of'
+          docker run --rm agentmesh-sdk-js:ci 2>&1 | grep -q 'exactly one of'
+          docker run --rm agentmesh-sdk-python:ci 2>&1 | grep -q 'exactly one of'
+          docker run --rm agentmesh-sdk-js:ci build/examples/call.js 2>&1 | grep -q 'exactly one of'
+          docker run --rm agentmesh-sdk-python:ci examples/call.py 2>&1 | grep -q 'exactly one of'
+          docker run --rm agentmesh-sdk-js:ci build/examples/a2a-agent.js 2>&1 | grep -q 'exactly one of'
+          docker run --rm agentmesh-sdk-python:ci examples/a2a_agent.py 2>&1 | grep -q 'exactly one of'
+          docker run --rm agentmesh-sdk-js:ci build/examples/a2a-call.js peer 2>&1 | grep -q 'exactly one of'
+          docker run --rm agentmesh-sdk-python:ci examples/a2a_call.py peer 2>&1 | grep -q 'exactly one of'

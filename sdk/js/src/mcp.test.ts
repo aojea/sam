@@ -13,8 +13,8 @@
 // limitations under the License.
 
 // A provider in one process: a js-libp2p host that serves /mesh/mcp/1.0.0
-// the way sam-node does (AuthFrame in, AuthResponse out, then MCP over the
-// stream) with the official MCP server behind it. The real sam-node is
+// the way agentmesh-node does (AuthFrame in, AuthResponse out, then MCP over the
+// stream) with the official MCP server behind it. The real agentmesh-node is
 // exercised by tests/integration/sdk_mesh_test.go.
 
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
@@ -70,7 +70,7 @@ function newHost(): Promise<Libp2p> {
   });
 }
 
-/** sam-node's WithBiscuitAuth(HandleMCPStream) in miniature. */
+/** agentmesh-node's WithBiscuitAuth(HandleMCPStream) in miniature. */
 async function serveMCP(stream: Stream, connection: Connection): Promise<void> {
   const auth = lpStream(stream, { maxDataLength: MAX_AUTH_FRAME_BYTES });
   const frame = fromBinary(AuthFrameSchema, (await auth.read()).subarray());
@@ -82,7 +82,7 @@ async function serveMCP(stream: Stream, connection: Connection): Promise<void> {
   }
   const { type, name } = parseServiceTarget(frame.targetService);
   if (type !== "" && name !== "calc") {
-    // An unknown service closes the stream after the frame, as sam-node does.
+    // An unknown service closes the stream after the frame, as agentmesh-node does.
     await auth.write(toBinary(AuthResponseSchema, create(AuthResponseSchema, { success: true, biscuit: providerBiscuit })));
     await stream.close();
     return;
@@ -169,7 +169,7 @@ test("required labels are checked on the provider's credential", async () => {
   assert.throws(() => requireLabels({ peerId: "p", expiration: new Date(), verifyingKey: cpKey, roles: [], labels: {}, taskRules: [] }, { team: "x" }), /team=x/);
 });
 
-test("a requirement of several labels is met only by every one of them, as sam-node's checkPeerLabels", () => {
+test("a requirement of several labels is met only by every one of them, as agentmesh-node's checkPeerLabels", () => {
   // The cases of internal/node/labels_gate_test.go, run through the SDK's predicate.
   const attesting = (labels: Record<string, string>) => ({ peerId: "p", expiration: new Date(), verifyingKey: cpKey, roles: [], labels, taskRules: [] });
   // exact match
@@ -191,7 +191,7 @@ test("a requirement of several labels is met only by every one of them, as sam-n
   requireLabels(attesting({}), undefined);
 });
 
-test("the egress floor is met only by every one of its pairs, as sam-node's api.LabelCheck", () => {
+test("the egress floor is met only by every one of its pairs, as agentmesh-node's api.LabelCheck", () => {
   const attesting = (labels: Record<string, string>) => ({ peerId: "p", expiration: new Date(), verifyingKey: cpKey, roles: [], labels, taskRules: [] });
   requireEgressLabels(attesting({ region: "eu", team: "platform" }), { region: "eu" });
   requireEgressLabels(attesting({ region: "eu", team: "platform" }), { region: "eu", team: "platform" });
@@ -234,7 +234,7 @@ test("a service the provider does not have ends the session before MCP starts", 
   await assert.rejects(openMCPSession(conn, frame("mcp://no-such-service"), [cpKey], { signal: AbortSignal.timeout(3000) }));
 });
 
-test("only a node is a provider, as sam-node's checkPeerLabels requires", async () => {
+test("only a node is a provider, as agentmesh-node's checkPeerLabels requires", async () => {
   // The provider answers with the credential it holds at the time; a router's, attesting the floor, is not a provider's.
   const nodeBiscuit = providerBiscuit;
   providerBiscuit = mint(provider.peerId.toString(), ROLE_ROUTER, { region: "eu" });

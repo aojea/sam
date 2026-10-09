@@ -14,7 +14,7 @@
 
 // The /libp2p-http protocol (go-libp2p-http): the client that calls inference
 // and A2A services on the mesh, and the ingress that accepts A2A requests for
-// this member's own agent, gated by the authorizer the way sam-node gates its
+// this member's own agent, gated by the authorizer the way agentmesh-node gates its
 // ingress (StartIngressServer in internal/node). Requests and responses are
 // framed by the codec in http1.ts on the libp2p stream itself, so bodies
 // stream in both directions, an A2A message/stream (SSE) works, and none of
@@ -60,8 +60,8 @@ export const DEFAULT_A2A_NAME = "agent";
 
 /**
  * The path prefix of a mesh URL, http://mesh/mesh/<peer-id>/<type>/<name>/<path>:
- * the shape of sam-node's egress proxy and of an agent card rewritten for the
- * mesh, by sam-node or by this SDK. The host is ignored; the peer ID is in the
+ * the shape of agentmesh-node's egress proxy and of an agent card rewritten for the
+ * mesh, by agentmesh-node or by this SDK. The host is ignored; the peer ID is in the
  * path because URL parsers lowercase the host and a peer ID is case-sensitive.
  */
 export const MESH_PATH_PREFIX = "/mesh/";
@@ -92,7 +92,7 @@ export type NodeRequestListener = (req: any, res: any) => void;
  * exactly one of url (an A2A server beside this process), handler or
  * listener (in this process). Authorized requests arrive with the biscuit
  * header stripped, X-Peer-Id naming the verified caller and the path
- * relative to /a2a/<name>, as sam-node forwards them. The endpoint is not
+ * relative to /a2a/<name>, as agentmesh-node forwards them. The endpoint is not
  * announced anywhere; a caller reaches it by peer ID.
  */
 export interface A2AEndpointSpec {
@@ -174,7 +174,7 @@ export interface IngressAdmission {
 }
 
 /**
- * Server-side admission of /libp2p-http, as sam-node's StartIngressServer:
+ * Server-side admission of /libp2p-http, as agentmesh-node's StartIngressServer:
  * the path is /<type>/<name>[/<upstream>], the caller's biscuit is
  * X-Mesh-Biscuit, and the request is authorized for <type>://<name> before
  * anything is forwarded. Only the agent's own endpoint is answered; anything
@@ -269,7 +269,7 @@ export function agentHeaders(inbound: Headers, remotePeer: string, noTrailingSla
   return headers;
 }
 
-/** A plain-text refusal, as sam-node's ingress writes one. */
+/** A plain-text refusal, as agentmesh-node's ingress writes one. */
 export function refusalResponse(refusal: IngressRefusal): Response {
   return new Response(refusal.text + "\n", { status: refusal.status, headers: { "content-type": "text/plain; charset=utf-8" } });
 }
@@ -412,7 +412,7 @@ function agentCardService(method: string, target: string): string | undefined {
 }
 
 /**
- * An agent card rebuilt for the mesh, as sam-node's egress proxy serves it:
+ * An agent card rebuilt for the mesh, as agentmesh-node's egress proxy serves it:
  * HTTP interfaces point at base, gRPC ones go, signatures no longer match.
  * Streaming stays as declared, this transport streams. Throws when no interface remains.
  */
@@ -437,7 +437,7 @@ function carriedOverHTTP(iface: unknown): boolean {
 }
 
 /**
- * Impersonates the agent's card endpoint as sam-node's egress proxy does: holds
+ * Impersonates the agent's card endpoint as agentmesh-node's egress proxy does: holds
  * the client's request, fetches the card itself with identity encoding, and
  * answers with it regenerated; the agent's own non-200 is relayed as it is.
  */
@@ -503,7 +503,7 @@ export interface HTTPStreamOptions {
  * per request, plain HTTP/1.1 with Host set to the peer ID and the biscuit in
  * X-Mesh-Biscuit. Resolves once the response headers are in; the body streams
  * after, so an SSE response is consumed as the peer sends it. An agent card
- * is served rewritten for the mesh (rewriteAgentCard), as sam-node serves one.
+ * is served rewritten for the mesh (rewriteAgentCard), as agentmesh-node serves one.
  */
 export async function fetchOverStream(conn: Connection, biscuit: Uint8Array, request: Request, options: HTTPStreamOptions = {}): Promise<Response> {
   const { target } = splitMeshURL(new URL(request.url));

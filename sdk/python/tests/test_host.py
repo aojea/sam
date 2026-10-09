@@ -111,7 +111,7 @@ def test_a_concrete_address_passes_through():
 
 
 def test_a_websocket_address_is_dialed_by_its_name():
-    """A TLS-terminating edge in front of the router (sam-one behind a tunnel)
+    """A TLS-terminating edge in front of the router (agentmesh-one behind a tunnel)
     selects the origin by the name in the TLS SNI and the Host header.
     py-libp2p resolves the name first and sends the IP (libp2p/py-libp2p#1549
     not yet released); the host sends the name. Pinned on the Host header of
@@ -140,7 +140,7 @@ def test_a_websocket_address_is_dialed_by_its_name():
 
 
 def test_a_websocket_listener_is_reached_with_tls_and_yamux():
-    """sam-one's router listens on /ws alone, on the port that also serves
+    """agentmesh-one's router listens on /ws alone, on the port that also serves
     its HTTP API; a member reaches it as it reaches a TCP router."""
 
     async def echo(stream):

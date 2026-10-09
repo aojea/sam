@@ -13,8 +13,8 @@
 # limitations under the License.
 
 """A provider in one process: a py-libp2p host that serves /mesh/mcp/1.0.0 the
-way sam-node does (AuthFrame in, AuthResponse out, then MCP over the stream)
-with the official MCP server behind it. The real sam-node is exercised by
+way agentmesh-node does (AuthFrame in, AuthResponse out, then MCP over the stream)
+with the official MCP server behind it. The real agentmesh-node is exercised by
 tests/integration/sdk_mesh_test.go."""
 
 import json
@@ -75,7 +75,7 @@ def catalog_server() -> MCPServer:
 
 
 def mcp_stream_handler(provider_biscuit: bytes, served: list[str]):
-    """sam-node's WithBiscuitAuth(HandleMCPStream) in miniature."""
+    """agentmesh-node's WithBiscuitAuth(HandleMCPStream) in miniature."""
 
     async def handle(stream) -> None:
         peer_id = str(stream.muxed_conn.peer_id)
@@ -88,7 +88,7 @@ def mcp_stream_handler(provider_biscuit: bytes, served: list[str]):
         service_type, name = parse_service_target(frame.target_service)
         await stream.write(encode_varint_prefixed(pb.AuthResponse(success=True, biscuit=provider_biscuit).SerializeToString()))
         if service_type != "" and name != "calc":
-            # An unknown service closes the stream after the frame, as sam-node does.
+            # An unknown service closes the stream after the frame, as agentmesh-node does.
             await stream.close()
             return
         served.append(frame.target_service)
@@ -229,7 +229,7 @@ def test_tools_over_the_mesh_stream():
                         async with open_mcp_session(caller, pid, frame(caller_biscuit, "mcp://no-such-service"), [CP_KEY]):
                             pass
 
-                # Only a node is a provider, as sam-node's checkPeerLabels requires: a router attesting the floor is not.
+                # Only a node is a provider, as agentmesh-node's checkPeerLabels requires: a router attesting the floor is not.
                 router, router_addr, _ = await start_provider(nursery, labels={"region": "eu"}, role=ROLE_ROUTER)
                 await caller.connect(info_from_p2p_addr(router_addr))
                 with pytest.raises(AuthRejectedError, match="lacks expected role 'mesh:role:node'"):
@@ -247,7 +247,7 @@ def test_tools_over_the_mesh_stream():
 def test_a_requirement_of_several_labels_is_met_only_by_every_one_of_them():
     """The cases of internal/node/labels_gate_test.go, run through the SDK's
     predicate: a caller naming several pairs requires all of them, as
-    sam-node's checkPeerLabels and api.LabelCheck read it."""
+    agentmesh-node's checkPeerLabels and api.LabelCheck read it."""
     from datetime import datetime, timezone
 
     def attesting(labels: dict) -> VerifiedBiscuit:
@@ -278,7 +278,7 @@ def test_a_requirement_of_several_labels_is_met_only_by_every_one_of_them():
 
 
 def test_the_egress_floor_is_met_only_by_every_one_of_its_pairs():
-    """sam-node's api.LabelCheck for egress.require_labels, run through the
+    """agentmesh-node's api.LabelCheck for egress.require_labels, run through the
     SDK's predicate: a floor takes no alternatives."""
     from datetime import datetime, timezone
 

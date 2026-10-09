@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // The libp2p host a member joins the mesh with, configured the way
-// sam-node's is (internal/node/node.go): yamux the muxer, circuit relay v2
+// agentmesh-node's is (internal/node/node.go): yamux the muxer, circuit relay v2
 // for reachability through the routers. Transports and the security
 // protocol come from the runtime (platform/transports.ts): on Node TCP and
 // WebSocket with TLS, in a browser WebSocket with Noise.
@@ -41,7 +41,7 @@ export interface MeshHostOptions {
   listenAddrs?: string[];
   /**
    * Peers the control plane has banned. Consulted for every dial and every
-   * inbound connection, as sam-node's connection gater; the session keeps
+   * inbound connection, as agentmesh-node's connection gater; the session keeps
    * it current from /info and the gossip events.
    */
   banned?: { has(peerId: string): boolean };
@@ -73,7 +73,7 @@ export async function createMeshHost(identity: Identity, options: MeshHostOption
       // published them, and every connection is authenticated by peer ID
       // whatever the address, so no address is refused for its shape. In a
       // browser js-libp2p would otherwise skip loopback and plain ws://
-      // addresses, which is what sam-one on the same machine advertises; a
+      // addresses, which is what agentmesh-one on the same machine advertises; a
       // page on https cannot open ws:// anyway, the browser sees to that.
       denyDialMultiaddr: () => false,
     },

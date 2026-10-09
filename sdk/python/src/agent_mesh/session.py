@@ -77,13 +77,13 @@ RESERVATION_RENEW_LEAD = 2 * 60.0
 # unreachable through that router at most before it notices and reserves
 # again.
 RESERVATION_CHECK_INTERVAL = 30.0
-# sam-node's --control-plane-sync-interval default.
+# agentmesh-node's --control-plane-sync-interval default.
 DEFAULT_POLICY_SYNC = 15 * 60.0
-# sam-node's --control-plane-sync-interval default, and its 2s first pull.
+# agentmesh-node's --control-plane-sync-interval default, and its 2s first pull.
 DEFAULT_CONTROL_PLANE_SYNC = 15 * 60.0
 FIRST_CONTROL_PLANE_SYNC = 2.0
 DEFAULT_CONTROL_PLANE_SYNC_JITTER = 2.0
-# How long a provider's positive egress verdict is kept; sam-node's labelGateTTL.
+# How long a provider's positive egress verdict is kept; agentmesh-node's labelGateTTL.
 EGRESS_VERDICT_TTL = 5 * 60.0
 
 # How a caller names the peer it wants to reach: a provider `discover` returned,
@@ -147,7 +147,7 @@ class MeshSession:
     banned: BanSet = field(default_factory=BanSet)
     # This member's agent, once accept_a2a was called.
     endpoint: Optional[A2AEndpoint] = None
-    # sam-node's egress.require_labels for an SDK member: every provider this
+    # agentmesh-node's egress.require_labels for an SDK member: every provider this
     # session calls must attest all of these pairs, on top of a call's
     # required_labels. Held on every call, MCP and HTTP alike; no call waives it.
     egress_require_labels: Optional[Mapping[str, str]] = None
@@ -191,7 +191,7 @@ class MeshSession:
     def mesh_url(peer_id: str, target_service: str, path: str = "") -> str:
         """The URL an httpx client on `MeshTransport` uses for a service on a
         peer: http://mesh/mesh/<peer-id>/<type>/<name>/<path>, the shape of
-        sam-node's egress proxy and of an agent card rewritten for the mesh."""
+        agentmesh-node's egress proxy and of an agent card rewritten for the mesh."""
         return mesh_url(canonical_peer_id(peer_id), target_service, path)
 
     @property
@@ -509,7 +509,7 @@ class MeshSession:
     async def _sync_loop(self) -> None:
         """Pulls once shortly after join, then every interval and whenever
         triggered; each periodic wait is stretched by up to a tenth and each
-        trigger delayed by up to the jitter, as sam-node's loop does."""
+        trigger delayed by up to the jitter, as agentmesh-node's loop does."""
         delay = min(FIRST_CONTROL_PLANE_SYNC, self.control_plane_sync_interval) if self.control_plane_sync_interval > 0 else None
         while True:
             triggered = False
@@ -596,7 +596,7 @@ class MeshSession:
         body: bytes | str | None = None,
     ) -> HTTPResponse:
         """Calls an inference or A2A service on a provider over /libp2p-http,
-        the way sam-node's egress proxy does for /mesh/<peer>/<type>/<name>/<path>."""
+        the way agentmesh-node's egress proxy does for /mesh/<peer>/<type>/<name>/<path>."""
         peer_id = await self._egress_peer(peer)
         return await http_request_over_stream(
             self.host, peer_id, self.biscuit, target_service, path, method=method, headers=headers, body=body
@@ -604,7 +604,7 @@ class MeshSession:
 
     async def _egress_peer(self, peer: Peer) -> ID:
         """The peer an HTTP call goes out to, verified as an enrolled node
-        holding the floor before anything is sent (sam-node's VerifyPeerLabels)."""
+        holding the floor before anything is sent (agentmesh-node's VerifyPeerLabels)."""
         peer_id = await self.connect(peer)
         if self._egress_verdicts.get(str(peer_id), 0.0) > time.monotonic():
             return peer_id
@@ -621,7 +621,7 @@ class MeshSession:
         /libp2p-http with target, the base URL of an A2A server beside this
         process or a handler in it. Nothing is announced: no DHT record, no
         catalog entry. A tool, a model or a service others should find by
-        name is published by a sam-node. Fetches the mesh policy first and
+        name is published by a agentmesh-node. Fetches the mesh policy first and
         keeps it current; a policy that cannot be read fails the call, since
         an agent without it could only authorize what callers carry in their
         own tokens. Returns the service target callers use. One agent per
@@ -683,7 +683,7 @@ async def join_mesh(
     credential lists; a peer behind another router is still reached, see
     MeshSession.connect. egress_require_labels is the floor every provider
     this member calls must attest, see MeshSession."""
-    # The pull sam-node makes before it starts: a member resuming from its
+    # The pull agentmesh-node makes before it starts: a member resuming from its
     # state directory after a key rotation would otherwise verify the routers,
     # which already hold credentials under the new key, against the keys it
     # persisted, and the sync that would have brought the new key runs only
@@ -755,7 +755,7 @@ async def join_mesh(
 
 async def _admit(host: IHost, mesh: "AgentMesh", router_addrs: list[multiaddr.Multiaddr], reserve: bool) -> list[AdmittedRouter]:
     """Authenticates with every router the control plane named, as the JS SDK
-    and sam-node do, and reserves a relay slot on the first that admits us.
+    and agentmesh-node do, and reserves a relay slot on the first that admits us.
     A peer reserves on the first router of its own list, so a caller that
     only knew one router could not reach a peer whose list started
     elsewhere; `connect` tries the relayed path through each of these. The

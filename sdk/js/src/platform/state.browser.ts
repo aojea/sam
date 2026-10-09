@@ -28,7 +28,7 @@ function request<T>(req: IDBRequest<T>): Promise<T> {
 }
 
 function openDatabase(name: string): Promise<IDBDatabase> {
-  const req = indexedDB.open(`sam-mesh:${name}`, 1);
+  const req = indexedDB.open(`agentmesh:${name}`, 1);
   req.onupgradeneeded = () => {
     req.result.createObjectStore(STORE);
   };

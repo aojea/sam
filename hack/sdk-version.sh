@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # Stamps one version on both native SDKs, so a release publishes
-# @sam-mesh/sdk and sam-mesh at the version of its tag. The release
+# @agentmesh-p2p/sdk and agentmesh-p2p at the version of its tag. The release
 # workflow runs it on the tag; a developer never needs to.
 #
 #   ./hack/sdk-version.sh 1.2.3

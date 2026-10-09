@@ -92,7 +92,7 @@ def auth_stream_handler(
     on_authenticated: Optional[Callable[[str, VerifiedBiscuit], None]] = None,
     is_banned: Optional[Callable[[str], bool]] = None,
 ) -> Callable[[INetStream], "trio.lowlevel.Awaitable[None]"]:
-    """Server side of /mesh/auth/1.0.0, mirroring sam-node's HandleAuthHandshake:
+    """Server side of /mesh/auth/1.0.0, mirroring agentmesh-node's HandleAuthHandshake:
     verify the caller's biscuit against the control plane keys and its
     connection peer ID, then answer with our own. A failed verification, or a
     peer the control plane banned, gets no answer, only a closed stream, as on

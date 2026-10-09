@@ -143,7 +143,7 @@ export class AgentMesh {
   #credential: MeshCredential;
   readonly #state: StateStore | undefined;
   readonly #jwtSource: (() => Promise<string>) | undefined;
-  // Refreshes run one after another, as sam-node's refreshMu: the control
+  // Refreshes run one after another, as agentmesh-node's refreshMu: the control
   // plane redeems only the last biscuit it issued, so two in flight would
   // leave the loser holding a spent one.
   #refreshChain: Promise<unknown> = Promise.resolve();
@@ -241,7 +241,7 @@ export class AgentMesh {
 
     // Widen trust from the one key the enrollment carries to every key the
     // control plane currently signs with, so peers holding credentials from
-    // a retiring key still verify. Best effort, as in sam-node.
+    // a retiring key still verify. Best effort, as in agentmesh-node.
     let controlPlaneKeys = [enrollment.controlPlanePublicKey];
     try {
       controlPlaneKeys = await controlPlane.keys(controlPlaneKeys);
@@ -363,7 +363,7 @@ export class AgentMesh {
   }
 
   /**
-   * The member's pull from the control plane, as sam-node's SyncControlPlane:
+   * The member's pull from the control plane, as agentmesh-node's SyncControlPlane:
    * the signing keys (verified against the set already trusted, so whoever
    * answers the URL cannot become the trust root), a credential refresh when
    * a rotation happened since it was issued, and /info for the router

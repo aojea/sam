@@ -650,7 +650,7 @@ def test_a_router_that_came_back_on_another_address_is_reserved_on_again(monkeyp
 
 
 def test_a_router_the_control_plane_lists_elsewhere_is_reserved_on_there():
-    """A mesh that hands out literal addresses (sam-one, a kind cluster) has
+    """A mesh that hands out literal addresses (agentmesh-one, a kind cluster) has
     no name to re-resolve: a router that came back on another address is
     known only through the control plane's list, refreshed by every pull.
     The reservation loop dials the router at the address that list names
@@ -802,7 +802,7 @@ def test_an_egress_floor_stated_at_join_is_held_on_the_http_path():
                 plain.banned.add(str(provider.get_id()), int(time.time() * 1000))
                 with pytest.raises(PermissionError, match="banned"):
                     await plain.request(provider_addr, "a2a://agent", "/card")
-                # Only nodes host services, as sam-node's checkPeerLabels requires.
+                # Only nodes host services, as agentmesh-node's checkPeerLabels requires.
                 with pytest.raises(BiscuitVerificationError, match="lacks expected role 'mesh:role:node'"):
                     await held.request(not_a_node_addr, "a2a://agent", "/card")
             nursery.cancel_scope.cancel()

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """What a member keeps in step with the control plane while it runs, as
-sam-node's controlplane_sync.go: the ban set, reconciled from /info, and the
+agentmesh-node's controlplane_sync.go: the ban set, reconciled from /info, and the
 gossip events that bring the next pull forward."""
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ class BanSet:
 
 
 def verify_mesh_event(data: bytes, trusted_keys: Sequence[bytes], now_ms: Optional[int] = None) -> Optional[pb.MeshEvent]:
-    """Verifies a MeshEvent as sam-node's verifyEvent does: the signature covers
+    """Verifies a MeshEvent as agentmesh-node's verifyEvent does: the signature covers
     the deterministic encoding of the event with the signature cleared, under
     any trusted control plane key. Returns the event, with a banned peer's id in
     canonical form, or None when it does not verify, is not fresh, or bans

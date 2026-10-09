@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// The provider-side authorizer, mirroring internal/node.(*SamNode).Authorize.
+// The provider-side authorizer, mirroring internal/node.(*AgentMeshNode).Authorize.
 // Every piece of Datalog it evaluates is text: the baseline generated from
 // api/datalog.go (gen/datalog.ts) and the mesh policy rules the control
 // plane renders (GET /policies). Nothing here derives rules from roles.
@@ -22,7 +22,7 @@ import { parseServiceTarget } from "./discovery.ts";
 import { BASELINE_DATALOG } from "./gen/datalog.ts";
 import { evaluateTaskRules, isSafeRequestHTTPPath } from "./tar.ts";
 
-/** What a caller asks for, as sam-node's RequestContext. */
+/** What a caller asks for, as agentmesh-node's RequestContext. */
 export interface AuthorizeRequest {
   /** The caller's biscuit, as it arrived in the AuthFrame or X-Mesh-Biscuit. */
   biscuit: Uint8Array;
@@ -111,7 +111,7 @@ export async function authorizeCaller(req: AuthorizeRequest, options: ProviderAu
   };
 
   // The action: service(type, name). An empty target is the protocol itself
-  // in the system namespace, as sam-node scopes its own catalog.
+  // in the system namespace, as agentmesh-node scopes its own catalog.
   let svcType: string;
   let svcName: string;
   if (req.targetService === "") {

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""MCP over a mesh stream, the client side of sam-node's /mesh/mcp/1.0.0
+"""MCP over a mesh stream, the client side of agentmesh-node's /mesh/mcp/1.0.0
 (internal/node/gate.go): an AuthFrame naming the service, the provider's
 AuthResponse, then JSON-RPC messages each with a varint length prefix."""
 
@@ -46,7 +46,7 @@ from .host import open_stream
 
 logger = logging.getLogger("agent_mesh")
 
-# go-msgio's default message cap, which sam-node's StreamTransport uses.
+# go-msgio's default message cap, which agentmesh-node's StreamTransport uses.
 MAX_MCP_MESSAGE_BYTES = 8 * 1024 * 1024
 
 MCP_CLIENT_INFO = mcp_types.Implementation(name="agent-mesh-sdk", version="0.1.0")
@@ -68,14 +68,14 @@ def _require_every_pair(provider: VerifiedBiscuit, required: Optional[Mapping[st
 
 def require_labels(provider: VerifiedBiscuit, required: Optional[Mapping[str, str]]) -> None:
     """A requirement is satisfied only when the provider attests every pair, as
-    sam-node's api.LabelCheck (`check if label(k1, v1), label(k2, v2)`), the
+    agentmesh-node's api.LabelCheck (`check if label(k1, v1), label(k2, v2)`), the
     same rule as the egress floor. A map holds one value per key, so listing
     several pairs narrows the acceptable providers. Empty is no requirement."""
     _require_every_pair(provider, required, "does not attest every required label")
 
 
 def require_egress_labels(provider: VerifiedBiscuit, required: Optional[Mapping[str, str]]) -> None:
-    """The session's egress floor, sam-node's egress.require_labels: the same
+    """The session's egress floor, agentmesh-node's egress.require_labels: the same
     rule as require_labels, refused with a message that names the floor. Empty
     is no floor."""
     _require_every_pair(provider, required, "does not attest the egress floor")

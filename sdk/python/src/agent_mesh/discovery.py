@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Service discovery as sam-node does it (internal/node/service.go): a provider
+"""Service discovery as agentmesh-node does it (internal/node/service.go): a provider
 record in the mesh DHT under a key derived from the service. The lookup is a
 bounded Kademlia GET_PROVIDERS walk, and a peer lookup a FIND_NODE one,
 spoken directly on go-libp2p-kad-dht's protocol: py-libp2p's DHT client
-(0.8 included) hardcodes the /ipfs prefix and the mesh uses /sam. An SDK
+(0.8 included) hardcodes the /ipfs prefix and the mesh uses /mesh. An SDK
 member only looks records up; it announces none."""
 
 from __future__ import annotations

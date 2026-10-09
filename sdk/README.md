@@ -1,14 +1,14 @@
 # Native SDKs
 
 This directory holds the SDKs that let an agent join a SAM mesh from inside
-its own process, without a `sam-node` sidecar. Two languages are in scope:
+its own process, without a `agentmesh-node` sidecar. Two languages are in scope:
 
-- [`js/`](js/) — `@sam-mesh/sdk`, TypeScript for Node.js, built on
+- [`js/`](js/) — `@agentmesh-p2p/sdk`, TypeScript for Node.js, built on
   [js-libp2p](https://github.com/libp2p/js-libp2p).
-- [`python/`](python/) — `sam-mesh` (import `agent_mesh`), built on
+- [`python/`](python/) — `agentmesh-p2p` (import `agent_mesh`), built on
   [py-libp2p](https://github.com/libp2p/py-libp2p).
 
-The motivation is [issue #480](https://github.com/google/sam/issues/480). The
+The motivation is [issue #480](https://github.com/google/agentmesh/issues/480). The
 sidecar works, but it makes every agent deployment manage a second process,
 a local port and a token, which does not fit serverless platforms and splits
 tracing between the agent and the network layer. An earlier attempt at a
@@ -17,15 +17,15 @@ removed in favour of this work.
 
 Both SDKs speak the mesh protocol directly. There is no SDK-specific
 endpoint anywhere in the mesh; a member built with an SDK is, to every other
-member and to the control plane, a peer like a `sam-node`.
+member and to the control plane, a peer like a `agentmesh-node`.
 
 An SDK member is an agent, not a service provider. It calls what the mesh
-offers: MCP tools, inference and A2A services that `sam-node`s publish and
+offers: MCP tools, inference and A2A services that `agentmesh-node`s publish and
 the discovery table names. Inbound, it accepts one thing: A2A requests for
 itself, as `a2a://<name>`, reached by peer ID through a router. It publishes
 no service, writes no provider record and reports no catalog; a tool, a
 model or a named agent that others should find by name runs behind a
-`sam-node`. The reasons are in [Agents, not services](#agents-not-services).
+`agentmesh-node`. The reasons are in [Agents, not services](#agents-not-services).
 
 ## What exists today
 
@@ -40,7 +40,7 @@ Milestones 1 to 5 are implemented and tested in both languages:
 | Signed key-set sync (`GET /keys`) | yes | yes |
 | Persisted state (identity and credential, owner-only files; IndexedDB in a browser) | yes | yes |
 | Biscuit verification of a peer's credential (signature, expiry, peer binding, roles, labels) | yes | yes |
-| libp2p host as `sam-node` configures it (TCP and WebSocket, TLS first and Noise, yamux) | yes | yes |
+| libp2p host as `agentmesh-node` configures it (TCP and WebSocket, TLS first and Noise, yamux) | yes | yes |
 | `/mesh/auth/1.0.0`, both sides; join = handshake with a router and check its role | yes | yes |
 | Circuit relay v2 reservation on the router; dial and accept through it | yes | yes |
 | Service discovery in the mesh DHT (`/mesh/kad/1.0.0`) | yes | yes |
@@ -48,18 +48,18 @@ Milestones 1 to 5 are implemented and tested in both languages:
 | Caller-side label requirements on the provider's credential | yes | yes |
 | `/libp2p-http` client: call inference and A2A services on the mesh; response bodies stream | yes | yes |
 | The mesh as a transport for HTTP clients: `session.fetch()` for fetch-based clients, `MeshTransport` for httpx, so the official A2A SDK's client works unchanged | `fetch` | httpx |
-| Provider authorizer: the baseline Datalog and the mesh policy (`GET /policies`), evaluated as `sam-node` does | yes | yes |
+| Provider authorizer: the baseline Datalog and the mesh policy (`GET /policies`), evaluated as `agentmesh-node` does | yes | yes |
 | A2A ingress for the agent: `/libp2p-http` for `a2a://<name>`, forwarded to an A2A server beside the process or answered in it; not announced anywhere | yes | yes |
-| Control plane pull before join and on `sam-node`'s interval: `/keys` verified against the trusted set, credential refresh after a rotation, `/info` bans and router addresses | yes | yes |
+| Control plane pull before join and on `agentmesh-node`'s interval: `/keys` verified against the trusted set, credential refresh after a rotation, `/info` bans and router addresses | yes | yes |
 | Gossip events from the control plane (`/mesh/events/v1`, StrictSign): ban enforced at once, key rotation adopted, policy update pulls | yes | yes |
 | Banned peers refused: connections dropped and denied, handshakes and requests refused, dials refused | yes | yes |
-| Runs in a browser page: WebSocket and Noise to the router, state in IndexedDB, the agent answered by a fetch handler; `sdk/js/examples/browser` against `sam-one`, tested in Chromium | yes | — |
-| Published to a registry from the release workflow | npm `@sam-mesh/sdk` | PyPI `sam-mesh` |
+| Runs in a browser page: WebSocket and Noise to the router, state in IndexedDB, the agent answered by a fetch handler; `sdk/js/examples/browser` against `agentmesh-one`, tested in Chromium | yes | — |
+| Published to a registry from the release workflow | npm `@agentmesh-p2p/sdk` | PyPI `agentmesh-p2p` |
 
 A member built this way is on the mesh and uses it in both directions: it
 finds a service in the DHT and calls it through the router, verifying the
 provider on every call, and it answers A2A requests for its own agent from
-a `sam-node` or another SDK member that names it by peer ID, authorizing
+a `agentmesh-node` or another SDK member that names it by peer ID, authorizing
 every caller with the same Datalog the Go node evaluates. It follows the
 control plane while it runs: a ban reaches it as a gossip event within a
 second and again with the next pull, and a key rotation makes it refresh
@@ -140,17 +140,17 @@ pinned by a test:
 - URL parsers lowercase the host (WHATWG `URL`, httpx), and a base58 peer
   ID is case-sensitive. The URL an HTTP client uses for a peer's service
   therefore carries the peer ID in the path,
-  `http://mesh/mesh/<peer-id>/<type>/<name>/<path>`, the shape of `sam-node`'s
+  `http://mesh/mesh/<peer-id>/<type>/<name>/<path>`, the shape of `agentmesh-node`'s
   egress proxy and of an agent card rewritten for the mesh; the host is ignored.
 - A member that publishes nothing has announced no address, so nothing in
-  the DHT or a router's peerstore names one. `sam-node` dials
+  the DHT or a router's peerstore names one. `agentmesh-node` dials
   `/p2p/<router>/p2p-circuit` for every router it authenticated with when
   it knows nothing else about a peer, as both SDKs do for a peer named by
   ID (`internal/node/mcp.go`, `preparePeerAddrs`).
 - Every Go component runs GossipSub with `StrictSign`. `@libp2p/gossipsub`
   (the libp2p-maintained package; `@chainsafe/libp2p-gossipsub` stops at
   libp2p 2) and py-libp2p's `GossipSub` with `strict_signing=True` both
-  exchange messages with `sam-router`. py-libp2p's Pubsub learns of peers
+  exchange messages with `agentmesh-router`. py-libp2p's Pubsub learns of peers
   through a notifee it registers when constructed, so it is built before
   the first connection; it also opens a meshsub stream to every new peer
   and its host logs an error for peers that do not run pubsub, which is
@@ -158,7 +158,7 @@ pinned by a test:
 - py-libp2p's connection gate is address-based, not peer-based, so the
   Python SDK enforces a ban by disconnecting the peer and refusing its
   handshakes, requests and dials; js-libp2p's `connectionGater` also denies
-  the connection itself, as sam-node's gater does.
+  the connection itself, as agentmesh-node's gater does.
 
 ## Wire contract
 
@@ -172,7 +172,7 @@ alters one of these, the SDKs change with it.
   protobuf encoding `PublicKey{Type: Ed25519, Data: <32 bytes>}`, which is
   the bytes `08 01 12 20` followed by the key. Private keys persist as
   `PrivateKey{Type: Ed25519, Data: <seed || public>}`, bytes `08 01 12 40`
-  followed by 64 bytes; this is what `sam-node` writes to its store.
+  followed by 64 bytes; this is what `agentmesh-node` writes to its store.
 - The peer ID is the identity multihash (`00 24`) of the public key encoding,
   written in base58btc. The control plane refuses an enrollment whose
   `peer_id` is not derived from `public_key`
@@ -191,10 +191,10 @@ An unknown field is an error. `control_plane_url` has no trailing slash.
 In a browser the JS SDK keeps the same two records in an IndexedDB
 database named after the state location, kept by the browser for the
 page's origin.
-`sam-node` keeps the same message in `agent.db`, and `sam-node state
+`agentmesh-node` keeps the same message in `agent.db`, and `agentmesh-node state
 export|import <dir>` moves a member between the two
 (`internal/node/statedir.go`). `TestNativeSDKExamples` resumes each SDK's
-directory with the other SDK and with an imported `sam-node`. Fields an SDK
+directory with the other SDK and with an imported `agentmesh-node`. Fields an SDK
 does not use (`receive_time`, `oidc_session`) are carried through on save,
 so a directory survives a round trip through any implementation.
 
@@ -225,9 +225,9 @@ messages in `api/agentmesh.proto`. Bodies are capped at 1 MiB on both sides.
 | `POST /refresh` | `TokenRefreshRequest`, header `Authorization: Bearer <base64 biscuit>` | `TokenRefreshResponse` | sign `mesh:refresh:<peer_id>:<ts>` |
 | `GET /keys` | — | `KeysResponse` | none; see below |
 | `GET /policies` | headers `Authorization: Bearer <base64 biscuit>`, `X-Mesh-Challenge-Ts`, `X-Mesh-Challenge-Sig` | `PolicyConfigGetResponse{datalog_rules}` | sign `mesh:policies:<peer_id>:<ts>` |
-| `GET /egress` | headers `Authorization: Bearer <base64 biscuit>`, `X-Mesh-Challenge-Ts`, `X-Mesh-Challenge-Sig` | `EgressAssignmentsResponse` | sign `mesh:egress:<peer_id>:<ts>` (`sam-node` only) |
-| `GET /revocations` | headers `Authorization: Bearer <base64 biscuit>`, `X-Mesh-Challenge-Ts`, `X-Mesh-Challenge-Sig` | `RevocationsResponse` | sign `mesh:revocations:<peer_id>:<ts>` (`sam-node` only) |
-| `POST /nodes/catalog` | `NodeCatalogReport`, headers `Authorization: Bearer <base64 biscuit>`, `X-Mesh-Challenge-Ts`, `X-Mesh-Challenge-Sig` | `204` | sign `mesh:nodes-catalog:<peer_id>:<ts>`; `sam-node` reports what it publishes, while an SDK member publishes nothing and does not call it |
+| `GET /egress` | headers `Authorization: Bearer <base64 biscuit>`, `X-Mesh-Challenge-Ts`, `X-Mesh-Challenge-Sig` | `EgressAssignmentsResponse` | sign `mesh:egress:<peer_id>:<ts>` (`agentmesh-node` only) |
+| `GET /revocations` | headers `Authorization: Bearer <base64 biscuit>`, `X-Mesh-Challenge-Ts`, `X-Mesh-Challenge-Sig` | `RevocationsResponse` | sign `mesh:revocations:<peer_id>:<ts>` (`agentmesh-node` only) |
+| `POST /nodes/catalog` | `NodeCatalogReport`, headers `Authorization: Bearer <base64 biscuit>`, `X-Mesh-Challenge-Ts`, `X-Mesh-Challenge-Sig` | `204` | sign `mesh:nodes-catalog:<peer_id>:<ts>`; `agentmesh-node` reports what it publishes, while an SDK member publishes nothing and does not call it |
 
 - `<ts>` is the request's `challenge_unix_ms`, unix milliseconds, and must
   be within 5 minutes of the control plane's clock (`challengeMaxAge`). When
@@ -269,7 +269,7 @@ messages in `api/agentmesh.proto`. Bodies are capped at 1 MiB on both sides.
 
 - Transports: `libp2p.DefaultTransports` (TCP, QUIC, WebSocket).
 - Security: TLS first, Noise accepted (`libp2p.Security` twice, in that
-  order, on `sam-node` and `sam-router`). Both bind the connection to the
+  order, on `agentmesh-node` and `agentmesh-router`). Both bind the connection to the
   peer ID. The Node and Python SDKs offer the same two in the same order and
   land on TLS with a Go peer and with each other; in a browser the JS SDK
   offers Noise alone, since a page cannot run libp2p's TLS, and a Node or
@@ -297,7 +297,7 @@ bytes), with a 64 KiB cap on the first frame.
   credential. The client verifies that credential the same way and, for a
   router, requires the router role. This is how a member joins: connect to a
   router, run this handshake, and the router admits it to the relay and
-  gossip. Both SDKs answer it too, so a `sam-node` can verify them before
+  gossip. Both SDKs answer it too, so a `agentmesh-node` can verify them before
   calling.
 - `/mesh/mcp/1.0.0` (`WithBiscuitAuth` then `HandleMCPStream`). Client sends
   `AuthFrame{biscuit, target_service: "mcp://<service>", agent}`; server
@@ -314,7 +314,7 @@ bytes), with a 64 KiB cap on the first frame.
   the same authorizer, then forwards `<upstream>` to the service with those
   two headers stripped and `X-Peer-Id` set to the verified caller. The SDKs
   are clients of this for `inference://`, `a2a://` and `egress://` services
-  (an egress destination is one a `sam-node` serves for a hostname outside
+  (an egress destination is one a `agentmesh-node` serves for a hostname outside
   the mesh, as the control plane assigned it; the SDK reaches it as any
   other service, `/egress/<hostname>/<path>` on that node), and servers of
   it for their own agent, `a2a://<name>`, only. Bodies are framed by
@@ -335,7 +335,7 @@ records up and announce none.
 A peer that announced nothing is still reachable by peer ID: every router
 relays for the peers it admitted, so a caller dials
 `<router>/p2p-circuit/p2p/<peer>` through each router that admitted it.
-Both SDKs do this for a bare peer ID, and `sam-node` does it when it knows
+Both SDKs do this for a bare peer ID, and `agentmesh-node` does it when it knows
 no other address for a peer (`preparePeerAddrs` in `internal/node/mcp.go`).
 This is how an SDK agent is reached.
 
@@ -358,7 +358,7 @@ of it is derived in the SDK:
   `hack/verify-sdk-generated.sh` fails when they are stale.
 - The mesh policy arrives rendered: `GET /policies` answers
   `PolicyConfigGetResponse{datalog_rules}`, one rule per entry, rendered by
-  the control plane with `api.BuildPolicyRules`. `sam-node` adds the same
+  the control plane with `api.BuildPolicyRules`. `agentmesh-node` adds the same
   text; no member compiles roles and bindings itself. An unparseable entry
   rejects the whole response.
 - Presence-only facts carry the single term `true`
@@ -377,15 +377,15 @@ service, no DHT record, no catalog entry. The reasons:
 
 - **The agent is the principal; a service is infrastructure.** A harness
   (LangChain, Claude Code, a browser agent) is an MCP client. The tools it
-  should see through the mesh are the ones `sam-node`s publish. Something
+  should see through the mesh are the ones `agentmesh-node`s publish. Something
   that must be reachable by name, a tool, a model, a named agent, is a
-  deployment concern, and the sidecar model exists for it: the `sam-node`
+  deployment concern, and the sidecar model exists for it: the `agentmesh-node`
   beside it publishes the service and enforces the policy once, in Go.
 - **Publishing is the expensive part.** Being a provider needs a DHT
   provide loop, a catalog report and provider records that go stale on
   every rollout. Accepting requests for the agent itself needs the relay
   reservation, the auth handshake and the authorizer, all of which a member
-  needs anyway to be verified by a `sam-node` before it is called.
+  needs anyway to be verified by a `agentmesh-node` before it is called.
 - **One inbound protocol.** A2A is the protocol for talking to an agent,
   and the A2A SDKs serve one agent card each. One ingress means one
   authorizer path to audit in three languages instead of two ingress
@@ -394,12 +394,12 @@ service, no DHT record, no catalog entry. The reasons:
   reachable through a router's relay and nothing else, which is what
   `accept_a2a` is. The JS SDK runs in a page: it reaches the router over
   WebSocket (`wss` when the router sits behind a TLS-terminating edge, as
-  `sam-one --tunnel` puts it), secures the connection with Noise, keeps its
+  `agentmesh-one --tunnel` puts it), secures the connection with Noise, keeps its
   state in IndexedDB and answers its agent with a fetch handler.
 
 What an SDK agent is on the wire: a peer with a relay reservation on a
 router, answering `/mesh/auth/1.0.0` and `/libp2p-http` for `a2a://<name>`,
-with no DHT record and no catalog entry. To a `sam-node` it is a peer whose
+with no DHT record and no catalog entry. To a `agentmesh-node` it is a peer whose
 address nobody announced, reached through the router that admitted both,
 and whose credential it verifies before forwarding
 `/mesh/<peer>/a2a/<name>/...`. Routers, the control plane and the Datalog
@@ -410,9 +410,9 @@ Two agents that both wrote nothing down still meet: A learns B's peer ID
 present their credentials, and A opens the A2A conversation on that
 connection; libp2p's secure channel is end to end, so the router carries
 ciphertext.
-An agent that must be *found* by name runs behind a `sam-node`. Two agents
+An agent that must be *found* by name runs behind a `agentmesh-node`. Two agents
 that both can only call out (two browsers) meet at a third agent behind a
-`sam-node` that both call.
+`agentmesh-node` that both call.
 
 ## Plan
 
@@ -429,9 +429,9 @@ holds against the control plane's records.
 
 ### Milestone 2 — join the mesh (done)
 
-- libp2p host per SDK, configured as `sam-node`'s: TCP and WebSocket, TLS,
+- libp2p host per SDK, configured as `agentmesh-node`'s: TCP and WebSocket, TLS,
   yamux, identify, circuit relay v2 client. The testnets' routers listen on
-  TCP; `sam-one`'s router is a WebSocket listener on the port that serves
+  TCP; `agentmesh-one`'s router is a WebSocket listener on the port that serves
   its API (`/ws`, or `/wss` behind a tunnel), so a member reaches it over
   WebSocket or not at all; `tests/integration/standalone_sdk_test.go` holds
   both SDKs to it. JS: `libp2p`, `@libp2p/tcp`, `@libp2p/websockets`,
@@ -460,11 +460,11 @@ holds against the control plane's records.
   with the handshake and a relay), and refuses a relay without the router
   role, a router that trusts another control plane, and a refused
   reservation. Integration: `tests/integration/sdk_mesh_test.go` runs one
-  mesh with a control plane, a `sam-router`, a `sam-node` and one member per
+  mesh with a control plane, a `agentmesh-router`, a `agentmesh-node` and one member per
   SDK, all real, then walks the connectivity matrix: every member on the
-  router's lease; each SDK member verifies the `sam-node` and the other SDK
+  router's lease; each SDK member verifies the `agentmesh-node` and the other SDK
   member on both the direct and the relayed path, and is verified by them;
-  the `sam-node` reaches each member through the router; an admitted Go peer
+  the `agentmesh-node` reaches each member through the router; an admitted Go peer
   does the same and sends a forged frame; an address behind the router for
   a peer that is not on the mesh fails. About 7 seconds.
 
@@ -489,7 +489,7 @@ holds against the control plane's records.
   and from the libp2p stream for `mcp.ClientSession`. `""` as the target is
   the provider's own catalog (`list_local_services`, `get_mesh_info`).
 - Egress floor: `join({ egressRequireLabels })` (`join(egress_require_labels=)`)
-  is `sam-node`'s `egress.require_labels` for an SDK member: every provider
+  is `agentmesh-node`'s `egress.require_labels` for an SDK member: every provider
   the session calls must attest all of them, on top of a call's required
   labels, on every outbound call however the peer was named, MCP and HTTP
   alike. It is the same rule as the caller's requirement (`api.LabelCheck`),
@@ -498,17 +498,17 @@ holds against the control plane's records.
   implementations agree on it, as they do on the caller's requirement. The
   HTTP path (`request`, `fetch`, `MeshTransport`) verifies the provider with
   or without a floor, through the mutual `/mesh/auth/1.0.0` handshake, as
-  `sam-node`'s `VerifyPeerLabels` does before its egress proxy sends
+  `agentmesh-node`'s `VerifyPeerLabels` does before its egress proxy sends
   anything; a positive verdict is kept per peer for five minutes
   (`labelGateTTL`); a refusal is not kept. An unmet floor is a
   `LabelsNotSatisfiedError` naming the floor.
 - `session.listTools(peer, service)` and `session.callTool(peer, service,
   tool, args)` on top of that.
 - Tests. Unit: each SDK calls a tool on an in-process provider that serves
-  `/mesh/mcp/1.0.0` as `sam-node` does with the official MCP server behind
+  `/mesh/mcp/1.0.0` as `agentmesh-node` does with the official MCP server behind
   it, reads its catalog, and is refused for missing labels, an untrusted
   provider, a forged caller credential and an unknown service. Integration:
-  the mesh of `sdk_mesh_test.go` has an MCP backend behind the `sam-node`
+  the mesh of `sdk_mesh_test.go` has an MCP backend behind the `agentmesh-node`
   (`calc`, tool `add`); each SDK member discovers it in the DHT, lists and
   calls `add` through the router, reads the node's catalog and is refused a
   service the node does not have. The runners took `discover`, `tools` and
@@ -518,7 +518,7 @@ holds against the control plane's records.
 
 - Datalog as the contract, Go side: the baseline moved into a generated
   artifact both SDKs embed, the control plane renders the mesh policy as
-  `datalog_rules`, and `sam-node` consumes that text like any other member.
+  `datalog_rules`, and `agentmesh-node` consumes that text like any other member.
   See the authorization section above.
 - Provider authorizer in each SDK (`authorizer.ts`, `authorizer.py`), built
   from the artifact and `datalog_rules`, evaluated on every inbound
@@ -533,20 +533,20 @@ holds against the control plane's records.
   listener, which is what an Express app with the A2A SDK's handlers is,
   and runs it on the ingress's own `http.Server`.
 - `session.accept_a2a(target, name=)` / `session.acceptA2A(spec)` fetches
-  the mesh policy, re-reads it on `sam-node`'s sync interval and starts
+  the mesh policy, re-reads it on `agentmesh-node`'s sync interval and starts
   answering. It announces nothing. One agent per session.
 - `/libp2p-http` client for callers built on HTTP libraries:
   `open_http_request` / `fetchOverStream` return once the headers are in
   and stream the body; `MeshTransport` (httpx) and `session.fetch()`
   (fetch) carry a client's requests to the peer a mesh URL names. The A2A
   SDK's client takes either without changes. The card of an agent behind a
-  `sam-node` names the agent's own address; a GET of the well-known card
+  `agentmesh-node` names the agent's own address; a GET of the well-known card
   path or of the service root is answered the way the node's egress proxy
   answers it: the SDK fetches the card itself, with identity encoding, and
   serves it rewritten (`rewriteAgentCard` / `rewrite_agent_card`): HTTP
   interfaces point at the mesh URL, gRPC ones are dropped, signatures go.
   Streaming stays as the agent declares it, since the transport streams.
-- `sam-node`: a peer it knows no address for is dialed through every
+- `agentmesh-node`: a peer it knows no address for is dialed through every
   router it authenticated with, so its egress proxy reaches an agent by
   peer ID (`preparePeerAddrs`).
 - Examples with the official A2A SDKs (`a2a-agent.ts`, `a2a-call.ts`;
@@ -562,16 +562,16 @@ holds against the control plane's records.
   a Node listener), an httpx client on `MeshTransport`, and refusals for a
   role that grants nothing, an ungranted type, another agent name (404), a
   missing biscuit and a dotted path; plus the authorizer alone against the
-  decisions `internal/node/middleware_test.go` pins, and `sam-node`'s
+  decisions `internal/node/middleware_test.go` pins, and `agentmesh-node`'s
   router fallback. Integration: in the mesh of `sdk_mesh_test.go` each SDK
-  member accepts `a2a://agent`; the `sam-node` reaches it by peer ID
+  member accepts `a2a://agent`; the `agentmesh-node` reaches it by peer ID
   through its egress proxy, the other SDK member does the same with no
   lookup, a lookup for `a2a://agent` finds nothing, the member refuses a
   `/mesh/mcp/1.0.0` stream, and a Go peer whose role the policy grants
   nothing gets 403 and is answered once it presents a node-role token.
   About 9 seconds for the whole mesh. `TestNativeSDKA2A` runs the A2A SDK
   agents and calls each from the other language with the A2A SDK's client;
-  the answer names the caller's peer, and a `sam-node` fetches the card
+  the answer names the caller's peer, and a `agentmesh-node` fetches the card
   through its egress proxy.
 
 ### Milestone 5 — parity and release (done)
@@ -585,7 +585,7 @@ holds against the control plane's records.
   reconciled with the rule that a ban recorded after the request went out
   survives an answer that omits it; the mesh policy while accepting
   callers. Runs
-  once shortly after join, then on `sam-node`'s interval with the same
+  once shortly after join, then on `agentmesh-node`'s interval with the same
   jitter, and whenever an event triggers it.
 - Gossip events on `/mesh/events/v1`: the topic validator rejects
   anything not signed by a trusted control plane key and ignores stale
@@ -597,7 +597,7 @@ holds against the control plane's records.
   connections are dropped when the ban lands.
 - Publishing: `.github/workflows/release.yml` stamps the release tag's
   version on both packages (`hack/sdk-version.sh`) and publishes
-  `@sam-mesh/sdk` to npm and `sam-mesh` to PyPI through trusted
+  `@agentmesh-p2p/sdk` to npm and `agentmesh-p2p` to PyPI through trusted
   publishing. A prerelease tag (`v0.1.0-rc.4`) publishes under the npm
   dist-tag `next`, a stable tag under `latest`; PyPI needs no tag, `pip`
   skips prereleases on its own. When a publish job (`publish-sdk-js`
@@ -605,12 +605,12 @@ holds against the control plane's records.
   the failed job, or run the workflow by hand from the Actions tab with
   the tag and target SDK as input; it checks out that tag and publishes
   the selected SDK. One-time setup by a package owner: on npmjs.com, create the
-  `sam-mesh` organization, publish `@sam-mesh/sdk` 0.1.0 once by hand
+  `agentmesh-p2p` organization, publish `@agentmesh-p2p/sdk` 0.1.0 once by hand
   (`cd sdk/js && npm publish --access public`; the trusted-publisher
   settings live on the package page, which exists only after that), then
   register `google/sam` with workflow `release.yml` under the package's
   Settings, Trusted publishing; on pypi.org, add a pending publisher for
-  project `sam-mesh` with the same repository and workflow (environment
+  project `agentmesh-p2p` with the same repository and workflow (environment
   left empty), which reserves the name and lets the first tag create the
   project. No publishing token is stored in the repository.
 - Docs: `site/content/docs/guides/native-sdks.md`.
@@ -625,12 +625,12 @@ holds against the control plane's records.
   and a pull agrees; then the control plane rotates its key and announces
   it, and every member ends up trusting both keys, holding a credential
   that verifies only under the new one, and still authenticating with the
-  `sam-node`.
+  `agentmesh-node`.
 
 ### On the testnets
 
 Both testnets run the example programs, unchanged, as canaries beside the
-`sam-node` ones (`.github/k8s/sam-sdk-canary-template.yaml`): two pairs, an
+`agentmesh-node` ones (`.github/k8s/agentmesh-sdk-canary-template.yaml`): two pairs, an
 agent written with one SDK and the official A2A SDK (`a2a-agent.ts`,
 `a2a_agent.py`) and a caller written with the other in one pod, enrolled
 with the pod's projected service account token through `AGENTMESH_JWT_PATH`. The
@@ -639,14 +639,14 @@ prints, through a volume the pod shares, sends it a message with the A2A
 SDK's client every five minutes and is Ready while the last answer named
 the caller, so the Deployment's availability says whether an agent is still
 reachable after hours on the mesh. Two CronJobs cross every implementation
-boundary every 15 minutes and once per rollout: the `sam-node` cold-path
+boundary every 15 minutes and once per rollout: the `agentmesh-node` cold-path
 probe (`sam-probe-cronjob-template.yaml`) runs an agent per SDK as sidecars
 and fetches each one's agent card by peer ID through the egress proxy
 (node → SDK), and the SDK cold-path probe
-(`sam-sdk-probe-cronjob-template.yaml`) runs each SDK's callers against the
+(`agentmesh-sdk-probe-cronjob-template.yaml`) runs each SDK's callers against the
 everything canary by name (SDK → node) and the other SDK's agent by peer ID,
 the card with the mesh SDK's client and a message with the A2A SDK's
-(SDK → SDK). The images (`Dockerfile.sam-sdk-js`, `Dockerfile.sam-sdk-python`)
+(SDK → SDK). The images (`Dockerfile.agentmesh-sdk-js`, `Dockerfile.agentmesh-sdk-python`)
 are built per commit by `deploy.yaml`, so `bananas` runs the SDKs at the
 same commit as the Go components they talk to.
 
@@ -654,7 +654,7 @@ same commit as the Go components they talk to.
 
 - The connector interface for platforms (issue #480): `Attach`, `Detach`,
   `Refresh`, `Status` and the agent bundle, so a scheduler places SDK
-  members the way it places `sam-box` sandboxes.
+  members the way it places `agentmesh-box` sandboxes.
 - Reading the control plane's events also for router address changes, and
   re-dialing a router that replaced another.
 
@@ -662,7 +662,7 @@ same commit as the Go components they talk to.
 
 - Rewriting the control plane, router or sandbox components; they stay Go.
 - Publishing services from an SDK: an MCP server, a named inference or A2A
-  service, a DHT record or a catalog entry. That is `sam-node`'s job; see
+  service, a DHT record or a catalog entry. That is `agentmesh-node`'s job; see
   [Agents, not services](#agents-not-services).
 - Any SDK-only wire protocol. If an SDK needs something the Go node does not
   speak, the Go node learns it first.
@@ -682,11 +682,11 @@ python3 -m venv sdk/python/.venv
 sdk/python/.venv/bin/pip install -e 'sdk/python[test]'
 sdk/python/.venv/bin/pytest sdk/python/tests
 
-# Both against a real control plane, router and sam-node, and the example
+# Both against a real control plane, router and agentmesh-node, and the example
 # programs the docs embed against the same
 go test ./tests/integration -run TestNativeSDK -v
 
-# The JS SDK in a browser page against sam-one, in Chromium (Playwright);
+# The JS SDK in a browser page against agentmesh-one, in Chromium (Playwright);
 # also run by `make ui-test`
 cd sdk/js && node scripts/bundle-browser.mjs examples/browser/app.js build/browser-example
 cd tests/ui && npm ci && npx playwright install chromium && npx playwright test browser-sdk
@@ -741,7 +741,7 @@ one follows is named so a change on one side can be carried to the others.
 | `session.ts` | `session.py` | `MeshSession`: join, relay reservation, refresh loop, control plane sync loop, gossip events, `acceptA2A()` / `accept_a2a()`, `fetch()` |
 | `discovery.ts` | `discovery.py` | service keys and DHT lookups as `internal/node/service.go`; lookups only, no records |
 | `mcp.ts` | `mcp_client.py` | MCP over `/mesh/mcp/1.0.0`, the client side of `internal/node/gate.go` |
-| `authorizer.ts` | `authorizer.py` | the provider authorizer, as `internal/node.(*SamNode).Authorize`, over the generated baseline and `datalog_rules` |
+| `authorizer.ts` | `authorizer.py` | the provider authorizer, as `internal/node.(*AgentMeshNode).Authorize`, over the generated baseline and `datalog_rules` |
 | `libp2p-http.ts` | `libp2p_http.py` | `/libp2p-http` client (streaming) and the A2A ingress for the agent, as go-libp2p-http and `StartIngressServer`; mesh URLs |
 | `http1.ts` | — | HTTP/1.1 heads and bodies on a libp2p stream, for `libp2p-http.ts` (Python uses `h11` in `libp2p_http.py`) |
 | `libp2p-http-node.ts` | — | the ingress for a Node request listener (an Express app), Node's own HTTP server over the stream |

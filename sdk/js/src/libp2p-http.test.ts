@@ -14,7 +14,7 @@
 
 // The A2A ingress in one process: this SDK's /libp2p-http handler for one
 // agent behind a js-libp2p host, called with this SDK's clients, including
-// the fetch a session hands to clients built on fetch. The real sam-node as
+// the fetch a session hands to clients built on fetch. The real agentmesh-node as
 // a caller is exercised by tests/integration.
 
 import { yamux } from "@chainsafe/libp2p-yamux";
@@ -270,7 +270,7 @@ test("a fetch over the stream delivers an SSE body event by event", async () => 
   );
 });
 
-test("the card of an agent behind a node comes back rewritten for the mesh, as sam-node serves it", async () => {
+test("the card of an agent behind a node comes back rewritten for the mesh, as agentmesh-node serves it", async () => {
   const conn = await dial();
   const base = meshURL(agent.peerId.toString(), "a2a://agent");
   const response = await fetchOverStream(conn, callerBiscuit, new Request(`${base}/${AGENT_CARD_PATH}`));

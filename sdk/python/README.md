@@ -1,22 +1,22 @@
 # sam-mesh (Python)
 
-Native Python SDK for joining an Agent Mesh (SAM) from inside the agent
-process. It replaces the `sam-node` sidecar for agents written in Python:
+Native Python SDK for joining an Agent Mesh from inside the agent
+process. It replaces the `agentmesh-node` sidecar for agents written in Python:
 the agent enrolls with the control plane, joins the mesh through a router,
 finds services and calls them, answers A2A requests for the agent itself,
 and follows the control plane's keys, bans and policy while it runs. It
 publishes no service; a tool or a model others should find by name runs
-behind a `sam-node`. Import it as
+behind a `agentmesh-node`. Import it as
 `agent_mesh`.
 
 Guide: [sam-mesh.dev/docs/guides/native-sdks](https://sam-mesh.dev/docs/guides/native-sdks/),
 from an empty machine to two programs on a mesh.
-Source: [github.com/google/sam/tree/main/sdk/python](https://github.com/google/sam/tree/main/sdk/python).
+Source: [github.com/google/agentmesh/tree/main/sdk/python](https://github.com/google/agentmesh/tree/main/sdk/python).
 
 ## Install
 
 ```bash
-pip install sam-mesh
+pip install agentmesh-p2p
 ```
 
 Python 3.11 or later. The SDK runs on trio (py-libp2p is trio-based); under
@@ -26,10 +26,10 @@ asyncio, use it through `anyio` with the trio backend. One dependency,
 ## Use
 
 Both programs below are in
-[`examples/`](https://github.com/google/sam/tree/main/sdk/python/examples)
+[`examples/`](https://github.com/google/agentmesh/tree/main/sdk/python/examples)
 and run against a real mesh in the repository's tests. They read the mesh
 from `AGENTMESH_CONTROL_PLANE_URL` and the enrollment token from
-`AGENTMESH_BOOTSTRAP_TOKEN_PATH`; the guide shows how to get both from `sam-one`
+`AGENTMESH_BOOTSTRAP_TOKEN_PATH`; the guide shows how to get both from `agentmesh-one`
 or from the operator of an existing mesh.
 
 Find a service and call it:
@@ -188,4 +188,4 @@ A plaintext `http://` control plane is accepted only on loopback. Pass
 ## License
 
 Apache-2.0. Issues and contributions at
-[github.com/google/sam](https://github.com/google/sam).
+[github.com/google/agentmesh](https://github.com/google/agentmesh).

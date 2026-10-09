@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """A mesh identity is an ed25519 key pair. Its peer ID is the one libp2p
-derives, so the same key works in the SDK, in sam-node and on the wire."""
+derives, so the same key works in the SDK, in agentmesh-node and on the wire."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def peer_id_from_public_key(public_key_raw: bytes) -> str:
 
 def canonical_peer_id(text: str) -> str:
     """The base58btc form of a peer ID written in any encoding libp2p accepts
-    (base58btc multihash, CIDv1). Every key, ban set and comparison in SAM is
+    (base58btc multihash, CIDv1). Every key, ban set and comparison in Agent Mesh is
     on this form, as peer.ID.String() in Go; a string read off the wire or from
     a caller goes through here before it is used as one. Raises ValueError when
     the text is not a peer ID at all."""
@@ -98,7 +98,7 @@ class Identity:
 
     @classmethod
     def from_libp2p_private_key(cls, data: bytes) -> "Identity":
-        """Loads the libp2p protobuf private key encoding, the format sam-node persists."""
+        """Loads the libp2p protobuf private key encoding, the format agentmesh-node persists."""
         prefix = len(_LIBP2P_PRIVATE_KEY_PREFIX)
         if len(data) != prefix + 64 or not data.startswith(_LIBP2P_PRIVATE_KEY_PREFIX):
             raise ValueError("not a libp2p ed25519 private key")

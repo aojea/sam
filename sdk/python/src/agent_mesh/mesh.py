@@ -186,7 +186,7 @@ class AgentMesh:
 
         # Widen trust from the one key the enrollment carries to every key the
         # control plane currently signs with, so peers holding credentials from
-        # a retiring key still verify. Best effort, as in sam-node.
+        # a retiring key still verify. Best effort, as in agentmesh-node.
         control_plane_keys = [enrollment.control_plane_public_key]
         try:
             control_plane_keys = control_plane.keys(control_plane_keys)
@@ -273,7 +273,7 @@ class AgentMesh:
             return True
 
     def sync_control_plane(self) -> ControlPlaneSync:
-        """The member's pull from the control plane, as sam-node's SyncControlPlane:
+        """The member's pull from the control plane, as agentmesh-node's SyncControlPlane:
         the signing keys (verified against the set already trusted, so whoever
         answers the URL cannot become the trust root), a credential refresh when
         a rotation happened since it was issued, and /info for the router

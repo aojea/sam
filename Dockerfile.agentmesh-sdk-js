@@ -2,7 +2,7 @@
 # them: `node build/examples/agent.js [url]` joins as an agent that accepts
 # A2A requests, `node build/examples/call.js [peer] <service> <tool|path>
 # [args]` calls a service or an agent, and `a2a-agent.js` and `a2a-call.js`
-# do the same with the official A2A SDK. The examples import "@sam-mesh/sdk"
+# do the same with the official A2A SDK. The examples import "@agentmesh-p2p/sdk"
 # by name and resolve it through the package's own exports, so the image
 # keeps the package layout: package.json, dist/, build/examples/ and the
 # production node_modules/ plus the two packages the A2A examples need,

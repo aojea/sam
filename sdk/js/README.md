@@ -1,22 +1,22 @@
-# @sam-mesh/sdk
+# @agentmesh-p2p/sdk
 
-Native JavaScript SDK for joining an Agent Mesh (SAM) from inside the agent
-process. It replaces the `sam-node` sidecar for agents written for Node.js
+Native JavaScript SDK for joining an Agent Mesh from inside the agent
+process. It replaces the `agentmesh-node` sidecar for agents written for Node.js
 or running in a browser page:
 the agent enrolls with the control plane, joins the mesh through a router,
 finds services and calls them, answers A2A requests for the agent itself,
 and follows the control plane's keys, bans and policy while it runs. It
 publishes no service; a tool or a model others should find by name runs
-behind a `sam-node`.
+behind a `agentmesh-node`.
 
 Guide: [sam-mesh.dev/docs/guides/native-sdks](https://sam-mesh.dev/docs/guides/native-sdks/),
 from an empty machine to two programs on a mesh.
-Source: [github.com/google/sam/tree/main/sdk/js](https://github.com/google/sam/tree/main/sdk/js).
+Source: [github.com/google/agentmesh/tree/main/sdk/js](https://github.com/google/agentmesh/tree/main/sdk/js).
 
 ## Install
 
 ```bash
-npm install @sam-mesh/sdk @modelcontextprotocol/sdk zod
+npm install @agentmesh-p2p/sdk @modelcontextprotocol/sdk zod
 ```
 
 Requires Node.js 22.18 or later. In a browser, bundle it with the page
@@ -27,10 +27,10 @@ section has the details and an example page.
 ## Use
 
 Both programs below are in
-[`examples/`](https://github.com/google/sam/tree/main/sdk/js/examples) and
+[`examples/`](https://github.com/google/agentmesh/tree/main/sdk/js/examples) and
 run against a real mesh in the repository's tests. They read the mesh from
 `AGENTMESH_CONTROL_PLANE_URL` and the enrollment token from
-`AGENTMESH_BOOTSTRAP_TOKEN_PATH`; the guide shows how to get both from `sam-one`
+`AGENTMESH_BOOTSTRAP_TOKEN_PATH`; the guide shows how to get both from `agentmesh-one`
 or from the operator of an existing mesh.
 
 Find a service and call it:
@@ -51,7 +51,7 @@ Find a service and call it:
 // Kubernetes projected service account token), and keeps the identity and
 // credential in AGENTMESH_STATE_DIR; later runs resume from there without it.
 import { homedir } from "node:os";
-import { AgentMesh, type DiscoveredProvider } from "@sam-mesh/sdk";
+import { AgentMesh, type DiscoveredProvider } from "@agentmesh-p2p/sdk";
 
 let argv = process.argv.slice(2);
 // A first argument that is not a service target is the peer ID of an agent.
@@ -65,7 +65,7 @@ const mesh = await AgentMesh.enroll({
   controlPlaneUrl: process.env.AGENTMESH_CONTROL_PLANE_URL ?? "https://mesh.example.com",
   bootstrapTokenPath: process.env.AGENTMESH_BOOTSTRAP_TOKEN_PATH,
   jwtPath: process.env.AGENTMESH_JWT_PATH,
-  stateDir: process.env.AGENTMESH_STATE_DIR ?? `${homedir()}/.config/sam-mesh/caller`,
+  stateDir: process.env.AGENTMESH_STATE_DIR ?? `${homedir()}/.config/agentmesh/caller`,
   // A plaintext http:// control plane is otherwise accepted only on loopback.
   allowInsecure: process.env.AGENTMESH_INSECURE_CONTROL_PLANE === "true",
 });
@@ -136,7 +136,7 @@ agent by its peer ID, the one it prints, through a router:
 // credential in AGENTMESH_STATE_DIR; later runs resume from there, as the same
 // peer, without it.
 import { homedir } from "node:os";
-import { AgentMesh } from "@sam-mesh/sdk";
+import { AgentMesh } from "@agentmesh-p2p/sdk";
 
 const [backendURL] = process.argv.slice(2);
 
@@ -144,7 +144,7 @@ const mesh = await AgentMesh.enroll({
   controlPlaneUrl: process.env.AGENTMESH_CONTROL_PLANE_URL ?? "https://mesh.example.com",
   bootstrapTokenPath: process.env.AGENTMESH_BOOTSTRAP_TOKEN_PATH,
   jwtPath: process.env.AGENTMESH_JWT_PATH,
-  stateDir: process.env.AGENTMESH_STATE_DIR ?? `${homedir()}/.config/sam-mesh/agent`,
+  stateDir: process.env.AGENTMESH_STATE_DIR ?? `${homedir()}/.config/agentmesh/agent`,
   // A plaintext http:// control plane is otherwise accepted only on loopback.
   allowInsecure: process.env.AGENTMESH_INSECURE_CONTROL_PLANE === "true",
 });
@@ -180,4 +180,4 @@ A plaintext `http://` control plane is accepted only on loopback. Pass
 ## License
 
 Apache-2.0. Issues and contributions at
-[github.com/google/sam](https://github.com/google/sam).
+[github.com/google/agentmesh](https://github.com/google/agentmesh).

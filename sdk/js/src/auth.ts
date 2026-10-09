@@ -81,7 +81,7 @@ export interface AuthServerOptions {
 export const AUTH_HANDLER_OPTIONS = { runOnLimitedConnection: true };
 
 /**
- * Server side of /mesh/auth/1.0.0, mirroring sam-node's HandleAuthHandshake:
+ * Server side of /mesh/auth/1.0.0, mirroring agentmesh-node's HandleAuthHandshake:
  * verify the caller's biscuit against the control plane keys and its
  * connection peer ID, then answer with our own. A failed verification gets
  * no answer, only a closed stream, as on the Go side.

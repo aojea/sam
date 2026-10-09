@@ -67,7 +67,7 @@ export interface JoinOptions extends MeshHostOptions {
   policySyncIntervalMs?: number;
   /**
    * How often keys, bans and router addresses are pulled from the control
-   * plane (sam-node's --control-plane-sync-interval). Gossip events bring a
+   * plane (agentmesh-node's --control-plane-sync-interval). Gossip events bring a
    * pull forward; 0 disables the loop.
    */
   controlPlaneSyncIntervalMs?: number;
@@ -80,7 +80,7 @@ export interface JoinOptions extends MeshHostOptions {
    */
   relayCheckIntervalMs?: number;
   /**
-   * sam-node's egress.require_labels for an SDK member: every provider this
+   * agentmesh-node's egress.require_labels for an SDK member: every provider this
    * session calls must attest all of these pairs, on top of a call's
    * requiredLabels. Held on every call, MCP and HTTP alike; no call waives it.
    */
@@ -135,14 +135,14 @@ const PEER_ROUTING_TIMEOUT_MS = 10_000;
 const DEFAULT_REFRESH_LEAD_MS = 60 * 60 * 1000;
 const DEFAULT_REFRESH_RETRY_MS = 30 * 1000;
 const MIN_REFRESH_DELAY_MS = 2_000;
-/** sam-node's --control-plane-sync-interval default. */
+/** agentmesh-node's --control-plane-sync-interval default. */
 const DEFAULT_POLICY_SYNC_MS = 15 * 60 * 1000;
-/** sam-node's --control-plane-sync-interval default, and its 2s first pull. */
+/** agentmesh-node's --control-plane-sync-interval default, and its 2s first pull. */
 const DEFAULT_CONTROL_PLANE_SYNC_MS = 15 * 60 * 1000;
 const FIRST_CONTROL_PLANE_SYNC_MS = 2_000;
 const DEFAULT_CONTROL_PLANE_SYNC_JITTER_MS = 2_000;
 const DEFAULT_RELAY_CHECK_MS = 30 * 1000;
-/** How long a provider's positive egress verdict is kept; sam-node's labelGateTTL. */
+/** How long a provider's positive egress verdict is kept; agentmesh-node's labelGateTTL. */
 const EGRESS_VERDICT_TTL_MS = 5 * 60 * 1000;
 
 /**
@@ -261,7 +261,7 @@ export class MeshSession {
   /**
    * The URL a fetch bound to this session (fetch()) takes for a service on a
    * peer: http://mesh/mesh/<peer-id>/<type>/<name>/<path>, the shape of
-   * sam-node's egress proxy and of an agent card it rewrote.
+   * agentmesh-node's egress proxy and of an agent card it rewrote.
    */
   static meshURL(peerId: string, targetService: string, path = ""): string {
     return meshURL(peerId, targetService, path);
@@ -489,7 +489,7 @@ export class MeshSession {
    * Looks the DHT up for peers offering a service: `"mcp://calc"`, the
    * same string callTool and request take, or a type alone (`"mcp"`) for
    * every service of that type, or (type, name). Bounded by the timeout;
-   * the DHT walk itself is what sam-node's discover does.
+   * the DHT walk itself is what agentmesh-node's discover does.
    */
   async discover(service: string, name?: string, options: { timeoutMs?: number; limit?: number } = {}): Promise<DiscoveredProvider[]> {
     const target = service.includes("://") ? parseServiceTarget(service) : { type: service, name };
@@ -735,7 +735,7 @@ export class MeshSession {
 
   /**
    * Calls an inference or A2A service on a provider over /libp2p-http, the
-   * way sam-node's egress proxy does for /mesh/<peer>/<type>/<name>/<path>.
+   * way agentmesh-node's egress proxy does for /mesh/<peer>/<type>/<name>/<path>.
    */
   async request(peer: Peer, targetService: string, path: string, options: HTTPRequestOptions = {}): Promise<HTTPResponse> {
     const conn = await this.#egressConnection(peer, options.signal);
@@ -744,7 +744,7 @@ export class MeshSession {
 
   /**
    * The connection an HTTP call goes out on, its peer verified as an enrolled
-   * node holding the floor before anything is sent (sam-node's VerifyPeerLabels).
+   * node holding the floor before anything is sent (agentmesh-node's VerifyPeerLabels).
    */
   async #egressConnection(peer: Peer, signal?: AbortSignal): Promise<Connection> {
     const conn = await this.connect(peer, signal);
@@ -787,7 +787,7 @@ export class MeshSession {
    * handler or listener (in this process; an Express app with the A2A SDK's
    * handlers is a listener). Nothing is announced: no DHT record, no
    * catalog entry. A tool, a model or a service others should find by name
-   * is published by a sam-node. Fetches the mesh policy first and keeps it
+   * is published by a agentmesh-node. Fetches the mesh policy first and keeps it
    * current; a policy that cannot be read fails the call, since an agent
    * without it could only authorize what callers carry in their own tokens.
    * Returns the service target callers use. One agent per session.
@@ -848,7 +848,7 @@ export class MeshSession {
 
 /** Implements AgentMesh.join(); lives here to keep mesh.ts free of libp2p. */
 export async function joinMesh(mesh: AgentMesh, options: JoinOptions = {}): Promise<MeshSession> {
-  // The pull sam-node makes before it starts: a member resuming from its
+  // The pull agentmesh-node makes before it starts: a member resuming from its
   // state directory after a key rotation would otherwise verify the routers,
   // which already hold credentials under the new key, against the keys it
   // persisted, and the sync that would have brought the new key runs only

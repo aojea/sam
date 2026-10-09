@@ -102,7 +102,7 @@ async function serveListener(req: http.IncomingMessage, res: http.ServerResponse
     res.end(admission.text + "\n");
     return;
   }
-  // The listener sees the request as a backend behind sam-node would: the
+  // The listener sees the request as a backend behind agentmesh-node would: the
   // path relative to the service, the verified caller, never the biscuit.
   // X-Peer-Id is set, not added, so an inbound value cannot pose as the
   // verified peer.

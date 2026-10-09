@@ -14,7 +14,7 @@
 
 """The /libp2p-http protocol (go-libp2p-http): the client that calls inference
 and A2A services on the mesh, and the ingress that accepts A2A requests for
-this member's own agent, gated by the authorizer the way sam-node gates its
+this member's own agent, gated by the authorizer the way agentmesh-node gates its
 ingress (StartIngressServer in internal/node)."""
 
 from __future__ import annotations
@@ -53,8 +53,8 @@ HEADER_MESH_NO_TRAILING_SLASH = "x-mesh-no-trailing-slash"
 DEFAULT_A2A_NAME = "agent"
 
 # The path prefix of a mesh URL, http://mesh/mesh/<peer-id>/<type>/<name>/<path>:
-# the shape of sam-node's egress proxy and of an agent card rewritten for the
-# mesh, by sam-node or by this SDK. The peer ID is in the path, not the host.
+# the shape of agentmesh-node's egress proxy and of an agent card rewritten for the
+# mesh, by agentmesh-node or by this SDK. The peer ID is in the path, not the host.
 MESH_PATH_PREFIX = "/mesh/"
 
 # The well-known agent card location (A2A spec / RFC 8615).
@@ -107,7 +107,7 @@ class A2AEndpoint:
     """This member's agent as other members reach it: `a2a://<name>`, answered
     by target, the base URL of an A2A server beside this process or a handler
     in it. Authorized requests are forwarded with the biscuit header
-    stripped and X-Peer-Id naming the verified caller, as sam-node does. The
+    stripped and X-Peer-Id naming the verified caller, as agentmesh-node does. The
     endpoint is not announced anywhere; a caller reaches it by peer ID."""
 
     target: Union[str, HTTPHandler]
@@ -181,7 +181,7 @@ async def _write_http_response(stream: INetStream, conn: h11.Connection, status:
 
 
 def http_ingress_handler(endpoint: A2AEndpoint, options: ProviderOptions):  # type: ignore[no-untyped-def]
-    """Server side of /libp2p-http, as sam-node's StartIngressServer: the path
+    """Server side of /libp2p-http, as agentmesh-node's StartIngressServer: the path
     is /<type>/<name>[/<upstream>], the caller's biscuit is X-Mesh-Biscuit, and
     the request is authorized for <type>://<name> before anything is forwarded.
     Only the agent's own endpoint is answered; anything else is 404 after
@@ -338,7 +338,7 @@ def _agent_card_service(method: str, target: str) -> Optional[str]:
 
 
 def rewrite_agent_card(card: object, base: str) -> dict:
-    """An agent card rebuilt for the mesh, as sam-node's egress proxy serves
+    """An agent card rebuilt for the mesh, as agentmesh-node's egress proxy serves
     it: HTTP interfaces point at base, gRPC ones go, signatures no longer match.
     Streaming stays as declared, this transport streams. Raises when no interface remains."""
     if not isinstance(card, dict):
@@ -418,7 +418,7 @@ async def open_http_request(
     biscuit in X-Mesh-Biscuit. Returns once the response headers are in; the
     body streams after. The timeout bounds the headers, not the body. An
     agent card is served rewritten for the mesh (rewrite_agent_card), as
-    sam-node's egress proxy serves one."""
+    agentmesh-node's egress proxy serves one."""
     service = _agent_card_service(method, target)
     if service is None:
         return await _open_http_request(host, peer_id, biscuit, method, target, headers=headers, body=body, timeout=timeout)
@@ -426,14 +426,14 @@ async def open_http_request(
 
 
 async def _serve_agent_card(host: IHost, peer_id: ID, biscuit: bytes, headers: Optional[Mapping[str, str]], timeout: float, service: str) -> StreamedResponse:
-    """Impersonates the agent's card endpoint as sam-node's egress proxy does:
+    """Impersonates the agent's card endpoint as agentmesh-node's egress proxy does:
     holds the client's request, fetches the card itself with identity encoding,
     and answers with it regenerated; the agent's own non-200 is relayed as it is."""
     base = mesh_url(str(peer_id), service)
     identity = {k: v for k, v in (headers or {}).items() if k.lower() != "accept-encoding"}
     try:
         response = await _open_http_request(host, peer_id, biscuit, "GET", mesh_http_target(service, AGENT_CARD_PATH), headers=identity, body=b"", timeout=timeout)
-    except Exception as err:  # noqa: BLE001 - answered as sam-node's 502
+    except Exception as err:  # noqa: BLE001 - answered as agentmesh-node's 502
         return _bad_gateway(f"agent card fetch failed: {err}")
     if response.status != 200:
         return response
@@ -442,7 +442,7 @@ async def _serve_agent_card(host: IHost, peer_id: ID, biscuit: bytes, headers: O
             card = json.loads(await response.read(_MAX_AGENT_CARD_BYTES))
     except (json.JSONDecodeError, UnicodeDecodeError):
         return _bad_gateway("agent card is not valid JSON")
-    except Exception as err:  # noqa: BLE001 - answered as sam-node's 502
+    except Exception as err:  # noqa: BLE001 - answered as agentmesh-node's 502
         return _bad_gateway(f"agent card fetch failed: {err}")
     finally:
         await response.aclose()

@@ -422,7 +422,7 @@ test("a resumed member adopts a rotated key before admitting routers", async () 
   const rotatedRouterBiscuit = mint(rotatedRouter.peerId.toString(), ROLE_ROUTER, undefined, {}, rotated);
   await rotatedRouter.handle(AUTH_PROTOCOL, authStreamHandler({ ownBiscuit: () => rotatedRouterBiscuit, trustedKeys: () => [cpKey, rotatedKey] }));
   const rotatedRouterAddr = (rotatedRouter.getMultiaddrs()[0] as ReturnType<typeof multiaddr>).toString();
-  const stateDir = await mkdtemp(join(tmpdir(), "sam-session-"));
+  const stateDir = await mkdtemp(join(tmpdir(), "agentmesh-session-"));
   try {
     // Enrolled before the rotation: the credential on disk trusts one key.
     const before = await AgentMesh.enroll({ controlPlaneUrl: "http://127.0.0.1:1", bootstrapToken: "sbt", stateDir, fetch: fakeControlPlane([rotatedRouterAddr]) });
@@ -559,7 +559,7 @@ test("an egress floor stated at join is held on the HTTP path, and the provider 
     // A banned provider is refused before any handshake.
     plain.banned.add(provider.peerId.toString(), Date.now());
     await assert.rejects(plain.request(addrOf(provider), "a2a://agent", "/card"), /banned/);
-    // Only nodes host services, as sam-node's checkPeerLabels requires.
+    // Only nodes host services, as agentmesh-node's checkPeerLabels requires.
     await assert.rejects(held.request(addrOf(notANode), "a2a://agent", "/card"), /lacks expected role "mesh:role:node"/);
   } finally {
     await Promise.all([...sessions.map((s) => s.close()), provider.stop(), impostor.stop(), notANode.stop()]);

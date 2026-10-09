@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // How a member in a browser reaches the mesh: WebSocket, the one transport a
-// page can open to a router (sam-one's single port, or a router behind a
+// page can open to a router (agentmesh-one's single port, or a router behind a
 // TLS-terminating proxy as wss), secured with Noise. A browser cannot run
 // libp2p's TLS, which needs a self-signed certificate over a raw socket;
 // routers and nodes accept Noise beside TLS, and both bind the connection to

@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { Message, Role, type SendMessageRequest } from "@a2a-js/sdk";
 import { ClientFactory, DefaultAgentCardResolver, JsonRpcTransportFactory } from "@a2a-js/sdk/client";
-import { AgentMesh, MeshSession } from "@sam-mesh/sdk";
+import { AgentMesh, MeshSession } from "@agentmesh-p2p/sdk";
 
 const [peerId, text = "hello"] = process.argv.slice(2);
 if (peerId === undefined) {
@@ -25,7 +25,7 @@ const mesh = await AgentMesh.enroll({
   controlPlaneUrl: process.env.AGENTMESH_CONTROL_PLANE_URL ?? "https://mesh.example.com",
   bootstrapTokenPath: process.env.AGENTMESH_BOOTSTRAP_TOKEN_PATH,
   jwtPath: process.env.AGENTMESH_JWT_PATH,
-  stateDir: process.env.AGENTMESH_STATE_DIR ?? `${homedir()}/.config/sam-mesh/a2a-caller`,
+  stateDir: process.env.AGENTMESH_STATE_DIR ?? `${homedir()}/.config/agentmesh/a2a-caller`,
   // A plaintext http:// control plane is otherwise accepted only on loopback.
   allowInsecure: process.env.AGENTMESH_INSECURE_CONTROL_PLANE === "true",
 });

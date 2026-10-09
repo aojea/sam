@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// MCP over a mesh stream, the client side of sam-node's /mesh/mcp/1.0.0
+// MCP over a mesh stream, the client side of agentmesh-node's /mesh/mcp/1.0.0
 // (internal/node/gate.go): an AuthFrame naming the service, the provider's
 // AuthResponse, then JSON-RPC messages each with a varint length prefix.
 
@@ -26,7 +26,7 @@ import { BiscuitVerificationError, requireRole, verifyPeerBiscuit, type Verified
 import { ROLE_NODE } from "./controlplane.ts";
 import { decodeAuthResponse } from "./credential.ts";
 
-/** go-msgio's default message cap, which sam-node's StreamTransport uses. */
+/** go-msgio's default message cap, which agentmesh-node's StreamTransport uses. */
 export const MAX_MCP_MESSAGE_BYTES = 8 * 1024 * 1024;
 
 /** The MCP client the SDK identifies itself as. */
@@ -129,7 +129,7 @@ function requireEveryPair(provider: VerifiedBiscuit, required: Record<string, st
 
 /**
  * A requirement is satisfied only when the provider attests every pair, as
- * sam-node's api.LabelCheck (`check if label(k1, v1), label(k2, v2)`), the
+ * agentmesh-node's api.LabelCheck (`check if label(k1, v1), label(k2, v2)`), the
  * same rule as the egress floor. A map holds one value per key, so listing
  * several pairs narrows the acceptable providers. Empty is no requirement.
  */
@@ -138,7 +138,7 @@ export function requireLabels(provider: VerifiedBiscuit, required: Record<string
 }
 
 /**
- * The session's egress floor, sam-node's egress.require_labels: the same
+ * The session's egress floor, agentmesh-node's egress.require_labels: the same
  * rule as requireLabels, refused with a message that names the floor. Empty
  * is no floor.
  */

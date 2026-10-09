@@ -39,12 +39,12 @@ class MeshCredential:
     # The trusted set when the biscuit was issued. A key trusted now that was
     # not in this set means a rotation happened since: the biscuit is signed by
     # a retiring key and must be refreshed before that key leaves its grace
-    # period (sam-node's identityPredatesRotation).
+    # period (agentmesh-node's identityPredatesRotation).
     issued_under_keys: list[bytes] = field(default_factory=list)
     # Router multiaddrs, `/p2p/<peer id>` suffixed, as handed out at enrollment.
     router_addresses: list[str] = field(default_factory=list)
     # What other implementations persist in the same file and this SDK does
-    # not use: when each key was learned (by key bytes) and sam-node's OIDC
+    # not use: when each key was learned (by key bytes) and agentmesh-node's OIDC
     # session. Carried through so a state directory survives a round trip.
     receive_times: dict[bytes, Timestamp] = field(default_factory=dict, compare=False)
     oidc_session: Optional[pb.OIDCSession] = field(default=None, compare=False)
@@ -75,7 +75,7 @@ class MeshCredential:
 
     def to_json(self) -> str:
         """credential.json: the api.MemberCredential message as protojson with
-        proto field names, the layout `sam-node state export` writes and every
+        proto field names, the layout `agentmesh-node state export` writes and every
         SDK reads."""
         message = pb.MemberCredential(
             control_plane_url=self.control_plane_url,
@@ -94,7 +94,7 @@ class MeshCredential:
 
     @classmethod
     def from_json(cls, text: str) -> "MeshCredential":
-        """Reads credential.json. An unknown field is an error, as on every SAM surface."""
+        """Reads credential.json. An unknown field is an error, as on every Agent Mesh surface."""
         try:
             message = json_format.Parse(text, pb.MemberCredential())
         except json_format.ParseError as err:

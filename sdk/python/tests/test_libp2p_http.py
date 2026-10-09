@@ -14,7 +14,7 @@
 
 """The A2A ingress in one process: this SDK's /libp2p-http handler for one
 agent behind a py-libp2p host, called with this SDK's client, the streaming
-client and an httpx client on MeshTransport. The real sam-node as a caller is
+client and an httpx client on MeshTransport. The real agentmesh-node as a caller is
 exercised by tests/integration."""
 
 import json

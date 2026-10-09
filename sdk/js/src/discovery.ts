@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Service discovery as sam-node does it (internal/node/service.go): a
+// Service discovery as agentmesh-node does it (internal/node/service.go): a
 // provider record in the mesh DHT under a CID derived from the service key.
 
 import { CID } from "multiformats/cid";

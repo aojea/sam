@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // A mesh identity is an ed25519 key pair. Its peer ID is the one libp2p
-// derives, so the same key works in the SDK, in sam-node and on the wire.
+// derives, so the same key works in the SDK, in agentmesh-node and on the wire.
 // The arithmetic is @noble/curves, the implementation libp2p itself uses,
 // so an identity is built and used the same way in Node and in a browser.
 
@@ -65,7 +65,7 @@ export function peerIdFromPublicKey(publicKeyRaw: Uint8Array): string {
 
 /**
  * The base58btc form of a peer ID written in any encoding libp2p accepts
- * (base58btc multihash, CIDv1). Every key, ban set and comparison in SAM is
+ * (base58btc multihash, CIDv1). Every key, ban set and comparison in Agent Mesh is
  * on this form, as peer.ID.String() in Go; a string read off the wire or
  * from a caller goes through here before it is used as one. Throws when the
  * text is not a peer ID at all.
@@ -103,7 +103,7 @@ export class Identity {
     return new Identity(seed);
   }
 
-  /** Loads the libp2p protobuf private key encoding, the format sam-node persists. */
+  /** Loads the libp2p protobuf private key encoding, the format agentmesh-node persists. */
   static fromLibp2pPrivateKey(bytes: Uint8Array): Identity {
     if (bytes.length !== LIBP2P_PRIVATE_KEY_PREFIX.length + 64 || !startsWith(bytes, LIBP2P_PRIVATE_KEY_PREFIX)) {
       throw new Error("not a libp2p ed25519 private key");
