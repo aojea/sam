@@ -731,6 +731,32 @@ jobs:
             exit 1
           }
 
+      # A resident fleet of plain members that join and stay. Its readiness
+      # is each node's /readyz, so this rollout only completes once every
+      # member holds a router, and every later deploy restarts the routers
+      # under it.
+      - name: Deploy Soak Fleet
+        env:
+          VAR_ENV_NAME: ${{ vars.ENV_NAME }}
+          VAR_IMAGE_TAG: ${{ env.IMAGE_TAG }}
+        run: |
+          export ENV_NAME="${VAR_ENV_NAME}"
+          export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
+          export NAMESPACE="sam-${ENV_NAME}"
+          export IMAGE_TAG="${VAR_IMAGE_TAG}"
+
+          envsubst '${ENV_NAME} ${NAMESPACE} ${IMAGE_TAG}' < .github/k8s/sam-soak-template.yaml | kubectl apply -f -
+          kubectl rollout status deployment/sam-soak-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=300s || {
+            echo "Soak fleet rollout failed: a member could not join or hold a router."
+            kubectl describe deployment/sam-soak-${ENV_NAME} -n ${CANARY_NAMESPACE} || true
+            kubectl get pods -n ${CANARY_NAMESPACE} -l app=sam-soak-${ENV_NAME} -o wide || true
+            for pod in $(kubectl get pods -n ${CANARY_NAMESPACE} -l app=sam-soak-${ENV_NAME} -o name | head -3); do
+              echo "==== ${pod} ===="
+              kubectl logs -n ${CANARY_NAMESPACE} "${pod#pod/}" --tail=40 || true
+            done
+            exit 1
+          }
+
       # Two long-lived pairs with no sam-node: an agent written with one SDK
       # and the official A2A SDK, and a caller written with the other that
       # sends it a message with the A2A SDK's client every few minutes, by

@@ -153,3 +153,16 @@ spec:
       annotations:
         summary: "Canary {{ $labels.pod }} on ${ENV_NAME} has not been ready for 20m"
         description: "`kubectl logs -n sam-canary-${ENV_NAME} {{ $labels.pod }} -c caller | tail -3` gives the error and the per-router detail of the last calls."
+    # A member's own account of the mesh: its node holds no authenticated
+    # router connection. A router rollout costs a member seconds; five
+    # minutes is a member that cannot get back, which after a key rotation
+    # or a refresh is how a fleet falls off the mesh one pod at a time. The
+    # soak fleet (sam-soak-template.yaml) exists to make this fire first.
+    - alert: SamCanaryMemberDisconnected
+      expr: min by (pod) (sam_node_mesh_connected{namespace="sam-canary-${ENV_NAME}"}) == 0
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Member {{ $labels.pod }} on ${ENV_NAME} has had no router for 5m"
+        description: "`kubectl logs -n sam-canary-${ENV_NAME} {{ $labels.pod }} -c sam-node | grep -iE 'router|auth|renew' | tail -5` says whether it cannot dial, is refused at the handshake, or holds a credential that no longer verifies; compare with sam_router_auth_handshakes_total and sam_router_inbound_connections_refused_total on the routers."
