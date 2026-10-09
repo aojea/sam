@@ -558,12 +558,18 @@ func (n *SamNode) Start(ctx context.Context) error {
 		libp2p.ListenAddrStrings(n.config.ListenAddrs...),
 		libp2p.EnableNATService(),
 		libp2p.EnableAutoNATv2(),
-		libp2p.ForceReachabilityPrivate(),
 		libp2p.EnableRelay(),
 		libp2p.EnableHolePunching(),
 		libp2p.ConnectionManager(cm),
 		libp2p.SwarmOpts(swarm.WithDialTimeout(15 * time.Second)),
 		libp2p.AddrsFactory(n.announceFilter),
+	}
+	// Private: the node holds a relay reservation whatever AutoNAT finds, so
+	// it is reachable through the routers behind any NAT. Auto: AutoNAT v2
+	// decides, and a node the routers can dial on a public address is
+	// advertised there and skips the relay; see Options.Reachability.
+	if n.config.Reachability == ReachabilityPrivate {
+		opts = append(opts, libp2p.ForceReachabilityPrivate())
 	}
 
 	// If we have routers, configure them as our static fallback relays for NAT hole-punching

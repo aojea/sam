@@ -86,6 +86,7 @@ var (
 	keyGracePeriodFlag           time.Duration
 	allowLoopbackFlag            bool
 	announcePrivateFlag          bool
+	reachabilityFlag             string
 	monitorBootstrapFlag         time.Duration
 	monitorCheckIntervalFlag     time.Duration
 	autoRelayMinIntervalFlag     time.Duration
@@ -453,6 +454,7 @@ func main() {
 					KeyGracePeriod:           keyGracePeriodFlag,
 					AllowLoopback:            allowLoopbackFlag,
 					AnnouncePrivateAddrs:     &announcePrivateFlag,
+					Reachability:             node.Reachability(reachabilityFlag),
 					MonitorBootstrap:         monitorBootstrapFlag,
 					MonitorInterval:          monitorCheckIntervalFlag,
 					AutoRelayMinInterval:     autoRelayMinIntervalFlag,
@@ -862,6 +864,7 @@ func main() {
 	runCmd.Flags().DurationVar(&keyGracePeriodFlag, "key-grace-period", 24*time.Hour, "Key grace period for old keys (e.g. 24h)")
 	runCmd.Flags().BoolVar(&allowLoopbackFlag, "allow-loopback", false, "Allow publishing and connecting to loopback/link-local addresses")
 	runCmd.Flags().BoolVar(&announcePrivateFlag, "announce-private", true, "Publish this host's private (RFC1918/ULA) addresses to the mesh; keep enabled for LAN or on-premises meshes, disable when peers are only reachable through routers or public addresses")
+	runCmd.Flags().StringVar(&reachabilityFlag, "reachability", string(node.ReachabilityPrivate), "private: always hold a relay reservation and be reached through the routers, which works behind any NAT. auto: let AutoNAT v2 decide; a node the routers can dial on a public address advertises it and skips the relay. Use auto only where the routers are on the public side of every NAT this node is behind")
 	runCmd.Flags().BoolVar(&offlineAccessFlag, "offline-access", false, "With --join, request OIDC offline access/refresh token for automatic renewal")
 	joinCmd.Flags().BoolVar(&allowLoopbackFlag, "allow-loopback", false, "Allow publishing and connecting to loopback/link-local addresses")
 	joinCmd.Flags().BoolVar(&announcePrivateFlag, "announce-private", true, "Publish this host's private (RFC1918/ULA) addresses to the mesh; keep enabled for LAN or on-premises meshes, disable when peers are only reachable through routers or public addresses")

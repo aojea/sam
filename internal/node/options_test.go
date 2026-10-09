@@ -55,3 +55,37 @@ func TestOptionsValidateControlPlaneKeySize(t *testing.T) {
 		t.Errorf("31-byte key: err = %v, want size error", err)
 	}
 }
+
+func TestOptionsReachability(t *testing.T) {
+	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	base := Options{PrivKey: priv, Store: store, RequiredRole: api.RoleNode}
+
+	for _, ok := range []Reachability{"", ReachabilityPrivate, ReachabilityAuto} {
+		o := base
+		o.Reachability = ok
+		if err := o.Validate(); err != nil {
+			t.Errorf("reachability %q rejected: %v", ok, err)
+		}
+	}
+	o := base
+	o.Reachability = "public"
+	if err := o.Validate(); err == nil || !strings.Contains(err.Error(), "reachability") {
+		t.Errorf("reachability %q: err = %v, want rejection", o.Reachability, err)
+	}
+
+	// Unset means private: the node is reached through the routers unless
+	// the operator says otherwise.
+	o = base
+	o.Default()
+	if o.Reachability != ReachabilityPrivate {
+		t.Errorf("default reachability = %q, want %q", o.Reachability, ReachabilityPrivate)
+	}
+}

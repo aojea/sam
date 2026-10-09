@@ -39,6 +39,14 @@ const (
 	DefaultSocketName = "sam.sock"
 )
 
+// Reachability is the value of Options.Reachability and of --reachability.
+type Reachability string
+
+const (
+	ReachabilityPrivate Reachability = "private"
+	ReachabilityAuto    Reachability = "auto"
+)
+
 // Options holds all configuration options for a SamNode.
 type Options struct {
 	PrivKey            crypto.PrivKey
@@ -58,6 +66,18 @@ type Options struct {
 	// those addresses. Set false on nodes that are only reachable via routers or
 	// public addresses, so peers do not learn the host's internal topology.
 	AnnouncePrivateAddrs *bool
+	// Reachability is how the node decides whether peers can dial it
+	// directly. ReachabilityPrivate, the default, assumes they cannot: the
+	// node always holds a relay reservation with the routers and is reached
+	// through them, which works behind any NAT and needs nothing configured.
+	// ReachabilityAuto lets AutoNAT v2 decide from dial-backs by the routers:
+	// a node they can reach on a public address advertises that address and
+	// holds no reservation, so direct dials replace relayed ones and the
+	// routers carry only the members that need them. Auto is only right
+	// where the routers sit on the public side of every NAT the node is
+	// behind: a router in the same cluster or LAN can reach a node that the
+	// rest of the mesh cannot, and would make it unreachable.
+	Reachability         Reachability
 	MonitorBootstrap     time.Duration
 	MonitorInterval      time.Duration
 	AutoRelayMinInterval time.Duration
@@ -152,6 +172,9 @@ func (o *Options) Default() {
 	if o.RouterRedialAttempts <= 0 {
 		o.RouterRedialAttempts = DefaultRouterRedialAttempts
 	}
+	if o.Reachability == "" {
+		o.Reachability = ReachabilityPrivate
+	}
 	if o.BiscuitTimeout <= 0 {
 		o.BiscuitTimeout = identity.DefaultAuthorizerTimeout
 	}
@@ -204,6 +227,11 @@ func (o *Options) Validate() error {
 	}
 	if o.RequiredRole == "" {
 		return fmt.Errorf("RequiredRole must be specified")
+	}
+	switch o.Reachability {
+	case "", ReachabilityPrivate, ReachabilityAuto:
+	default:
+		return fmt.Errorf("reachability %q is not %q or %q", o.Reachability, ReachabilityPrivate, ReachabilityAuto)
 	}
 	// ed25519 verification panics on a wrong-size key, and this one comes
 	// from a flag or FFI config.

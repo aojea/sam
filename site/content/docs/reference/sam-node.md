@@ -107,6 +107,7 @@ explains how to enroll.
 |---|---|---|
 | `--listen` | `/ip4/0.0.0.0/udp/5001/quic-v1`, `/ip4/0.0.0.0/tcp/5002` | libp2p listen addresses. Repeatable. |
 | `--allow-loopback`, `--announce-private`, `--router-connect-timeout` | | As for `join`. |
+| `--reachability` | `private` | How the node decides whether peers can dial it directly. `private` always holds a relay reservation with the routers and is reached through them, which works behind any NAT. `auto` lets AutoNAT decide from dial-backs by the routers: a node they reach on a public address advertises it and holds no reservation, so direct dials replace relayed ones. Use `auto` only where the routers are on the public side of every NAT the node is behind; a router in the same cluster or LAN can reach a node the rest of the mesh cannot, and would make it unreachable. |
 | `--enable-relay` | `false` | Relay traffic for other peers. |
 | `--mesh` | `public-mesh` | Mesh federation name. Must match the routers' name. |
 | `--discovery-interval` | `30s` | DHT discovery polling interval. |
