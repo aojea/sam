@@ -37,7 +37,7 @@ import (
 )
 
 // startNoOIDCControlPlaneStub serves a /info with no issuer, the
-// bootstrap-token-only mode sam-one runs the console in.
+// bootstrap-token-only mode agentmesh-one runs the console in.
 func startNoOIDCControlPlaneStub(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -56,7 +56,7 @@ func startNoOIDCControlPlaneStub(t *testing.T) *httptest.Server {
 }
 
 // TestNewServerEmbeddedAssets pins the compiled-in frontend path used by
-// sam-one and the cmd default: StaticFS serving, SPA fallback, StaticDir
+// agentmesh-one and the cmd default: StaticFS serving, SPA fallback, StaticDir
 // precedence for live-editing, and the fail-fast when no assets are set.
 func TestNewServerEmbeddedAssets(t *testing.T) {
 	cpStub := startNoOIDCControlPlaneStub(t)
@@ -218,7 +218,7 @@ func TestNewServer_OIDCAutoDiscovery(t *testing.T) {
 
 // TestNewServer_OIDCDiscoveryRetriesTransientFailure guards against a real
 // deployment race: if the OIDC issuer (e.g. Dex) is still starting up when
-// sam-console boots, discovery must retry instead of permanently disabling
+// agentmesh-console boots, discovery must retry instead of permanently disabling
 // login for the life of the pod (console's /info reports healthy either way,
 // so Kubernetes never restarts it to retry on its own).
 func TestNewServer_OIDCDiscoveryRetriesTransientFailure(t *testing.T) {
@@ -445,7 +445,7 @@ func TestHandleTokenLogin(t *testing.T) {
 
 	sessionCookie := func(resp *http.Response) *http.Cookie {
 		for _, c := range resp.Cookies() {
-			if c.Name == "sam_session" {
+			if c.Name == "agentmesh_session" {
 				return c
 			}
 		}
@@ -460,7 +460,7 @@ func TestHandleTokenLogin(t *testing.T) {
 		}
 		c := sessionCookie(resp)
 		if c == nil {
-			t.Fatal("no sam_session cookie set")
+			t.Fatal("no agentmesh_session cookie set")
 		}
 		if c.Value != "test-admin-token" {
 			t.Errorf("cookie value = %q, want %q", c.Value, "test-admin-token")
@@ -553,12 +553,12 @@ func TestHandleLogoutCookieAttributes(t *testing.T) {
 
 	var cookie *http.Cookie
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == "sam_session" {
+		if c.Name == "agentmesh_session" {
 			cookie = c
 		}
 	}
 	if cookie == nil {
-		t.Fatal("logout did not set a sam_session deletion cookie")
+		t.Fatal("logout did not set a agentmesh_session deletion cookie")
 	}
 	if cookie.MaxAge >= 0 {
 		t.Errorf("MaxAge = %d, want negative to delete the cookie", cookie.MaxAge)
@@ -633,7 +633,7 @@ func TestConsoleCSRFAndSecurityHeaders(t *testing.T) {
 	crossReq, _ := http.NewRequest(http.MethodPost, console.URL+"/api/policies", strings.NewReader(`{}`))
 	crossReq.Header.Set("Content-Type", "application/json")
 	crossReq.Header.Set("Origin", "https://evil.example.com")
-	crossReq.AddCookie(&http.Cookie{Name: "sam_session", Value: "test-admin-token"})
+	crossReq.AddCookie(&http.Cookie{Name: "agentmesh_session", Value: "test-admin-token"})
 	crossResp, err := http.DefaultClient.Do(crossReq)
 	if err != nil {
 		t.Fatalf("POST /api/policies: %v", err)
@@ -646,7 +646,7 @@ func TestConsoleCSRFAndSecurityHeaders(t *testing.T) {
 	// 3. HTML form Content-Type on cookie-authenticated POST /api/* must be rejected with 415
 	formReq, _ := http.NewRequest(http.MethodPost, console.URL+"/api/admin/enrollments/123/approve", strings.NewReader("a=b"))
 	formReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	formReq.AddCookie(&http.Cookie{Name: "sam_session", Value: "test-admin-token"})
+	formReq.AddCookie(&http.Cookie{Name: "agentmesh_session", Value: "test-admin-token"})
 	formResp, err := http.DefaultClient.Do(formReq)
 	if err != nil {
 		t.Fatalf("POST /api/admin/enrollments/123/approve: %v", err)
@@ -661,7 +661,7 @@ func TestConsoleCSRFAndSecurityHeaders(t *testing.T) {
 	sameReq.Header.Set("Content-Type", "application/json")
 	sameReq.Header.Set("Origin", console.URL)
 	sameReq.Header.Set("Sec-Fetch-Site", "same-origin")
-	sameReq.AddCookie(&http.Cookie{Name: "sam_session", Value: "test-admin-token"})
+	sameReq.AddCookie(&http.Cookie{Name: "agentmesh_session", Value: "test-admin-token"})
 	sameResp, err := http.DefaultClient.Do(sameReq)
 	if err != nil {
 		t.Fatalf("same-origin POST /api/policies: %v", err)

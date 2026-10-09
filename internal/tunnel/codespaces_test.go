@@ -75,7 +75,7 @@ func scriptedProxy(t *testing.T, statuses ...int) (*httptest.Server, *atomic.Int
 
 func TestCodespacesOpenDerivesURLFromPlatformEnv(t *testing.T) {
 	c := &Codespaces{
-		Getenv:       codespaceEnv("octocat-sam-abc123", "app.github.dev"),
+		Getenv:       codespaceEnv("octocat-agentmesh-abc123", "app.github.dev"),
 		Transport:    rewriteTo("http://127.0.0.1:0"),
 		ProbeTimeout: 10 * time.Millisecond,
 	}
@@ -83,7 +83,7 @@ func TestCodespacesOpenDerivesURLFromPlatformEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if got, want := tun.URL(), "https://octocat-sam-abc123-8080.app.github.dev"; got != want {
+	if got, want := tun.URL(), "https://octocat-agentmesh-abc123-8080.app.github.dev"; got != want {
 		t.Fatalf("URL = %q, want %q", got, want)
 	}
 	select {
@@ -110,7 +110,7 @@ func TestCodespacesOpenDerivesURLFromPlatformEnv(t *testing.T) {
 func TestCodespacesOpenRejectsOtherPlatforms(t *testing.T) {
 	for name, getenv := range map[string]func(string) string{
 		"no env":      codespaceEnv("", ""),
-		"name only":   codespaceEnv("octocat-sam-abc123", ""),
+		"name only":   codespaceEnv("octocat-agentmesh-abc123", ""),
 		"domain only": codespaceEnv("", "app.github.dev"),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -120,14 +120,14 @@ func TestCodespacesOpenRejectsOtherPlatforms(t *testing.T) {
 			}
 		})
 	}
-	c := &Codespaces{Getenv: codespaceEnv("octocat-sam-abc123", "app.github.dev")}
+	c := &Codespaces{Getenv: codespaceEnv("octocat-agentmesh-abc123", "app.github.dev")}
 	if _, err := c.Open(context.Background(), "http://127.0.0.1"); err == nil {
 		t.Fatal("Open accepted a target without a port")
 	}
 }
 
 func TestCodespacesProbeWaitsForTheMeshBehindThePublicPort(t *testing.T) {
-	// 502 is what the proxy returns while sam-one is still binding.
+	// 502 is what the proxy returns while agentmesh-one is still binding.
 	proxy, n := scriptedProxy(t, http.StatusBadGateway, http.StatusBadGateway, http.StatusOK)
 	c := &Codespaces{Transport: rewriteTo(proxy.URL), ProbeInterval: time.Millisecond}
 	if got := c.probe(context.Background(), "https://name-8080.app.github.dev", time.Now().Add(5*time.Second), true); got != probeReachable {

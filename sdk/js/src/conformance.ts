@@ -18,10 +18,10 @@
 // ships the same runner (python -m agent_mesh.conformance) with the same
 // environment and output, so one Go test checks both.
 //
-//   SAM_CONTROL_PLANE_URL      base URL of the control plane
-//   SAM_BOOTSTRAP_TOKEN_PATH   file holding a bootstrap token
-//   SAM_SDK_STATE_DIR          directory for identity and credential
-//   SAM_INSECURE_CONTROL_PLANE "1" to accept plaintext http:// off loopback
+//   AGENTMESH_CONTROL_PLANE_URL      base URL of the control plane
+//   AGENTMESH_BOOTSTRAP_TOKEN_PATH   file holding a bootstrap token
+//   AGENTMESH_SDK_STATE_DIR          directory for identity and credential
+//   AGENTMESH_INSECURE_CONTROL_PLANE "1" to accept plaintext http:// off loopback
 
 import { AgentMesh } from "./mesh.ts";
 
@@ -37,10 +37,10 @@ function requireEnv(name: string): string {
 }
 
 async function main(): Promise<void> {
-  const controlPlaneUrl = requireEnv("SAM_CONTROL_PLANE_URL");
-  const bootstrapTokenPath = requireEnv("SAM_BOOTSTRAP_TOKEN_PATH");
-  const stateDir = requireEnv("SAM_SDK_STATE_DIR");
-  const allowInsecure = process.env.SAM_INSECURE_CONTROL_PLANE === "1";
+  const controlPlaneUrl = requireEnv("AGENTMESH_CONTROL_PLANE_URL");
+  const bootstrapTokenPath = requireEnv("AGENTMESH_BOOTSTRAP_TOKEN_PATH");
+  const stateDir = requireEnv("AGENTMESH_SDK_STATE_DIR");
+  const allowInsecure = process.env.AGENTMESH_INSECURE_CONTROL_PLANE === "1";
 
   const mesh = await AgentMesh.enroll({ controlPlaneUrl, allowInsecure, stateDir, bootstrapTokenPath, pollIntervalMs: 200 });
   const enrolled = mesh.credential;

@@ -36,7 +36,7 @@ import (
 )
 
 var (
-	activeNode  *node.SamNode
+	activeNode  *node.AgentMeshNode
 	activeStore *node.Store
 	cancelFunc  context.CancelFunc
 	sidecarSrv  *http.Server
@@ -208,7 +208,7 @@ func StartNode(configJSON string) error {
 		return err
 	}
 
-	samNode, err := node.NewSamNode(node.Options{
+	samNode, err := node.NewAgentMeshNode(node.Options{
 		PrivKey:              priv,
 		ControlPlanePubKey:   controlPlanePubKey,
 		RouterAddrs:          routerAddrs,
@@ -355,7 +355,7 @@ func decodeLabels(jsonText string) (map[string]string, error) {
 // and are minted into the node's Biscuit here; changing them means enrolling
 // again, which reuses the stored key so the PeerID survives.
 func EnrollNode(dataDir string, controlPlaneURL string, jwt string, allowLoopback bool, labels string, refreshToken string) error {
-	return enrollWith(dataDir, controlPlaneURL, allowLoopback, labels, func(ctx context.Context, n *node.SamNode, store *node.Store) error {
+	return enrollWith(dataDir, controlPlaneURL, allowLoopback, labels, func(ctx context.Context, n *node.AgentMeshNode, store *node.Store) error {
 		if err := n.Enroll(ctx, controlPlaneURL, jwt); err != nil {
 			return err
 		}
@@ -375,7 +375,7 @@ func EnrollNodeBootstrap(dataDir string, controlPlaneURL string, bootstrapToken 
 	if strings.TrimSpace(bootstrapToken) == "" {
 		return errors.New("bootstrap token is required")
 	}
-	return enrollWith(dataDir, controlPlaneURL, allowLoopback, labels, func(ctx context.Context, n *node.SamNode, _ *node.Store) error {
+	return enrollWith(dataDir, controlPlaneURL, allowLoopback, labels, func(ctx context.Context, n *node.AgentMeshNode, _ *node.Store) error {
 		return n.EnrollBootstrap(ctx, controlPlaneURL, strings.TrimSpace(bootstrapToken))
 	})
 }
@@ -383,7 +383,7 @@ func EnrollNodeBootstrap(dataDir string, controlPlaneURL string, bootstrapToken 
 // enrollWith runs one enrollment flow on a throwaway node built from the
 // stored (or freshly generated) key, then persists the control plane URL and
 // syncs the mesh config so the next StartNode finds everything in place.
-func enrollWith(dataDir string, controlPlaneURL string, allowLoopback bool, labels string, enroll func(context.Context, *node.SamNode, *node.Store) error) error {
+func enrollWith(dataDir string, controlPlaneURL string, allowLoopback bool, labels string, enroll func(context.Context, *node.AgentMeshNode, *node.Store) error) error {
 	mu.Lock()
 	isRunning := activeNode != nil || unauthSrv != nil
 	mu.Unlock()
@@ -431,7 +431,7 @@ func enrollWith(dataDir string, controlPlaneURL string, allowLoopback bool, labe
 		listenAddrs = []string{"/ip4/0.0.0.0/udp/0/quic-v1", "/ip4/0.0.0.0/tcp/0"}
 	}
 
-	meshNode, err := node.NewSamNode(node.Options{
+	meshNode, err := node.NewAgentMeshNode(node.Options{
 		PrivKey:       priv,
 		RouterAddrs:   initRouterAddrs,
 		Store:         store,
@@ -614,7 +614,7 @@ func ReEnrollNode(dataDir string, labels string) error {
 	}
 	defer func() { _ = store.Close() }()
 
-	meshNode, err := node.NewSamNode(node.Options{
+	meshNode, err := node.NewAgentMeshNode(node.Options{
 		PrivKey:       node.GetOrGenerateKey(store),
 		Store:         store,
 		AllowLoopback: true,

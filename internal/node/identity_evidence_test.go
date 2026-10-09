@@ -33,7 +33,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-func newIdentityEvidenceTestNode(t *testing.T, labels map[string]string) (*SamNode, ed25519.PrivateKey, time.Time) {
+func newIdentityEvidenceTestNode(t *testing.T, labels map[string]string) (*AgentMeshNode, ed25519.PrivateKey, time.Time) {
 	t.Helper()
 	host, err := libp2p.New()
 	if err != nil {
@@ -64,7 +64,7 @@ func newIdentityEvidenceTestNode(t *testing.T, labels map[string]string) (*SamNo
 	if err != nil {
 		t.Fatalf("create revocation cache: %v", err)
 	}
-	node := &SamNode{
+	node := &AgentMeshNode{
 		Host:           host,
 		Store:          store,
 		trustedKeys:    []TrustedKey{{Key: controlPlanePublic, ReceivedAt: time.Now().UTC().Add(-time.Minute)}},

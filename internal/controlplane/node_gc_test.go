@@ -73,7 +73,7 @@ func TestGCExpiredNodesAppliesRetention(t *testing.T) {
 	var after dto.Metric
 	_ = nodesDeletedTotal.Write(&after)
 	if got := after.GetCounter().GetValue() - before.GetCounter().GetValue(); got != 1 {
-		t.Errorf("sam_control_plane_nodes_deleted_total advanced by %v, want 1", got)
+		t.Errorf("agentmesh_control_plane_nodes_deleted_total advanced by %v, want 1", got)
 	}
 }
 

@@ -21,7 +21,7 @@ import (
 
 // nodeSecretEnvVars are this process's own credentials. A command backend is
 // the operator's program, not the node's, so it never needs them.
-var nodeSecretEnvVars = []string{"SAM_API_TOKEN", "SAM_CLIENT_SECRET"}
+var nodeSecretEnvVars = []string{"AGENTMESH_API_TOKEN", "AGENTMESH_CLIENT_SECRET"}
 
 // backendEnv builds the environment for a command-backed service: the node's
 // environment minus its own secrets, plus the operator-declared extras.

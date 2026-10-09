@@ -6,11 +6,11 @@ ones, and the SDK turns the rest away before a request reaches the app.
 
     python a2a_agent.py
 
-SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
-SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or SAM_JWT_PATH
+AGENTMESH_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
+AGENTMESH_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or AGENTMESH_JWT_PATH
 (a workload identity token your platform issues, such as a Kubernetes
 projected service account token), and keeps the identity and credential in
-SAM_STATE_DIR; later runs resume from there, as the same peer, without it.
+AGENTMESH_STATE_DIR; later runs resume from there, as the same peer, without it.
 """
 
 import os
@@ -30,12 +30,12 @@ from agent_mesh import AgentMesh, MeshSession
 from starlette.applications import Starlette
 
 mesh = AgentMesh.enroll(
-    os.environ.get("SAM_CONTROL_PLANE_URL", "https://mesh.example.com"),
-    bootstrap_token_path=os.environ.get("SAM_BOOTSTRAP_TOKEN_PATH"),
-    jwt_path=os.environ.get("SAM_JWT_PATH"),
-    state_dir=os.environ.get("SAM_STATE_DIR", "~/.config/sam-mesh/a2a-agent"),
+    os.environ.get("AGENTMESH_CONTROL_PLANE_URL", "https://mesh.example.com"),
+    bootstrap_token_path=os.environ.get("AGENTMESH_BOOTSTRAP_TOKEN_PATH"),
+    jwt_path=os.environ.get("AGENTMESH_JWT_PATH"),
+    state_dir=os.environ.get("AGENTMESH_STATE_DIR", "~/.config/agentmesh/a2a-agent"),
     # A plaintext http:// control plane is otherwise accepted only on loopback.
-    allow_insecure=os.environ.get("SAM_INSECURE_CONTROL_PLANE") == "true",
+    allow_insecure=os.environ.get("AGENTMESH_INSECURE_CONTROL_PLANE") == "true",
 )
 
 

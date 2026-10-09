@@ -42,13 +42,13 @@ type extAuthzCheckResult = envoy.CheckResult
 
 // newNodeEnvoyGateway creates an Envoy ext_authz + ext_proc GatewayServer backed
 // by this node's Biscuit PDP and credential broker.
-func newNodeEnvoyGateway(node *SamNode) *envoy.GatewayServer {
+func newNodeEnvoyGateway(node *AgentMeshNode) *envoy.GatewayServer {
 	return envoy.NewGatewayServer(func(ctx context.Context, in envoy.CheckInput) envoy.CheckResult {
 		return evaluateExtAuthz(ctx, node, in)
 	})
 }
 
-func handleExtAuthzHTTP(node *SamNode, w http.ResponseWriter, r *http.Request) {
+func handleExtAuthzHTTP(node *AgentMeshNode, w http.ResponseWriter, r *http.Request) {
 	newNodeEnvoyGateway(node).HandleExtAuthzHTTP(w, r)
 }
 
@@ -56,7 +56,7 @@ func inspectMCPHTTPRequestBody(r *http.Request) (string, bool, error) {
 	return envoy.InspectMCPHTTPRequestBody(r)
 }
 
-func evaluateExtAuthz(ctx context.Context, node *SamNode, in extAuthzCheckInput) extAuthzCheckResult {
+func evaluateExtAuthz(ctx context.Context, node *AgentMeshNode, in extAuthzCheckInput) extAuthzCheckResult {
 	if node == nil {
 		return extAuthzCheckResult{
 			Allowed:    false,
@@ -191,7 +191,7 @@ func evaluateExtAuthz(ctx context.Context, node *SamNode, in extAuthzCheckInput)
 	}
 }
 
-func extractAndVerifyExtAuthzBiscuit(ctx context.Context, node *SamNode, headers map[string]string) ([]byte, int, error) {
+func extractAndVerifyExtAuthzBiscuit(ctx context.Context, node *AgentMeshNode, headers map[string]string) ([]byte, int, error) {
 	if rawB64 := strings.TrimSpace(headers[strings.ToLower(api.HeaderMeshBiscuit)]); rawB64 != "" {
 		raw, err := decodeBiscuitToken(rawB64)
 		if err != nil {
@@ -238,7 +238,7 @@ func isExtAuthzServiceScheme(scheme string) bool {
 	}
 }
 
-func resolveExtAuthzTarget(node *SamNode, in extAuthzCheckInput) (target, reqPath string) {
+func resolveExtAuthzTarget(node *AgentMeshNode, in extAuthzCheckInput) (target, reqPath string) {
 	path := in.Path
 	if idx := strings.IndexByte(path, '?'); idx >= 0 {
 		path = path[:idx]

@@ -47,7 +47,7 @@ var NewFileTokenSource = cpclient.NewFileTokenSource
 // ClientCredentialsTokenSource fetches a JWT via OAuth2 client_credentials
 // against an OIDC issuer.
 type ClientCredentialsTokenSource struct {
-	node         *SamNode
+	node         *AgentMeshNode
 	issuerURL    string
 	clientID     string
 	clientSecret string
@@ -55,9 +55,9 @@ type ClientCredentialsTokenSource struct {
 
 // NewClientCredentialsTokenSource creates a TokenSource that exchanges client
 // credentials at issuerURL's token endpoint.
-func NewClientCredentialsTokenSource(n *SamNode, issuerURL, clientID, clientSecret string) *ClientCredentialsTokenSource {
+func NewClientCredentialsTokenSource(n *AgentMeshNode, issuerURL, clientID, clientSecret string) *ClientCredentialsTokenSource {
 	if n == nil {
-		n = &SamNode{}
+		n = &AgentMeshNode{}
 	}
 	return &ClientCredentialsTokenSource{
 		node:         n,
@@ -82,13 +82,13 @@ func (s *ClientCredentialsTokenSource) FetchToken(ctx context.Context) (string, 
 
 // RefreshTokenSource exchanges a stored OIDC refresh token for a fresh JWT.
 type RefreshTokenSource struct {
-	node         *SamNode
+	node         *AgentMeshNode
 	clientSecret string
 }
 
 // NewRefreshTokenSource creates a TokenSource backed by the node's persisted
 // OIDC refresh token.
-func NewRefreshTokenSource(n *SamNode, clientSecret string) *RefreshTokenSource {
+func NewRefreshTokenSource(n *AgentMeshNode, clientSecret string) *RefreshTokenSource {
 	return &RefreshTokenSource{
 		node:         n,
 		clientSecret: clientSecret,
@@ -196,9 +196,9 @@ func ProbeGCPMetadata(ctx context.Context, endpoint string, httpClient *http.Cli
 	return resp.StatusCode == http.StatusOK && strings.EqualFold(resp.Header.Get("Metadata-Flavor"), "Google")
 }
 
-// TokenSourceConfig configures how sam-node resolves its platform/OIDC JWT source.
+// TokenSourceConfig configures how agentmesh-node resolves its platform/OIDC JWT source.
 type TokenSourceConfig struct {
-	Node             *SamNode
+	Node             *AgentMeshNode
 	IssuerURL        string
 	ClientID         string
 	ClientSecret     string

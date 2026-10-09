@@ -37,8 +37,8 @@ import (
 )
 
 func TestMultiMasterControlPlane(t *testing.T) {
-	cpBin := buildBinary(t, "./cmd/sam-control-plane")
-	routerBin := buildBinary(t, "./cmd/sam-router")
+	cpBin := buildBinary(t, "./cmd/agentmesh-control-plane")
+	routerBin := buildBinary(t, "./cmd/agentmesh-router")
 
 	tmpDir := t.TempDir()
 

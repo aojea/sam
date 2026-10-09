@@ -251,7 +251,7 @@ func TestOIDCFederationAndAWSExchangers(t *testing.T) {
 			http.Error(w, "unexpected subject_token", http.StatusBadRequest)
 			return
 		}
-		if r.FormValue("audience") != "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/sam/providers/sam-cp" {
+		if r.FormValue("audience") != "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/agentmesh/providers/agentmesh-cp" {
 			http.Error(w, "unexpected audience", http.StatusBadRequest)
 			return
 		}
@@ -275,7 +275,7 @@ func TestOIDCFederationAndAWSExchangers(t *testing.T) {
 
 	ex := NewOIDCFederationExchanger("bigquery.googleapis.com", &api.OIDCFederation{
 		TokenEndpoint: mockSTS.URL + "/v1/token",
-		Audience:      "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/sam/providers/sam-cp",
+		Audience:      "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/agentmesh/providers/agentmesh-cp",
 		Impersonate:   "bq-reader@my-proj.iam.gserviceaccount.com",
 		Scopes: []string{
 			"https://www.googleapis.com/auth/bigquery.readonly",
@@ -311,7 +311,7 @@ func TestOIDCFederationAndAWSExchangers(t *testing.T) {
 
 	mockAWS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
-		if r.FormValue("Action") != "AssumeRoleWithWebIdentity" || r.FormValue("RoleArn") != "arn:aws:iam::123456789012:role/sam-reader" {
+		if r.FormValue("Action") != "AssumeRoleWithWebIdentity" || r.FormValue("RoleArn") != "arn:aws:iam::123456789012:role/agentmesh-reader" {
 			http.Error(w, "invalid AWS request", http.StatusBadRequest)
 			return
 		}
@@ -325,7 +325,7 @@ func TestOIDCFederationAndAWSExchangers(t *testing.T) {
 	defer mockAWS.Close()
 
 	awsEx := NewAWSAssumeRoleExchanger("s3.amazonaws.com", &api.AWSAssumeRole{
-		RoleArn: "arn:aws:iam::123456789012:role/sam-reader",
+		RoleArn: "arn:aws:iam::123456789012:role/agentmesh-reader",
 	}, mintFn, mockAWS.Client())
 	awsEx.stsEndpoint = mockAWS.URL
 

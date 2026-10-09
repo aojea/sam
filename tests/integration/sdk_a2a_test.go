@@ -34,7 +34,7 @@ import (
 // reaches the other language's agent by peer ID with the A2A SDK's client
 // over the mesh SDK's transport. The caller fetches the agent card, sends a
 // message and gets an answer that names the caller the agent's server saw
-// as the verified peer. A sam-node's egress proxy fetches the same card.
+// as the verified peer. A agentmesh-node's egress proxy fetches the same card.
 // A language whose toolchain or A2A SDK is missing is skipped.
 func TestNativeSDKA2A(t *testing.T) {
 	mesh := startSDKMesh(t)
@@ -60,15 +60,15 @@ func TestNativeSDKA2A(t *testing.T) {
 	errs := make([]error, len(launchers))
 	var wg sync.WaitGroup
 	for i := range launchers {
-		jwtPath := filepath.Join(t.TempDir(), "sam-token")
+		jwtPath := filepath.Join(t.TempDir(), "agentmesh-token")
 		jwt := mesh.mintToken(map[string]interface{}{"sub": "mock-user", "roles": []string{api.RoleNode}})
 		if err := os.WriteFile(jwtPath, []byte(jwt+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		cmds[i].Env = append(os.Environ(),
-			"SAM_CONTROL_PLANE_URL="+mesh.baseURL,
-			"SAM_JWT_PATH="+jwtPath,
-			"SAM_STATE_DIR="+filepath.Join(t.TempDir(), "state"),
+			"AGENTMESH_CONTROL_PLANE_URL="+mesh.baseURL,
+			"AGENTMESH_JWT_PATH="+jwtPath,
+			"AGENTMESH_STATE_DIR="+filepath.Join(t.TempDir(), "state"),
 		)
 		cmds[i].Dir = mesh.root
 		wg.Add(1)
@@ -105,7 +105,7 @@ func TestNativeSDKA2A(t *testing.T) {
 			if err := os.WriteFile(tokenPath, []byte(mintBootstrapToken(t, mesh.baseURL, mesh.adminToken)+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			env := []string{"SAM_CONTROL_PLANE_URL=" + mesh.baseURL, "SAM_STATE_DIR=" + filepath.Join(t.TempDir(), "state"), "SAM_BOOTSTRAP_TOKEN_PATH=" + tokenPath}
+			env := []string{"AGENTMESH_CONTROL_PLANE_URL=" + mesh.baseURL, "AGENTMESH_STATE_DIR=" + filepath.Join(t.TempDir(), "state"), "AGENTMESH_BOOTSTRAP_TOKEN_PATH=" + tokenPath}
 
 			out := runExample(t, mesh.root, l, env, "a2a-call", target.peerID, "hello from "+l.name)
 			caller := expectLine(t, out, "on the mesh as ")
@@ -118,7 +118,7 @@ func TestNativeSDKA2A(t *testing.T) {
 		})
 	}
 
-	// A sam-node reaches the same agent card through its egress proxy, and
+	// A agentmesh-node reaches the same agent card through its egress proxy, and
 	// rewrites the card's URL so an A2A client behind the node can use it.
 	for _, a := range agents {
 		status, body := egressGet(t, mesh.nodeAPI, "node-token", "/mesh/"+a.peerID+"/a2a/agent/.well-known/agent-card.json")

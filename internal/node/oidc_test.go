@@ -65,7 +65,7 @@ func TestInteractiveLogin(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -85,7 +85,7 @@ func TestInteractiveLogin(t *testing.T) {
 	}
 	defer func() { openBrowserFunc = originalOpenBrowser }()
 
-	token, err := node.InteractiveLogin(ctx, "http://auth.example.com/auth", server.URL+"/token", "client_id_test", "sam-e2e", false, false)
+	token, err := node.InteractiveLogin(ctx, "http://auth.example.com/auth", server.URL+"/token", "client_id_test", "agentmesh-e2e", false, false)
 	if err != nil {
 		t.Fatalf("InteractiveLogin failed: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestDiscoverEndpoints(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond}
 	ctx := context.Background()
 
 	tokenURL, authURL, err := node.DiscoverEndpoints(ctx, server.URL)
@@ -144,7 +144,7 @@ func TestDiscoverEndpointsWithDevice(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond}
 	ctx := context.Background()
 
 	endpoints, err := node.DiscoverEndpointsWithDevice(ctx, server.URL)
@@ -187,7 +187,7 @@ func TestDiscoverEndpointsDoesNotHangOnUnresponsiveIssuer(t *testing.T) {
 		}
 	}()
 
-	node := &SamNode{}
+	node := &AgentMeshNode{}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -240,7 +240,7 @@ func TestInteractiveLoginWithRefresh(t *testing.T) {
 		}
 	}()
 
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond, Store: store}
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond, Store: store}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -268,7 +268,7 @@ func TestInteractiveLoginWithRefresh(t *testing.T) {
 	}
 	defer func() { openBrowserFunc = originalOpenBrowser }()
 
-	token, err := node.InteractiveLogin(ctx, "http://auth.example.com/auth", server.URL+"/token", "client_id_test", "sam-e2e", true, false)
+	token, err := node.InteractiveLogin(ctx, "http://auth.example.com/auth", server.URL+"/token", "client_id_test", "agentmesh-e2e", true, false)
 	if err != nil {
 		t.Fatalf("InteractiveLogin failed: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestInteractiveLoginWithDeviceAuth_Headless(t *testing.T) {
 		}
 	}()
 
-	node := &SamNode{Store: store}
+	node := &AgentMeshNode{Store: store}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -371,7 +371,7 @@ func TestInteractiveLoginWithDeviceAuth_Headless(t *testing.T) {
 		server.URL+"/token",
 		server.URL+"/device",
 		"client_id_test",
-		"sam-e2e",
+		"agentmesh-e2e",
 		true,
 		true,
 	)
@@ -392,7 +392,7 @@ func TestInteractiveLoginWithDeviceAuth_Headless(t *testing.T) {
 }
 
 // TestInteractiveLoginBrowserFailFallsBackToDevice verifies that in an
-// interactive (non-headless) flow, if the browser cannot be opened, SAM falls
+// interactive (non-headless) flow, if the browser cannot be opened, Agent Mesh falls
 // back to the device authorization flow when the provider advertises one,
 // instead of leaving the user to paste a callback code.
 func TestInteractiveLoginBrowserFailFallsBackToDevice(t *testing.T) {
@@ -440,7 +440,7 @@ func TestInteractiveLoginBrowserFailFallsBackToDevice(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	node := &SamNode{}
+	node := &AgentMeshNode{}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -456,7 +456,7 @@ func TestInteractiveLoginBrowserFailFallsBackToDevice(t *testing.T) {
 		server.URL+"/token",
 		server.URL+"/device",
 		"client_id_test",
-		"sam-e2e",
+		"agentmesh-e2e",
 		false,
 		false, // interactive: browser flow attempted first, then device fallback
 	)
@@ -508,11 +508,11 @@ func TestDeviceLoginRetriesOnTransientTokenError(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	node := &SamNode{}
+	node := &AgentMeshNode{}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	token, err := node.DeviceLogin(ctx, server.URL+"/device", server.URL+"/token", "client_id_test", "sam-e2e", false)
+	token, err := node.DeviceLogin(ctx, server.URL+"/device", server.URL+"/token", "client_id_test", "agentmesh-e2e", false)
 	if err != nil {
 		t.Fatalf("DeviceLogin failed: %v", err)
 	}
@@ -555,11 +555,11 @@ func TestDeviceLoginPending401(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	node := &SamNode{}
+	node := &AgentMeshNode{}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	token, err := node.DeviceLogin(ctx, server.URL+"/device", server.URL+"/token", "client_id_test", "sam-e2e", false)
+	token, err := node.DeviceLogin(ctx, server.URL+"/device", server.URL+"/token", "client_id_test", "agentmesh-e2e", false)
 	if err != nil {
 		t.Fatalf("DeviceLogin failed: %v", err)
 	}
@@ -609,11 +609,11 @@ func TestDeviceLoginFatalErrors(t *testing.T) {
 			server := httptest.NewServer(mux)
 			defer server.Close()
 
-			node := &SamNode{}
+			node := &AgentMeshNode{}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			_, err := node.DeviceLogin(ctx, server.URL+"/device", server.URL+"/token", "client_id_test", "sam-e2e", false)
+			_, err := node.DeviceLogin(ctx, server.URL+"/device", server.URL+"/token", "client_id_test", "agentmesh-e2e", false)
 			if err == nil {
 				t.Fatal("expected DeviceLogin to fail")
 			}
@@ -688,7 +688,7 @@ func TestAuthModeDeviceForcedWhenInteractive(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	node := &SamNode{}
+	node := &AgentMeshNode{}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -705,7 +705,7 @@ func TestAuthModeDeviceForcedWhenInteractive(t *testing.T) {
 		server.URL+"/token",
 		server.URL+"/device",
 		"client_id_test",
-		"sam-e2e",
+		"agentmesh-e2e",
 		false,
 		false,
 		AuthModeDevice,
@@ -721,7 +721,7 @@ func TestAuthModeDeviceForcedWhenInteractive(t *testing.T) {
 // TestAuthModeDeviceWithoutEndpointErrors verifies that auth-mode=device fails
 // fast when the provider advertises no device endpoint.
 func TestAuthModeDeviceWithoutEndpointErrors(t *testing.T) {
-	node := &SamNode{}
+	node := &AgentMeshNode{}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
@@ -731,7 +731,7 @@ func TestAuthModeDeviceWithoutEndpointErrors(t *testing.T) {
 		"http://token.example.com/token",
 		"", // no device endpoint
 		"client_id_test",
-		"sam-e2e",
+		"agentmesh-e2e",
 		false,
 		true,
 		AuthModeDevice,
@@ -769,7 +769,7 @@ func TestAuthModeBrowserIgnoresDevice(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	node := &SamNode{}
+	node := &AgentMeshNode{}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -792,7 +792,7 @@ func TestAuthModeBrowserIgnoresDevice(t *testing.T) {
 		server.URL+"/token",
 		server.URL+"/device",
 		"client_id_test",
-		"sam-e2e",
+		"agentmesh-e2e",
 		false,
 		true, // headless requested, but browser mode overrides it
 		AuthModeBrowser,
@@ -856,14 +856,14 @@ func TestRenewWithRefreshToken(t *testing.T) {
 	}()
 
 	// Store OIDC Config and old refresh token
-	if err := store.SaveOIDCConfig(server.URL, "client_id_test", "sam-e2e"); err != nil {
+	if err := store.SaveOIDCConfig(server.URL, "client_id_test", "agentmesh-e2e"); err != nil {
 		t.Fatalf("Failed to save OIDC Config: %v", err)
 	}
 	if err := store.SaveRefreshToken("old_refresh_123"); err != nil {
 		t.Fatalf("Failed to save Refresh Token: %v", err)
 	}
 
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond, Store: store}
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond, Store: store}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

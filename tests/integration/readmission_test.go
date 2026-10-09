@@ -43,7 +43,7 @@ import (
 // lapses, and must show the new one to every router it is connected to:
 // otherwise the router keeps the first expiry and the member turns
 // unreachable an hour after it started while every connection looks fine.
-// Every member implementation is run against a real router: sam-node, whose
+// Every member implementation is run against a real router: agentmesh-node, whose
 // own renewal loop refreshes, and each SDK, which refreshes right after
 // joining since the credential is shorter than its refresh lead. Two things
 // are checked for each: the router's admission of the member moves to the
@@ -55,15 +55,15 @@ func TestMembersStayAdmittedAcrossCredentialRefresh(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	t.Cleanup(cancel)
 	mesh := startReadmissionMesh(t, ctx)
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 
 	// How long the token every member joins with vouches for it: past each
-	// runner's startup, short enough for sam-node's renewal loop, which
+	// runner's startup, short enough for agentmesh-node's renewal loop, which
 	// refreshes halfway through a credential this short, and for the test to
 	// outlive it.
 	const lifetime = 10 * time.Second
 
-	t.Run("sam-node", func(t *testing.T) {
+	t.Run("agentmesh-node", func(t *testing.T) {
 		t.Parallel()
 		jwtFile := writeJWTFile(t, mesh.memberJWT("node-member", lifetime))
 		home := t.TempDir()
@@ -94,7 +94,7 @@ func TestMembersStayAdmittedAcrossCredentialRefresh(t *testing.T) {
 			}
 			jwtFile := writeJWTFile(t, mesh.memberJWT(runner.name+"-member", lifetime))
 			firstExpiry := time.Now().Add(lifetime)
-			m := launchSDKRunner(t, runner.name, cmd, mesh.root, mesh.baseURL, "SAM_JWT_PATH="+jwtFile, "SAM_SDK_LISTEN_ADDRS=/ip4/127.0.0.1/tcp/0")
+			m := launchSDKRunner(t, runner.name, cmd, mesh.root, mesh.baseURL, "AGENTMESH_JWT_PATH="+jwtFile, "AGENTMESH_SDK_LISTEN_ADDRS=/ip4/127.0.0.1/tcp/0")
 			rewriteJWTFile(t, jwtFile, mesh.memberJWT(runner.name+"-member", time.Hour))
 			peerID, err := peer.Decode(m.report.PeerID)
 			if err != nil {

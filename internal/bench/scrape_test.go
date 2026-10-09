@@ -26,12 +26,12 @@ import (
 func TestParseExpositionReadsLabelledSamples(t *testing.T) {
 	// The numbers a report quotes come out of this parser, so it has to be
 	// right about the cases the real endpoints actually emit.
-	const exposition = `# HELP sam_box_flows_total Flows a sandbox asked to open
-# TYPE sam_box_flows_total counter
-sam_box_flows_total{route="mesh-service",outcome="allowed"} 42
-sam_box_flows_total{route="unresolved",outcome="denied"} 7
+	const exposition = `# HELP agentmesh_box_flows_total Flows a sandbox asked to open
+# TYPE agentmesh_box_flows_total counter
+agentmesh_box_flows_total{route="mesh-service",outcome="allowed"} 42
+agentmesh_box_flows_total{route="unresolved",outcome="denied"} 7
 process_resident_memory_bytes 1.8874368e+07
-sam_box_flow_setup_seconds_bucket{route="mesh-service",le="0.001"} 12
+agentmesh_box_flow_setup_seconds_bucket{route="mesh-service",le="0.001"} 12
 `
 
 	series, err := parseExposition(strings.NewReader(exposition))
@@ -40,16 +40,16 @@ sam_box_flow_setup_seconds_bucket{route="mesh-service",le="0.001"} 12
 	}
 	snap := &Snapshot{Series: series}
 
-	if got, ok := snap.Value("sam_box_flows_total", map[string]string{"outcome": "denied"}); !ok || got != 7 {
+	if got, ok := snap.Value("agentmesh_box_flows_total", map[string]string{"outcome": "denied"}); !ok || got != 7 {
 		t.Errorf("denied flows = %v (found %v), want 7", got, ok)
 	}
-	if got := snap.Sum("sam_box_flows_total"); got != 49 {
+	if got := snap.Sum("agentmesh_box_flows_total"); got != 49 {
 		t.Errorf("total flows = %v, want 49", got)
 	}
 	if got, ok := snap.Value("process_resident_memory_bytes", nil); !ok || got != 18874368 {
 		t.Errorf("rss = %v (found %v), want 18874368", got, ok)
 	}
-	if got, ok := snap.Value("sam_box_flow_setup_seconds_bucket", map[string]string{"le": "0.001"}); !ok || got != 12 {
+	if got, ok := snap.Value("agentmesh_box_flow_setup_seconds_bucket", map[string]string{"le": "0.001"}); !ok || got != 12 {
 		t.Errorf("bucket = %v (found %v), want 12", got, ok)
 	}
 }
@@ -109,7 +109,7 @@ func TestParseExpositionNonFinite(t *testing.T) {
 
 func TestScrapeReadsALiveEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("sam_node_requests_in_flight 3\n"))
+		_, _ = w.Write([]byte("agentmesh_node_requests_in_flight 3\n"))
 	}))
 	defer server.Close()
 
@@ -117,7 +117,7 @@ func TestScrapeReadsALiveEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Scrape: %v", err)
 	}
-	if got, ok := snap.Value("sam_node_requests_in_flight", nil); !ok || got != 3 {
+	if got, ok := snap.Value("agentmesh_node_requests_in_flight", nil); !ok || got != 3 {
 		t.Errorf("in flight = %v (found %v), want 3", got, ok)
 	}
 }

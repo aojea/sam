@@ -69,7 +69,7 @@ type STSPhaseReport struct {
 }
 
 // STSReport summarizes all STS benchmark phases (uncached Control Plane
-// endpoints and cached SamNode paths under 5-minute JWT-SVID and 1-hour
+// endpoints and cached AgentMeshNode paths under 5-minute JWT-SVID and 1-hour
 // projected token rotation schedules).
 type STSReport struct {
 	Concurrency           int            `json:"concurrency"`
@@ -84,7 +84,7 @@ type STSReport struct {
 }
 
 // RunSTS executes the STS benchmark suite against an in-process Control Plane
-// and enrolled SamNode, measuring uncached mint throughput/latency as well as
+// and enrolled AgentMeshNode, measuring uncached mint throughput/latency as well as
 // node-cached throughput and hit rates for 5-minute JWT-SVIDs and 1-hour
 // Kubernetes projected tokens.
 func RunSTS(ctx context.Context, opts STSOptions) (*STSReport, error) {
@@ -149,12 +149,12 @@ func RunSTS(ctx context.Context, opts STSOptions) (*STSReport, error) {
 		_, err := cpClient.MintSTSToken(ctx, env.nodeBiscuit, &api.STSTokenRequest{
 			Biscuit:     taskBiscuit,
 			Destination: "bigquery.googleapis.com",
-			Audience:    "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/sam/providers/cp",
+			Audience:    "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/agentmesh/providers/cp",
 		})
 		return err
 	})
 
-	// Phase 3: Cached SamNode.ExchangeSubjectJWT with 5-minute SPIFFE JWT-SVID rotation.
+	// Phase 3: Cached AgentMeshNode.ExchangeSubjectJWT with 5-minute SPIFFE JWT-SVID rotation.
 	// A workload issuing RequestsPerMinute requests/min makes (5 * RequestsPerMinute)
 	// requests per 5-minute SVID lifetime before its token rotates.
 	reqsPerSVID := 5 * opts.RequestsPerMinute
@@ -170,7 +170,7 @@ func RunSTS(ctx context.Context, opts STSOptions) (*STSReport, error) {
 		return err
 	})
 
-	// Phase 4: Cached SamNode.ExchangeSubjectJWT with 1-hour Kubernetes projected token rotation.
+	// Phase 4: Cached AgentMeshNode.ExchangeSubjectJWT with 1-hour Kubernetes projected token rotation.
 	// A workload issuing RequestsPerMinute requests/min makes (60 * RequestsPerMinute)
 	// requests per 1-hour projected token lifetime before its token rotates.
 	reqsPerK8s := 60 * opts.RequestsPerMinute
@@ -186,7 +186,7 @@ func RunSTS(ctx context.Context, opts STSOptions) (*STSReport, error) {
 		return err
 	})
 
-	// Phase 5: Cached SamNode.MintBorderJWT across active task Biscuits (15m border JWT lifetime).
+	// Phase 5: Cached AgentMeshNode.MintBorderJWT across active task Biscuits (15m border JWT lifetime).
 	reqsPerTask := 15 * opts.RequestsPerMinute
 	taskBiscuits, err := env.precomputeTaskBiscuits(opts.Workloads, opts.Requests, reqsPerTask)
 	if err != nil {
@@ -200,7 +200,7 @@ func RunSTS(ctx context.Context, opts STSOptions) (*STSReport, error) {
 			ctx,
 			tb,
 			"bigquery.googleapis.com",
-			"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/sam/providers/cp",
+			"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/agentmesh/providers/cp",
 		)
 		return err
 	})
@@ -292,13 +292,13 @@ type stsBenchEnv struct {
 	nodePriv      crypto.PrivKey
 	nodePeerID    peer.ID
 	nodeBiscuit   []byte
-	samNode       *node.SamNode
+	samNode       *node.AgentMeshNode
 	exchangeCalls atomic.Int64
 	stsCalls      atomic.Int64
 }
 
 func newSTSEnv(ctx context.Context) (*stsBenchEnv, error) {
-	tempDir, err := os.MkdirTemp("", "sam-bench-sts-*")
+	tempDir, err := os.MkdirTemp("", "agentmesh-bench-sts-*")
 	if err != nil {
 		return nil, err
 	}
@@ -369,7 +369,7 @@ func newSTSEnv(ctx context.Context) (*stsBenchEnv, error) {
 				Kind: &api.CredentialBroker_OidcFederation{
 					OidcFederation: &api.OIDCFederation{
 						TokenEndpoint: "https://sts.googleapis.com/v1/token",
-						Audience:      "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/sam/providers/cp",
+						Audience:      "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/agentmesh/providers/cp",
 					},
 				},
 			},
@@ -435,7 +435,7 @@ func newSTSEnv(ctx context.Context) (*stsBenchEnv, error) {
 	}))
 	env.cpURL = env.cpProxySrv.URL
 
-	// Enroll a benchmark SamNode.
+	// Enroll a benchmark AgentMeshNode.
 	priv, pub, err := crypto.GenerateEd25519Key(rand.Reader)
 	if err != nil {
 		env.Close()
@@ -513,7 +513,7 @@ func newSTSEnv(ctx context.Context) (*stsBenchEnv, error) {
 		return nil, err
 	}
 
-	samNode, err := node.NewSamNode(node.Options{
+	samNode, err := node.NewAgentMeshNode(node.Options{
 		PrivKey:        priv,
 		Store:          nodeStore,
 		BiscuitTimeout: 5 * time.Second,

@@ -42,8 +42,8 @@ func main() {
 	timeoutArgs := flag.Int("timeout", 10, "Timeout in seconds")
 	listTools := flag.Bool("list", false, "List available tools and exit")
 	streamOpt := flag.Bool("stream", false, "Enable streaming mode for service discovery HTTP API")
-	tokenOpt := flag.String("token", "", "Authorization Bearer token for protected sidecar endpoints (deprecated: prefer -token-path or SAM_API_TOKEN)")
-	tokenPathOpt := flag.String("token-path", "", "Path to file containing the Authorization Bearer token (or env SAM_API_TOKEN)")
+	tokenOpt := flag.String("token", "", "Authorization Bearer token for protected sidecar endpoints (deprecated: prefer -token-path or AGENTMESH_API_TOKEN)")
+	tokenPathOpt := flag.String("token-path", "", "Path to file containing the Authorization Bearer token (or env AGENTMESH_API_TOKEN)")
 	showVersion := flag.Bool("version", false, "Print the version and exit")
 	flag.Parse()
 	if *showVersion {
@@ -59,7 +59,7 @@ func main() {
 		}
 		resolvedToken = strings.TrimSpace(string(data))
 	} else if resolvedToken == "" {
-		resolvedToken = strings.TrimSpace(os.Getenv("SAM_API_TOKEN"))
+		resolvedToken = strings.TrimSpace(os.Getenv("AGENTMESH_API_TOKEN"))
 	}
 
 	if *serverURL == "" {

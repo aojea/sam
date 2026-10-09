@@ -35,7 +35,7 @@ import (
 // behaviour set through the environment the children inherit.
 
 func TestMain(m *testing.M) {
-	if os.Getenv("SAM_BENCH_FAKE_NODE") == "1" {
+	if os.Getenv("AGENTMESH_BENCH_FAKE_NODE") == "1" {
 		os.Exit(fakeNode(os.Args[1:]))
 	}
 	os.Exit(m.Run())
@@ -121,7 +121,7 @@ func fakeNode(args []string) int {
 
 func fakeFleet(t *testing.T, count int, env map[string]string) JoinOptions {
 	t.Helper()
-	t.Setenv("SAM_BENCH_FAKE_NODE", "1")
+	t.Setenv("AGENTMESH_BENCH_FAKE_NODE", "1")
 	if env == nil {
 		env = map[string]string{}
 	}
@@ -132,12 +132,12 @@ func fakeFleet(t *testing.T, count int, env map[string]string) JoinOptions {
 		t.Setenv(k, env[k])
 	}
 	token := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(token, []byte("sam-bt-test\n"), 0o600); err != nil {
+	if err := os.WriteFile(token, []byte("mesh-bt-test\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// t.TempDir carries the test's name, which for a subtest is long enough
 	// to push a member's socket past the Unix path limit.
-	dir, err := os.MkdirTemp("", "sam-join-")
+	dir, err := os.MkdirTemp("", "agentmesh-join-")
 	if err != nil {
 		t.Fatal(err)
 	}

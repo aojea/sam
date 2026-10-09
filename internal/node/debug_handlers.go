@@ -34,7 +34,7 @@ const (
 
 // newDebugHandler serves the operator diagnostics under /debug. These were MCP
 // tools once; they moved here so agents never see them in their tool list (#318).
-func newDebugHandler(n *SamNode) http.Handler {
+func newDebugHandler(n *AgentMeshNode) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /debug/mesh-info", func(w http.ResponseWriter, r *http.Request) {
 		info, err := n.meshInfo()
@@ -88,7 +88,7 @@ func newDebugHandler(n *SamNode) http.Handler {
 }
 
 // debugReady reports whether the components the /debug handlers touch exist.
-func (n *SamNode) debugReady() error {
+func (n *AgentMeshNode) debugReady() error {
 	switch {
 	case n == nil:
 		return fmt.Errorf("node not initialized")
@@ -149,7 +149,7 @@ type logsResponse struct {
 
 // meshInfo backs both the get_mesh_info MCP tool and GET /debug/mesh-info.
 // The MCP path skips the /debug boundary guard, so it re-checks here.
-func (n *SamNode) meshInfo() (*meshInfoResponse, error) {
+func (n *AgentMeshNode) meshInfo() (*meshInfoResponse, error) {
 	if err := n.debugReady(); err != nil {
 		return nil, err
 	}
@@ -171,8 +171,8 @@ func (n *SamNode) meshInfo() (*meshInfoResponse, error) {
 }
 
 // connectivityStats backs GET /debug/connectivity: with a peer ID it pings that
-// peer, otherwise it pings the SAM router.
-func (n *SamNode) connectivityStats(ctx context.Context, peerIDStr string) connectivityResponse {
+// peer, otherwise it pings the Agent Mesh router.
+func (n *AgentMeshNode) connectivityStats(ctx context.Context, peerIDStr string) connectivityResponse {
 	ctx, cancel := context.WithTimeout(ctx, connectivityPingTimeout)
 	defer cancel()
 
@@ -215,7 +215,7 @@ func (n *SamNode) connectivityStats(ctx context.Context, peerIDStr string) conne
 }
 
 // tokenInfo backs GET /debug/token-info.
-func (n *SamNode) tokenInfo() tokenInfoResponse {
+func (n *AgentMeshNode) tokenInfo() tokenInfoResponse {
 	var info tokenInfoResponse
 	token, err := n.Store.LoadIdentity()
 	if err == nil && len(token) > 0 {
@@ -232,7 +232,7 @@ func (n *SamNode) tokenInfo() tokenInfoResponse {
 }
 
 // networkInfo backs GET /debug/network-info.
-func (n *SamNode) networkInfo() networkInfoResponse {
+func (n *AgentMeshNode) networkInfo() networkInfoResponse {
 	listenAddrs := []string{}
 	for _, a := range n.Host.Network().ListenAddresses() {
 		listenAddrs = append(listenAddrs, a.String())
@@ -250,7 +250,7 @@ func (n *SamNode) networkInfo() networkInfoResponse {
 }
 
 // connectPeer backs POST /debug/connect-peer.
-func (n *SamNode) connectPeer(ctx context.Context, peerAddr string) error {
+func (n *AgentMeshNode) connectPeer(ctx context.Context, peerAddr string) error {
 	ctx, cancel := context.WithTimeout(ctx, connectPeerTimeout)
 	defer cancel()
 

@@ -31,7 +31,7 @@ import (
 // as gauges a scraper can keep. A node that runs unattended, such as a
 // canary, becomes a continuous probe of the mesh this way.
 type nodeStateCollector struct {
-	n *SamNode
+	n *AgentMeshNode
 
 	readyDesc         *prometheus.Desc
 	meshConnectedDesc *prometheus.Desc
@@ -42,35 +42,35 @@ type nodeStateCollector struct {
 	servicesDesc      *prometheus.Desc
 }
 
-func newNodeStateCollector(n *SamNode) *nodeStateCollector {
+func newNodeStateCollector(n *AgentMeshNode) *nodeStateCollector {
 	return &nodeStateCollector{
 		n: n,
 		readyDesc: prometheus.NewDesc(
-			"sam_node_ready",
+			"agentmesh_node_ready",
 			"1 once the libp2p host, DHT and identity store exist",
 			nil, nil),
 		meshConnectedDesc: prometheus.NewDesc(
-			"sam_node_mesh_connected",
+			"agentmesh_node_mesh_connected",
 			"1 while the node holds an authenticated connection to a router",
 			nil, nil),
 		connectedDesc: prometheus.NewDesc(
-			"sam_node_connected_peers",
+			"agentmesh_node_connected_peers",
 			"Peers with an open libp2p connection, authenticated or not",
 			nil, nil),
 		authenticatedDesc: prometheus.NewDesc(
-			"sam_node_authenticated_peers",
+			"agentmesh_node_authenticated_peers",
 			"Peers that have completed the mesh authentication handshake with this node",
 			nil, nil),
 		dhtDesc: prometheus.NewDesc(
-			"sam_node_dht_routing_table_size",
+			"agentmesh_node_dht_routing_table_size",
 			"Peers in the Kademlia routing table",
 			nil, nil),
 		biscuitExpiryDesc: prometheus.NewDesc(
-			"sam_node_biscuit_expiry_timestamp_seconds",
+			"agentmesh_node_biscuit_expiry_timestamp_seconds",
 			"Unix time the node's mesh credential expires",
 			nil, nil),
 		servicesDesc: prometheus.NewDesc(
-			"sam_node_services_registered",
+			"agentmesh_node_services_registered",
 			"Local services this node offers to the mesh, by type",
 			[]string{"type"}, nil),
 	}
@@ -131,8 +131,8 @@ func serviceTypeLabel(t api.ServiceType) string {
 // metricsHandler serves the process-wide registry, which carries the request
 // and inference counters and the Go runtime, alongside this node's own state.
 // The state collector is per node so two nodes in one process (tests,
-// sam-one) never fight over a registration.
-func (n *SamNode) metricsHandler() http.Handler {
+// agentmesh-one) never fight over a registration.
+func (n *AgentMeshNode) metricsHandler() http.Handler {
 	n.metricsOnce.Do(func() {
 		n.metricsRegistry = prometheus.NewRegistry()
 		n.metricsRegistry.MustRegister(newNodeStateCollector(n))
@@ -148,7 +148,7 @@ func (n *SamNode) metricsHandler() http.Handler {
 // The sidecar's own /metrics stays token-gated: this listener exists so a
 // socket-only node, which has no TCP port at all, can still be observed. It
 // is off unless an operator names the address, since nothing on it is gated.
-func StartMetricsServer(node *SamNode, addr string) (*http.Server, error) {
+func StartMetricsServer(node *AgentMeshNode, addr string) (*http.Server, error) {
 	if addr == "" {
 		return nil, errors.New("no metrics address configured")
 	}

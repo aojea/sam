@@ -43,14 +43,14 @@ import (
 // leaves a few behind is reported as a few left behind rather than as a
 // slightly worse mean.
 //
-// The members are real sam-node processes, one per member, started from this
+// The members are real agentmesh-node processes, one per member, started from this
 // process so that every timestamp comes from one clock. They all share this
 // host's source address, which is what a classroom, an office or a CI runner
 // pool looks like from the router.
 
 // JoinOptions describe one fleet to take through the join journey.
 type JoinOptions struct {
-	// NodeBin is the sam-node binary; one process of it is started per member.
+	// NodeBin is the agentmesh-node binary; one process of it is started per member.
 	NodeBin string
 
 	// Count is how many members to start.
@@ -219,7 +219,7 @@ const (
 
 // mcpInitialize is the first request of an MCP session, enough for the
 // server to name itself.
-const mcpInitialize = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"sam-bench","version":"0"}}}`
+const mcpInitialize = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"agentmesh-bench","version":"0"}}}`
 
 type member struct {
 	index       int
@@ -329,7 +329,7 @@ func RunJoin(ctx context.Context, opts JoinOptions) (*JoinReport, error) {
 func (o *JoinOptions) validate() error {
 	switch {
 	case o.NodeBin == "":
-		return errors.New("bench: no sam-node binary")
+		return errors.New("bench: no agentmesh-node binary")
 	case o.Count <= 0:
 		return errors.New("bench: no members to start")
 	case o.Dir == "":
@@ -389,7 +389,7 @@ func newMember(opts JoinOptions, i int) *member {
 	}
 }
 
-// start launches the member's sam-node. Its p2p listeners take ephemeral
+// start launches the member's agentmesh-node. Its p2p listeners take ephemeral
 // ports: the fixed defaults would collide across members, and a member is
 // reached through the router's relay regardless of where it listens.
 func (m *member) start(opts JoinOptions) error {
@@ -403,7 +403,7 @@ func (m *member) start(opts JoinOptions) error {
 	args := []string{
 		"run",
 		"--control-plane", opts.ControlPlane,
-		"--config", filepath.Join(m.dir, "sam-node.yaml"),
+		"--config", filepath.Join(m.dir, "agentmesh-node.yaml"),
 		"--data-dir", m.dir,
 		"--socket-path", m.socket,
 		"--bind-addr=",

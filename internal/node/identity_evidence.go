@@ -54,7 +54,7 @@ func snapshotControlPlaneKey(key ed25519.PublicKey) (trustedKeySnapshot, error) 
 	}, nil
 }
 
-func (n *SamNode) trustedKeySnapshot() ([]trustedKeySnapshot, error) {
+func (n *AgentMeshNode) trustedKeySnapshot() ([]trustedKeySnapshot, error) {
 	n.keysMu.RLock()
 	trusted := append([]TrustedKey(nil), n.trustedKeys...)
 	n.keysMu.RUnlock()
@@ -90,7 +90,7 @@ func findSelectedKey(snapshots []trustedKeySnapshot, selected ed25519.PublicKey)
 	return trustedKeySnapshot{}, false
 }
 
-func (n *SamNode) stillTrustsKey(selected trustedKeySnapshot) bool {
+func (n *AgentMeshNode) stillTrustsKey(selected trustedKeySnapshot) bool {
 	n.keysMu.RLock()
 	defer n.keysMu.RUnlock()
 	for _, candidate := range n.trustedKeys {
@@ -136,7 +136,7 @@ func handleIdentityEvidenceNotFound(w http.ResponseWriter, _ *http.Request) {
 	writeEvidenceError(w, http.StatusNotFound, "Not found")
 }
 
-func handleIdentityEvidence(n *SamNode, w http.ResponseWriter, r *http.Request) {
+func handleIdentityEvidence(n *AgentMeshNode, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		writeEvidenceError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -159,7 +159,7 @@ func handleIdentityEvidence(n *SamNode, w http.ResponseWriter, r *http.Request) 
 	writeEvidenceProtoJSON(w, http.StatusOK, response)
 }
 
-func handlePeerEvidence(n *SamNode, w http.ResponseWriter, r *http.Request) {
+func handlePeerEvidence(n *AgentMeshNode, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		writeEvidenceError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -211,7 +211,7 @@ func trustedControlPlaneKeysUnavailable(err error, snapshots []trustedKeySnapsho
 	return nil
 }
 
-func (n *SamNode) buildIdentityEvidence(checkedAt time.Time) (*api.IdentityEvidenceResponse, error) {
+func (n *AgentMeshNode) buildIdentityEvidence(checkedAt time.Time) (*api.IdentityEvidenceResponse, error) {
 	if n == nil || n.Host == nil || n.Store == nil {
 		return nil, fmt.Errorf("node identity store is unavailable")
 	}
@@ -256,7 +256,7 @@ func (n *SamNode) buildIdentityEvidence(checkedAt time.Time) (*api.IdentityEvide
 	}, nil
 }
 
-func (n *SamNode) buildPeerEvidence(requested peer.ID, observation peerBiscuitObservation, checkedAt time.Time) (*api.PeerEvidenceResponse, error) {
+func (n *AgentMeshNode) buildPeerEvidence(requested peer.ID, observation peerBiscuitObservation, checkedAt time.Time) (*api.PeerEvidenceResponse, error) {
 	if requested == "" || observation.ConnectionPeer == "" || requested != observation.ConnectionPeer {
 		return nil, fmt.Errorf("requested and connection PeerIDs differ")
 	}
@@ -299,7 +299,7 @@ func (n *SamNode) buildPeerEvidence(requested peer.ID, observation peerBiscuitOb
 // peerIsRevoked reports whether the peer is in the revocation cache, which is
 // reconciled against the control plane's ban set by every SyncControlPlane
 // and updated by MeshEvent_BANNED.
-func (n *SamNode) peerIsRevoked(peerID peer.ID) bool {
+func (n *AgentMeshNode) peerIsRevoked(peerID peer.ID) bool {
 	return n.revokedPeers != nil && n.revokedPeers.Contains(peerID.String())
 }
 

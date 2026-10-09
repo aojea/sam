@@ -34,7 +34,7 @@ type ServiceConfig struct {
 	Env            map[string]string `yaml:"env,omitempty"`
 }
 
-// NodeConfig defines the optional attenuation rules and static services for a specific SAM Node.
+// NodeConfig defines the optional attenuation rules and static services for a specific Agent Mesh Node.
 type NodeConfig struct {
 	Version     string          `yaml:"version"`
 	Attenuation Attenuation     `yaml:"attenuation"`

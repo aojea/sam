@@ -78,7 +78,7 @@ func TestValidateMeshEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node := &SamNode{
+	node := &AgentMeshNode{
 		trustedKeys:    []TrustedKey{{Key: cpPub, ReceivedAt: time.Now()}},
 		BiscuitTimeout: 500 * time.Millisecond,
 	}

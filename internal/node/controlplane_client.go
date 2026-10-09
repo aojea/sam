@@ -36,5 +36,5 @@ func SetAllowInsecureControlPlane(allow bool) {
 // controlPlaneHTTPClient is the client for every request the node makes to
 // its control plane; the plaintext policy is re-checked on every hop.
 func controlPlaneHTTPClient(timeout time.Duration) *http.Client {
-	return cpclient.NewHTTPClient(timeout, allowInsecureControlPlane.Load, "sam-node")
+	return cpclient.NewHTTPClient(timeout, allowInsecureControlPlane.Load, "agentmesh-node")
 }

@@ -48,7 +48,7 @@ func TestConnectionGater(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		Store:          store,
 		revokedPeers:   cache,
 		BiscuitTimeout: 500 * time.Millisecond,
@@ -126,7 +126,7 @@ func TestGaterEnforcesSeededBans(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	node, err := NewSamNode(Options{PrivKey: bannedPriv, Store: store})
+	node, err := NewAgentMeshNode(Options{PrivKey: bannedPriv, Store: store})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,8 +146,8 @@ func TestGaterEnforcesSeededBans(t *testing.T) {
 	}
 }
 
-// startBareNode brings up a SamNode without control plane/enrollment.
-func startBareNode(t *testing.T, ctx context.Context) (*SamNode, func()) {
+// startBareNode brings up a AgentMeshNode without control plane/enrollment.
+func startBareNode(t *testing.T, ctx context.Context) (*AgentMeshNode, func()) {
 	t.Helper()
 	dir := t.TempDir()
 	store, err := NewStore(dir)
@@ -159,7 +159,7 @@ func startBareNode(t *testing.T, ctx context.Context) (*SamNode, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node, err := NewSamNode(Options{
+	node, err := NewAgentMeshNode(Options{
 		PrivKey:           priv,
 		RouterAddrs:       nil,
 		Store:             store,
@@ -188,7 +188,7 @@ func startBareNode(t *testing.T, ctx context.Context) (*SamNode, func()) {
 	return node, cleanup
 }
 
-const testMCPProtocol = protocol.ID("/sam-test/mcp/1.0.0")
+const testMCPProtocol = protocol.ID("/mesh-test/mcp/1.0.0")
 
 func TestHandleMCPStream_DumbPipeProxy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -342,7 +342,7 @@ func TestHandleMCPStream_ForwarderRoutesCalls(t *testing.T) {
 // the equivalent locally only - its CloseRead doc says plainly "Remote is
 // not notified." A stream backed by TCP+yamux structurally cannot exercise
 // the wire-level race this test is after; only a real QUIC connection can.
-func startBareQUICNode(t *testing.T, ctx context.Context) (*SamNode, func()) {
+func startBareQUICNode(t *testing.T, ctx context.Context) (*AgentMeshNode, func()) {
 	t.Helper()
 	dir := t.TempDir()
 	store, err := NewStore(dir)
@@ -354,7 +354,7 @@ func startBareQUICNode(t *testing.T, ctx context.Context) (*SamNode, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node, err := NewSamNode(Options{
+	node, err := NewAgentMeshNode(Options{
 		PrivKey:           priv,
 		RouterAddrs:       nil,
 		Store:             store,
@@ -384,7 +384,7 @@ func startBareQUICNode(t *testing.T, ctx context.Context) (*SamNode, func()) {
 }
 
 // TestHandleStreamPassThrough_BackendEOFDoesNotDropInFlightResponse is a
-// regression test for google/sam#375.
+// regression test for google/agentmesh#375.
 //
 // A backend that answers a single request and then closes its side of the
 // connection - a normal EOF for a one-shot HTTP-style backend, not a
@@ -469,7 +469,7 @@ func TestHandleStreamPassThrough_BackendEOFDoesNotDropInFlightResponse(t *testin
 }
 
 // TestHandleStreamPassThrough_SlowBackendDoesNotHitDrainTimeout is a
-// regression test for review feedback from aojea on google/sam#379: the
+// regression test for review feedback from aojea on google/agentmesh#379: the
 // drain wait was timed from the start of the whole exchange, not from when
 // the backend leg actually finished, so any session - healthy or not -
 // that happened to run longer than passThroughDrainTimeout got killed

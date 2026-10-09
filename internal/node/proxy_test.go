@@ -69,7 +69,7 @@ func TestDatapathIntegration(t *testing.T) {
 	// Pre-populate stores with dummy keys to avoid enrollment failure if required
 	// For this test, we assume we can run without full enrollment if we bypass AuthHandler
 
-	nodeA, err := NewSamNode(Options{
+	nodeA, err := NewAgentMeshNode(Options{
 		PrivKey:           privA,
 		RouterAddrs:       nil,
 		Store:             storeA,
@@ -96,7 +96,7 @@ func TestDatapathIntegration(t *testing.T) {
 		}
 	}()
 
-	nodeB, err := NewSamNode(Options{
+	nodeB, err := NewAgentMeshNode(Options{
 		PrivKey:           privB,
 		RouterAddrs:       nil,
 		Store:             storeB,
@@ -179,7 +179,7 @@ func TestDatapathIntegration(t *testing.T) {
 	// 4. Execution: Node B makes a request via its local Egress Proxy
 
 	// We need to create the egress proxy for Node B.
-	// The user request says: "Implement a reverse proxy on the local `sam-node` HTTP server that intercepts requests to `/mesh/`"
+	// The user request says: "Implement a reverse proxy on the local `agentmesh-node` HTTP server that intercepts requests to `/mesh/`"
 	// In sidecar.go we have `createEgressProxy(node)`. We can use it here.
 
 	proxyHandler := createEgressProxy(nodeB)
@@ -265,7 +265,7 @@ func TestDatapathIntegration_Unauthenticated(t *testing.T) {
 	}
 	defer func() { _ = storeB.Close() }()
 
-	nodeA, err := NewSamNode(Options{
+	nodeA, err := NewAgentMeshNode(Options{
 		PrivKey:           privA,
 		RouterAddrs:       nil,
 		Store:             storeA,
@@ -292,7 +292,7 @@ func TestDatapathIntegration_Unauthenticated(t *testing.T) {
 		}
 	}()
 
-	nodeB, err := NewSamNode(Options{
+	nodeB, err := NewAgentMeshNode(Options{
 		PrivKey:           privB,
 		RouterAddrs:       nil,
 		Store:             storeB,
@@ -414,7 +414,7 @@ func TestStdioDatapathIntegration(t *testing.T) {
 	}
 	defer func() { _ = storeB.Close() }()
 
-	nodeA, err := NewSamNode(Options{
+	nodeA, err := NewAgentMeshNode(Options{
 		PrivKey:           privA,
 		RouterAddrs:       nil,
 		Store:             storeA,
@@ -437,7 +437,7 @@ func TestStdioDatapathIntegration(t *testing.T) {
 	}
 	defer func() { _ = nodeA.Host.Close() }()
 
-	nodeB, err := NewSamNode(Options{
+	nodeB, err := NewAgentMeshNode(Options{
 		PrivKey:           privB,
 		RouterAddrs:       nil,
 		Store:             storeB,
@@ -585,7 +585,7 @@ func TestDatapathHeadersAndRoutingTable(t *testing.T) {
 	}
 	defer func() { _ = storeB.Close() }()
 
-	nodeA, err := NewSamNode(Options{
+	nodeA, err := NewAgentMeshNode(Options{
 		PrivKey:           privA,
 		RouterAddrs:       nil,
 		Store:             storeA,
@@ -612,7 +612,7 @@ func TestDatapathHeadersAndRoutingTable(t *testing.T) {
 		}
 	}()
 
-	nodeB, err := NewSamNode(Options{
+	nodeB, err := NewAgentMeshNode(Options{
 		PrivKey:           privB,
 		RouterAddrs:       nil,
 		Store:             storeB,
@@ -809,7 +809,7 @@ func TestDatapathHeadersAndRoutingTable(t *testing.T) {
 	}
 }
 
-// The operator's egress floor holds at the /sam/ chokepoint itself, so an agent
+// The operator's egress floor holds at the /mesh/ chokepoint itself, so an agent
 // that skips the facade and dials /mesh/<peer>/... raw is still gated: the
 // provider's biscuit must attest every pair of the floor before anything is
 // forwarded, whatever the caller did or did not ask for (see #385).

@@ -102,7 +102,7 @@ type openAIFacade struct {
 	backoff   map[string]time.Time
 }
 
-func newOpenAIFacade(node *SamNode, egress http.Handler) *openAIFacade {
+func newOpenAIFacade(node *AgentMeshNode, egress http.Handler) *openAIFacade {
 	client := &http.Client{Transport: libp2phttp.NewTransport(node.Host)}
 	return &openAIFacade{
 		forward:     egress,
@@ -180,7 +180,7 @@ func newOpenAIFacade(node *SamNode, egress http.Handler) *openAIFacade {
 
 // fetchRemoteModels probes a remote provider's backend /v1/models through its
 // libp2p ingress, authenticating with this node's biscuit.
-func fetchRemoteModels(ctx context.Context, node *SamNode, client *http.Client, peerID, srvName string) ([]string, error) {
+func fetchRemoteModels(ctx context.Context, node *AgentMeshNode, client *http.Client, peerID, srvName string) ([]string, error) {
 	pid, err := peer.Decode(peerID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid peer ID %q: %w", peerID, err)

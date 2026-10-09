@@ -40,7 +40,7 @@ import (
 	"github.com/google/agentmesh/internal/standalone"
 )
 
-// TestStandaloneSDKAgents pins that both SDKs work with sam-one. Its
+// TestStandaloneSDKAgents pins that both SDKs work with agentmesh-one. Its
 // embedded router listens on WebSocket alone, on the single port that also
 // serves the control plane, so a member that dials TCP only never gets on.
 // One agent example per language (sdk/js/examples/a2a-agent.ts,
@@ -57,9 +57,9 @@ func TestStandaloneSDKAgents(t *testing.T) {
 }
 
 // TestStandaloneSDKAgentsBehindTLSEdge is the same pair behind what
-// `sam-one --tunnel` puts in front of it: a TLS-terminating edge reached by
+// `agentmesh-one --tunnel` puts in front of it: a TLS-terminating edge reached by
 // name, which selects the origin by the TLS server name and the Host header
-// and answers anything else with 403, as Cloudflare does. sam-one advertises
+// and answers anything else with 403, as Cloudflare does. agentmesh-one advertises
 // its router as /dns4/localhost/tcp/<edge>/wss/p2p/<id>, so each SDK must
 // carry the name to the edge instead of what it resolves to. Both SDKs
 // trust the edge's certificate through the file their TLS stacks read
@@ -91,7 +91,7 @@ func startStandalone(t *testing.T, ctx context.Context, opts standalone.Options)
 }
 
 // runStandaloneSDKAgents runs each language's A2A agent example against
-// sam-one at publicURL and calls it with the other language's A2A caller.
+// agentmesh-one at publicURL and calls it with the other language's A2A caller.
 func runStandaloneSDKAgents(t *testing.T, ctx context.Context, srv *standalone.Server, publicURL string, extraEnv []string) {
 	t.Helper()
 	root := repoRoot(t)
@@ -117,9 +117,9 @@ func runStandaloneSDKAgents(t *testing.T, ctx context.Context, srv *standalone.S
 	}
 	env := func(stateDir string) []string {
 		return append([]string{
-			"SAM_CONTROL_PLANE_URL=" + publicURL,
-			"SAM_BOOTSTRAP_TOKEN_PATH=" + tokenPath,
-			"SAM_STATE_DIR=" + filepath.Join(t.TempDir(), stateDir),
+			"AGENTMESH_CONTROL_PLANE_URL=" + publicURL,
+			"AGENTMESH_BOOTSTRAP_TOKEN_PATH=" + tokenPath,
+			"AGENTMESH_STATE_DIR=" + filepath.Join(t.TempDir(), stateDir),
 			"PYTHONUNBUFFERED=1",
 		}, extraEnv...)
 	}
@@ -152,7 +152,7 @@ func runStandaloneSDKAgents(t *testing.T, ctx context.Context, srv *standalone.S
 			caller := expectLine(t, out, "on the mesh as ")
 			expectLine(t, out, "agent: Echo agent, ")
 			if want := caller + " said: hello from " + l.name; !strings.Contains(out, want) {
-				t.Fatalf("%s calling the %s agent through sam-one: want %q in\n%s", l.name, target.name, want, out)
+				t.Fatalf("%s calling the %s agent through agentmesh-one: want %q in\n%s", l.name, target.name, want, out)
 			}
 		})
 	}

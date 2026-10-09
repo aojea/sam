@@ -20,11 +20,11 @@ import (
 	"time"
 )
 
-func TestSamNodeRunHelp(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+func TestAgentMeshNodeRunHelp(t *testing.T) {
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	stdout, stderr, err := runCommand(t, repoRoot(t), 10*time.Second, nil, "", nodeBin, "run", "--help")
 	if err != nil {
-		t.Fatalf("sam-node run --help failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		t.Fatalf("agentmesh-node run --help failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 	out := stdout + stderr
 	if !strings.Contains(out, "Start the mesh node") {

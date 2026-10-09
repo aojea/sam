@@ -199,7 +199,7 @@ func TestTokenExchangeStatelessAndRoleIsolation(t *testing.T) {
 		t.Fatal("expected VerifyBiscuit (peer handshake) to reject delegated token lacking node() fact")
 	}
 
-	// Verify SamNode.Authorize accepts the delegated token for mcp://weather get_forecast,
+	// Verify AgentMeshNode.Authorize accepts the delegated token for mcp://weather get_forecast,
 	// denies mcp://weather drop_table (TAR), and denies mcp://internal-admin (standing policy).
 	compiledRules, _ := api.BuildPolicyRules(roles, bindings)
 	parsedRules, err := api.ParseDatalogRules(api.PolicyRuleTexts(compiledRules))
@@ -211,14 +211,14 @@ func TestTokenExchangeStatelessAndRoleIsolation(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	defer func() { _ = nStore.Close() }()
-	verifierNode, err := node.NewSamNode(node.Options{
+	verifierNode, err := node.NewAgentMeshNode(node.Options{
 		PrivKey:            nodePriv,
 		Store:              nStore,
 		ControlPlanePubKey: cpPubKey,
 		BiscuitTimeout:     time.Second,
 	})
 	if err != nil {
-		t.Fatalf("NewSamNode: %v", err)
+		t.Fatalf("NewAgentMeshNode: %v", err)
 	}
 	verifierNode.MeshPolicyRules = parsedRules
 	verifierNode.SetIdentityCache(nodeBiscuit)
@@ -275,7 +275,7 @@ func jwkToECDSAPublicKey(t *testing.T, jwk JSONWebKey) *ecdsa.PublicKey {
 func TestOIDCIssuerJWKSAndSTSToken(t *testing.T) {
 	issuer, mintOIDC := startCustomMockOIDC(t)
 	srv, store, baseURL := setupTestServer(t, issuer, func(o *Options) {
-		o.STSIssuerURL = "https://cp.sam-mesh.example"
+		o.STSIssuerURL = "https://cp.agentmesh.example"
 	})
 	defer func() { _ = srv.Close() }()
 
@@ -304,10 +304,10 @@ func TestOIDCIssuerJWKSAndSTSToken(t *testing.T) {
 	if err := json.NewDecoder(discResp.Body).Decode(&discDoc); err != nil {
 		t.Fatalf("decode discovery doc: %v", err)
 	}
-	if discDoc["issuer"] != "https://cp.sam-mesh.example" {
-		t.Fatalf("issuer = %v, want https://cp.sam-mesh.example", discDoc["issuer"])
+	if discDoc["issuer"] != "https://cp.agentmesh.example" {
+		t.Fatalf("issuer = %v, want https://cp.agentmesh.example", discDoc["issuer"])
 	}
-	if discDoc["jwks_uri"] != "https://cp.sam-mesh.example/jwks" {
+	if discDoc["jwks_uri"] != "https://cp.agentmesh.example/jwks" {
 		t.Fatalf("jwks_uri = %v", discDoc["jwks_uri"])
 	}
 
@@ -351,7 +351,7 @@ func TestOIDCIssuerJWKSAndSTSToken(t *testing.T) {
 	stsReq := &api.STSTokenRequest{
 		Biscuit:            exResp.BiscuitToken,
 		Destination:        "bigquery.googleapis.com",
-		Audience:           "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/sam/providers/cp",
+		Audience:           "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/agentmesh/providers/cp",
 		ChallengeUnixMs:    stsTs,
 		ChallengeSignature: stsSig,
 	}
@@ -409,8 +409,8 @@ func TestOIDCIssuerJWKSAndSTSToken(t *testing.T) {
 	if claims["sub"] != "alice@example.com" {
 		t.Fatalf("jwt sub = %v, want alice@example.com", claims["sub"])
 	}
-	if claims["sam_task"] != "bq-export" {
-		t.Fatalf("jwt sam_task = %v, want bq-export", claims["sam_task"])
+	if claims["mesh_task"] != "bq-export" {
+		t.Fatalf("jwt mesh_task = %v, want bq-export", claims["mesh_task"])
 	}
 	actMap, _ := claims["act"].(map[string]any)
 	if actMap["sub"] != nodePeerID.String() {
@@ -648,7 +648,7 @@ func TestOAuth21AuthorizationCodePKCEAndTokenExchange(t *testing.T) {
 		t.Fatal("expected AttenuateBiscuit on a sealed token to fail")
 	}
 
-	// And verify the 2-block sealed Biscuit authorizes mcp://weather get_forecast on SamNode.
+	// And verify the 2-block sealed Biscuit authorizes mcp://weather get_forecast on AgentMeshNode.
 	compiledRules, _ := api.BuildPolicyRules(roles, bindings)
 	parsedRules, _ := api.ParseDatalogRules(api.PolicyRuleTexts(compiledRules))
 	nStore, err := node.NewStore(t.TempDir())
@@ -656,14 +656,14 @@ func TestOAuth21AuthorizationCodePKCEAndTokenExchange(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	defer func() { _ = nStore.Close() }()
-	verifierNode, err := node.NewSamNode(node.Options{
+	verifierNode, err := node.NewAgentMeshNode(node.Options{
 		PrivKey:            nodePriv,
 		Store:              nStore,
 		ControlPlanePubKey: cpPubKey,
 		BiscuitTimeout:     time.Second,
 	})
 	if err != nil {
-		t.Fatalf("NewSamNode: %v", err)
+		t.Fatalf("NewAgentMeshNode: %v", err)
 	}
 	verifierNode.MeshPolicyRules = parsedRules
 	verifierNode.SetIdentityCache(nodeBiscuit)
@@ -794,7 +794,7 @@ func TestSTSSecurityHardening(t *testing.T) {
 			Broker: &api.CredentialBroker{
 				Kind: &api.CredentialBroker_AwsAssumeRole{
 					AwsAssumeRole: &api.AWSAssumeRole{
-						RoleArn: "arn:aws:iam::123456789012:role/sam-s3",
+						RoleArn: "arn:aws:iam::123456789012:role/agentmesh-s3",
 					},
 				},
 			},

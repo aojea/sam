@@ -44,12 +44,12 @@ import (
 // node, connect to an exact peer, and collect fresh independently verifiable
 // peer evidence before any provider request.
 func TestIdentityEvidenceOperatorFlow(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	_, controlPlaneURL, pinnedControlPlaneKey := startMockRouterWithControlPlaneKey(t)
 
 	ownerHome := t.TempDir()
 	providerHome := t.TempDir()
-	socketDir, err := os.MkdirTemp("", "sam-evidence-")
+	socketDir, err := os.MkdirTemp("", "agentmesh-evidence-")
 	if err != nil {
 		t.Fatalf("create short socket directory: %v", err)
 	}

@@ -166,7 +166,7 @@ type EnrollmentRequest struct {
 	ResolvedBy   string
 }
 
-// Store defines the persistent operations for the SAM control plane.
+// Store defines the persistent operations for the Agent Mesh control plane.
 type Store interface {
 	// Ping checks the health of the underlying database connection.
 	Ping(ctx context.Context) error
@@ -246,7 +246,7 @@ type Store interface {
 	// rather than a page of it.
 	ListBannedPeerIDs(ctx context.Context) ([]string, error)
 
-	// UpsertRouterLease updates or creates a lease for a sam-router.
+	// UpsertRouterLease updates or creates a lease for a agentmesh-router.
 	UpsertRouterLease(ctx context.Context, lease *RouterLease) error
 
 	// GetActiveRouters retrieves all routers whose leases are still valid.

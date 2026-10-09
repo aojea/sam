@@ -127,9 +127,9 @@ func labelGateKey(peerID peer.ID, required, floor map[string]string) string {
 
 // egressFloor returns the operator's egress floor, or nil when none is
 // configured (api.Egress.RequireLabels).
-func (n *SamNode) egressFloor() map[string]string {
-	// Nil-safe for the same reason labels() is: NewSamNode always leaves
-	// nodeConfig set, but tests build SamNode directly.
+func (n *AgentMeshNode) egressFloor() map[string]string {
+	// Nil-safe for the same reason labels() is: NewAgentMeshNode always leaves
+	// nodeConfig set, but tests build AgentMeshNode directly.
 	if n.nodeConfig == nil {
 		return nil
 	}
@@ -143,7 +143,7 @@ func (n *SamNode) egressFloor() map[string]string {
 // The gate runs whenever either exists. A caller that requires nothing is
 // still held to the floor — the whole point of a floor is that the party being
 // constrained does not get to opt out of it by saying nothing.
-func (n *SamNode) VerifyPeerLabels(ctx context.Context, peerID peer.ID, required map[string]string) error {
+func (n *AgentMeshNode) VerifyPeerLabels(ctx context.Context, peerID peer.ID, required map[string]string) error {
 	floor := n.egressFloor()
 	// No early return for an empty requirement: with nothing to attest this
 	// still verifies that the peer holds a control-plane-signed biscuit bound
@@ -168,7 +168,7 @@ func (n *SamNode) VerifyPeerLabels(ctx context.Context, peerID peer.ID, required
 // checkPeerLabels verifies the provider's biscuit (control-plane signature,
 // expiry, binding to peerID) and evaluates the caller's requirement and the
 // operator's egress floor against its attested facts.
-func (n *SamNode) checkPeerLabels(providerBiscuit []byte, peerID peer.ID, required map[string]string) error {
+func (n *AgentMeshNode) checkPeerLabels(providerBiscuit []byte, peerID peer.ID, required map[string]string) error {
 	floor := n.egressFloor()
 	if len(providerBiscuit) == 0 {
 		return fmt.Errorf("provider %s returned no identity biscuit; not an enrolled peer (required labels %v, egress floor %v)", peerID, required, floor)
@@ -227,7 +227,7 @@ func (n *SamNode) checkPeerLabels(providerBiscuit []byte, peerID peer.ID, requir
 
 // fetchPeerBiscuit obtains the peer's control-plane-minted identity via the
 // mutual auth handshake on AuthProtocolID, authenticating with our own.
-func (n *SamNode) fetchPeerBiscuit(ctx context.Context, peerID peer.ID) ([]byte, error) {
+func (n *AgentMeshNode) fetchPeerBiscuit(ctx context.Context, peerID peer.ID) ([]byte, error) {
 	observation, err := n.fetchPeerBiscuitEvidence(ctx, peerID)
 	if err != nil {
 		return nil, err
@@ -250,7 +250,7 @@ func labelGateDialContext(ctx context.Context) context.Context {
 // fetchPeerBiscuitEvidence is the uncached form used by the local evidence API.
 // It preserves the PeerID authenticated by the libp2p stream separately from
 // the requested target so callers can fail closed on any binding mismatch.
-func (n *SamNode) fetchPeerBiscuitEvidence(ctx context.Context, peerID peer.ID) (peerBiscuitObservation, error) {
+func (n *AgentMeshNode) fetchPeerBiscuitEvidence(ctx context.Context, peerID peer.ID) (peerBiscuitObservation, error) {
 	ourBiscuit := n.GetIdentity()
 	if ourBiscuit == nil {
 		return peerBiscuitObservation{}, fmt.Errorf("missing node identity")

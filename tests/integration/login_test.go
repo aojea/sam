@@ -95,7 +95,7 @@ func storedMembership(t *testing.T, dataDir string) ([]byte, string) {
 	return identity, cpURL
 }
 
-// join runs `sam-node join` for the node living under env, with the mock
+// join runs `agentmesh-node join` for the node living under env, with the mock
 // provider playing the user who signs in.
 func join(t *testing.T, nodeBin string, env []string, cpURL string, extra ...string) {
 	t.Helper()
@@ -103,7 +103,7 @@ func join(t *testing.T, nodeBin string, env []string, cpURL string, extra ...str
 	args = append(args, cpURL)
 	stdout, stderr, err := runCommandWithCallback(t, repoRoot(t), 15*time.Second, env, "", nodeBin, args...)
 	if err != nil {
-		t.Fatalf("sam-node %s: %v\nstdout:\n%s\nstderr:\n%s", strings.Join(args, " "), err, stdout, stderr)
+		t.Fatalf("agentmesh-node %s: %v\nstdout:\n%s\nstderr:\n%s", strings.Join(args, " "), err, stdout, stderr)
 	}
 }
 
@@ -146,8 +146,8 @@ func enrolledAs(t *testing.T, cpPort int, peerID string, subject string) []byte 
 	return stored.Biscuit
 }
 
-func TestSamNodeJoin(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+func TestAgentMeshNodeJoin(t *testing.T) {
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	tmpDir := t.TempDir()
 	oidcURL, mintToken := startCustomMockOIDC(t)
 	cpPort, cpURL := startMesh(t, filepath.Join(tmpDir, "mesh"), oidcURL, mintToken)
@@ -176,12 +176,12 @@ func TestSamNodeJoin(t *testing.T) {
 	waitForPeerOnRouter(t, cpPort, testAdminToken, peerID, 10*time.Second)
 }
 
-// TestSamNodeJoinOfflineAccessSavesRefreshToken guards against a real bug:
-// interactiveJoin used a *node.SamNode with no Store, so InteractiveLogin's
+// TestAgentMeshNodeJoinOfflineAccessSavesRefreshToken guards against a real bug:
+// interactiveJoin used a *node.AgentMeshNode with no Store, so InteractiveLogin's
 // "if n.Store != nil" guard silently skipped persisting the refresh token,
 // breaking --offline-access for both "join" and "run --join".
-func TestSamNodeJoinOfflineAccessSavesRefreshToken(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+func TestAgentMeshNodeJoinOfflineAccessSavesRefreshToken(t *testing.T) {
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	tmpDir := t.TempDir()
 	oidcURL, mintToken := startCustomMockOIDC(t)
 	cpPort, cpURL := startMesh(t, filepath.Join(tmpDir, "mesh"), oidcURL, mintToken)
@@ -210,12 +210,12 @@ func TestSamNodeJoinOfflineAccessSavesRefreshToken(t *testing.T) {
 	}
 }
 
-// TestSamNodeRunWithoutIdentityServesEnrollment covers a node that has never
+// TestAgentMeshNodeRunWithoutIdentityServesEnrollment covers a node that has never
 // enrolled: it must not fail, nor block on a login it cannot complete
 // without a terminal, but serve the enrollment-only MCP surface until
 // someone enrolls it.
-func TestSamNodeRunWithoutIdentityServesEnrollment(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+func TestAgentMeshNodeRunWithoutIdentityServesEnrollment(t *testing.T) {
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -240,11 +240,11 @@ func TestSamNodeRunWithoutIdentityServesEnrollment(t *testing.T) {
 	}
 }
 
-// TestSamNodeRunWithStoredIdentity covers the everyday restart: a node that
+// TestAgentMeshNodeRunWithStoredIdentity covers the everyday restart: a node that
 // enrolled once comes back with no token and no --control-plane, on what it
 // stored, and the router admits it again.
-func TestSamNodeRunWithStoredIdentity(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+func TestAgentMeshNodeRunWithStoredIdentity(t *testing.T) {
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	tmpDir := t.TempDir()
 	oidcURL, mintToken := startCustomMockOIDC(t)
 	cpPort, cpURL := startMesh(t, filepath.Join(tmpDir, "mesh"), oidcURL, mintToken)
@@ -277,12 +277,12 @@ func TestSamNodeRunWithStoredIdentity(t *testing.T) {
 	}
 }
 
-// TestSamNodeRunControlPlaneMismatch covers a node enrolled with one mesh
+// TestAgentMeshNodeRunControlPlaneMismatch covers a node enrolled with one mesh
 // being pointed at another: it must refuse, with or without --join, keeping
 // its identity for the first mesh and leaving no trace on the second, and
 // "reset" must clear the way for a fresh enrollment there.
-func TestSamNodeRunControlPlaneMismatch(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+func TestAgentMeshNodeRunControlPlaneMismatch(t *testing.T) {
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	tmpDir := t.TempDir()
 	oidcURL, mintToken := startCustomMockOIDC(t)
 	cpPortA, cpURLA := startMesh(t, filepath.Join(tmpDir, "meshA"), oidcURL, mintToken)
@@ -308,14 +308,14 @@ func TestSamNodeRunControlPlaneMismatch(t *testing.T) {
 	} {
 		n := launchNode(t, nodeBin, env, home, append(args, "--allow-loopback", "--api-token-path", token)...)
 		if err := n.exitsWithin(t, 10*time.Second); err == nil {
-			t.Fatalf("sam-node %s exited cleanly against a mesh it is not enrolled with", strings.Join(args, " "))
+			t.Fatalf("agentmesh-node %s exited cleanly against a mesh it is not enrolled with", strings.Join(args, " "))
 		}
 		identity, storedURL := storedMembership(t, dataDir)
 		if !bytes.Equal(identity, issuedByA) || storedURL != cpURLA {
-			t.Fatalf("sam-node %s changed the stored membership (control plane now %q)", strings.Join(args, " "), storedURL)
+			t.Fatalf("agentmesh-node %s changed the stored membership (control plane now %q)", strings.Join(args, " "), storedURL)
 		}
 		if fetchAdminStatus(t, cpPortB, testAdminToken).enrolledNode(peerID) != nil {
-			t.Fatalf("sam-node %s enrolled with mesh B", strings.Join(args, " "))
+			t.Fatalf("agentmesh-node %s enrolled with mesh B", strings.Join(args, " "))
 		}
 	}
 
@@ -323,7 +323,7 @@ func TestSamNodeRunControlPlaneMismatch(t *testing.T) {
 	// peer ID, stays.
 	stdout, stderr, err := runCommand(t, repoRoot(t), 5*time.Second, env, "", nodeBin, "reset")
 	if err != nil {
-		t.Fatalf("sam-node reset: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		t.Fatalf("agentmesh-node reset: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 	if identity, storedURL := storedMembership(t, dataDir); len(identity) != 0 || storedURL != "" {
 		t.Fatalf("reset left a membership behind (control plane %q)", storedURL)

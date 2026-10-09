@@ -41,7 +41,7 @@ const (
 
 var inboundRefusedTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
-		Name: "sam_router_inbound_connections_refused_total",
+		Name: "agentmesh_router_inbound_connections_refused_total",
 		Help: "Inbound connections the resource manager refused before the handshake, by reason",
 	},
 	[]string{"reason"},
@@ -133,7 +133,7 @@ func refusalReason(err error) string {
 // connsPerSourceIPDesc exports the cap in force, so a dashboard can read the
 // refusal counter against it.
 var connsPerSourceIPDesc = prometheus.NewDesc(
-	"sam_router_conns_per_source_ip_limit",
+	"agentmesh_router_conns_per_source_ip_limit",
 	"Inbound connections allowed from one source IP",
 	nil, nil)
 

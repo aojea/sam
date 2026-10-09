@@ -362,7 +362,7 @@ func (s *Server) HandleOpenIDConfiguration(w http.ResponseWriter, r *http.Reques
 		},
 		"code_challenge_methods_supported": []string{"S256"},
 		"claims_supported": []string{
-			"iss", "sub", "aud", "exp", "iat", "jti", "act", "sam_roles", "sam_task",
+			"iss", "sub", "aud", "exp", "iat", "jti", "act", "mesh_roles", "mesh_task",
 		},
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -735,7 +735,7 @@ func (s *Server) HandleRevocations(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleTokenExchange serves stateless HTTP POST `/token/exchange` (mesh protocol).
-// It verifies the calling sam-node's Biscuit + PoP challenge, verifies the
+// It verifies the calling agentmesh-node's Biscuit + PoP challenge, verifies the
 // inbound subject JWT, resolves subject roles from mesh policy, and mints a
 // short-lived Delegated Session Biscuit with zero database writes.
 func (s *Server) HandleTokenExchange(w http.ResponseWriter, r *http.Request) {
@@ -936,7 +936,7 @@ func (s *Server) mintDelegatedBiscuitFromJWT(
 }
 
 // HandleSTSToken serves stateless HTTP POST `/sts/token` (mesh protocol).
-// It authenticates the calling egress sam-node via Biscuit + PoP challenge,
+// It authenticates the calling egress agentmesh-node via Biscuit + PoP challenge,
 // verifies the caller's Biscuit + appended tar_block chain against standing
 // mesh policy and egress://<destination>, and mints a short-lived ES256 JWT.
 func (s *Server) HandleSTSToken(w http.ResponseWriter, r *http.Request) {
@@ -994,7 +994,7 @@ func (s *Server) HandleSTSToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify that if the destination is configured in PolicyConfig.egress with
-	// served_by constraints, the calling sam-node is authorized to serve it.
+	// served_by constraints, the calling agentmesh-node is authorized to serve it.
 	destHost := api.NormalizeMeshHost(strings.TrimPrefix(strings.TrimSpace(req.Destination), api.EgressServicePrefix))
 	if egressList, err := s.store.GetEgressDestinations(r.Context()); err == nil {
 		for _, d := range egressList {
@@ -1053,17 +1053,17 @@ func (s *Server) HandleSTSToken(w http.ResponseWriter, r *http.Request) {
 	subject := claims.Principal()
 	taskName := claims.InnermostTaskName()
 	jwtClaims := jwt.MapClaims{
-		"iss":       s.oidcIssuerURL(r),
-		"sub":       subject,
-		"aud":       audience,
-		"act":       map[string]any{"sub": nodeRecord.PeerID},
-		"sam_roles": claims.Roles,
-		"iat":       now.Unix(),
-		"exp":       jwtExpiry.Unix(),
-		"jti":       jti,
+		"iss":        s.oidcIssuerURL(r),
+		"sub":        subject,
+		"aud":        audience,
+		"act":        map[string]any{"sub": nodeRecord.PeerID},
+		"mesh_roles": claims.Roles,
+		"iat":        now.Unix(),
+		"exp":        jwtExpiry.Unix(),
+		"jti":        jti,
 	}
 	if taskName != "" {
-		jwtClaims["sam_task"] = taskName
+		jwtClaims["mesh_task"] = taskName
 	}
 
 	signedJWT, err := s.oidcSigner.SignJWT(r.Context(), jwtClaims)
@@ -1204,7 +1204,7 @@ func (s *Server) authorizeBiscuitForEgress(ctx context.Context, rawBiscuit []byt
 	}
 	// Destination-level STS minting checks whether the role grants egress://<destination>
 	// at all (plain or HTTP-narrowed); per-request method/path restrictions are
-	// enforced by the egress sam-node PEP on the wire HTTP request.
+	// enforced by the egress agentmesh-node PEP on the wire HTTP request.
 	for _, r := range stsDestinationRules {
 		authorizer.AddRule(r)
 	}
@@ -1231,7 +1231,7 @@ func (s *Server) authorizeBiscuitForEgress(ctx context.Context, rawBiscuit []byt
 		return nil, http.StatusForbidden, err
 	}
 
-	// Collect any roles derived via Datalog policy bindings so sam_roles is complete.
+	// Collect any roles derived via Datalog policy bindings so mesh_roles is complete.
 	if facts, qErr := authorizer.Query(biscuit.Rule{
 		Head: biscuit.Predicate{Name: "get_roles", IDs: []biscuit.Term{biscuit.Variable("r")}},
 		Body: []biscuit.Predicate{{Name: api.FactRole, IDs: []biscuit.Term{biscuit.Variable("r")}}},

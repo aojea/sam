@@ -59,7 +59,7 @@ import (
 )
 
 // sdkMesh is the real mesh the SDK tests run against: a control plane
-// publishing gossip events, a sam-router, and a sam-node serving the MCP
+// publishing gossip events, a agentmesh-router, and a agentmesh-node serving the MCP
 // service "calc" from a backend the test runs.
 type sdkMesh struct {
 	root       string
@@ -92,7 +92,7 @@ type sdkMesh struct {
 // against a real credential from every implementation.
 var sdkMeshLabels = map[string]string{"region": "na-us", "team": "platform"}
 
-// The egress destination the sam-node serves, assigned to it by label, and
+// The egress destination the agentmesh-node serves, assigned to it by label, and
 // the credential the platform delivered to the node's host for it.
 const (
 	sdkMeshEgressHost       = "api.example.test"
@@ -149,7 +149,7 @@ func startSDKMesh(t *testing.T) *sdkMesh {
 	cpPort, _ := strconv.Atoi(portStr)
 
 	// Bans and rotations reach the mesh as gossip events through the routers,
-	// as the sam-control-plane binary publishes them.
+	// as the agentmesh-control-plane binary publishes them.
 	publisher, err := controlplane.NewMeshPublisher(context.Background(), store, 500*time.Millisecond)
 	if err != nil {
 		t.Fatalf("failed to start mesh event publisher: %v", err)
@@ -212,7 +212,7 @@ egress:
 	}()
 	go func() {
 		defer rwg.Done()
-		nodeBin = buildBinary(t, "./cmd/sam-node")
+		nodeBin = buildBinary(t, "./cmd/agentmesh-node")
 	}()
 	rwg.Wait()
 	routerAddrs := []string{routerA, routerB}
@@ -223,7 +223,7 @@ egress:
 		t.Fatalf("failed to load control plane signing key: %v", err)
 	}
 
-	// The Go node: a sam-node enrolled through OIDC, listening on loopback,
+	// The Go node: a agentmesh-node enrolled through OIDC, listening on loopback,
 	// serving the MCP service "calc" from a backend this test runs.
 	backend := httptest.NewServer(newBoundaryMCPHandler(t))
 	t.Cleanup(backend.Close)
@@ -287,7 +287,7 @@ egress:
 
 const sdkMeshAgentName = "echo-agent"
 
-const sdkMeshStockAgentCard = `{"name":"echo-agent","description":"stock agent behind a sam-node","version":"1.0.0",` +
+const sdkMeshStockAgentCard = `{"name":"echo-agent","description":"stock agent behind a agentmesh-node","version":"1.0.0",` +
 	`"capabilities":{"streaming":true},` +
 	`"supportedInterfaces":[{"url":"http://127.0.0.1:7777/","protocolBinding":"JSONRPC","protocolVersion":"1.0"},` +
 	`{"url":"127.0.0.1:50051","protocolBinding":"GRPC","protocolVersion":"1.0"}],` +
@@ -363,24 +363,24 @@ var sdkMemberLaunchers = []sdkRunner{
 	},
 }
 
-// TestNativeSDKsMesh runs one mesh: a control plane, a sam-router, a
-// sam-node serving an MCP service, and one member per SDK, all real. It
+// TestNativeSDKsMesh runs one mesh: a control plane, a agentmesh-router, a
+// agentmesh-node serving an MCP service, and one member per SDK, all real. It
 // then walks the connectivity matrix. Every member authenticates with the
 // router and gets a relay reservation, which the router grants only to
-// admitted peers. Each SDK member reaches the sam-node directly and the
+// admitted peers. Each SDK member reaches the agentmesh-node directly and the
 // other SDK member both directly and through the router, and on every path
 // both ends verify each other's credential with the /mesh/auth/1.0.0
-// handshake. The sam-node reaches each SDK member through the router. A Go
+// handshake. The agentmesh-node reaches each SDK member through the router. A Go
 // peer that is itself admitted does the same and also checks that a forged
-// credential gets no answer. Then each SDK member discovers the sam-node's
+// credential gets no answer. Then each SDK member discovers the agentmesh-node's
 // service in the DHT, lists and calls its tools over /mesh/mcp/1.0.0 through
 // the router, reads the node's own catalog, and is refused a service the
-// node does not have. Every member and the sam-node attest the same labels,
+// node does not have. Every member and the agentmesh-node attest the same labels,
 // and the caller-side label requirement is run as one matrix from each SDK
 // against the node and from the node against each SDK agent, so the three
 // implementations agree on what a requirement of several pairs means. Then
 // each SDK member accepts A2A requests for its
-// agent: the sam-node reaches it by peer ID through its egress proxy
+// agent: the agentmesh-node reaches it by peer ID through its egress proxy
 // (/mesh/<peer>/a2a/agent/...), the other SDK member does the same over the
 // mesh, the agent is in no discovery table, the member speaks no
 // /mesh/mcp/1.0.0, and a Go peer holding a role the policy grants nothing is
@@ -435,17 +435,17 @@ func TestNativeSDKsMesh(t *testing.T) {
 	for _, m := range members {
 		m := m
 		t.Run(m.name, func(t *testing.T) {
-			// SDK -> sam-node, directly: the node's HandleAuthHandshake
+			// SDK -> agentmesh-node, directly: the node's HandleAuthHandshake
 			// verifies the member's biscuit and answers with its own.
 			nodeCred := m.auth(t, samNode.p2pAddr)
 			if nodeCred.PeerID != samNode.peerID.String() || !contains(nodeCred.Roles, api.RoleNode) {
 				t.Fatalf("%s verified the node as %+v", m.name, nodeCred)
 			}
 			if !strings.Contains(samNode.log(), "Successfully authenticated peer "+m.report.PeerID) {
-				t.Errorf("sam-node log does not record admitting %s", m.report.PeerID)
+				t.Errorf("agentmesh-node log does not record admitting %s", m.report.PeerID)
 			}
 
-			// sam-node -> SDK, through the router: the node reaches the member
+			// agentmesh-node -> SDK, through the router: the node reaches the member
 			// on its relayed address, which the router only serves for
 			// authenticated peers on both ends.
 			connectPeerWithToken(t, nodeAPI, "node-token", m.report.RelayAddresses[0])
@@ -492,7 +492,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 
 			// Services. The node advertises calc in the DHT once its backend
 			// answered a probe; the member finds it there and calls it through
-			// the router, the way sam-node's call_remote_tool would.
+			// the router, the way agentmesh-node's call_remote_tool would.
 			providers := m.discoverUntil(t, "mcp", serviceName, samNode.peerID.String(), 20*time.Second)
 			if len(providers) != 1 {
 				t.Fatalf("%s discovered %+v for %s, want only the node", m.name, providers, serviceName)
@@ -588,7 +588,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 			t.Run(m.name, func(t *testing.T) {
 				t.Parallel()
 				cmd := exec.Command(m.cmd.Path, m.cmd.Args[1:]...)
-				floored := launchSDKMember(t, m.name+"-floored", cmd, root, baseURL, adminToken, "SAM_SDK_EGRESS_REQUIRE_LABELS=team=nobody")
+				floored := launchSDKMember(t, m.name+"-floored", cmd, root, baseURL, adminToken, "AGENTMESH_SDK_EGRESS_REQUIRE_LABELS=team=nobody")
 				byFloor := func(what, target, err string) {
 					if !strings.Contains(err, "LabelsNotSatisfied") {
 						t.Errorf("%s %s to %s was not refused by the floor: %q", floored.name, what, target, err)
@@ -655,12 +655,12 @@ func TestNativeSDKsMesh(t *testing.T) {
 		t.Run(m.name+"-accepts", func(t *testing.T) {
 			sdkPeer, _ := peer.Decode(m.report.PeerID)
 
-			// sam-node -> SDK agent, through the egress proxy: the node
+			// agentmesh-node -> SDK agent, through the egress proxy: the node
 			// verifies the member's credential, then the member authorizes
 			// the node's and answers with who called.
 			status, body := egressGet(t, nodeAPI, "node-token", "/mesh/"+m.report.PeerID+"/a2a/agent/card")
 			if status != 200 {
-				t.Fatalf("sam-node egress to %s agent: status %d, body %s", m.name, status, body)
+				t.Fatalf("agentmesh-node egress to %s agent: status %d, body %s", m.name, status, body)
 			}
 			var seen struct {
 				SDK  string `json:"sdk"`
@@ -668,7 +668,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 				Path string `json:"path"`
 			}
 			if json.Unmarshal([]byte(body), &seen) != nil || seen.SDK != m.name || seen.Peer != samNode.peerID.String() || seen.Path != "/card" {
-				t.Fatalf("sam-node egress to %s agent answered %s", m.name, body)
+				t.Fatalf("agentmesh-node egress to %s agent answered %s", m.name, body)
 			}
 
 			// The node's caller-side requirement against the member's
@@ -680,7 +680,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 				}
 				status, body := egressGetRequiring(t, nodeAPI, "node-token", "/mesh/"+m.report.PeerID+"/a2a/agent/card", tc.required)
 				if status != want {
-					t.Errorf("sam-node requiring %v of %s (%s): status %d %s, want %d", tc.required, m.name, tc.name, status, strings.TrimSpace(body), want)
+					t.Errorf("agentmesh-node requiring %v of %s (%s): status %d %s, want %d", tc.required, m.name, tc.name, status, strings.TrimSpace(body), want)
 				}
 			}
 
@@ -810,7 +810,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 
 		// The control plane rotates its signing key; the retiring key stays
 		// valid for its grace period, and the rotation is announced as the
-		// sam-control-plane binary announces it. A member learns the new key
+		// agentmesh-control-plane binary announces it. A member learns the new key
 		// from the event or from its next pull, and since its credential
 		// predates the rotation, refreshes it under the new key.
 		newPub, newPriv, err := ed25519.GenerateKey(nil)
@@ -843,7 +843,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 			if _, err := identity.VerifyBiscuitAndGetExpiry(fresh, sdkPeer, []ed25519.PublicKey{cpPub}, 5*time.Second); err == nil {
 				t.Fatalf("%s refreshed credential still verifies under the retiring key", m.name)
 			}
-			// The mesh keeps working under the new credential: the sam-node
+			// The mesh keeps working under the new credential: the agentmesh-node
 			// learned the key from the same event.
 			deadline := time.Now().Add(10 * time.Second)
 			for {
@@ -915,7 +915,7 @@ func TestNativeSDKsAcrossRouters(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			m := launchSDKMember(t, sp.launcher.name+"@"+sp.router[len(sp.router)-6:], sp.cmd, mesh.root, mesh.baseURL, mesh.adminToken, "SAM_SDK_ROUTERS="+sp.router)
+			m := launchSDKMember(t, sp.launcher.name+"@"+sp.router[len(sp.router)-6:], sp.cmd, mesh.root, mesh.baseURL, mesh.adminToken, "AGENTMESH_SDK_ROUTERS="+sp.router)
 			m.accept(t, "agent")
 			members[i] = placed{m, sp.router, sp.routerAddr}
 		}()
@@ -976,7 +976,7 @@ func TestNativeSDKsAcrossRouters(t *testing.T) {
 // A router rescheduled keeps its key and comes back on another address. A
 // member that reserved on it advertises a dead relayed address until it
 // reserves again, and it must do so at the router's new address: here a
-// literal one, as sam-one hands out, so there is no name to re-resolve and
+// literal one, as agentmesh-one hands out, so there is no name to re-resolve and
 // only the control plane's list, which the member pulls, names it.
 func TestNativeSDKsFollowAMovedRouter(t *testing.T) {
 	mesh := startSDKMesh(t)
@@ -991,7 +991,7 @@ func TestNativeSDKsFollowAMovedRouter(t *testing.T) {
 			t.Logf("%s SDK skipped: %s", launcher.name, skip)
 			continue
 		}
-		m := launchSDKMember(t, launcher.name, cmd, mesh.root, mesh.baseURL, mesh.adminToken, "SAM_SDK_ROUTERS="+router, "SAM_SDK_RELAY_CHECK_SECONDS=0.5")
+		m := launchSDKMember(t, launcher.name, cmd, mesh.root, mesh.baseURL, mesh.adminToken, "AGENTMESH_SDK_ROUTERS="+router, "AGENTMESH_SDK_RELAY_CHECK_SECONDS=0.5")
 		if got := routerIDs(m.report); !reflect.DeepEqual(got, []string{router}) {
 			t.Fatalf("%s joined through %v, want %s only", m.name, got, router)
 		}
@@ -1063,7 +1063,7 @@ func routerIDs(report sdkJoinReport) []string {
 
 func startSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, adminToken string, routerAddrs []string) *sdkMember {
 	t.Helper()
-	m := launchSDKMember(t, name, cmd, root, baseURL, adminToken, "SAM_SDK_LISTEN_ADDRS=/ip4/127.0.0.1/tcp/0")
+	m := launchSDKMember(t, name, cmd, root, baseURL, adminToken, "AGENTMESH_SDK_LISTEN_ADDRS=/ip4/127.0.0.1/tcp/0")
 	// Every router the control plane named admitted the member, in whatever
 	// order it was handed them; it reserved on the first of its own list.
 	var admitted []string
@@ -1104,9 +1104,9 @@ func launchSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, ad
 		t.Fatalf("failed to write bootstrap token: %v", err)
 	}
 	return launchSDKRunner(t, name, cmd, root, baseURL, append([]string{
-		"SAM_BOOTSTRAP_TOKEN_PATH=" + tokenPath,
-		"SAM_SDK_LABELS=" + labelsEnv(sdkMeshLabels),
-		"SAM_SDK_EGRESS_REQUIRE_LABELS=region=" + sdkMeshLabels["region"],
+		"AGENTMESH_BOOTSTRAP_TOKEN_PATH=" + tokenPath,
+		"AGENTMESH_SDK_LABELS=" + labelsEnv(sdkMeshLabels),
+		"AGENTMESH_SDK_EGRESS_REQUIRE_LABELS=region=" + sdkMeshLabels["region"],
 	}, env...)...)
 }
 
@@ -1115,8 +1115,8 @@ func launchSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, ad
 func launchSDKRunner(t *testing.T, name string, cmd *exec.Cmd, root, baseURL string, env ...string) *sdkMember {
 	t.Helper()
 	cmd.Env = append(append(os.Environ(),
-		"SAM_CONTROL_PLANE_URL="+baseURL,
-		"SAM_SDK_STATE_DIR="+filepath.Join(t.TempDir(), "state"),
+		"AGENTMESH_CONTROL_PLANE_URL="+baseURL,
+		"AGENTMESH_SDK_STATE_DIR="+filepath.Join(t.TempDir(), "state"),
 	), env...)
 	cmd.Dir = root
 	m := &sdkMember{name: name, cmd: cmd, stderr: &bytes.Buffer{}}
@@ -1507,7 +1507,7 @@ func (m *sdkMember) readLine(t *testing.T, timeout time.Duration) []byte {
 	}
 }
 
-// newAdmittedGoPeer is a libp2p host configured like sam-node's, connected
+// newAdmittedGoPeer is a libp2p host configured like agentmesh-node's, connected
 // to every router and past their auth handshakes, so each relays for it.
 func newAdmittedGoPeer(t *testing.T, ctx context.Context, cpPriv ed25519.PrivateKey, routerAddrs []string) host.Host {
 	t.Helper()
@@ -1583,7 +1583,7 @@ func tryMCPStream(ctx context.Context, h host.Host, target peer.ID, addr multiad
 }
 
 // libp2pHTTPGet is one GET over /libp2p-http with the biscuit in
-// X-Mesh-Biscuit, the way sam-node's egress proxy sends it.
+// X-Mesh-Biscuit, the way agentmesh-node's egress proxy sends it.
 func libp2pHTTPGet(t *testing.T, ctx context.Context, h host.Host, target peer.ID, biscuit []byte, path string) (int, string) {
 	t.Helper()
 	client := &http.Client{Transport: libp2phttp.NewTransport(h), Timeout: 15 * time.Second}
@@ -1601,7 +1601,7 @@ func libp2pHTTPGet(t *testing.T, ctx context.Context, h host.Host, target peer.I
 	return resp.StatusCode, string(body)
 }
 
-// egressGet is a GET through sam-node's egress proxy with the node API token.
+// egressGet is a GET through agentmesh-node's egress proxy with the node API token.
 func egressGet(t *testing.T, apiAddr, token, path string) (int, string) {
 	t.Helper()
 	return egressGetRequiring(t, apiAddr, token, path, nil)
@@ -1628,8 +1628,8 @@ func egressGetRequiring(t *testing.T, apiAddr, token, path string, required map[
 	return resp.StatusCode, string(body)
 }
 
-// labelsEnv renders labels as "k=v,k2=v2", the form the runners' SAM_SDK_LABELS
-// and sam-node's X-Mesh-Required-Labels both take, keys sorted.
+// labelsEnv renders labels as "k=v,k2=v2", the form the runners' AGENTMESH_SDK_LABELS
+// and agentmesh-node's X-Mesh-Required-Labels both take, keys sorted.
 func labelsEnv(labels map[string]string) string {
 	keys := make([]string, 0, len(labels))
 	for k := range labels {
@@ -1707,7 +1707,7 @@ func tryAuthHandshake(ctx context.Context, h host.Host, target peer.ID, addr mul
 }
 
 // refuseForgedFrame checks that target answers a frame it cannot verify
-// with a closed stream and nothing else, as sam-node does.
+// with a closed stream and nothing else, as agentmesh-node does.
 func refuseForgedFrame(t *testing.T, ctx context.Context, h host.Host, target peer.ID) {
 	t.Helper()
 	s, err := h.NewStream(network.WithAllowLimitedConn(ctx, "auth"), target, api.AuthProtocolID)

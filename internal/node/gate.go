@@ -34,7 +34,7 @@ var _ connmgr.ConnectionGater = (*nodeConnGate)(nil)
 
 // nodeConnGate enforces swarm-level AuthN policies
 type nodeConnGate struct {
-	node *SamNode
+	node *AgentMeshNode
 }
 
 // InterceptPeerDial controls who we are allowed to call (Outbound)
@@ -72,7 +72,7 @@ func (g *nodeConnGate) InterceptSecured(dir network.Direction, p peer.ID, n netw
 // HandleMCPStream is the libp2p stream handler for the MCP protocol.
 // It routes the authenticated stream to the appropriate backend service,
 // or serves the internal MCP catalog if the TargetService is empty/catalog.
-func (n *SamNode) HandleMCPStream(s network.Stream, reqCtx RequestContext) {
+func (n *AgentMeshNode) HandleMCPStream(s network.Stream, reqCtx RequestContext) {
 	// If the TargetService is for a registered local backend, dumb-pipe proxy to it.
 	target := reqCtx.Target
 	targetType, targetName := api.ParseServiceTarget(target)
@@ -106,7 +106,7 @@ func (n *SamNode) HandleMCPStream(s network.Stream, reqCtx RequestContext) {
 
 	transport := NewStreamTransport(s)
 	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "sam-node-catalog",
+		Name:    "agentmesh-node-catalog",
 		Version: "0.1.0",
 	}, nil)
 

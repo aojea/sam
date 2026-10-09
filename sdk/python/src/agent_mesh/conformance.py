@@ -18,10 +18,10 @@ holds as JSON on stdout for the Go side to verify. The JavaScript SDK ships the
 same runner (dist/conformance.js) with the same environment and output, so one
 Go test checks both.
 
-  SAM_CONTROL_PLANE_URL      base URL of the control plane
-  SAM_BOOTSTRAP_TOKEN_PATH   file holding a bootstrap token
-  SAM_SDK_STATE_DIR          directory for identity and credential
-  SAM_INSECURE_CONTROL_PLANE "1" to accept plaintext http:// off loopback
+  AGENTMESH_CONTROL_PLANE_URL      base URL of the control plane
+  AGENTMESH_BOOTSTRAP_TOKEN_PATH   file holding a bootstrap token
+  AGENTMESH_SDK_STATE_DIR          directory for identity and credential
+  AGENTMESH_INSECURE_CONTROL_PLANE "1" to accept plaintext http:// off loopback
 """
 
 import base64
@@ -40,10 +40,10 @@ def _require_env(name: str) -> str:
 
 
 def main() -> None:
-    control_plane_url = _require_env("SAM_CONTROL_PLANE_URL")
-    bootstrap_token_path = _require_env("SAM_BOOTSTRAP_TOKEN_PATH")
-    state_dir = _require_env("SAM_SDK_STATE_DIR")
-    allow_insecure = os.environ.get("SAM_INSECURE_CONTROL_PLANE") == "1"
+    control_plane_url = _require_env("AGENTMESH_CONTROL_PLANE_URL")
+    bootstrap_token_path = _require_env("AGENTMESH_BOOTSTRAP_TOKEN_PATH")
+    state_dir = _require_env("AGENTMESH_SDK_STATE_DIR")
+    allow_insecure = os.environ.get("AGENTMESH_INSECURE_CONTROL_PLANE") == "1"
 
     mesh = AgentMesh.enroll(
         control_plane_url,

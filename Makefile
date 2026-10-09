@@ -25,13 +25,13 @@ ANDROID_CC_X86_64=$(ANDROID_NDK_TOOLCHAIN)/x86_64-linux-android30-clang
 
 
 build:
-	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/sam-node" ./cmd/sam-node
-	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/sam-control-plane" ./cmd/sam-control-plane
-	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/sam-router" ./cmd/sam-router
-	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/sam-one" ./cmd/sam-one
+	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/agentmesh-node" ./cmd/agentmesh-node
+	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/agentmesh-control-plane" ./cmd/agentmesh-control-plane
+	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/agentmesh-router" ./cmd/agentmesh-router
+	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/agentmesh-one" ./cmd/agentmesh-one
 	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/mcp-client" ./cmd/mcp-client
-	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/sam-bench" ./cmd/sam-bench
-	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/sam-console" ./cmd/sam-console
+	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/agentmesh-bench" ./cmd/agentmesh-bench
+	go build -v -ldflags "$(VERSION_LDFLAGS)" -o "$(OUT_DIR)/agentmesh-console" ./cmd/agentmesh-console
 
 
 .PHONY: mobile-ffi-host mobile-ffi-android mobile-ffi-android-x86_64 mobile-ffi-ios mobile-ffi mobile-app-apk mobile-app-apk-emulator mobile-app-bundle
@@ -147,14 +147,14 @@ kind-e2e-mesh: build
 
 # A mesh of your own on port 8080. In a GitHub codespace the port is
 # published on the codespace's https URL; anywhere else this is a local
-# sam-one. Uses ./bin/sam-one when built, else sam-one on PATH. State lives
-# in ./.sam-one (ignored by git; in a codespace it survives rebuilds). Extra
+# agentmesh-one. Uses ./bin/agentmesh-one when built, else agentmesh-one on PATH. State lives
+# in ./.agentmesh-one (ignored by git; in a codespace it survives rebuilds). Extra
 # flags pass through: make testnet ARGS="--issuer https://accounts.google.com".
-SAM_ONE_BIN ?= $(if $(wildcard $(OUT_DIR)/sam-one),$(OUT_DIR)/sam-one,sam-one)
-SAM_ONE_DATA_DIR ?= $(REPO_ROOT)/.sam-one
+AGENTMESH_ONE_BIN ?= $(if $(wildcard $(OUT_DIR)/agentmesh-one),$(OUT_DIR)/agentmesh-one,agentmesh-one)
+AGENTMESH_ONE_DATA_DIR ?= $(REPO_ROOT)/.agentmesh-one
 .PHONY: testnet
 testnet:
-	$(SAM_ONE_BIN) --data-dir "$(SAM_ONE_DATA_DIR)" --port 8080 $(if $(CODESPACE_NAME),--tunnel codespaces) $(ARGS)
+	$(AGENTMESH_ONE_BIN) --data-dir "$(AGENTMESH_ONE_DATA_DIR)" --port 8080 $(if $(CODESPACE_NAME),--tunnel codespaces) $(ARGS)
 
 test:
 	CGO_ENABLED=1 go test -v -race -count 1 $(if $(WHAT),-run $(WHAT)) ./...
@@ -208,7 +208,7 @@ test-e2e: build docker-build
 			exit 1; \
 		fi; \
 	}
-	SAM_NODE_BINARY=$(OUT_DIR)/sam-node SAM_CONTROL_PLANE_BINARY=$(OUT_DIR)/sam-control-plane SAM_ROUTER_BINARY=$(OUT_DIR)/sam-router bats --verbose-run tests/e2e/
+	AGENTMESH_NODE_BINARY=$(OUT_DIR)/agentmesh-node AGENTMESH_CONTROL_PLANE_BINARY=$(OUT_DIR)/agentmesh-control-plane AGENTMESH_ROUTER_BINARY=$(OUT_DIR)/agentmesh-router bats --verbose-run tests/e2e/
 
 test-e2e-container: build docker-build
 	@command -v docker >/dev/null 2>&1 || { echo "docker not found"; exit 1; }
@@ -259,26 +259,26 @@ update:
 	go mod tidy
 
 docker-build-control-plane:
-	docker build --load --build-arg VERSION="$(VERSION)" -t sam-control-plane:local -f Dockerfile.sam-control-plane .
+	docker build --load --build-arg VERSION="$(VERSION)" -t agentmesh-control-plane:local -f Dockerfile.agentmesh-control-plane .
 
 docker-build-router:
-	docker build --load --build-arg VERSION="$(VERSION)" -t sam-router:local -f Dockerfile.sam-router .
+	docker build --load --build-arg VERSION="$(VERSION)" -t agentmesh-router:local -f Dockerfile.agentmesh-router .
 
 docker-build-node:
-	docker build --load --build-arg VERSION="$(VERSION)" -t sam-node:local -f Dockerfile.sam-node .
+	docker build --load --build-arg VERSION="$(VERSION)" -t agentmesh-node:local -f Dockerfile.agentmesh-node .
 
 docker-build-one:
-	docker build --load --build-arg VERSION="$(VERSION)" -t sam-one:local -f Dockerfile.sam-one .
+	docker build --load --build-arg VERSION="$(VERSION)" -t agentmesh-one:local -f Dockerfile.agentmesh-one .
 
 docker-build-mock-oidc:
-	docker build --load -t sam-mock-oidc:local -f tests/e2e/docker/Dockerfile.mock-oidc .
+	docker build --load -t agentmesh-mock-oidc:local -f tests/e2e/docker/Dockerfile.mock-oidc .
 
 docker-build-e2e-runtime:
-	docker build --load -t sam-e2e-runtime:local -f tests/e2e/docker/Dockerfile.sam-runtime .
+	docker build --load -t agentmesh-e2e-runtime:local -f tests/e2e/docker/Dockerfile.sam-runtime .
 
-docker-build-sam-console:
-	docker build --load --build-arg VERSION="$(VERSION)" -t sam-console:local -f Dockerfile.sam-console .
+docker-build-agentmesh-console:
+	docker build --load --build-arg VERSION="$(VERSION)" -t agentmesh-console:local -f Dockerfile.agentmesh-console .
 
-docker-build: docker-build-control-plane docker-build-router docker-build-node docker-build-one docker-build-mock-oidc docker-build-e2e-runtime docker-build-sam-console
+docker-build: docker-build-control-plane docker-build-router docker-build-node docker-build-one docker-build-mock-oidc docker-build-e2e-runtime docker-build-agentmesh-console
 
-.PHONY: docker-build-control-plane docker-build-router docker-build-node docker-build-one docker-build-mock-oidc docker-build-e2e-runtime docker-build-sam-console docker-build
+.PHONY: docker-build-control-plane docker-build-router docker-build-node docker-build-one docker-build-mock-oidc docker-build-e2e-runtime docker-build-agentmesh-console docker-build

@@ -23,7 +23,7 @@ import (
 	"net/url"
 )
 
-// InferenceEngine is the connector between SAM and an inference backend.
+// InferenceEngine is the connector between Agent Mesh and an inference backend.
 // Implementations adapt one backend family; the service and facade layers
 // stay backend-agnostic.
 type InferenceEngine interface {

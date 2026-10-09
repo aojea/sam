@@ -130,7 +130,7 @@ func TestPeerBindingRejectsAppendedBlock(t *testing.T) {
 	}
 	// Nor is the token accepted from its real owner: appended blocks are the
 	// one place a holder can put Datalog of their own, and even a check there
-	// is a rule biscuit-go runs to completion with no deadline, so SAM does
+	// is a rule biscuit-go runs to completion with no deadline, so Agent Mesh does
 	// not evaluate any (ErrAppendedBlocks). RequireAuthorityBinding above is
 	// the defence in depth behind that gate.
 	if _, err := VerifyBiscuit(forged, victim, keys, time.Second); !errors.Is(err, ErrAppendedBlocks) {

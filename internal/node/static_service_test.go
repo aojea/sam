@@ -180,7 +180,7 @@ func TestStaticServiceRegistrationRequiresConnection(t *testing.T) {
 	}
 
 	// 4. Create Node with empty router addrs initially
-	node, err := NewSamNode(Options{
+	node, err := NewAgentMeshNode(Options{
 		PrivKey:           priv,
 		RouterAddrs:       []multiaddr.Multiaddr{},
 		Store:             store,
@@ -267,7 +267,7 @@ func TestStaticServiceRegistrationCommandFailure(t *testing.T) {
 	}
 
 	// 4. Create Node with empty router addrs initially
-	node, err := NewSamNode(Options{
+	node, err := NewAgentMeshNode(Options{
 		PrivKey:           priv,
 		RouterAddrs:       []multiaddr.Multiaddr{},
 		Store:             store,

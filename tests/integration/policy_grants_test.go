@@ -43,11 +43,11 @@ import (
 // while SaveMeshPolicy dropped it on the floor: the grant was configured, the
 // API returned it, and the token was minted without it.
 //
-// This drives the real sam-control-plane binary over its own REST API, so the
+// This drives the real agentmesh-control-plane binary over its own REST API, so the
 // path under test is the deployed one: POST /policies -> database -> enrollment
 // -> the facts actually inside the signed token.
 func TestPolicyGrantsReachTheMintedToken(t *testing.T) {
-	cpBin := buildBinary(t, "./cmd/sam-control-plane")
+	cpBin := buildBinary(t, "./cmd/agentmesh-control-plane")
 	tmpDir := t.TempDir()
 
 	const adminToken = "integration-admin-token"

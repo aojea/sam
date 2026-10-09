@@ -76,7 +76,7 @@ type CheckResult struct {
 	ResponseHeaders map[string]string
 }
 
-// Evaluator evaluates a normalized CheckInput against SAM's Datalog and TAR policy.
+// Evaluator evaluates a normalized CheckInput against Agent Mesh's Datalog and TAR policy.
 type Evaluator func(ctx context.Context, in CheckInput) CheckResult
 
 // GatewayServer serves Envoy HTTP ext_authz, gRPC ext_authz (v3 and v2), and

@@ -25,10 +25,10 @@ import (
 )
 
 // ============================================================================
-// SAM Datalog Authorization Concepts & Predicates
+// Agent Mesh Datalog Authorization Concepts & Predicates
 // ============================================================================
 //
-// SAM enforces security policies using Biscuit tokens containing Datalog facts,
+// Agent Mesh enforces security policies using Biscuit tokens containing Datalog facts,
 // rules, and checks. Here are the core concepts used in our Datalog engine:
 //
 // 1. Replay Defense Facts:
@@ -79,7 +79,7 @@ const (
 	// Example Datalog: check if client_peer_id($id), connection_peer_id($id)
 	FactClientPeerID = "client_peer_id"
 
-	// FactActorNode names the origin sam-node PeerID that exchanged a delegated
+	// FactActorNode names the origin agentmesh-node PeerID that exchanged a delegated
 	// subject credential at POST /token/exchange, for audit logs, for act.sub in
 	// border JWTs, and for ext_proc attributes["mesh"].actor_node. It grants
 	// nothing: no baseline rule and no policy binding reads it.
@@ -90,7 +90,7 @@ const (
 	// Example Datalog: allow if group("data-science")
 	FactGroup = "group"
 
-	// FactRole defines a custom SAM role assigned to the user or node.
+	// FactRole defines a custom Agent Mesh role assigned to the user or node.
 	// Contains: biscuit.String(roleName)
 	// Example Datalog: allow if role("mesh-member")
 	//
@@ -419,7 +419,7 @@ var (
 
 	// BaselineSources is the Datalog text every variable above is parsed from.
 	// The SDKs embed this text (see hack/gen-sdk-datalog) so that a provider
-	// written in another language evaluates the same authorizer as sam-node.
+	// written in another language evaluates the same authorizer as agentmesh-node.
 	BaselineSources DatalogSources
 )
 

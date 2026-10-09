@@ -5,11 +5,11 @@
 //
 //   node a2a-call.js 12D3KooW... "hello"
 //
-// SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
-// SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or
-// SAM_JWT_PATH (a workload identity token your platform issues, such as a
+// AGENTMESH_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
+// AGENTMESH_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or
+// AGENTMESH_JWT_PATH (a workload identity token your platform issues, such as a
 // Kubernetes projected service account token), and keeps the identity and
-// credential in SAM_STATE_DIR; later runs resume from there without it.
+// credential in AGENTMESH_STATE_DIR; later runs resume from there without it.
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { Message, Role, type SendMessageRequest } from "@a2a-js/sdk";
@@ -22,12 +22,12 @@ if (peerId === undefined) {
 }
 
 const mesh = await AgentMesh.enroll({
-  controlPlaneUrl: process.env.SAM_CONTROL_PLANE_URL ?? "https://mesh.example.com",
-  bootstrapTokenPath: process.env.SAM_BOOTSTRAP_TOKEN_PATH,
-  jwtPath: process.env.SAM_JWT_PATH,
-  stateDir: process.env.SAM_STATE_DIR ?? `${homedir()}/.config/sam-mesh/a2a-caller`,
+  controlPlaneUrl: process.env.AGENTMESH_CONTROL_PLANE_URL ?? "https://mesh.example.com",
+  bootstrapTokenPath: process.env.AGENTMESH_BOOTSTRAP_TOKEN_PATH,
+  jwtPath: process.env.AGENTMESH_JWT_PATH,
+  stateDir: process.env.AGENTMESH_STATE_DIR ?? `${homedir()}/.config/sam-mesh/a2a-caller`,
   // A plaintext http:// control plane is otherwise accepted only on loopback.
-  allowInsecure: process.env.SAM_INSECURE_CONTROL_PLANE === "true",
+  allowInsecure: process.env.AGENTMESH_INSECURE_CONTROL_PLANE === "true",
 });
 const session = await mesh.join();
 console.log(`on the mesh as ${session.peerId}`);

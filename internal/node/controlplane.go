@@ -41,7 +41,7 @@ func controlPlaneClient(controlPlaneURL string) *cpclient.Client {
 
 // controlPlane returns a control plane client configured with this node's
 // peer ID and private key so authenticated requests carry a signed challenge.
-func (n *SamNode) controlPlane(controlPlaneURL string) *cpclient.Client {
+func (n *AgentMeshNode) controlPlane(controlPlaneURL string) *cpclient.Client {
 	c := controlPlaneClient(controlPlaneURL)
 	if n == nil {
 		return c

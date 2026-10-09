@@ -64,11 +64,11 @@ func TestConstantTimeEqual(t *testing.T) {
 // the same bar as reading the token file, and every scrape in this repo goes
 // that way.
 func TestMetricsGatedOnTCPButNotOnTheSocket(t *testing.T) {
-	node := &SamNode{
+	node := &AgentMeshNode{
 		BiscuitTimeout: 500 * time.Millisecond,
 		services:       NewServiceRegistry(&fakeDHT{}, 0),
 	}
-	socketPath := filepath.Join(t.TempDir(), "sam.sock")
+	socketPath := filepath.Join(t.TempDir(), "agentmesh.sock")
 
 	srv, err := StartSidecarServer(node, "127.0.0.1:0", socketPath, "test-token", "", "", "")
 	if err != nil {

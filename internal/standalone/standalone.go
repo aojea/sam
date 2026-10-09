@@ -47,11 +47,11 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-var logger = golog.Logger("sam-one")
+var logger = golog.Logger("agentmesh-one")
 
 const (
 	joinTokenPrefix   = "mesh_tok_"
-	adminTokenPrefix  = "sam_adm_"
+	adminTokenPrefix  = "mesh_adm_"
 	deviceTokenPrefix = "mesh_dev_"
 
 	joinTokenFile  = "join-token"
@@ -91,14 +91,14 @@ type Options struct {
 	// DBDriver selects "sqlite" (default) or "postgres".
 	DBDriver string
 	// DBDSN is the database connection string; defaults to
-	// <DataDir>/sam.db for sqlite.
+	// <DataDir>/agentmesh.db for sqlite.
 	DBDSN string
 	// JoinToken is the cluster join token; auto-generated and persisted in
 	// DataDir when empty.
 	JoinToken string
 	// DisableJoinToken runs without any standing join token: devices then
 	// enroll only with explicitly minted bootstrap tokens or through OIDC.
-	// The right setting for a fleet; the default keeps `sam-node join` on a
+	// The right setting for a fleet; the default keeps `agentmesh-node join` on a
 	// laptop zero-config.
 	DisableJoinToken bool
 	// AdminToken protects the admin REST API; auto-generated and persisted in
@@ -179,7 +179,7 @@ func (o *Options) Default() {
 		o.DBDriver = "sqlite"
 	}
 	if o.DBDSN == "" && o.DBDriver == "sqlite" {
-		o.DBDSN = filepath.Join(o.DataDir, "sam.db")
+		o.DBDSN = filepath.Join(o.DataDir, "agentmesh.db")
 	}
 	if len(o.AllowedAudiences) == 0 {
 		o.AllowedAudiences = []string{api.DefaultAudience}
@@ -309,18 +309,18 @@ func (s *Server) Start(ctx context.Context) (retErr error) {
 				return fmt.Errorf("failed to provision join token: %w", err)
 			}
 		}
-		if err := s.ensureBootstrapToken(ctx, s.joinToken, api.RoleNode, joinTokenMaxUsages, joinTokenTTL, "sam-one join token"); err != nil {
+		if err := s.ensureBootstrapToken(ctx, s.joinToken, api.RoleNode, joinTokenMaxUsages, joinTokenTTL, "agentmesh-one join token"); err != nil {
 			return fmt.Errorf("failed to register join token: %w", err)
 		}
 	}
 
 	// Per-boot single-use credential for the embedded router's stock
 	// enrollment flow; never persisted or displayed.
-	routerToken, err := generateToken("sam_rtr_")
+	routerToken, err := generateToken("mesh_rtr_")
 	if err != nil {
 		return err
 	}
-	if err := s.ensureBootstrapToken(ctx, routerToken, api.RoleRouter, 1, routerTokenTTL, "sam-one embedded router token"); err != nil {
+	if err := s.ensureBootstrapToken(ctx, routerToken, api.RoleRouter, 1, routerTokenTTL, "agentmesh-one embedded router token"); err != nil {
 		return fmt.Errorf("failed to register router token: %w", err)
 	}
 
@@ -458,7 +458,7 @@ func (s *Server) AdminToken() string { return s.adminToken }
 func (s *Server) JoinToken() string { return s.joinToken }
 
 // JoinTokenPath is where an auto-generated join token is persisted, for
-// `sam-node join --bootstrap-token-path`.
+// `agentmesh-node join --bootstrap-token-path`.
 func (s *Server) JoinTokenPath() string { return filepath.Join(s.opts.DataDir, joinTokenFile) }
 
 // PeerID returns the embedded router's peer ID.
@@ -468,7 +468,7 @@ func (s *Server) PeerID() string { return s.router.Host.ID().String() }
 // maxUsages enrollments (1 = burned by the first device; more lets one code
 // on a projector enroll a room) and returns its plaintext once. Unlike the
 // join token it is never persisted; a device that missed the window simply
-// gets a new one, and `sam-one token revoke` ends a shared one early.
+// gets a new one, and `agentmesh-one token revoke` ends a shared one early.
 func (s *Server) MintDeviceEnrollmentToken(ctx context.Context, ttl time.Duration, maxUsages int) (string, error) {
 	if ttl <= 0 {
 		ttl = DeviceTokenTTL
@@ -480,7 +480,7 @@ func (s *Server) MintDeviceEnrollmentToken(ctx context.Context, ttl time.Duratio
 	if err != nil {
 		return "", err
 	}
-	if err := s.ensureBootstrapToken(ctx, tok, api.RoleNode, maxUsages, ttl, "sam-one device enrollment via "+s.PublicURL()); err != nil {
+	if err := s.ensureBootstrapToken(ctx, tok, api.RoleNode, maxUsages, ttl, "agentmesh-one device enrollment via "+s.PublicURL()); err != nil {
 		return "", fmt.Errorf("failed to register device enrollment token: %w", err)
 	}
 	return tok, nil
@@ -529,7 +529,7 @@ func (s *Server) seedPolicyOnFirstBoot(ctx context.Context) error {
 // node role opened up for zero-config development use.
 func defaultDevPolicyRoles() []*api.PolicyRole {
 	return []*api.PolicyRole{
-		{Name: "sam-admin", AllowedServices: []string{"*"}, AllowedTargets: []string{"*"}},
+		{Name: "mesh-admin", AllowedServices: []string{"*"}, AllowedTargets: []string{"*"}},
 		{Name: api.RoleRouter, AllowedServices: []string{"*"}, AllowedTargets: []string{"*"}},
 		{Name: api.RoleNode, AllowedServices: []string{"*"}, AllowedTargets: []string{"*"}, AllowedLabels: []string{"*"}},
 	}
@@ -683,7 +683,7 @@ func externalMultiaddr(rawURL string) (string, error) {
 // ensureRouterKey seeds router.key deterministically from an operator-supplied
 // adminToken when no router.key file exists on disk yet. On stateless
 // single-container platforms (e.g. Cloud Run) where /data is ephemeral and
-// SAM_ADMIN_TOKEN is pinned via environment variable, this keeps the embedded
+// AGENTMESH_ADMIN_TOKEN is pinned via environment variable, this keeps the embedded
 // router's libp2p PeerID stable across container restarts without extra config.
 func ensureRouterKey(keyPath, adminToken string) error {
 	if _, err := os.Stat(keyPath); err == nil {
@@ -694,7 +694,7 @@ func ensureRouterKey(keyPath, adminToken string) error {
 	if strings.TrimSpace(adminToken) == "" {
 		return nil
 	}
-	seed := sha256.Sum256([]byte("sam-one-router-ed25519-v1:" + strings.TrimSpace(adminToken)))
+	seed := sha256.Sum256([]byte("agentmesh-one-router-ed25519-v1:" + strings.TrimSpace(adminToken)))
 	priv, _, err := crypto.GenerateEd25519Key(bytes.NewReader(seed[:]))
 	if err != nil {
 		return err

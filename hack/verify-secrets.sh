@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Refuses tracked files that carry a SAM-shaped credential. Generic secret
+# Refuses tracked files that carry a Agent Mesh-shaped credential. Generic secret
 # scanners do not know these shapes: a node API token is 32 random bytes hex
 # encoded behind "Bearer", and a private key block anywhere outside a test
 # fixture is a key somebody will trust (a demo recording once carried a real

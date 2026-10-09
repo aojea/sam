@@ -301,7 +301,7 @@ labels:
 				path = filepath.Join(t.TempDir(), "nonexistent.yaml")
 			} else {
 				dir := t.TempDir()
-				path = filepath.Join(dir, "sam-node.yaml")
+				path = filepath.Join(dir, "agentmesh-node.yaml")
 				if err := os.WriteFile(path, []byte(tt.yamlContent), 0644); err != nil {
 					t.Fatalf("failed to write temp config file: %v", err)
 				}
@@ -338,13 +338,13 @@ func TestCompleteNodeConfig(t *testing.T) {
 	}
 }
 
-// A backend credential may not be written into sam-node.yaml: the file is
+// A backend credential may not be written into agentmesh-node.yaml: the file is
 // copied, committed and rendered into ConfigMaps. It comes from
 // target_auth_path instead. An in-memory config (the mobile FFI, which
 // passes a per-launch token that is never written) is not held to this.
 func TestBackendCredentialRefusedInConfigFileOnly(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "sam-node.yaml")
+	path := filepath.Join(dir, "agentmesh-node.yaml")
 	inline := `version: v1alpha1
 services:
   - type: mcp
@@ -390,7 +390,7 @@ services:
 func TestLoadNodeConfigEgressFloor(t *testing.T) {
 	write := func(t *testing.T, body string) string {
 		t.Helper()
-		path := filepath.Join(t.TempDir(), "sam-node.yaml")
+		path := filepath.Join(t.TempDir(), "agentmesh-node.yaml")
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}

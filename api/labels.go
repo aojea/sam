@@ -24,12 +24,12 @@ import (
 // Labels are free-form, control-plane-attested key=value metadata a node's
 // identity carries (e.g. region="us-east-1", team="platform"). Cloud
 // providers, on-prem operators, and countries all name things differently,
-// so SAM imposes no taxonomy or hierarchy on keys or values: composition
+// so Agent Mesh imposes no taxonomy or hierarchy on keys or values: composition
 // (e.g. attesting both a precise and a coarser value so a coarser
 // requirement also matches) is entirely up to the operator. Matching is
 // exact and case-sensitive on both key and value (see LabelCheck).
 //
-// Keys are plain conventions agreed by operators (e.g. "region"); SAM does
+// Keys are plain conventions agreed by operators (e.g. "region"); Agent Mesh does
 // not reserve or interpret any key beyond ValidateLabelKey/ValidateLabelValue.
 
 // labelKeySyntax bounds label keys to a safe, portable charset.

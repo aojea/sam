@@ -33,7 +33,7 @@ import (
 )
 
 func TestIntegrationStdioDatapath(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	_, routerAddr := startMockRouter(t)
 
 	homeA := t.TempDir()
@@ -135,7 +135,7 @@ func TestIntegrationStdioDatapath(t *testing.T) {
 }
 
 func TestIntegrationHTTPDatapath(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	_, routerAddr := startMockRouter(t)
 
 	homeA := t.TempDir()

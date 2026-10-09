@@ -28,7 +28,7 @@ import (
 // termination grace period.
 const DefaultShutdownLeaseTTL = 30 * time.Second
 
-// Options holds configuration details for the sam-router.
+// Options holds configuration details for the agentmesh-router.
 type Options struct {
 	ControlPlaneURL    string
 	ListenAddrs        []string

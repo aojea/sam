@@ -47,7 +47,7 @@ func writeProto(t *testing.T, w http.ResponseWriter, msg proto.Message) {
 }
 
 func TestHTTPClientUserAgent(t *testing.T) {
-	for _, component := range []string{"sam-node", "sam-router"} {
+	for _, component := range []string{"agentmesh-node", "agentmesh-router"} {
 		t.Run(component, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 				if got, want := request.UserAgent(), component+"/"+version.String(); got != want {
@@ -94,7 +94,7 @@ func TestFetchInfo(t *testing.T) {
 	defer srv.Close()
 
 	// A trailing slash on the base URL must not double up in the path.
-	c := New(srv.URL+"/", NewHTTPClient(time.Second, nil, "sam-node"))
+	c := New(srv.URL+"/", NewHTTPClient(time.Second, nil, "agentmesh-node"))
 	info, err := c.FetchInfo(context.Background())
 	if err != nil {
 		t.Fatalf("FetchInfo: %v", err)
@@ -138,7 +138,7 @@ func TestFetchKeys(t *testing.T) {
 			writeProto(t, w, resp)
 		}))
 		t.Cleanup(srv.Close)
-		return New(srv.URL, NewHTTPClient(time.Second, nil, "sam-node"))
+		return New(srv.URL, NewHTTPClient(time.Second, nil, "agentmesh-node"))
 	}
 
 	t.Run("a set vouched for by a trusted key is adopted whole", func(t *testing.T) {
@@ -173,7 +173,7 @@ func TestErrors(t *testing.T) {
 			http.Error(w, "store down", http.StatusServiceUnavailable)
 		}))
 		defer srv.Close()
-		c := New(srv.URL, NewHTTPClient(time.Second, nil, "sam-node"))
+		c := New(srv.URL, NewHTTPClient(time.Second, nil, "agentmesh-node"))
 		_, err := c.FetchInfo(context.Background())
 		if err == nil || !strings.Contains(err.Error(), "503") || !strings.Contains(err.Error(), "store down") {
 			t.Fatalf("FetchInfo error = %v, want status and body", err)
@@ -187,7 +187,7 @@ func TestErrors(t *testing.T) {
 			}
 		}))
 		defer srv.Close()
-		c := New(srv.URL, NewHTTPClient(time.Second, nil, "sam-node"))
+		c := New(srv.URL, NewHTTPClient(time.Second, nil, "agentmesh-node"))
 		if _, err := c.FetchInfo(context.Background()); err == nil || !strings.Contains(err.Error(), "decode /info") {
 			t.Fatalf("FetchInfo error = %v, want a decode error naming the path", err)
 		}
@@ -207,7 +207,7 @@ func TestErrors(t *testing.T) {
 			writeProto(t, w, big)
 		}))
 		defer srv.Close()
-		c := New(srv.URL, NewHTTPClient(5*time.Second, nil, "sam-node"))
+		c := New(srv.URL, NewHTTPClient(5*time.Second, nil, "agentmesh-node"))
 		info, err := c.FetchInfo(context.Background())
 		if !errors.Is(err, ErrBodyTooLarge) {
 			t.Fatalf("FetchInfo = (%d bans, %v), want ErrBodyTooLarge", len(info.GetBannedPeerIds()), err)
@@ -232,7 +232,7 @@ func TestLargeAnswersArriveWhole(t *testing.T) {
 			writeProto(t, w, big)
 		}))
 		defer srv.Close()
-		info, err := New(srv.URL, NewHTTPClient(5*time.Second, nil, "sam-node")).FetchInfo(context.Background())
+		info, err := New(srv.URL, NewHTTPClient(5*time.Second, nil, "agentmesh-node")).FetchInfo(context.Background())
 		if err != nil {
 			t.Fatalf("FetchInfo: %v", err)
 		}
@@ -256,7 +256,7 @@ func TestLargeAnswersArriveWhole(t *testing.T) {
 			writeProto(t, w, exact)
 		}))
 		defer srv.Close()
-		info, err := New(srv.URL, NewHTTPClient(5*time.Second, nil, "sam-node")).FetchInfo(context.Background())
+		info, err := New(srv.URL, NewHTTPClient(5*time.Second, nil, "agentmesh-node")).FetchInfo(context.Background())
 		if err != nil {
 			t.Fatalf("FetchInfo at exactly the cap: %v", err)
 		}
@@ -281,7 +281,7 @@ func TestFetchPolicy(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	policy, err := New(srv.URL, NewHTTPClient(time.Second, nil, "sam-node")).FetchPolicy(context.Background(), []byte("biscuit"))
+	policy, err := New(srv.URL, NewHTTPClient(time.Second, nil, "agentmesh-node")).FetchPolicy(context.Background(), []byte("biscuit"))
 	if err != nil {
 		t.Fatalf("FetchPolicy: %v", err)
 	}
@@ -304,10 +304,10 @@ func TestHTTPClientTransportPolicy(t *testing.T) {
 	defer srv.Close()
 	// httptest binds 127.0.0.1; spell it as a non-loopback name that the
 	// transport must refuse before any connection is attempted.
-	nonLoopbackURL := strings.Replace(srv.URL, "127.0.0.1", "sam-control-plane.invalid", 1)
+	nonLoopbackURL := strings.Replace(srv.URL, "127.0.0.1", "agentmesh-control-plane.invalid", 1)
 
 	allow := false
-	httpClient := NewHTTPClient(time.Second, func() bool { return allow }, "sam-node")
+	httpClient := NewHTTPClient(time.Second, func() bool { return allow }, "agentmesh-node")
 
 	if _, err := New(srv.URL, httpClient).FetchInfo(context.Background()); err != nil {
 		t.Fatalf("loopback plaintext must be accepted: %v", err)

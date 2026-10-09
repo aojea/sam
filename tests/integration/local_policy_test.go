@@ -25,7 +25,7 @@ import (
 )
 
 func TestLocalPolicyCanGrantPermissions(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	tmpDir := t.TempDir()
 
 	oidcURL, mintToken := startCustomMockOIDC(t)
@@ -132,7 +132,7 @@ attenuation:
 }
 
 func TestLocalPolicyCannotBypassControlPlaneTargetConstraint(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	tmpDir := t.TempDir()
 
 	oidcURL, mintToken := startCustomMockOIDC(t)

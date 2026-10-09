@@ -316,7 +316,7 @@ type referenceCalloutServer struct {
 	extprocv3.UnimplementedExternalProcessorServer
 
 	mu            sync.Mutex
-	lastSamAttrs  map[string]*structpb.Value
+	lastMeshAttrs map[string]*structpb.Value
 	hadDeadline   bool
 	sleepDuration time.Duration
 }
@@ -345,9 +345,9 @@ func (s *referenceCalloutServer) Process(stream extprocv3.ExternalProcessor_Proc
 			return err
 		}
 
-		if samAttrs := req.GetAttributes()["mesh"]; samAttrs != nil {
+		if meshAttrs := req.GetAttributes()["mesh"]; meshAttrs != nil {
 			s.mu.Lock()
-			s.lastSamAttrs = samAttrs.GetFields()
+			s.lastMeshAttrs = meshAttrs.GetFields()
 			s.mu.Unlock()
 		}
 
@@ -488,11 +488,11 @@ func TestCalloutClient_UnixSocketAndMTLS(t *testing.T) {
 			t.Fatalf("NewCalloutClient: %v", err)
 		}
 
-		samStruct, _ := structpb.NewStruct(map[string]any{
+		meshStruct, _ := structpb.NewStruct(map[string]any{
 			"destination": "vertex.googleapis.com",
 			"principal":   "user:alice@example.com",
 		})
-		attrs := map[string]*structpb.Struct{"mesh": samStruct}
+		attrs := map[string]*structpb.Struct{"mesh": meshStruct}
 
 		req := httptest.NewRequest(http.MethodPost, "https://vertex.googleapis.com/v1/models/gemini:generateContent", nil)
 		session, imm, newReqBody, err := client.RunRequestPhase(req, cfg, "vertex.googleapis.com", []byte("prompt with PII_SSN inside"), attrs)
@@ -517,7 +517,7 @@ func TestCalloutClient_UnixSocketAndMTLS(t *testing.T) {
 		}
 
 		callout.mu.Lock()
-		gotDest := callout.lastSamAttrs["destination"].GetStringValue()
+		gotDest := callout.lastMeshAttrs["destination"].GetStringValue()
 		hadDeadline := callout.hadDeadline
 		callout.mu.Unlock()
 		if gotDest != "vertex.googleapis.com" {

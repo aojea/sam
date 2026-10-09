@@ -242,8 +242,8 @@ func (s *testExtProcInspector) Process(stream extprocv3.ExternalProcessor_Proces
 		if err != nil {
 			return err
 		}
-		if samStruct := req.GetAttributes()["mesh"]; samStruct != nil {
-			if v := samStruct.GetFields()["destination"]; v != nil {
+		if meshStruct := req.GetAttributes()["mesh"]; meshStruct != nil {
+			if v := meshStruct.GetFields()["destination"]; v != nil {
 				s.mu.Lock()
 				s.capturedDestAttr = v.GetStringValue()
 				s.mu.Unlock()
@@ -436,7 +436,7 @@ func TestExtProcEgressClient(t *testing.T) {
 	gotDest := inspector.capturedDestAttr
 	inspector.mu.Unlock()
 	if gotDest != "api.anthropic.com" {
-		t.Fatalf("attributes[sam].destination = %q, want api.anthropic.com", gotDest)
+		t.Fatalf("attributes[mesh].destination = %q, want api.anthropic.com", gotDest)
 	}
 	if upstreamBody != `{"prompt":"my [MASKED] value"}` {
 		t.Fatalf("upstreamBody = %q, want masked body", upstreamBody)
@@ -641,7 +641,7 @@ func TestGatewayExtProcServer(t *testing.T) {
 				Headers: &corev3.HeaderMap{
 					Headers: []*corev3.HeaderValue{
 						{Key: ":method", Value: "POST"},
-						{Key: ":path", Value: "/mesh/egress/api.github.com/repos/google/sam"},
+						{Key: ":path", Value: "/mesh/egress/api.github.com/repos/google/agentmesh"},
 						{Key: "authorization", Value: "Bearer " + b64Biscuit},
 					},
 				},

@@ -48,7 +48,7 @@ func CallerBiscuitFromContext(ctx context.Context) []byte {
 
 // GetRequestIdentity returns the caller Biscuit from ctx when present,
 // falling back to the node's own enrolled Biscuit identity.
-func (n *SamNode) GetRequestIdentity(ctx context.Context) []byte {
+func (n *AgentMeshNode) GetRequestIdentity(ctx context.Context) []byte {
 	if b := CallerBiscuitFromContext(ctx); len(b) > 0 {
 		return b
 	}
@@ -57,7 +57,7 @@ func (n *SamNode) GetRequestIdentity(ctx context.Context) []byte {
 
 // trustedPublicKeys returns the Control Plane Ed25519 public keys currently
 // trusted by this node, falling back to the stored mesh config key if needed.
-func (n *SamNode) trustedPublicKeys() []ed25519.PublicKey {
+func (n *AgentMeshNode) trustedPublicKeys() []ed25519.PublicKey {
 	n.keysMu.RLock()
 	keys := publicKeysOf(n.trustedKeys)
 	n.keysMu.RUnlock()
@@ -72,7 +72,7 @@ func (n *SamNode) trustedPublicKeys() []ed25519.PublicKey {
 // VerifyLocalBiscuit verifies a raw Biscuit against the node's revocation
 // cache, banned peer cache, and trusted Control Plane keys, returning its
 // extracted claims and TaskAuthorizationRule chain.
-func (n *SamNode) VerifyLocalBiscuit(rawToken []byte) (*identity.VerifiedBiscuitClaims, error) {
+func (n *AgentMeshNode) VerifyLocalBiscuit(rawToken []byte) (*identity.VerifiedBiscuitClaims, error) {
 	if len(rawToken) == 0 {
 		return nil, errors.New("empty biscuit token")
 	}
@@ -111,7 +111,7 @@ func (n *SamNode) VerifyLocalBiscuit(rawToken []byte) (*identity.VerifiedBiscuit
 // (len(claims.TaskRules) == 0) must be bound to this node's localPeerID;
 // task-attenuated Biscuits (len(claims.TaskRules) > 0) may be further
 // attenuated or exchanged for an outbound border JWT at a PEP node.
-func (n *SamNode) verifyLocalCallerBiscuit(rawToken []byte) (*identity.VerifiedBiscuitClaims, error) {
+func (n *AgentMeshNode) verifyLocalCallerBiscuit(rawToken []byte) (*identity.VerifiedBiscuitClaims, error) {
 	claims, err := n.VerifyLocalBiscuit(rawToken)
 	if err != nil {
 		return nil, err
@@ -126,7 +126,7 @@ func (n *SamNode) verifyLocalCallerBiscuit(rawToken []byte) (*identity.VerifiedB
 	return claims, nil
 }
 
-func (n *SamNode) localPeerID() (peer.ID, error) {
+func (n *AgentMeshNode) localPeerID() (peer.ID, error) {
 	if n.Host != nil && n.Host.ID() != "" {
 		return n.Host.ID(), nil
 	}
@@ -136,7 +136,7 @@ func (n *SamNode) localPeerID() (peer.ID, error) {
 	return "", errors.New("node has no peer ID")
 }
 
-func (n *SamNode) controlPlaneURL() (string, error) {
+func (n *AgentMeshNode) controlPlaneURL() (string, error) {
 	if n.Store != nil {
 		if u, err := n.Store.LoadControlPlaneURL(); err == nil && u != "" {
 			return u, nil
@@ -149,7 +149,7 @@ func (n *SamNode) controlPlaneURL() (string, error) {
 // an external JWT (OIDC, K8s SA, SPIFFE JWT-SVID) and mint a short-lived
 // Delegated Session Biscuit bound to this node. Unattenuated, unsealed
 // exchanges are cached in memory by SHA-256 of the subject JWT.
-func (n *SamNode) ExchangeSubjectJWT(ctx context.Context, subjectToken, subjectTokenType string, taskRule *api.TaskAuthorizationRule, seal bool) (*api.TokenExchangeResponse, error) {
+func (n *AgentMeshNode) ExchangeSubjectJWT(ctx context.Context, subjectToken, subjectTokenType string, taskRule *api.TaskAuthorizationRule, seal bool) (*api.TokenExchangeResponse, error) {
 	if subjectToken == "" {
 		return nil, errors.New("subject_token is required")
 	}
@@ -217,7 +217,7 @@ func (n *SamNode) ExchangeSubjectJWT(ctx context.Context, subjectToken, subjectT
 // MintBorderJWT calls POST /sts/token on the Control Plane to verify a caller
 // Biscuit for an egress destination and mint a short-lived ES256 JWT for cloud
 // STS federation. Minted JWTs are cached in memory until 10s before expiry.
-func (n *SamNode) MintBorderJWT(ctx context.Context, callerBiscuit []byte, destination, audience string) (*api.STSTokenResponse, error) {
+func (n *AgentMeshNode) MintBorderJWT(ctx context.Context, callerBiscuit []byte, destination, audience string) (*api.STSTokenResponse, error) {
 	if len(callerBiscuit) == 0 {
 		callerBiscuit = n.GetIdentity()
 	}
@@ -307,7 +307,7 @@ func decodeBiscuitToken(s string) ([]byte, error) {
 			return raw, nil
 		}
 	}
-	return nil, errors.New("not a valid SAM biscuit token")
+	return nil, errors.New("not a valid Agent Mesh biscuit token")
 }
 
 // isLikelyJWT reports whether s has the 3-part base64url structure of a compact
@@ -329,14 +329,14 @@ func isLikelyJWT(s string) bool {
 	return ok
 }
 
-// resolveCallerCredential inspects a bearer credential presented to sam-node.
+// resolveCallerCredential inspects a bearer credential presented to agentmesh-node.
 // It returns:
 //   - (biscuitBytes, true, nil) when the credential is a valid Biscuit or an
 //     external JWT successfully exchanged into a Delegated Session Biscuit;
 //   - (nil, true, err) when the credential is recognizable as a Biscuit or JWT
 //     but failed verification/exchange (so the caller must fail closed);
 //   - (nil, false, nil) when the credential is neither a Biscuit nor a JWT.
-func (n *SamNode) resolveCallerCredential(ctx context.Context, bearer string) ([]byte, bool, error) {
+func (n *AgentMeshNode) resolveCallerCredential(ctx context.Context, bearer string) ([]byte, bool, error) {
 	if n == nil || bearer == "" {
 		return nil, false, nil
 	}
@@ -366,14 +366,14 @@ func (n *SamNode) resolveCallerCredential(ctx context.Context, bearer string) ([
 
 // withCallerOrTokenAuth gates a sidecar handler behind either:
 //  1. the Unix domain socket / mTLS,
-//  2. the static sidecar API token (SAM_API_TOKEN),
-//  3. a verified SAM Biscuit (including attenuated Task Biscuits), or
+//  2. the static sidecar API token (AGENTMESH_API_TOKEN),
+//  3. a verified Agent Mesh Biscuit (including attenuated Task Biscuits), or
 //  4. an external Workload/User JWT exchanged via the Control Plane STS.
 //
 // Whenever a caller Biscuit or JWT is presented, the verified Biscuit is
 // attached to r.Context() via WithCallerBiscuit so outbound mesh/egress calls
 // execute under the caller's narrowed authority.
-func withCallerOrTokenAuth(node *SamNode, token string, allowAuthorizationFallback bool, next http.Handler) http.Handler {
+func withCallerOrTokenAuth(node *AgentMeshNode, token string, allowAuthorizationFallback bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.Debugf("[SidecarAuth] Incoming request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 
@@ -465,8 +465,8 @@ func withCallerOrTokenAuth(node *SamNode, token string, allowAuthorizationFallba
 }
 
 // handleNodeOAuthToken implements RFC 8693 Token Exchange & Attenuation
-// (POST /oauth/token) on sam-node.
-func handleNodeOAuthToken(node *SamNode, sidecarToken string, w http.ResponseWriter, r *http.Request) {
+// (POST /oauth/token) on agentmesh-node.
+func handleNodeOAuthToken(node *AgentMeshNode, sidecarToken string, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeNodeOAuthError(w, http.StatusMethodNotAllowed, "invalid_request", "Method not allowed")
 		return
@@ -483,7 +483,7 @@ func handleNodeOAuthToken(node *SamNode, sidecarToken string, w http.ResponseWri
 
 	grantType := r.FormValue("grant_type")
 	if grantType != api.GrantTypeTokenExchange {
-		writeNodeOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "Only urn:ietf:params:oauth:grant-type:token-exchange is supported on sam-node")
+		writeNodeOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "Only urn:ietf:params:oauth:grant-type:token-exchange is supported on agentmesh-node")
 		return
 	}
 
@@ -625,7 +625,7 @@ func handleNodeOAuthToken(node *SamNode, sidecarToken string, w http.ResponseWri
 	writeNodeOAuthTokenResponse(w, base64.StdEncoding.EncodeToString(baseBiscuit), api.TokenTypeBiscuit, expIn, scope)
 }
 
-func authenticateSidecarCaller(node *SamNode, sidecarToken string, r *http.Request) ([]byte, bool) {
+func authenticateSidecarCaller(node *AgentMeshNode, sidecarToken string, r *http.Request) ([]byte, bool) {
 	for _, hdr := range []string{api.HeaderMeshAuthentication, "Authorization"} {
 		val := r.Header.Get(hdr)
 		if val == "" {
@@ -650,10 +650,10 @@ func authenticateSidecarCaller(node *SamNode, sidecarToken string, r *http.Reque
 }
 
 // handleNodeOAuthRevoke implements RFC 7009 Token Revocation (POST /oauth/revoke)
-// on sam-node, adding the Biscuit's root Block 0 revocation ID to the local
+// on agentmesh-node, adding the Biscuit's root Block 0 revocation ID to the local
 // revocation cache so any call carrying it (or any child attenuated from it)
 // is immediately rejected.
-func handleNodeOAuthRevoke(node *SamNode, sidecarToken string, w http.ResponseWriter, r *http.Request) {
+func handleNodeOAuthRevoke(node *AgentMeshNode, sidecarToken string, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeNodeOAuthError(w, http.StatusMethodNotAllowed, "invalid_request", "Method not allowed")
 		return
@@ -710,7 +710,7 @@ func handleNodeOAuthRevoke(node *SamNode, sidecarToken string, w http.ResponseWr
 
 // handleOAuthProtectedResource serves RFC 9728 OAuth 2.0 Protected Resource Metadata
 // (GET /.well-known/oauth-protected-resource).
-func handleOAuthProtectedResource(node *SamNode, w http.ResponseWriter, r *http.Request) {
+func handleOAuthProtectedResource(node *AgentMeshNode, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return

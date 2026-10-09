@@ -44,7 +44,7 @@ import (
 )
 
 type stsNodeHarness struct {
-	node        *SamNode
+	node        *AgentMeshNode
 	cpPub       ed25519.PublicKey
 	cpPriv      ed25519.PrivateKey
 	peerID      peer.ID
@@ -99,12 +99,12 @@ func newSTSNodeHarness(t *testing.T) *stsNodeHarness {
 		t.Fatalf("SaveIdentity: %v", err)
 	}
 
-	n, err := NewSamNode(Options{
+	n, err := NewAgentMeshNode(Options{
 		PrivKey: privKey,
 		Store:   store,
 	})
 	if err != nil {
-		t.Fatalf("NewSamNode: %v", err)
+		t.Fatalf("NewAgentMeshNode: %v", err)
 	}
 	n.trustedKeys = []TrustedKey{{Key: cpPub, ReceivedAt: time.Now()}}
 	n.SetIdentityCache(nodeBiscuit)

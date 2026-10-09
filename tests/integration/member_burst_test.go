@@ -63,7 +63,7 @@ func TestMemberBurstJoinsConcurrently(t *testing.T) {
 	backend := httptest.NewServer(newBoundaryMCPHandler(t))
 	defer backend.Close()
 
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	providerDir := t.TempDir()
 	provider := launchNode(t, nodeBin, os.Environ(), providerDir, "run",
 		"--control-plane", controlPlane,

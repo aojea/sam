@@ -32,7 +32,7 @@ import (
 // lists the model on /v1/models and serves /v1/chat/completions for it across
 // the mesh.
 func TestOpenAIFacadeCUJ(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	_, hubAddr := startMockRouter(t)
 
 	homeA := t.TempDir()
@@ -42,13 +42,13 @@ func TestOpenAIFacadeCUJ(t *testing.T) {
 	// Fake OpenAI-compatible backend on node A's side. The backend exists
 	// before the node: services are declared in the node's configuration,
 	// never registered at runtime.
-	var sawSidecarToken, sawSamAuthHeader atomic.Bool
+	var sawSidecarToken, sawMeshAuthHeader atomic.Bool
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.Header.Get("Authorization"), apiToken) {
 			sawSidecarToken.Store(true)
 		}
 		if r.Header.Get(api.HeaderMeshAuthentication) != "" {
-			sawSamAuthHeader.Store(true)
+			sawMeshAuthHeader.Store(true)
 		}
 		switch r.URL.Path {
 		case "/v1/models":
@@ -185,7 +185,7 @@ func TestOpenAIFacadeCUJ(t *testing.T) {
 	if sawSidecarToken.Load() {
 		t.Error("sidecar token leaked to the inference backend")
 	}
-	if sawSamAuthHeader.Load() {
+	if sawMeshAuthHeader.Load() {
 		t.Errorf("%s header leaked to the inference backend", api.HeaderMeshAuthentication)
 	}
 

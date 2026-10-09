@@ -45,7 +45,7 @@ const DefaultAuthorizerTimeout = 1 * time.Second
 // number of derived facts and fixpoint iterations, but neither preempts a
 // single rule: one self-join over a few hundred facts runs to completion
 // whatever these say, and on timeout biscuit-go's worker goroutine keeps
-// computing. The only bound on attacker-authored rules is therefore that SAM
+// computing. The only bound on attacker-authored rules is therefore that Agent Mesh
 // never evaluates any: see UnmarshalInbound.
 const (
 	maxDatalogFacts      = 1000

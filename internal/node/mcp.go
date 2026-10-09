@@ -33,9 +33,9 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// meshInstructions tells connecting clients how the SAM mesh is composed and how
+// meshInstructions tells connecting clients how the Agent Mesh is composed and how
 // to discover and call remote tools/services. Sent at initialize time.
-const meshInstructions = `This MCP server connects this node to a SAM mesh: a network of remote agents that host their own services (e.g., MCP servers or inference services) and tools.
+const meshInstructions = `This MCP server connects this node to an Agent Mesh: a network of remote agents that host their own services (e.g., MCP servers or inference services) and tools.
 
 The mesh allows you to discover these remote services, list their tools, and call them.
 To use these remote services and their tools, the client can use the following flow:
@@ -45,7 +45,7 @@ To use these remote services and their tools, the client can use the following f
 
 Other useful tools: discover_remote_services browses services by type (e.g. 'MCP' or 'Inference'), get_mesh_info reports connected peers and mesh state, list_local_services shows what this node hosts.
 
-Node diagnostics (logs, connectivity, network/token info, connecting to a peer by address) are NOT MCP tools. When asked to diagnose this node, run 'sam-node debug --help' in a shell to discover the available diagnostics, then invoke the matching subcommand. They talk to the node over its Unix socket, so no token is involved.
+Node diagnostics (logs, connectivity, network/token info, connecting to a peer by address) are NOT MCP tools. When asked to diagnose this node, run 'agentmesh-node debug --help' in a shell to discover the available diagnostics, then invoke the matching subcommand. They talk to the node over its Unix socket, so no token is involved.
 
 Tools on remote services are identified via the format 'scheme://service-name/tool-name' (where 'scheme://service-name' represents the well-known local address of the service, and 'tool-name' is the individual tool to execute on it. Tool names themselves can contain any characters).
 
@@ -55,14 +55,14 @@ A2A agents ('a2a://...') are NOT called via call_remote_tool either: discover th
 
 To authenticate such an HTTP request to this node, try these in order:
   1. If get_mesh_info reports a local_api_socket, send the request over that Unix socket and skip authentication entirely: it serves this same HTTP API, and only the user who owns the socket can connect to it, so no token is involved and no secret lands in a command line. e.g. 'curl --unix-socket <local_api_socket> <local_proxy_url>/chat/completions'.
-  2. Otherwise use the TCP endpoint with header 'X-Mesh-Authentication: Bearer <node API token>'. Do not read your MCP client configuration files to recover that token: they hold every other server's headers too, and reading them puts all of those secrets into the transcript. A daemonized node writes its token to ~/.config/sam-mesh/api-token; have curl read the file itself (e.g. -H @<(printf 'X-Mesh-Authentication: Bearer %s' "$(cat ~/.config/sam-mesh/api-token)")) so the value never lands in an argument. If the node was started with --api-token-path or SAM_API_TOKEN, ask the user where the token lives.
+  2. Otherwise use the TCP endpoint with header 'X-Mesh-Authentication: Bearer <node API token>'. Do not read your MCP client configuration files to recover that token: they hold every other server's headers too, and reading them puts all of those secrets into the transcript. A daemonized node writes its token to ~/.config/agentmesh/api-token; have curl read the file itself (e.g. -H @<(printf 'X-Mesh-Authentication: Bearer %s' "$(cat ~/.config/agentmesh/api-token)")) so the value never lands in an argument. If the node was started with --api-token-path or AGENTMESH_API_TOKEN, ask the user where the token lives.
 
 Never print that token or echo it into the transcript. 'Authorization: Bearer <upstream-credential>' is a different thing: send it only when the destination service requires its own credential — it passes straight through untouched and is never used to authenticate to this node.`
 
 // NewMCPServer creates a new MCP server instance with all tools registered.
-func NewMCPServer(node *SamNode) *mcp.Server {
+func NewMCPServer(node *AgentMeshNode) *mcp.Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
-		Name:    "sam-node-mcp",
+		Name:    "agentmesh-node-mcp",
 		Version: "0.1.0",
 	}, &mcp.ServerOptions{Instructions: meshInstructions})
 
@@ -108,18 +108,18 @@ func NewMCPServer(node *SamNode) *mcp.Server {
 // NewUnauthenticatedMCPServer creates a minimal MCP server that instructs the client on how to authenticate.
 func NewUnauthenticatedMCPServer(controlPlaneURL string) *mcp.Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
-		Name:    "sam-node-mcp-unauth",
+		Name:    "agentmesh-node-mcp-unauth",
 		Version: "0.1.0",
 	}, &mcp.ServerOptions{Instructions: "This node is unauthenticated. Use the get_login_instructions tool or help_user_login prompt."})
 
-	joinCmd := "sam-node join"
+	joinCmd := "agentmesh-node join"
 	if controlPlaneURL != "" {
 		joinCmd += " " + controlPlaneURL
 	}
 
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "get_login_instructions",
-		Description: "Get instructions on how to authenticate this node so it can join the SAM mesh.",
+		Description: "Get instructions on how to authenticate this node so it can join the Agent Mesh.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params map[string]any) (*mcp.CallToolResult, any, error) {
 		msg := fmt.Sprintf("The node is unauthenticated. Please open a regular terminal and run:\n\n  %s\n\nOnce complete, restart this MCP client.", joinCmd)
 		return &mcp.CallToolResult{
@@ -134,7 +134,7 @@ func NewUnauthenticatedMCPServer(controlPlaneURL string) *mcp.Server {
 		Description: "Provides the user with login instructions when the node is unauthenticated.",
 	}, func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 		return &mcp.GetPromptResult{
-			Description: "Instructions for joining the SAM mesh.",
+			Description: "Instructions for joining the Agent Mesh.",
 			Messages: []*mcp.PromptMessage{
 				{
 					Role: "user",
@@ -172,7 +172,7 @@ func NewUnauthenticatedMCPHandler(controlPlaneURL string) http.Handler {
 }
 
 // NewMCPHandler creates a new HTTP handler for the MCP server using the official SDK.
-func NewMCPHandler(node *SamNode) http.Handler {
+func NewMCPHandler(node *AgentMeshNode) http.Handler {
 	mcpServer := NewMCPServer(node)
 
 	streamableHandler := mcp.NewStreamableHTTPHandler(func(request *http.Request) *mcp.Server {
@@ -195,7 +195,7 @@ func NewMCPHandler(node *SamNode) http.Handler {
 // requiredLabels, when non-empty, fail-closed verifies the peer's control-plane-attested
 // labels (see checkPeerLabels) before the tool is invoked; nil means no caller
 // requirement, though the operator's egress floor, if configured, is still enforced.
-func (n *SamNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName string, params any, requiredLabels map[string]string) (*mcp.CallToolResult, error) {
+func (n *AgentMeshNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName string, params any, requiredLabels map[string]string) (*mcp.CallToolResult, error) {
 	var res *mcp.CallToolResult
 	var err error
 	maxRetries := 3
@@ -239,7 +239,7 @@ func (n *SamNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName 
 // (find_remote_tools) can hide forbidden services instead of leaking their names.
 var ErrAuthRejected = errors.New("auth rejected")
 
-func (n *SamNode) ConnectMCPSession(ctx context.Context, targetPeer peer.ID, targetService string, requiredLabels map[string]string) (*mcp.ClientSession, func(), error) {
+func (n *AgentMeshNode) ConnectMCPSession(ctx context.Context, targetPeer peer.ID, targetService string, requiredLabels map[string]string) (*mcp.ClientSession, func(), error) {
 	// Open stream
 	logger.Debugf("Dialing %s for MCP...\n", targetPeer)
 	// For discovery, we want a fast failure, but for tool calls, we can wait a bit. We'll use the context's deadline,
@@ -347,7 +347,7 @@ func (n *SamNode) ConnectMCPSession(ctx context.Context, targetPeer peer.ID, tar
 
 	// Handoff to SDK using custom transport
 	transport := NewStreamTransport(s)
-	mcpClient := mcp.NewClient(&mcp.Implementation{Name: "sam-node-mcp-client", Version: "0.1.0"}, nil)
+	mcpClient := mcp.NewClient(&mcp.Implementation{Name: "agentmesh-node-mcp-client", Version: "0.1.0"}, nil)
 
 	session, err := mcpClient.Connect(ctx, transport, nil)
 	if err != nil {
@@ -363,7 +363,7 @@ func (n *SamNode) ConnectMCPSession(ctx context.Context, targetPeer peer.ID, tar
 	return session, fullCleanup, nil
 }
 
-func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolName string, params any, requiredLabels map[string]string) (*mcp.CallToolResult, error) {
+func (n *AgentMeshNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolName string, params any, requiredLabels map[string]string) (*mcp.CallToolResult, error) {
 	targetService, originalToolName, err := api.SplitToolName(toolName)
 	if err != nil {
 		return nil, err
@@ -392,7 +392,7 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 
 // fetchRemoteServiceCatalog calls the remote peer's list_local_services
 // MCP tool with the type filter and returns the parsed catalog.
-func (n *SamNode) fetchRemoteServiceCatalog(ctx context.Context, peerID peer.ID, typeStr string) ([]*api.ServiceInfo, error) {
+func (n *AgentMeshNode) fetchRemoteServiceCatalog(ctx context.Context, peerID peer.ID, typeStr string) ([]*api.ServiceInfo, error) {
 	n.preparePeerAddrs(ctx, peerID)
 
 	session, cleanup, err := n.ConnectMCPSession(ctx, peerID, "system://"+api.CatalogTarget, nil)
@@ -429,7 +429,7 @@ func (n *SamNode) fetchRemoteServiceCatalog(ctx context.Context, peerID peer.ID,
 // preparePeerAddrs scans the target peer's addresses, filters out unroutable private IPs,
 // and ensures relay circuits are available. This prevents dial backoff errors when the
 // relay is behind a load-balanced DNS address or when pods advertise internal IPs.
-func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
+func (n *AgentMeshNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 	if n.Host == nil || n.DHT == nil {
 		logger.Debugf("[Discovery] Host or DHT is nil")
 		return

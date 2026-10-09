@@ -45,9 +45,9 @@ func TestNodeMetricsServer(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 
-	// Half-built, as a node is between NewSamNode and Start: alive, not
+	// Half-built, as a node is between NewAgentMeshNode and Start: alive, not
 	// ready, and nothing read from a host that does not exist yet.
-	node := &SamNode{Store: store, services: NewServiceRegistry(&fakeDHT{}, 0)}
+	node := &AgentMeshNode{Store: store, services: NewServiceRegistry(&fakeDHT{}, 0)}
 	srv, err := StartMetricsServer(node, "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -68,10 +68,10 @@ func TestNodeMetricsServer(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("/metrics = %d: %s", code, body)
 	}
-	if !strings.Contains(body, "sam_node_ready 0") {
-		t.Error("/metrics missing sam_node_ready 0 before start")
+	if !strings.Contains(body, "agentmesh_node_ready 0") {
+		t.Error("/metrics missing agentmesh_node_ready 0 before start")
 	}
-	if strings.Contains(body, "sam_node_connected_peers") {
+	if strings.Contains(body, "agentmesh_node_connected_peers") {
 		t.Error("/metrics exported host state before the host existed")
 	}
 
@@ -101,21 +101,21 @@ func TestNodeMetricsServer(t *testing.T) {
 	}
 	_, body = getMetricsBody(t, base+"/metrics")
 	for _, want := range []string{
-		"sam_node_ready 1",
-		"sam_node_mesh_connected 0",
-		"sam_node_connected_peers 0",
-		"sam_node_authenticated_peers 2",
-		"sam_node_dht_routing_table_size 0",
-		"sam_node_biscuit_expiry_timestamp_seconds " + strconv.FormatFloat(float64(expiry), 'g', -1, 64),
+		"agentmesh_node_ready 1",
+		"agentmesh_node_mesh_connected 0",
+		"agentmesh_node_connected_peers 0",
+		"agentmesh_node_authenticated_peers 2",
+		"agentmesh_node_dht_routing_table_size 0",
+		"agentmesh_node_biscuit_expiry_timestamp_seconds " + strconv.FormatFloat(float64(expiry), 'g', -1, 64),
 		// The process-wide registry rides along: sidecar counters and libp2p.
-		"sam_node_requests_in_flight",
+		"agentmesh_node_requests_in_flight",
 		"libp2p_",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/metrics missing %q", want)
 		}
 	}
-	if strings.Contains(body, "sam_node_services_registered") {
+	if strings.Contains(body, "agentmesh_node_services_registered") {
 		t.Error("services gauge exported with an empty registry")
 	}
 
@@ -136,7 +136,7 @@ func TestNodeMetricsServer(t *testing.T) {
 		t.Errorf("/readyz = %d once a router is authenticated", code)
 	}
 	_, body = getMetricsBody(t, base+"/metrics")
-	for _, want := range []string{"sam_node_mesh_connected 1", "sam_node_connected_peers 1"} {
+	for _, want := range []string{"agentmesh_node_mesh_connected 1", "agentmesh_node_connected_peers 1"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/metrics missing %q", want)
 		}
@@ -144,7 +144,7 @@ func TestNodeMetricsServer(t *testing.T) {
 }
 
 func TestStartMetricsServerRequiresAddress(t *testing.T) {
-	if _, err := StartMetricsServer(&SamNode{}, ""); err == nil {
+	if _, err := StartMetricsServer(&AgentMeshNode{}, ""); err == nil {
 		t.Fatal("expected an error for an empty address")
 	}
 }

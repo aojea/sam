@@ -47,7 +47,7 @@ const (
 var (
 	authHandshakesTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "sam_router_auth_handshakes_total",
+			Name: "agentmesh_router_auth_handshakes_total",
 			Help: "Inbound mesh authentication handshakes by outcome",
 		},
 		[]string{"result"},
@@ -55,7 +55,7 @@ var (
 
 	leaseRenewalsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "sam_router_lease_renewals_total",
+			Name: "agentmesh_router_lease_renewals_total",
 			Help: "Control-plane lease renewal attempts by outcome",
 		},
 		[]string{"result"},
@@ -97,47 +97,47 @@ func newRouterStateCollector(r *Router) *routerStateCollector {
 	return &routerStateCollector{
 		r: r,
 		infoDesc: prometheus.NewDesc(
-			"sam_router_info",
+			"agentmesh_router_info",
 			"The router's mesh identity; always 1",
 			[]string{"peer_id"}, nil),
 		readyDesc: prometheus.NewDesc(
-			"sam_router_ready",
+			"agentmesh_router_ready",
 			"1 once the router is enrolled and its libp2p host is online",
 			nil, nil),
 		drainingDesc: prometheus.NewDesc(
-			"sam_router_draining",
+			"agentmesh_router_draining",
 			"1 once the router has withdrawn its lease and is shutting down",
 			nil, nil),
 		authenticatedDesc: prometheus.NewDesc(
-			"sam_router_authenticated_peers",
+			"agentmesh_router_authenticated_peers",
 			"Connected peers that have completed the mesh authentication handshake",
 			nil, nil),
 		connectedDesc: prometheus.NewDesc(
-			"sam_router_connected_peers",
+			"agentmesh_router_connected_peers",
 			"Peers with an open libp2p connection, authenticated or not",
 			nil, nil),
 		connectionsDesc: prometheus.NewDesc(
-			"sam_router_connections",
+			"agentmesh_router_connections",
 			"Open libp2p connections by direction; a peer may hold several",
 			[]string{"direction"}, nil),
 		watermarkDesc: prometheus.NewDesc(
-			"sam_router_connection_watermark",
+			"agentmesh_router_connection_watermark",
 			"Connection manager limits: above high, connections are trimmed down to low",
 			[]string{"level"}, nil),
 		relayLimitDesc: prometheus.NewDesc(
-			"sam_router_relay_limit",
+			"agentmesh_router_relay_limit",
 			"Relay budgets in force, to read libp2p_relaysvc_* against",
 			[]string{"limit"}, nil),
 		bannedDesc: prometheus.NewDesc(
-			"sam_router_banned_peers",
+			"agentmesh_router_banned_peers",
 			"Peers on the ban list synced from the control plane",
 			nil, nil),
 		dhtDesc: prometheus.NewDesc(
-			"sam_router_dht_routing_table_size",
+			"agentmesh_router_dht_routing_table_size",
 			"Peers in the Kademlia routing table",
 			nil, nil),
 		biscuitExpiryDesc: prometheus.NewDesc(
-			"sam_router_biscuit_expiry_timestamp_seconds",
+			"agentmesh_router_biscuit_expiry_timestamp_seconds",
 			"Unix time the router's own mesh credential expires",
 			nil, nil),
 	}

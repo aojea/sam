@@ -77,14 +77,14 @@ func TestNewReverseProxyHandler_RewritesRequests(t *testing.T) {
 		{
 			name:       "joins target path and query",
 			targetURL:  "http://backend.example/base?upstream=one",
-			requestURL: "https://service.sam/child/?client=two",
+			requestURL: "https://service.mesh/child/?client=two",
 			wantURL:    "http://backend.example/base/child/?upstream=one&client=two",
 			wantProto:  "https",
 		},
 		{
 			name:            "marker trims trailing slash",
 			targetURL:       "http://backend.example/base?upstream=one",
-			requestURL:      "http://service.sam/child/?client=two",
+			requestURL:      "http://service.mesh/child/?client=two",
 			noTrailingSlash: true,
 			wantURL:         "http://backend.example/base/child?upstream=one&client=two",
 			wantProto:       "http",
@@ -92,7 +92,7 @@ func TestNewReverseProxyHandler_RewritesRequests(t *testing.T) {
 		{
 			name:            "target trailing slash is retained",
 			targetURL:       "http://backend.example/base/",
-			requestURL:      "http://service.sam/child/",
+			requestURL:      "http://service.mesh/child/",
 			noTrailingSlash: true,
 			wantURL:         "http://backend.example/base/child/",
 			wantProto:       "http",

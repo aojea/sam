@@ -36,9 +36,9 @@ import (
 )
 
 func TestNodeRevocationIntegration(t *testing.T) {
-	cpBin := buildBinary(t, "./cmd/sam-control-plane")
-	routerBin := buildBinary(t, "./cmd/sam-router")
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	cpBin := buildBinary(t, "./cmd/agentmesh-control-plane")
+	routerBin := buildBinary(t, "./cmd/agentmesh-router")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	clientBin := buildBinary(t, "./cmd/mcp-client")
 
 	tmpDir := t.TempDir()

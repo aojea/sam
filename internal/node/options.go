@@ -28,7 +28,7 @@ import (
 const (
 	DefaultMeshName             = "public-mesh"
 	DefaultDiscoveryInterval    = "30s"
-	DefaultConfigFile           = "sam-node.yaml"
+	DefaultConfigFile           = "agentmesh-node.yaml"
 	DefaultRouterConnectTimeout = 5 * time.Second
 	// A router pod that restarts is back in well under a minute; the first
 	// redial waits a moment for it, and six doublings reach past where the
@@ -36,7 +36,7 @@ const (
 	DefaultRouterRedialDelay    = 2 * time.Second
 	DefaultRouterRedialAttempts = 6
 	// DefaultSocketName is the local API socket the node creates in its data directory.
-	DefaultSocketName = "sam.sock"
+	DefaultSocketName = "agentmesh.sock"
 )
 
 // Reachability is the value of Options.Reachability and of --reachability.
@@ -47,7 +47,7 @@ const (
 	ReachabilityAuto    Reachability = "auto"
 )
 
-// Options holds all configuration options for a SamNode.
+// Options holds all configuration options for a AgentMeshNode.
 type Options struct {
 	PrivKey            crypto.PrivKey
 	ControlPlanePubKey ed25519.PublicKey
@@ -114,7 +114,7 @@ type Options struct {
 	// stampede.
 	ControlPlaneSyncJitter time.Duration
 	// BackendProbeTimeout bounds how long a command-spawned service backend
-	// (sam-node.yaml's `command`, spawned as a local subprocess) is given to
+	// (agentmesh-node.yaml's `command`, spawned as a local subprocess) is given to
 	// answer before the service is registered but withheld from
 	// advertisement. Zero uses the library default (2s). Raise this for
 	// backends with slower cold-start/import costs than that - the default

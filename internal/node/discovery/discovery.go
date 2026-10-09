@@ -27,7 +27,7 @@ import (
 	golog "github.com/ipfs/go-log/v2"
 )
 
-var logger = golog.Logger("sam-discovery")
+var logger = golog.Logger("agentmesh-discovery")
 
 const (
 	// DefaultAnnounceInterval is how often a provider publishes on topics

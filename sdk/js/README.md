@@ -29,8 +29,8 @@ section has the details and an example page.
 Both programs below are in
 [`examples/`](https://github.com/google/sam/tree/main/sdk/js/examples) and
 run against a real mesh in the repository's tests. They read the mesh from
-`SAM_CONTROL_PLANE_URL` and the enrollment token from
-`SAM_BOOTSTRAP_TOKEN_PATH`; the guide shows how to get both from `sam-one`
+`AGENTMESH_CONTROL_PLANE_URL` and the enrollment token from
+`AGENTMESH_BOOTSTRAP_TOKEN_PATH`; the guide shows how to get both from `sam-one`
 or from the operator of an existing mesh.
 
 Find a service and call it:
@@ -45,11 +45,11 @@ Find a service and call it:
 //   node call.js inference://ollama /v1/models
 //   node call.js 12D3KooW... a2a://agent /card
 //
-// SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
-// SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or
-// SAM_JWT_PATH (a workload identity token your platform issues, such as a
+// AGENTMESH_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
+// AGENTMESH_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or
+// AGENTMESH_JWT_PATH (a workload identity token your platform issues, such as a
 // Kubernetes projected service account token), and keeps the identity and
-// credential in SAM_STATE_DIR; later runs resume from there without it.
+// credential in AGENTMESH_STATE_DIR; later runs resume from there without it.
 import { homedir } from "node:os";
 import { AgentMesh, type DiscoveredProvider } from "@sam-mesh/sdk";
 
@@ -62,12 +62,12 @@ if (argv[0] !== undefined && !argv[0].includes("://")) {
 const [service = peerId !== undefined ? "a2a://agent" : "mcp://everything", toolOrPath = peerId !== undefined ? "/card" : "echo", args = '{"message": "hi"}'] = argv;
 
 const mesh = await AgentMesh.enroll({
-  controlPlaneUrl: process.env.SAM_CONTROL_PLANE_URL ?? "https://mesh.example.com",
-  bootstrapTokenPath: process.env.SAM_BOOTSTRAP_TOKEN_PATH,
-  jwtPath: process.env.SAM_JWT_PATH,
-  stateDir: process.env.SAM_STATE_DIR ?? `${homedir()}/.config/sam-mesh/caller`,
+  controlPlaneUrl: process.env.AGENTMESH_CONTROL_PLANE_URL ?? "https://mesh.example.com",
+  bootstrapTokenPath: process.env.AGENTMESH_BOOTSTRAP_TOKEN_PATH,
+  jwtPath: process.env.AGENTMESH_JWT_PATH,
+  stateDir: process.env.AGENTMESH_STATE_DIR ?? `${homedir()}/.config/sam-mesh/caller`,
   // A plaintext http:// control plane is otherwise accepted only on loopback.
-  allowInsecure: process.env.SAM_INSECURE_CONTROL_PLANE === "true",
+  allowInsecure: process.env.AGENTMESH_INSECURE_CONTROL_PLANE === "true",
 });
 const session = await mesh.join();
 console.log(`on the mesh as ${session.peerId}`);
@@ -129,11 +129,11 @@ agent by its peer ID, the one it prints, through a router:
 //   node agent.js                        # answered by the handler below
 //   node agent.js http://127.0.0.1:9999  # forwarded to an A2A server beside it
 //
-// SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
-// SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or
-// SAM_JWT_PATH (a workload identity token your platform issues, such as a
+// AGENTMESH_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
+// AGENTMESH_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or
+// AGENTMESH_JWT_PATH (a workload identity token your platform issues, such as a
 // Kubernetes projected service account token), and keeps the identity and
-// credential in SAM_STATE_DIR; later runs resume from there, as the same
+// credential in AGENTMESH_STATE_DIR; later runs resume from there, as the same
 // peer, without it.
 import { homedir } from "node:os";
 import { AgentMesh } from "@sam-mesh/sdk";
@@ -141,12 +141,12 @@ import { AgentMesh } from "@sam-mesh/sdk";
 const [backendURL] = process.argv.slice(2);
 
 const mesh = await AgentMesh.enroll({
-  controlPlaneUrl: process.env.SAM_CONTROL_PLANE_URL ?? "https://mesh.example.com",
-  bootstrapTokenPath: process.env.SAM_BOOTSTRAP_TOKEN_PATH,
-  jwtPath: process.env.SAM_JWT_PATH,
-  stateDir: process.env.SAM_STATE_DIR ?? `${homedir()}/.config/sam-mesh/agent`,
+  controlPlaneUrl: process.env.AGENTMESH_CONTROL_PLANE_URL ?? "https://mesh.example.com",
+  bootstrapTokenPath: process.env.AGENTMESH_BOOTSTRAP_TOKEN_PATH,
+  jwtPath: process.env.AGENTMESH_JWT_PATH,
+  stateDir: process.env.AGENTMESH_STATE_DIR ?? `${homedir()}/.config/sam-mesh/agent`,
   // A plaintext http:// control plane is otherwise accepted only on loopback.
-  allowInsecure: process.env.SAM_INSECURE_CONTROL_PLANE === "true",
+  allowInsecure: process.env.AGENTMESH_INSECURE_CONTROL_PLANE === "true",
 });
 const session = await mesh.join();
 

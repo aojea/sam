@@ -62,7 +62,7 @@ func TestCheckPeerLabels(t *testing.T) {
 		return b
 	}
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		trustedKeys:    []TrustedKey{{Key: cpPub, ReceivedAt: time.Now()}},
 		BiscuitTimeout: 500 * time.Millisecond,
 	}
@@ -97,7 +97,7 @@ func TestCheckPeerLabels(t *testing.T) {
 	}
 
 	t.Run("no trusted keys fails closed", func(t *testing.T) {
-		bare := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
+		bare := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond}
 		if err := bare.checkPeerLabels(mint(cpPriv, providerPeer, map[string]string{"region": "eu"}), providerPeer, map[string]string{"region": "eu"}); err == nil {
 			t.Error("expected error, got nil")
 		}
@@ -140,8 +140,8 @@ func TestCheckPeerLabelsEnforcesEgressFloor(t *testing.T) {
 		return b
 	}
 
-	nodeWithFloor := func(floor map[string]string) *SamNode {
-		return &SamNode{
+	nodeWithFloor := func(floor map[string]string) *AgentMeshNode {
+		return &AgentMeshNode{
 			trustedKeys:    []TrustedKey{{Key: cpPub, ReceivedAt: time.Now()}},
 			BiscuitTimeout: 500 * time.Millisecond,
 			nodeConfig:     &NodeConfigComplete{EgressRequireLabels: floor},
@@ -224,7 +224,7 @@ func TestCheckPeerLabelsEnforcesEgressFloor(t *testing.T) {
 // asked for nothing is gated, which is the difference between a floor and a
 // suggestion, and between a provider and a peer that merely announced.
 func TestVerifyPeerLabelsDoesNotShortCircuit(t *testing.T) {
-	node := &SamNode{
+	node := &AgentMeshNode{
 		BiscuitTimeout: 500 * time.Millisecond,
 		nodeConfig:     &NodeConfigComplete{EgressRequireLabels: map[string]string{"jurisdiction": "eu"}},
 	}

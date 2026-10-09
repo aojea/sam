@@ -36,7 +36,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-var logger = golog.Logger("sam-node")
+var logger = golog.Logger("agentmesh-node")
 
 // expireUnix is the unix seconds of a control plane's expire_time for the
 // store; an unset one is 0, an already-expired credential, so the node
@@ -73,7 +73,7 @@ func GetOrGenerateKey(s *Store) crypto.PrivKey {
 	return priv
 }
 
-func (n *SamNode) Enroll(ctx context.Context, controlPlaneURL string, jwt string) error {
+func (n *AgentMeshNode) Enroll(ctx context.Context, controlPlaneURL string, jwt string) error {
 	enrollResp, err := n.enrollHTTP(ctx, controlPlaneURL, jwt, n.Host.ID(), n.config.PrivKey)
 	if err != nil {
 		return err
@@ -91,7 +91,7 @@ func (n *SamNode) Enroll(ctx context.Context, controlPlaneURL string, jwt string
 // right after a rotation that is still signed by the retiring key; with only
 // the newest key loaded the node would refuse every router. Best effort: a
 // control plane too old to serve /keys still enrolls with one key.
-func (n *SamNode) adoptEnrolledKeys(ctx context.Context, controlPlaneURL string, newest []byte) {
+func (n *AgentMeshNode) adoptEnrolledKeys(ctx context.Context, controlPlaneURL string, newest []byte) {
 	n.addTrustedKey(ed25519.PublicKey(newest))
 	if err := n.syncTrustedKeys(ctx, controlPlaneURL); err != nil {
 		logger.Warnf("Could not fetch the control plane's full key set after enrollment (continuing with the enrollment key only): %v", err)
@@ -102,7 +102,7 @@ func (n *SamNode) adoptEnrolledKeys(ctx context.Context, controlPlaneURL string,
 // enrollHTTP performs the HTTP half of enrollment for an explicit peer
 // identity, so it can run before the libp2p host exists (startup recovery).
 // privKey signs the proof-of-possession challenge; peerID must be its own.
-func (n *SamNode) enrollHTTP(ctx context.Context, controlPlaneURL, jwt string, peerID peer.ID, privKey crypto.PrivKey) (*api.EnrollResponse, error) {
+func (n *AgentMeshNode) enrollHTTP(ctx context.Context, controlPlaneURL, jwt string, peerID peer.ID, privKey crypto.PrivKey) (*api.EnrollResponse, error) {
 	pubBytes, err := crypto.MarshalPublicKey(privKey.GetPublic())
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal public key: %w", err)
@@ -160,7 +160,7 @@ func (n *SamNode) enrollHTTP(ctx context.Context, controlPlaneURL, jwt string, p
 // ReEnrollWithRefreshToken re-enrolls over HTTP with a JWT from the stored
 // refresh token, keeping the PeerID. Must not touch n.Host: startup recovery
 // runs it before the host exists, and the mobile app on a never-started node.
-func (n *SamNode) ReEnrollWithRefreshToken(ctx context.Context) error {
+func (n *AgentMeshNode) ReEnrollWithRefreshToken(ctx context.Context) error {
 	controlPlaneURL, err := n.Store.LoadControlPlaneURL()
 	if err != nil || controlPlaneURL == "" {
 		return fmt.Errorf("no control plane URL in store")
@@ -178,7 +178,7 @@ func (n *SamNode) ReEnrollWithRefreshToken(ctx context.Context) error {
 	return err
 }
 
-func (n *SamNode) processEnrollResponse(resp *http.Response) (*api.EnrollResponse, error) {
+func (n *AgentMeshNode) processEnrollResponse(resp *http.Response) (*api.EnrollResponse, error) {
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxControlPlaneBodyBytes))
 		return nil, fmt.Errorf("enrollment failed with status %s: %s", resp.Status, string(body))
@@ -225,7 +225,7 @@ func (n *SamNode) processEnrollResponse(resp *http.Response) (*api.EnrollRespons
 	return &enrollResp, nil
 }
 
-func (n *SamNode) connectToRouters(ctx context.Context, addrs []string) error {
+func (n *AgentMeshNode) connectToRouters(ctx context.Context, addrs []string) error {
 	if len(addrs) == 0 {
 		return fmt.Errorf("failed to connect and authenticate after HTTP enrollment: control plane returned no router addresses")
 	}
@@ -251,7 +251,7 @@ func (n *SamNode) connectToRouters(ctx context.Context, addrs []string) error {
 
 // EnrollBootstrap enrolls the node with the control plane using a pre-shared bootstrap token.
 // If the enrollment status is PENDING, it polls the status endpoint until approved or rejected.
-func (n *SamNode) EnrollBootstrap(ctx context.Context, controlPlaneURL string, bootstrapToken string) error {
+func (n *AgentMeshNode) EnrollBootstrap(ctx context.Context, controlPlaneURL string, bootstrapToken string) error {
 	pubKey := n.Host.Peerstore().PubKey(n.Host.ID())
 	pubBytes, err := crypto.MarshalPublicKey(pubKey)
 	if err != nil {

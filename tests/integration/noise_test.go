@@ -34,7 +34,7 @@ import (
 
 // TestNoiseOnlyPeer pins what a browser member is on the wire: a peer that
 // speaks Noise and no libp2p TLS. It authenticates with the router over
-// Noise, is relayed to a sam-node, and the relayed connection, upgraded end
+// Noise, is relayed to a agentmesh-node, and the relayed connection, upgraded end
 // to end between the two of them, is Noise as well, so the node's auth
 // handshake and a service call go through. A peer that speaks TLS still
 // lands on TLS: it is offered first.

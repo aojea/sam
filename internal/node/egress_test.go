@@ -82,7 +82,7 @@ func TestAuthorizeHTTPFacts(t *testing.T) {
 	})
 	token, pub := mintFor(t, caller, append(narrowed, api.MarkerFact(api.FactTargetUnrestricted))...)
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		Store:          store,
 		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 		BiscuitTimeout: 500 * time.Millisecond,
@@ -150,7 +150,7 @@ func TestAuthorizeLocalIsSelfTargeted(t *testing.T) {
 	grant := biscuit.Fact{Predicate: biscuit.Predicate{Name: api.FactGrantedServiceExact,
 		IDs: []biscuit.Term{biscuit.String("egress"), biscuit.String("api.github.com")}}}
 	token, pub := mintFor(t, self, grant)
-	node := &SamNode{Store: store, trustedKeys: []TrustedKey{{Key: pub, ReceivedAt: time.Now()}}, BiscuitTimeout: 500 * time.Millisecond}
+	node := &AgentMeshNode{Store: store, trustedKeys: []TrustedKey{{Key: pub, ReceivedAt: time.Now()}}, BiscuitTimeout: 500 * time.Millisecond}
 
 	local := RequestContext{PeerID: self, Protocol: "local-api", Target: "egress://api.github.com",
 		HTTP: &HTTPRequestFacts{Method: "GET", Path: "/"}, Local: true}
@@ -239,7 +239,7 @@ func TestEgressServiceProxiesWithTheNodesCredential(t *testing.T) {
 	}
 	rr = httptest.NewRecorder()
 	svc.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rr.Code != http.StatusBadGateway || rr.Header().Get("Proxy-Status") != "sam-node; error=proxy_configuration_error" {
+	if rr.Code != http.StatusBadGateway || rr.Header().Get("Proxy-Status") != "agentmesh-node; error=proxy_configuration_error" {
 		t.Errorf("missing credential at request time: %d %q", rr.Code, rr.Header().Get("Proxy-Status"))
 	}
 
@@ -282,7 +282,7 @@ func TestApplyEgressAssignmentsReconciles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(secrets, "cred"), []byte("tok"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	node := &SamNode{services: NewServiceRegistry(&fakeDHT{}, time.Second), config: Options{SecretsDir: secrets}}
+	node := &AgentMeshNode{services: NewServiceRegistry(&fakeDHT{}, time.Second), config: Options{SecretsDir: secrets}}
 	ctx := context.Background()
 	assignments := func(outcome string) float64 {
 		return counterValue(t, egressAssignmentsTotal.WithLabelValues(outcome))
@@ -326,7 +326,7 @@ func TestApplyEgressAssignmentsReconciles(t *testing.T) {
 	}
 }
 
-func egressNames(node *SamNode) []string {
+func egressNames(node *AgentMeshNode) []string {
 	var names []string
 	for _, info := range node.services.List(api.ServiceType_SERVICE_TYPE_EGRESS) {
 		names = append(names, info.GetName())

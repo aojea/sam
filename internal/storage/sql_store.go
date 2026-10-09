@@ -34,7 +34,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-var logger = log.Logger("sam-storage")
+var logger = log.Logger("agentmesh-storage")
 
 // SQLStore implements Store interface using database/sql.
 type SQLStore struct {

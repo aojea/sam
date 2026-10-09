@@ -70,7 +70,7 @@ func (f *fakeToolService) Tools(_ context.Context) ([]string, error) {
 }
 
 func TestDiscoverySource(t *testing.T) {
-	node := &SamNode{
+	node := &AgentMeshNode{
 		services:   NewServiceRegistry(&fakeDHT{}, 0),
 		nodeConfig: &NodeConfigComplete{Labels: map[string]string{"region": "EU"}},
 	}

@@ -59,7 +59,7 @@ func TestWithAuthStripsDuplicateSidecarToken(t *testing.T) {
 		"token in both headers": {
 			samAuth: "Bearer " + token, authorization: "Bearer " + token, wantAuthorization: "",
 		},
-		"token via X-Sam, provider key in Authorization": {
+		"token via X-Mesh, provider key in Authorization": {
 			samAuth: "Bearer " + token, authorization: "Bearer provider-key", wantAuthorization: "Bearer provider-key",
 		},
 		"token via Authorization only": {

@@ -38,9 +38,9 @@ import (
 // current key. Asserting only while the retiring key is still valid would
 // pass with credentials nobody refreshed, which is the failure this pins.
 func TestKeyRotationIntegration(t *testing.T) {
-	cpBin := buildBinary(t, "./cmd/sam-control-plane")
-	routerBin := buildBinary(t, "./cmd/sam-router")
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	cpBin := buildBinary(t, "./cmd/agentmesh-control-plane")
+	routerBin := buildBinary(t, "./cmd/agentmesh-router")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 
 	tmpDir := t.TempDir()
 
@@ -134,7 +134,7 @@ roles:
 
 	// The owner socket serves /mesh/identity, the node's own credential;
 	// t.TempDir is too long for a socket path.
-	socketDir, err := os.MkdirTemp("", "sam-rot-")
+	socketDir, err := os.MkdirTemp("", "agentmesh-rot-")
 	if err != nil {
 		t.Fatal(err)
 	}

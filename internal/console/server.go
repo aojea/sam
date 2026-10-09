@@ -194,9 +194,9 @@ func NewServer(cfg Config) (*Server, error) {
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(controlPlaneURL)
 			r.Out.Host = r.In.Host
-			// If Authorization header is not set, inject from sam_session cookie
+			// If Authorization header is not set, inject from agentmesh_session cookie
 			if r.Out.Header.Get("Authorization") == "" {
-				if cookie, err := r.In.Cookie("sam_session"); err == nil && cookie.Value != "" {
+				if cookie, err := r.In.Cookie("agentmesh_session"); err == nil && cookie.Value != "" {
 					r.Out.Header.Set("Authorization", "Bearer "+cookie.Value)
 				}
 			}
@@ -256,7 +256,7 @@ func NewServer(cfg Config) (*Server, error) {
 }
 
 // checkCookieCSRF blocks cross-site state-mutating requests to /api/* that rely
-// on the ambient sam_session cookie rather than an explicit Authorization header.
+// on the ambient agentmesh_session cookie rather than an explicit Authorization header.
 func (s *Server) checkCookieCSRF(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
 		return true
@@ -284,7 +284,7 @@ func (s *Server) checkCookieCSRF(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// Defaults for discoverProviderWithRetry; matches sam-control-plane's
+// Defaults for discoverProviderWithRetry; matches agentmesh-control-plane's
 // discoverProviders so a transient hiccup during rollout (e.g. Dex still
 // starting up) doesn't permanently disable console OIDC login, since the
 // console's /info reports healthy either way and Kubernetes won't restart it.
@@ -331,7 +331,7 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     "sam_session",
+		Name:     "agentmesh_session",
 		Value:    "",
 		Path:     s.cfg.BasePath + "/",
 		MaxAge:   -1,
@@ -359,7 +359,7 @@ func (s *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	state := fmt.Sprintf("%x", stateBytes)
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     "sam_oidc_state",
+		Name:     "agentmesh_oidc_state",
 		Value:    state,
 		Path:     s.cfg.BasePath + "/",
 		MaxAge:   300,
@@ -369,7 +369,7 @@ func (s *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     "sam_oidc_verifier",
+		Name:     "agentmesh_oidc_verifier",
 		Value:    verifier,
 		Path:     s.cfg.BasePath + "/",
 		MaxAge:   300,
@@ -394,20 +394,20 @@ func (s *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) HandleCallback(w http.ResponseWriter, r *http.Request) {
-	stateCookie, err := r.Cookie("sam_oidc_state")
+	stateCookie, err := r.Cookie("agentmesh_oidc_state")
 	if err != nil || stateCookie.Value == "" || stateCookie.Value != r.URL.Query().Get("state") {
 		http.Error(w, "Invalid state (CSRF verification failed)", http.StatusBadRequest)
 		return
 	}
 
-	verifierCookie, err := r.Cookie("sam_oidc_verifier")
+	verifierCookie, err := r.Cookie("agentmesh_oidc_verifier")
 	if err != nil || verifierCookie.Value == "" {
 		http.Error(w, "Missing verifier cookie", http.StatusBadRequest)
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{Name: "sam_oidc_state", Value: "", Path: s.cfg.BasePath + "/", MaxAge: -1, HttpOnly: true, Secure: s.secureCookies(r), SameSite: http.SameSiteLaxMode})
-	http.SetCookie(w, &http.Cookie{Name: "sam_oidc_verifier", Value: "", Path: s.cfg.BasePath + "/", MaxAge: -1, HttpOnly: true, Secure: s.secureCookies(r), SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: "agentmesh_oidc_state", Value: "", Path: s.cfg.BasePath + "/", MaxAge: -1, HttpOnly: true, Secure: s.secureCookies(r), SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: "agentmesh_oidc_verifier", Value: "", Path: s.cfg.BasePath + "/", MaxAge: -1, HttpOnly: true, Secure: s.secureCookies(r), SameSite: http.SameSiteLaxMode})
 
 	code := r.URL.Query().Get("code")
 	if code == "" {
@@ -442,7 +442,7 @@ func (s *Server) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     "sam_session",
+		Name:     "agentmesh_session",
 		Value:    rawIDToken,
 		Path:     s.cfg.BasePath + "/",
 		MaxAge:   24 * 3600,
@@ -461,7 +461,7 @@ func (s *Server) HandleCallback(w http.ResponseWriter, r *http.Request) {
 // needs it, since the reverse proxy injects the cookie as Authorization for
 // /api/ calls.
 func (s *Server) HandleSession(w http.ResponseWriter, r *http.Request) {
-	sessionCookie, err := r.Cookie("sam_session")
+	sessionCookie, err := r.Cookie("agentmesh_session")
 	if err != nil || sessionCookie.Value == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -530,7 +530,7 @@ func (s *Server) HandleTokenLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     "sam_session",
+		Name:     "agentmesh_session",
 		Value:    token,
 		Path:     s.cfg.BasePath + "/",
 		MaxAge:   24 * 3600,
@@ -566,7 +566,7 @@ func generatePKCE() (string, string, error) {
 }
 
 // versionPlaceholder in index.html is replaced with the build version on every page load.
-const versionPlaceholder = "__SAM_VERSION__"
+const versionPlaceholder = "__AGENTMESH_VERSION__"
 
 // serveIndex reads index.html per request so a StaticDir stays live-editable.
 func serveIndex(w http.ResponseWriter, r *http.Request, assets fs.FS) {

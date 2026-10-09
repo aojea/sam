@@ -85,10 +85,10 @@ var acceptingLine = regexp.MustCompile(`^accepting (\S+) as (\S+)$`)
 // TestNativeSDKExamples runs the programs the SDK READMEs and the Native
 // SDKs guide embed, unchanged, against a real mesh, configured as the
 // testnet canaries are (.github/k8s/sam-sdk-canary-template.yaml). Each
-// SDK's agent example enrolls with an OIDC token through SAM_JWT_PATH, the
+// SDK's agent example enrolls with an OIDC token through AGENTMESH_JWT_PATH, the
 // way a Kubernetes workload does, and accepts A2A requests for a2a://agent,
 // publishing nothing. Each SDK's call example enrolls with a bootstrap
-// token, reaches the sam-node's mcp://calc by name, and the other language's
+// token, reaches the agentmesh-node's mcp://calc by name, and the other language's
 // agent (its own when the other toolchain is missing) by peer ID; the SDK
 // finds the path through the router by itself. The first run spends the
 // token, the later runs resume from the state directory without one.
@@ -113,15 +113,15 @@ func TestNativeSDKExamples(t *testing.T) {
 	errs := make([]error, len(launchers))
 	var wg sync.WaitGroup
 	for i := range launchers {
-		jwtPath := filepath.Join(t.TempDir(), "sam-token")
+		jwtPath := filepath.Join(t.TempDir(), "agentmesh-token")
 		jwt := mesh.mintToken(map[string]interface{}{"sub": "mock-user", "roles": []string{api.RoleNode}})
 		if err := os.WriteFile(jwtPath, []byte(jwt+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		cmds[i].Env = append(os.Environ(),
-			"SAM_CONTROL_PLANE_URL="+mesh.baseURL,
-			"SAM_JWT_PATH="+jwtPath,
-			"SAM_STATE_DIR="+filepath.Join(t.TempDir(), "state"),
+			"AGENTMESH_CONTROL_PLANE_URL="+mesh.baseURL,
+			"AGENTMESH_JWT_PATH="+jwtPath,
+			"AGENTMESH_STATE_DIR="+filepath.Join(t.TempDir(), "state"),
 		)
 		cmds[i].Dir = mesh.root
 		wg.Add(1)
@@ -161,10 +161,10 @@ func TestNativeSDKExamples(t *testing.T) {
 			if err := os.WriteFile(tokenPath, []byte(mintBootstrapToken(t, mesh.baseURL, mesh.adminToken)+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			withToken := []string{"SAM_CONTROL_PLANE_URL=" + mesh.baseURL, "SAM_STATE_DIR=" + stateDir, "SAM_BOOTSTRAP_TOKEN_PATH=" + tokenPath}
+			withToken := []string{"AGENTMESH_CONTROL_PLANE_URL=" + mesh.baseURL, "AGENTMESH_STATE_DIR=" + stateDir, "AGENTMESH_BOOTSTRAP_TOKEN_PATH=" + tokenPath}
 			withoutToken := withToken[:2]
 
-			// The first run spends the token: the sam-node's calc over MCP,
+			// The first run spends the token: the agentmesh-node's calc over MCP,
 			// found by name.
 			out := runExample(t, mesh.root, l, withToken, "call", "mcp://calc", "add", `{"a": 1, "b": 2}`)
 			caller := expectLine(t, out, "on the mesh as ")
@@ -200,7 +200,7 @@ func TestNativeSDKExamples(t *testing.T) {
 			egressPath := "/repos/acme/" + l.name
 			out = runExample(t, mesh.root, l, withoutToken, "call", "egress://"+sdkMeshEgressHost, egressPath)
 			if got := expectLine(t, out, "egress://"+sdkMeshEgressHost+" is served by "); got != mesh.samNode.peerID.String() {
-				t.Fatalf("egress://%s is served by %s, want the sam-node %s", sdkMeshEgressHost, got, mesh.samNode.peerID)
+				t.Fatalf("egress://%s is served by %s, want the agentmesh-node %s", sdkMeshEgressHost, got, mesh.samNode.peerID)
 			}
 			expectLine(t, out, "204 ")
 			var reached *http.Request
@@ -223,7 +223,7 @@ func TestNativeSDKExamples(t *testing.T) {
 
 			// The state directory is the same layout in every implementation:
 			// the other SDK's call example resumes this identity from it, and
-			// so does a sam-node after `state import`. Each proves it by
+			// so does a agentmesh-node after `state import`. Each proves it by
 			// reaching the agent as the same peer.
 			for _, other := range launchers {
 				if other.name == l.name {
@@ -239,7 +239,7 @@ func TestNativeSDKExamples(t *testing.T) {
 			}
 			importedNode := importStateIntoNode(t, mesh, stateDir)
 			if importedNode.peerID.String() != caller {
-				t.Fatalf("sam-node imported %s's state directory as %s, want %s", l.name, importedNode.peerID, caller)
+				t.Fatalf("agentmesh-node imported %s's state directory as %s, want %s", l.name, importedNode.peerID, caller)
 			}
 			importedAPI := importedNode.waitForAPI(t)
 			waitForPeerOnRouter(t, mesh.cpPort, mesh.adminToken, caller, 10*time.Second)
@@ -253,18 +253,18 @@ func TestNativeSDKExamples(t *testing.T) {
 	}
 }
 
-// importStateIntoNode runs `sam-node state import` on a fresh data directory
+// importStateIntoNode runs `agentmesh-node state import` on a fresh data directory
 // and starts a node from it, so the node runs as the member the directory
 // holds. The import refuses a token: the identity is already enrolled.
 func importStateIntoNode(t *testing.T, mesh *sdkMesh, stateDir string) *backgroundNode {
 	t.Helper()
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	nodeHome := filepath.Join(t.TempDir(), "imported")
 	dataDir := filepath.Join(nodeHome, "data")
 	importCmd := exec.Command(nodeBin, "state", "import", stateDir, "--data-dir", dataDir)
 	importCmd.Dir = mesh.root
 	if out, err := importCmd.CombinedOutput(); err != nil {
-		t.Fatalf("sam-node state import: %v\n%s", err, out)
+		t.Fatalf("agentmesh-node state import: %v\n%s", err, out)
 	}
 	return launchNode(t, nodeBin,
 		append(os.Environ(), "HOME="+nodeHome, "XDG_CONFIG_HOME="+filepath.Join(nodeHome, ".config")),

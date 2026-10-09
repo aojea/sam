@@ -40,7 +40,7 @@ import (
 // stop a key rotation from landing; the errors are reported together. Called
 // once before Start, so the node dials the routers the control plane knows
 // now and enforces the bans it holds now, and then by the sync loop.
-func (n *SamNode) SyncControlPlane(ctx context.Context) error {
+func (n *AgentMeshNode) SyncControlPlane(ctx context.Context) error {
 	if n.Store == nil {
 		return errors.New("node has no store")
 	}
@@ -71,7 +71,7 @@ func (n *SamNode) SyncControlPlane(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (n *SamNode) syncRevocations(ctx context.Context, controlPlaneURL string) error {
+func (n *AgentMeshNode) syncRevocations(ctx context.Context, controlPlaneURL string) error {
 	token := n.GetIdentity()
 	if len(token) == 0 {
 		return nil
@@ -101,7 +101,7 @@ func (n *SamNode) syncRevocations(ctx context.Context, controlPlaneURL string) e
 // about. Verification against the keys already trusted keeps whoever answers
 // the URL from becoming the trust root; an empty answer is a failure so the
 // set is never wiped.
-func (n *SamNode) syncTrustedKeys(ctx context.Context, controlPlaneURL string) error {
+func (n *AgentMeshNode) syncTrustedKeys(ctx context.Context, controlPlaneURL string) error {
 	n.keysMu.RLock()
 	existing := append([]TrustedKey(nil), n.trustedKeys...)
 	n.keysMu.RUnlock()
@@ -132,7 +132,7 @@ func (n *SamNode) syncTrustedKeys(ctx context.Context, controlPlaneURL string) e
 // same after a restart. An identity from a build that recorded no set is
 // checked against the stored mesh-config key, the one enrollment handed out
 // with it. Nothing enrolled means nothing to refresh.
-func (n *SamNode) identityPredatesRotation() bool {
+func (n *AgentMeshNode) identityPredatesRotation() bool {
 	if n.Store == nil || len(n.GetIdentity()) == 0 {
 		return false
 	}
@@ -168,7 +168,7 @@ func containsPublicKey(keys []ed25519.PublicKey, key ed25519.PublicKey) bool {
 }
 
 // recordIdentityKeySet pins the trusted set to the identity just adopted.
-func (n *SamNode) recordIdentityKeySet() {
+func (n *AgentMeshNode) recordIdentityKeySet() {
 	if n.Store == nil {
 		return
 	}
@@ -185,7 +185,7 @@ func (n *SamNode) recordIdentityKeySet() {
 // dial; once it is running they only matter to the next start. The ban set
 // is reconciled against the revocation cache, which is how a running node
 // learns a ban or an unban it got no event for.
-func (n *SamNode) syncMeshInfo(ctx context.Context, controlPlaneURL string) error {
+func (n *AgentMeshNode) syncMeshInfo(ctx context.Context, controlPlaneURL string) error {
 	// Taken before the request: a ban recorded after this instant cannot be
 	// in the answer, so its absence must not be read as an unban.
 	fetchedAt := time.Now()
@@ -231,7 +231,7 @@ func parseMultiaddrs(addrs []string) []multiaddr.Multiaddr {
 // ban set as of fetchedAt. Bans recorded at or after fetchedAt are kept even
 // when absent from the answer: the answer predates them and cannot speak to
 // them (see the router's reconcileBannedPeers for the same rule).
-func (n *SamNode) reconcileBannedPeers(peerIDs []string, fetchedAt time.Time) {
+func (n *AgentMeshNode) reconcileBannedPeers(peerIDs []string, fetchedAt time.Time) {
 	if n.revokedPeers == nil {
 		return
 	}
@@ -267,7 +267,7 @@ func (n *SamNode) reconcileBannedPeers(peerIDs []string, fetchedAt time.Time) {
 // banPeer records the ban and evicts the peer: the cache entry is what the
 // gater and the auth path consult, and dropping the admission is what stops
 // the relay ACL from honouring a session that was already established.
-func (n *SamNode) banPeer(p peer.ID, bannedAtMs int64) {
+func (n *AgentMeshNode) banPeer(p peer.ID, bannedAtMs int64) {
 	if n.revokedPeers != nil {
 		n.revokedPeers.Add(p.String(), bannedAtMs)
 	}
@@ -280,7 +280,7 @@ func (n *SamNode) banPeer(p peer.ID, bannedAtMs int64) {
 // triggerControlPlaneSync asks the sync loop to run soon, after a random
 // delay of up to the configured jitter so a fleet told at once does not hit
 // the control plane at once. A pending request is not duplicated.
-func (n *SamNode) triggerControlPlaneSync() {
+func (n *AgentMeshNode) triggerControlPlaneSync() {
 	select {
 	case n.controlPlaneSyncTrigger <- struct{}{}:
 	default:
@@ -293,7 +293,7 @@ func (n *SamNode) triggerControlPlaneSync() {
 // jitter, so a fleet started or notified together does not pull together.
 // Failures are logged at Warn once and at Debug while they persist, with an
 // Info on recovery.
-func (n *SamNode) startControlPlaneSyncLoop(ctx context.Context, interval time.Duration) {
+func (n *AgentMeshNode) startControlPlaneSyncLoop(ctx context.Context, interval time.Duration) {
 	if interval <= 0 || n.Store == nil {
 		return
 	}

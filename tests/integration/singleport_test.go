@@ -35,7 +35,7 @@ import (
 	"github.com/multiformats/go-multiaddr"
 )
 
-// TestSinglePortWebSocketAndHTTP pins the single-binary (sam-one) topology:
+// TestSinglePortWebSocketAndHTTP pins the single-binary (agentmesh-one) topology:
 // one TCP socket, owned by the router's WebSocket transport, carries both
 // libp2p traffic (WebSocket upgrades) and plain HTTP requests (fallback
 // handler), including control-plane routes registered on the shared mux. The
@@ -136,7 +136,7 @@ func TestSinglePortWebSocketAndHTTP(t *testing.T) {
 		_ = resp.Body.Close()
 	}
 
-	// 2. A default-transports libp2p client (same dial path as sam-node)
+	// 2. A default-transports libp2p client (same dial path as agentmesh-node)
 	// connects over the very same port.
 	dialer, err := libp2p.New(libp2p.NoListenAddrs)
 	if err != nil {

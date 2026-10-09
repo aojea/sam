@@ -79,7 +79,7 @@ func debugGet(t *testing.T, apiAddr, path string) string {
 }
 
 func TestDebugEndpoints(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 
 	tmpDir := t.TempDir()
 
@@ -201,7 +201,7 @@ roles: []
 
 	t.Run("logs", func(t *testing.T) {
 		resp := debugGet(t, actualApiAddrA, "/debug/logs")
-		if !strings.Contains(resp, "Starting MCP server") && !strings.Contains(resp, "SAM Node Online") {
+		if !strings.Contains(resp, "Starting MCP server") && !strings.Contains(resp, "Agent Mesh Node Online") {
 			t.Errorf("expected logs to contain startup messages, got: %v", resp)
 		}
 	})

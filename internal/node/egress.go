@@ -41,7 +41,7 @@ type CloudTokenExchanger = credprovider.Exchanger
 
 // DefaultSecretsDir is where a node looks for the credentials the control
 // plane names in egress destinations when --secrets-dir is not given.
-const DefaultSecretsDir = "/etc/sam/secrets"
+const DefaultSecretsDir = "/etc/agentmesh/secrets"
 
 // Proxy-Status error types (RFC 9209) the node answers with when it, and not
 // the destination, refuses a request. A client can then tell a policy denial
@@ -55,7 +55,7 @@ const (
 // refuse answers a request the node refuses itself, naming the reason in
 // Proxy-Status so the client can tell it from the destination's own answer.
 func refuse(w http.ResponseWriter, status int, text, errorType string) {
-	w.Header().Set("Proxy-Status", "sam-node; error="+errorType)
+	w.Header().Set("Proxy-Status", "agentmesh-node; error="+errorType)
 	http.Error(w, text, status)
 }
 
@@ -66,7 +66,7 @@ func refuse(w http.ResponseWriter, status int, text, errorType string) {
 // its own about it. Every request reaches the handler only after Authorize
 // ran with the caller's credential and the method, path, host and port facts.
 type EgressService struct {
-	node              *SamNode
+	node              *AgentMeshNode
 	destination       *api.EgressDestination
 	info              *api.ServiceInfo
 	target            *url.URL
@@ -97,7 +97,7 @@ func newEgressService(d *api.EgressDestination, secretsDir string) (*EgressServi
 	return newEgressServiceForNode(nil, d, secretsDir)
 }
 
-func newEgressServiceForNode(node *SamNode, d *api.EgressDestination, secretsDir string) (*EgressService, error) {
+func newEgressServiceForNode(node *AgentMeshNode, d *api.EgressDestination, secretsDir string) (*EgressService, error) {
 	if err := api.ValidateEgressName(d.GetName()); err != nil {
 		return nil, err
 	}
@@ -252,9 +252,9 @@ func (s *EgressService) Init(ctx context.Context) error {
 		},
 	}
 	s.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodConnect || strings.EqualFold(r.Header.Get("Upgrade"), HeaderSamTunnelUpgrade) {
+		if r.Method == http.MethodConnect || strings.EqualFold(r.Header.Get("Upgrade"), HeaderMeshTunnelUpgrade) {
 			reqPort := s.port()
-			if pStr := r.Header.Get(HeaderSamEgressPort); pStr != "" {
+			if pStr := r.Header.Get(HeaderMeshEgressPort); pStr != "" {
 				if p, err := strconv.Atoi(pStr); err == nil {
 					reqPort = p
 				}
@@ -375,7 +375,7 @@ func egressFactsFor(svc Service) *EgressFacts {
 // registered, withdrawn ones unregistered. One assignment that cannot be
 // served (a credential the platform did not deliver) is reported and the
 // rest are still applied.
-func (n *SamNode) syncEgressAssignments(ctx context.Context, controlPlaneURL string) error {
+func (n *AgentMeshNode) syncEgressAssignments(ctx context.Context, controlPlaneURL string) error {
 	token := n.GetIdentity()
 	if len(token) == 0 {
 		return errors.New("node has no identity token to fetch egress assignments")
@@ -393,7 +393,7 @@ func (n *SamNode) syncEgressAssignments(ctx context.Context, controlPlaneURL str
 	return n.applyEgressAssignments(ctx, resp.GetEgress())
 }
 
-func (n *SamNode) applyEgressAssignments(ctx context.Context, assigned []*api.EgressDestination) error {
+func (n *AgentMeshNode) applyEgressAssignments(ctx context.Context, assigned []*api.EgressDestination) error {
 	if n.services == nil {
 		// Before Start there is no registry to reconcile against; Start
 		// applies what arrived last.
@@ -454,7 +454,7 @@ func (n *SamNode) applyEgressAssignments(ctx context.Context, assigned []*api.Eg
 
 // applyPendingEgress registers the assignments that arrived before the
 // registry existed. Called by Start once it does.
-func (n *SamNode) applyPendingEgress(ctx context.Context) {
+func (n *AgentMeshNode) applyPendingEgress(ctx context.Context) {
 	n.pendingEgressMu.Lock()
 	pending := n.pendingEgress
 	n.pendingEgress = nil
@@ -472,7 +472,7 @@ func (n *SamNode) applyPendingEgress(ctx context.Context) {
 // node, so its own credential is evaluated, with the request's method and
 // path and the destination's host and port, as on the mesh datapath. The
 // client's Authorization was for the node and does not travel further.
-func handleLocalEgress(node *SamNode, w http.ResponseWriter, r *http.Request) {
+func handleLocalEgress(node *AgentMeshNode, w http.ResponseWriter, r *http.Request) {
 	if hasDotSegment(r.URL.Path) {
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return

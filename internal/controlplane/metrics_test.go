@@ -185,40 +185,40 @@ func TestMeshStateCollectorExportsStoreState(t *testing.T) {
 	c.now = func() time.Time { return now }
 	g := gather(t, c)
 
-	g.want(t, "sam_control_plane_mesh_state_scrape_success", 1)
-	g.want(t, "sam_control_plane_mesh_state_timestamp_seconds", float64(now.Unix()))
+	g.want(t, "agentmesh_control_plane_mesh_state_scrape_success", 1)
+	g.want(t, "agentmesh_control_plane_mesh_state_timestamp_seconds", float64(now.Unix()))
 
-	g.want(t, "sam_control_plane_enrolled_nodes{role="+api.RoleNode+",state=admitted}", 2)
-	g.want(t, "sam_control_plane_enrolled_nodes{role="+api.RoleNode+",state=expired}", 1)
-	g.want(t, "sam_control_plane_enrolled_nodes{role="+api.RoleNode+",state=banned}", 1)
-	g.want(t, "sam_control_plane_enrolled_nodes{role="+api.RoleRouter+",state=admitted}", 2)
-	g.want(t, "sam_control_plane_users", 1)
+	g.want(t, "agentmesh_control_plane_enrolled_nodes{role="+api.RoleNode+",state=admitted}", 2)
+	g.want(t, "agentmesh_control_plane_enrolled_nodes{role="+api.RoleNode+",state=expired}", 1)
+	g.want(t, "agentmesh_control_plane_enrolled_nodes{role="+api.RoleNode+",state=banned}", 1)
+	g.want(t, "agentmesh_control_plane_enrolled_nodes{role="+api.RoleRouter+",state=admitted}", 2)
+	g.want(t, "agentmesh_control_plane_users", 1)
 
-	g.want(t, "sam_control_plane_enrollment_requests{status=pending}", 2)
-	g.want(t, "sam_control_plane_enrollment_requests{status=approved}", 1)
+	g.want(t, "agentmesh_control_plane_enrollment_requests{status=pending}", 2)
+	g.want(t, "agentmesh_control_plane_enrollment_requests{status=approved}", 1)
 
-	g.want(t, "sam_control_plane_bootstrap_tokens{state=active}", 1)
-	g.want(t, "sam_control_plane_bootstrap_tokens{state=exhausted}", 1)
-	g.want(t, "sam_control_plane_bootstrap_tokens{state=expired}", 1)
-	g.want(t, "sam_control_plane_bootstrap_tokens{state=revoked}", 1)
+	g.want(t, "agentmesh_control_plane_bootstrap_tokens{state=active}", 1)
+	g.want(t, "agentmesh_control_plane_bootstrap_tokens{state=exhausted}", 1)
+	g.want(t, "agentmesh_control_plane_bootstrap_tokens{state=expired}", 1)
+	g.want(t, "agentmesh_control_plane_bootstrap_tokens{state=revoked}", 1)
 
 	// The lapsed lease is neither counted nor labelled.
-	g.want(t, "sam_control_plane_routers_active", 2)
-	g.want(t, "sam_control_plane_router_connected_peers{router=router-1}", 3)
-	g.want(t, "sam_control_plane_router_connected_peers{router=router-2}", 3)
-	g.want(t, "sam_control_plane_router_dht_size{router=router-1}", 5)
-	g.want(t, "sam_control_plane_router_dht_size{router=router-2}", 4)
-	g.want(t, "sam_control_plane_router_lease_renewed_timestamp_seconds{router=router-2}", float64(now.Add(-time.Minute).Unix()))
-	if _, ok := g["sam_control_plane_router_connected_peers{router=router-gone}"]; ok {
+	g.want(t, "agentmesh_control_plane_routers_active", 2)
+	g.want(t, "agentmesh_control_plane_router_connected_peers{router=router-1}", 3)
+	g.want(t, "agentmesh_control_plane_router_connected_peers{router=router-2}", 3)
+	g.want(t, "agentmesh_control_plane_router_dht_size{router=router-1}", 5)
+	g.want(t, "agentmesh_control_plane_router_dht_size{router=router-2}", 4)
+	g.want(t, "agentmesh_control_plane_router_lease_renewed_timestamp_seconds{router=router-2}", float64(now.Add(-time.Minute).Unix()))
+	if _, ok := g["agentmesh_control_plane_router_connected_peers{router=router-gone}"]; ok {
 		t.Error("lapsed router lease was exported")
 	}
 
 	// node-a counted once, routers excluded, node-z behind a dead lease ignored.
-	g.want(t, "sam_control_plane_mesh_connected_peers", 3)
+	g.want(t, "agentmesh_control_plane_mesh_connected_peers", 3)
 
 	// Both keys verify during the grace period; the retiring one's expiry is exported.
-	g.want(t, "sam_control_plane_signing_keys", 2)
-	retiring, ok := g["sam_control_plane_retiring_key_expiry_timestamp_seconds"]
+	g.want(t, "agentmesh_control_plane_signing_keys", 2)
+	retiring, ok := g["agentmesh_control_plane_retiring_key_expiry_timestamp_seconds"]
 	if !ok {
 		t.Fatal("retiring key expiry not exported during the grace period")
 	}
@@ -236,7 +236,7 @@ func TestMeshStateCollectorCachesWithinTTL(t *testing.T) {
 	c := newMeshStateCollector(store)
 	c.now = func() time.Time { return clock }
 
-	gather(t, c).want(t, "sam_control_plane_routers_active", 2)
+	gather(t, c).want(t, "agentmesh_control_plane_routers_active", 2)
 
 	extra := storage.RouterLease{PeerID: "router-3", Addresses: []string{"/ip4/10.0.0.4/tcp/4501"}, LastRenewal: now, ExpiresAt: now.Add(time.Hour)}
 	if err := store.UpsertRouterLease(context.Background(), &extra); err != nil {
@@ -244,10 +244,10 @@ func TestMeshStateCollectorCachesWithinTTL(t *testing.T) {
 	}
 
 	clock = now.Add(c.ttl / 2)
-	gather(t, c).want(t, "sam_control_plane_routers_active", 2)
+	gather(t, c).want(t, "agentmesh_control_plane_routers_active", 2)
 
 	clock = now.Add(c.ttl)
-	gather(t, c).want(t, "sam_control_plane_routers_active", 3)
+	gather(t, c).want(t, "agentmesh_control_plane_routers_active", 3)
 }
 
 func TestMeshStateCollectorKeepsLastSnapshotWhenStoreFails(t *testing.T) {
@@ -260,8 +260,8 @@ func TestMeshStateCollectorKeepsLastSnapshotWhenStoreFails(t *testing.T) {
 	c.now = func() time.Time { return clock }
 
 	g := gather(t, c)
-	g.want(t, "sam_control_plane_mesh_state_scrape_success", 1)
-	g.want(t, "sam_control_plane_routers_active", 2)
+	g.want(t, "agentmesh_control_plane_mesh_state_scrape_success", 1)
+	g.want(t, "agentmesh_control_plane_routers_active", 2)
 
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
@@ -269,9 +269,9 @@ func TestMeshStateCollectorKeepsLastSnapshotWhenStoreFails(t *testing.T) {
 	clock = now.Add(c.ttl)
 
 	g = gather(t, c)
-	g.want(t, "sam_control_plane_mesh_state_scrape_success", 0)
-	g.want(t, "sam_control_plane_routers_active", 2)
-	g.want(t, "sam_control_plane_mesh_state_timestamp_seconds", float64(now.Unix()))
+	g.want(t, "agentmesh_control_plane_mesh_state_scrape_success", 0)
+	g.want(t, "agentmesh_control_plane_routers_active", 2)
+	g.want(t, "agentmesh_control_plane_mesh_state_timestamp_seconds", float64(now.Unix()))
 }
 
 func TestMeshStateCollectorBeforeFirstReadReportsOnlyFailure(t *testing.T) {
@@ -281,7 +281,7 @@ func TestMeshStateCollectorBeforeFirstReadReportsOnlyFailure(t *testing.T) {
 	}
 
 	g := gather(t, newMeshStateCollector(store))
-	g.want(t, "sam_control_plane_mesh_state_scrape_success", 0)
+	g.want(t, "agentmesh_control_plane_mesh_state_scrape_success", 0)
 	if len(g) != 1 {
 		t.Errorf("expected only the success gauge before any snapshot, got %v", g)
 	}
@@ -340,9 +340,9 @@ func TestMetricsEndpointServesMeshStateAndRuntime(t *testing.T) {
 		t.Fatalf("status %d: %s", resp.StatusCode, body)
 	}
 	for _, want := range []string{
-		"sam_control_plane_mesh_state_scrape_success 1",
-		"sam_control_plane_routers_active 0",
-		"sam_control_plane_mesh_connected_peers 0",
+		"agentmesh_control_plane_mesh_state_scrape_success 1",
+		"agentmesh_control_plane_routers_active 0",
+		"agentmesh_control_plane_mesh_connected_peers 0",
 		"go_goroutines",
 	} {
 		if !strings.Contains(string(body), want) {

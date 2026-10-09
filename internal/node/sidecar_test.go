@@ -68,11 +68,11 @@ func waitForSocket(t *testing.T, path string) *http.Client {
 // file's owner-only permissions are the credential, while the TCP listener on
 // the very same server keeps demanding the token.
 func TestSidecarSocketAuthorizesWithoutToken(t *testing.T) {
-	node := &SamNode{
+	node := &AgentMeshNode{
 		BiscuitTimeout: 500 * time.Millisecond,
 		services:       NewServiceRegistry(&fakeDHT{}, 0),
 	}
-	socketPath := filepath.Join(t.TempDir(), "sam.sock")
+	socketPath := filepath.Join(t.TempDir(), "agentmesh.sock")
 
 	srv, err := StartSidecarServer(node, "127.0.0.1:0", socketPath, "test-token", "", "", "")
 	if err != nil {
@@ -118,11 +118,11 @@ func TestSidecarSocketAuthorizesWithoutToken(t *testing.T) {
 // TestSidecarSocketOnly covers a node with no TCP listener at all, where no API
 // token exists to demand.
 func TestSidecarSocketOnly(t *testing.T) {
-	node := &SamNode{
+	node := &AgentMeshNode{
 		BiscuitTimeout: 500 * time.Millisecond,
 		services:       NewServiceRegistry(&fakeDHT{}, 0),
 	}
-	socketPath := filepath.Join(t.TempDir(), "sam.sock")
+	socketPath := filepath.Join(t.TempDir(), "agentmesh.sock")
 
 	srv, err := StartSidecarServer(node, "", socketPath, "", "", "", "")
 	if err != nil {
@@ -138,7 +138,7 @@ func TestSidecarSocketOnly(t *testing.T) {
 }
 
 func TestStartSidecarServerRequiresAListener(t *testing.T) {
-	node := &SamNode{services: NewServiceRegistry(&fakeDHT{}, 0)}
+	node := &AgentMeshNode{services: NewServiceRegistry(&fakeDHT{}, 0)}
 	if _, err := StartSidecarServer(node, "", "", "token", "", "", ""); err == nil {
 		t.Fatal("expected an error when neither a TCP address nor a socket is configured")
 	}
@@ -152,9 +152,9 @@ func TestSidecarSocketFailureKeepsTCPServing(t *testing.T) {
 	if err := os.WriteFile(unusable, []byte("not a directory"), 0600); err != nil {
 		t.Fatalf("failed to write the blocking file: %v", err)
 	}
-	socketPath := filepath.Join(unusable, "sam.sock")
+	socketPath := filepath.Join(unusable, "agentmesh.sock")
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		BiscuitTimeout: 500 * time.Millisecond,
 		services:       NewServiceRegistry(&fakeDHT{}, 0),
 	}
@@ -170,7 +170,7 @@ func TestSidecarSocketFailureKeepsTCPServing(t *testing.T) {
 		t.Errorf("BoundSocketPath = %q, want empty after a failed socket", node.BoundSocketPath)
 	}
 
-	socketOnly := &SamNode{services: NewServiceRegistry(&fakeDHT{}, 0)}
+	socketOnly := &AgentMeshNode{services: NewServiceRegistry(&fakeDHT{}, 0)}
 	if _, err := StartSidecarServer(socketOnly, "", socketPath, "", "", "", ""); err == nil {
 		t.Error("expected an error when the socket is the only configured listener")
 	}
@@ -178,7 +178,7 @@ func TestSidecarSocketFailureKeepsTCPServing(t *testing.T) {
 
 func TestListenLocalSocket(t *testing.T) {
 	t.Run("replaces a socket left behind by a crashed node", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "sam.sock")
+		path := filepath.Join(t.TempDir(), "agentmesh.sock")
 		stale, err := net.Listen("unix", path)
 		if err != nil {
 			t.Fatalf("failed to create the stale socket: %v", err)
@@ -197,7 +197,7 @@ func TestListenLocalSocket(t *testing.T) {
 	})
 
 	t.Run("refuses a socket a live node is using", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "sam.sock")
+		path := filepath.Join(t.TempDir(), "agentmesh.sock")
 		live, err := net.Listen("unix", path)
 		if err != nil {
 			t.Fatalf("failed to create the live socket: %v", err)
@@ -219,7 +219,7 @@ func TestListenLocalSocket(t *testing.T) {
 	})
 
 	t.Run("refuses to remove a file that is not a socket", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "sam.sock")
+		path := filepath.Join(t.TempDir(), "agentmesh.sock")
 		if err := os.WriteFile(path, []byte("precious"), 0600); err != nil {
 			t.Fatalf("failed to write the file: %v", err)
 		}
@@ -293,9 +293,9 @@ func TestWithAuth(t *testing.T) {
 	})
 
 	t.Run("Consumed gate header is stripped, other headers survive", func(t *testing.T) {
-		var gotSamAuth, gotAuth string
+		var gotMeshAuth, gotAuth string
 		inspect := withAuth(token, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			gotSamAuth = r.Header.Get(api.HeaderMeshAuthentication)
+			gotMeshAuth = r.Header.Get(api.HeaderMeshAuthentication)
 			gotAuth = r.Header.Get("Authorization")
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -306,8 +306,8 @@ func TestWithAuth(t *testing.T) {
 		rr := httptest.NewRecorder()
 		inspect.ServeHTTP(rr, req)
 
-		if gotSamAuth != "" {
-			t.Errorf("consumed %s header must be stripped, got %q", api.HeaderMeshAuthentication, gotSamAuth)
+		if gotMeshAuth != "" {
+			t.Errorf("consumed %s header must be stripped, got %q", api.HeaderMeshAuthentication, gotMeshAuth)
 		}
 		if gotAuth != "Bearer backend-credential" {
 			t.Errorf("Authorization must survive when not consumed, got %q", gotAuth)
@@ -361,7 +361,7 @@ func TestWithAuth(t *testing.T) {
 }
 
 func TestSidecarServerAuthEnforcement(t *testing.T) {
-	node := &SamNode{
+	node := &AgentMeshNode{
 		BiscuitTimeout: 500 * time.Millisecond,
 		services:       NewServiceRegistry(&fakeDHT{}, 0),
 	}
@@ -451,7 +451,7 @@ func TestSidecarServerAuthEnforcement(t *testing.T) {
 // (register/unregister/discover, mcp), and rejected on the egress proxy, which
 // must forward "Authorization" untouched to the destination service.
 func TestSidecarAuthorizationFallbackScope(t *testing.T) {
-	node := &SamNode{
+	node := &AgentMeshNode{
 		BiscuitTimeout: 500 * time.Millisecond,
 		services:       NewServiceRegistry(&fakeDHT{}, 0),
 	}
@@ -545,7 +545,7 @@ func TestRegisterService(t *testing.T) {
 	// Wait for DHT to recognize the peer
 	time.Sleep(100 * time.Millisecond)
 
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond,
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond,
 		services: NewServiceRegistry(d, 0),
 		DHT:      d,
 	}
@@ -574,7 +574,7 @@ func TestRegisterService(t *testing.T) {
 }
 
 func TestUnregisterService(t *testing.T) {
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond,
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond,
 		services: NewServiceRegistry(&fakeDHT{}, 0),
 	}
 	node.services.insertService(&testService{info: &api.ServiceInfo{Name: "test-service"}})
@@ -600,7 +600,7 @@ func TestHandleDiscoverService(t *testing.T) {
 	}
 	defer func() { _ = d.Close() }()
 
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond,
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond,
 		services:      NewServiceRegistry(d, 0),
 		DHT:           d,
 		Host:          h,
@@ -659,7 +659,7 @@ func TestHandleDiscoverService(t *testing.T) {
 }
 
 func TestListLocalServices(t *testing.T) {
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond,
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond,
 		services: NewServiceRegistry(&fakeDHT{}, 0),
 	}
 
@@ -677,7 +677,7 @@ func TestListLocalServices(t *testing.T) {
 }
 
 func TestListLocalServices_TypeFilter(t *testing.T) {
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond,
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond,
 		services: NewServiceRegistry(&fakeDHT{}, 0),
 	}
 	mcpA := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "mcp-a"}
@@ -776,7 +776,7 @@ func TestServiceKeyToCID_Equivalence(t *testing.T) {
 }
 
 func TestRegisterService_Validation(t *testing.T) {
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond,
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond,
 		services: NewServiceRegistry(&fakeDHT{}, 0),
 	}
 
@@ -822,7 +822,7 @@ func TestRegisterService_Validation(t *testing.T) {
 }
 
 func TestStartSidecarServer_TokenMandatory(t *testing.T) {
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond}
 
 	// Test case: No token, no TLS
 	_, err := StartSidecarServer(node, "127.0.0.1:0", "", "", "", "", "")
@@ -856,7 +856,7 @@ func TestDiscoverService_Pagination(t *testing.T) {
 	}
 	defer func() { _ = d.Close() }()
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		BiscuitTimeout: 500 * time.Millisecond,
 		services:       NewServiceRegistry(d, 0),
 		DHT:            d,

@@ -149,13 +149,13 @@ func TestFacade_Completions_ForwardsToRemote(t *testing.T) {
 	f.remoteModels = func(_ context.Context, _, _ string) ([]string, error) {
 		return []string{"m1"}, nil
 	}
-	var gotPath, gotBody, gotAuth, gotSamAuth string
+	var gotPath, gotBody, gotAuth, gotMeshAuth string
 	f.forward = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		b, _ := io.ReadAll(r.Body)
 		gotBody = string(b)
 		gotAuth = r.Header.Get("Authorization")
-		gotSamAuth = r.Header.Get(api.HeaderMeshAuthentication)
+		gotMeshAuth = r.Header.Get(api.HeaderMeshAuthentication)
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -177,8 +177,8 @@ func TestFacade_Completions_ForwardsToRemote(t *testing.T) {
 	if gotBody != body {
 		t.Errorf("forwarded body: got %q, want %q", gotBody, body)
 	}
-	if gotSamAuth != "" {
-		t.Errorf("%s must never travel off-node, got %q", api.HeaderMeshAuthentication, gotSamAuth)
+	if gotMeshAuth != "" {
+		t.Errorf("%s must never travel off-node, got %q", api.HeaderMeshAuthentication, gotMeshAuth)
 	}
 	if gotAuth != "Bearer backend-credential" {
 		t.Errorf("backend Authorization must pass through, got %q", gotAuth)

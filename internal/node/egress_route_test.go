@@ -108,8 +108,8 @@ func TestLocalEgressRoute(t *testing.T) {
 	// The node's own refusals name themselves, so an app can tell a policy
 	// denial from a 403 the destination sent.
 	proxyStatus := map[int]string{
-		http.StatusForbidden: "sam-node; error=http_request_denied",
-		http.StatusNotFound:  "sam-node; error=destination_not_found",
+		http.StatusForbidden: "agentmesh-node; error=http_request_denied",
+		http.StatusNotFound:  "agentmesh-node; error=destination_not_found",
 	}
 
 	tests := []struct {
@@ -125,7 +125,7 @@ func TestLocalEgressRoute(t *testing.T) {
 		{"local attenuation on path", "GET", "/egress/api.github.com/repos/acme/vault/keys", nil, http.StatusForbidden},
 		{"a destination with a plain grant takes any method", "DELETE", "/egress/open.example/anything", nil, http.StatusNoContent},
 		{"a destination not assigned to this node", "GET", "/egress/other.example/x", nil, http.StatusNotFound},
-		{"a mesh name is not an egress destination", "GET", "/egress/tools.mcp.sam.alt/x", nil, http.StatusNotFound},
+		{"a mesh name is not an egress destination", "GET", "/egress/tools.mcp.mesh.alt/x", nil, http.StatusNotFound},
 	}
 	decisions := func(destination, outcome string) float64 {
 		return counterValue(t, egressDecisionsTotal.WithLabelValues(destination, outcome))

@@ -338,8 +338,8 @@ function renderUsersTable(users) {
 }
 
 // Renders an operator-declared labels map (e.g. {component: "stvv", role:
-// "producer"}, from sam-node.yaml's labels: key) as a compact key=value
-// list - the closest thing to a node mnemonic that exists today, since SAM
+// "producer"}, from agentmesh-node.yaml's labels: key) as a compact key=value
+// list - the closest thing to a node mnemonic that exists today, since Agent Mesh
 // has no dedicated name/alias field. Returns '' if there are none.
 function formatLabels(labels) {
     const entries = Object.entries(labels || {});
@@ -812,7 +812,7 @@ function showGeneratedToken(res) {
     input.value = res.token;
     document.getElementById('token-result-owner').textContent = res.owner_id || 'you';
     document.getElementById('token-result-cmd').textContent =
-        'sam-node join --bootstrap-token ' + res.token + ' <control-plane-url>';
+        'agentmesh-node join --bootstrap-token ' + res.token + ' <control-plane-url>';
     panel.hidden = false;
     input.focus();
     input.select();

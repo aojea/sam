@@ -32,7 +32,7 @@ import (
 )
 
 // headerRoundTripper stamps fixed headers (mesh auth, labels) on every
-// request so the stock A2A SDK client needs no SAM-specific code.
+// request so the stock A2A SDK client needs no Agent Mesh-specific code.
 type headerRoundTripper struct {
 	headers map[string]string
 }
@@ -59,7 +59,7 @@ func meshHTTPClient(token string, extra map[string]string) *http.Client {
 // holds a message exchange, and a region-mismatched request is refused
 // fail-closed before any payload leaves node B.
 func TestA2ACUJ(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	_, hubAddr := startMockRouter(t)
 
 	homeA := t.TempDir()

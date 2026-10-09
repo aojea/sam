@@ -58,7 +58,7 @@ func LoadNodeConfig(path string) (*NodeConfigComplete, error) {
 	}
 
 	if !api.SupportedNodeConfigVersions[config.Version] {
-		return nil, fmt.Errorf("node config %s declares version %q, which this build does not support (supported: %s); upgrade sam-node",
+		return nil, fmt.Errorf("node config %s declares version %q, which this build does not support (supported: %s); upgrade agentmesh-node",
 			path, config.Version, api.NodeConfigVersionV1Alpha1)
 	}
 

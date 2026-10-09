@@ -35,9 +35,9 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// TestStandaloneNodeJoin pins the sam-one first-boot CUJ end to end: one
+// TestStandaloneNodeJoin pins the agentmesh-one first-boot CUJ end to end: one
 // standalone server provisions its own tokens, policy and embedded router,
-// and a stock sam-node enrolls with the generated join token and connects to
+// and a stock agentmesh-node enrolls with the generated join token and connects to
 // the router over WebSocket through the single public port.
 func TestStandaloneNodeJoin(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -57,7 +57,7 @@ func TestStandaloneNodeJoin(t *testing.T) {
 	t.Cleanup(func() { _ = srv.Close() })
 
 	// First boot persisted the generated credentials.
-	for _, f := range []string{"join-token", "admin-token", "router.key", "sam.db"} {
+	for _, f := range []string{"join-token", "admin-token", "router.key", "agentmesh.db"} {
 		if _, err := os.Stat(filepath.Join(dataDir, f)); err != nil {
 			t.Errorf("expected %s in data dir: %v", f, err)
 		}
@@ -199,7 +199,7 @@ func TestStandaloneNoJoinToken(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || strings.Contains(string(body), "sam-one join token") {
+	if resp.StatusCode != http.StatusOK || strings.Contains(string(body), "agentmesh-one join token") {
 		t.Fatalf("token list = %s %s; want 200 without a join token", resp.Status, body)
 	}
 
@@ -275,7 +275,7 @@ func TestStandalonePolicyFileSeedsEgress(t *testing.T) {
 }
 
 // newStandaloneTestNode returns a started, unenrolled loopback node.
-func newStandaloneTestNode(t *testing.T, ctx context.Context) *node.SamNode {
+func newStandaloneTestNode(t *testing.T, ctx context.Context) *node.AgentMeshNode {
 	t.Helper()
 	nodeStore, err := node.NewStore(t.TempDir())
 	if err != nil {
@@ -287,7 +287,7 @@ func newStandaloneTestNode(t *testing.T, ctx context.Context) *node.SamNode {
 	if err != nil {
 		t.Fatalf("failed to generate node key: %v", err)
 	}
-	samNode, err := node.NewSamNode(node.Options{
+	samNode, err := node.NewAgentMeshNode(node.Options{
 		PrivKey:       priv,
 		Store:         nodeStore,
 		ListenAddrs:   []string{"/ip4/127.0.0.1/tcp/0"},

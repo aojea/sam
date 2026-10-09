@@ -49,7 +49,7 @@ func generatePKCE() (string, string, error) {
 }
 
 // FetchJWT fetches a JWT token using the Client Credentials flow.
-func (n *SamNode) FetchJWT(ctx context.Context, tokenURL, clientID, clientSecret string) (string, error) {
+func (n *AgentMeshNode) FetchJWT(ctx context.Context, tokenURL, clientID, clientSecret string) (string, error) {
 	config := &clientcredentials.Config{
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
@@ -96,7 +96,7 @@ func ParseAuthMode(s string) (AuthMode, error) {
 }
 
 // InteractiveLogin prompts the user to go to a URL and enter a code.
-func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clientID, audience string, requestRefresh bool, headless bool) (string, error) {
+func (n *AgentMeshNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clientID, audience string, requestRefresh bool, headless bool) (string, error) {
 	return n.InteractiveLoginWithDeviceAuth(ctx, authURL, tokenURL, "", clientID, audience, requestRefresh, headless)
 }
 
@@ -104,14 +104,14 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 // the OAuth Device Authorization Grant in headless mode when the provider
 // exposes a device authorization endpoint, and otherwise uses the loopback
 // browser flow with a device fallback.
-func (n *SamNode) InteractiveLoginWithDeviceAuth(ctx context.Context, authURL, tokenURL, deviceAuthURL, clientID, audience string, requestRefresh bool, headless bool) (string, error) {
+func (n *AgentMeshNode) InteractiveLoginWithDeviceAuth(ctx context.Context, authURL, tokenURL, deviceAuthURL, clientID, audience string, requestRefresh bool, headless bool) (string, error) {
 	return n.InteractiveLoginWithMode(ctx, authURL, tokenURL, deviceAuthURL, clientID, audience, requestRefresh, headless, AuthModeAuto)
 }
 
 // InteractiveLoginWithMode authenticates the user using an explicit AuthMode,
 // letting callers (e.g. CUJ harnesses) force a deterministic flow instead of
 // relying on headless environment detection.
-func (n *SamNode) InteractiveLoginWithMode(ctx context.Context, authURL, tokenURL, deviceAuthURL, clientID, audience string, requestRefresh bool, headless bool, mode AuthMode) (string, error) {
+func (n *AgentMeshNode) InteractiveLoginWithMode(ctx context.Context, authURL, tokenURL, deviceAuthURL, clientID, audience string, requestRefresh bool, headless bool, mode AuthMode) (string, error) {
 	if tokenURL == "" {
 		return "", fmt.Errorf("token URL is required")
 	}
@@ -397,7 +397,7 @@ func bodySnippet(body []byte) string {
 }
 
 // DeviceLogin performs OAuth 2.0 Device Authorization Grant (RFC 8628).
-func (n *SamNode) DeviceLogin(ctx context.Context, deviceAuthURL, tokenURL, clientID, audience string, requestRefresh bool) (string, error) {
+func (n *AgentMeshNode) DeviceLogin(ctx context.Context, deviceAuthURL, tokenURL, clientID, audience string, requestRefresh bool) (string, error) {
 	if deviceAuthURL == "" {
 		return "", fmt.Errorf("device authorization URL is required")
 	}
@@ -655,7 +655,7 @@ func parseTokenResponse(resp *http.Response) (jwt string, refreshToken string, e
 var oidcDiscoveryTimeout = 10 * time.Second
 
 // DiscoverTokenURL discovers the token URL from the OIDC issuer.
-func (n *SamNode) DiscoverTokenURL(ctx context.Context, issuerURL string) (string, error) {
+func (n *AgentMeshNode) DiscoverTokenURL(ctx context.Context, issuerURL string) (string, error) {
 	client := &http.Client{Timeout: oidcDiscoveryTimeout}
 	provider, err := oidc.NewProvider(oidc.ClientContext(ctx, client), issuerURL)
 	if err != nil {
@@ -674,7 +674,7 @@ func (n *SamNode) DiscoverTokenURL(ctx context.Context, issuerURL string) (strin
 }
 
 // DiscoverEndpoints discovers both token and authorization endpoints.
-func (n *SamNode) DiscoverEndpoints(ctx context.Context, issuerURL string) (tokenURL, authURL string, err error) {
+func (n *AgentMeshNode) DiscoverEndpoints(ctx context.Context, issuerURL string) (tokenURL, authURL string, err error) {
 	endpoints, err := n.DiscoverEndpointsWithDevice(ctx, issuerURL)
 	if err != nil {
 		return "", "", err
@@ -690,7 +690,7 @@ type OIDCEndpoints struct {
 }
 
 // DiscoverEndpointsWithDevice discovers token, authorization and device authorization endpoints.
-func (n *SamNode) DiscoverEndpointsWithDevice(ctx context.Context, issuerURL string) (*OIDCEndpoints, error) {
+func (n *AgentMeshNode) DiscoverEndpointsWithDevice(ctx context.Context, issuerURL string) (*OIDCEndpoints, error) {
 	client := &http.Client{Timeout: oidcDiscoveryTimeout}
 	provider, err := oidc.NewProvider(oidc.ClientContext(ctx, client), issuerURL)
 	if err != nil {
@@ -737,7 +737,7 @@ func openBrowser(targetURL string) error {
 }
 
 // RefreshJWT refreshes the OIDC token using the stored refresh token.
-func (n *SamNode) RefreshJWT(ctx context.Context, tokenURL, clientID, clientSecret, refreshToken string) (string, string, error) {
+func (n *AgentMeshNode) RefreshJWT(ctx context.Context, tokenURL, clientID, clientSecret, refreshToken string) (string, string, error) {
 	tokenData := url.Values{}
 	tokenData.Set("grant_type", "refresh_token")
 	tokenData.Set("client_id", clientID)

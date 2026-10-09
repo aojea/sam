@@ -32,8 +32,8 @@ import (
 // lease expires. A router with the ttl off sends nothing and stays listed,
 // as does a router that keeps running.
 func TestRouterGracefulShutdownWithdrawsLease(t *testing.T) {
-	cpBin := buildBinary(t, "./cmd/sam-control-plane")
-	routerBin := buildBinary(t, "./cmd/sam-router")
+	cpBin := buildBinary(t, "./cmd/agentmesh-control-plane")
+	routerBin := buildBinary(t, "./cmd/agentmesh-router")
 
 	tmpDir := t.TempDir()
 	policyFile := filepath.Join(tmpDir, "policies.yaml")

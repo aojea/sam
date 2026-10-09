@@ -1,12 +1,12 @@
 version: 2
-project_name: sam
-# Deliberately not released: sam-bench (a measurement instrument for people
+project_name: agentmesh
+# Deliberately not released: agentmesh-bench (a measurement instrument for people
 # working on the mesh, built from the repo, not something operators install)
 # and chaos-agent (a Python dev tool).
 builds:
-  - id: sam-node
-    main: ./cmd/sam-node
-    binary: sam-node
+  - id: agentmesh-node
+    main: ./cmd/agentmesh-node
+    binary: agentmesh-node
     env:
       - CGO_ENABLED=0
     goos:
@@ -18,9 +18,9 @@ builds:
       - arm64
     ldflags:
       - -s -w -X github.com/google/agentmesh/internal/version.Version={{ .Tag }}
-  - id: sam-control-plane
-    main: ./cmd/sam-control-plane
-    binary: sam-control-plane
+  - id: agentmesh-control-plane
+    main: ./cmd/agentmesh-control-plane
+    binary: agentmesh-control-plane
     env:
       - CGO_ENABLED=0
     goos:
@@ -32,9 +32,9 @@ builds:
       - arm64
     ldflags:
       - -s -w -X github.com/google/agentmesh/internal/version.Version={{ .Tag }}
-  - id: sam-router
-    main: ./cmd/sam-router
-    binary: sam-router
+  - id: agentmesh-router
+    main: ./cmd/agentmesh-router
+    binary: agentmesh-router
     env:
       - CGO_ENABLED=0
     goos:
@@ -60,9 +60,9 @@ builds:
       - arm64
     ldflags:
       - -s -w -X github.com/google/agentmesh/internal/version.Version={{ .Tag }}
-  - id: sam-console
-    main: ./cmd/sam-console
-    binary: sam-console
+  - id: agentmesh-console
+    main: ./cmd/agentmesh-console
+    binary: agentmesh-console
     env:
       - CGO_ENABLED=0
     goos:
@@ -74,9 +74,9 @@ builds:
       - arm64
     ldflags:
       - -s -w -X github.com/google/agentmesh/internal/version.Version={{ .Tag }}
-  - id: sam-one
-    main: ./cmd/sam-one
-    binary: sam-one
+  - id: agentmesh-one
+    main: ./cmd/agentmesh-one
+    binary: agentmesh-one
     env:
       - CGO_ENABLED=0
     goos:

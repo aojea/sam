@@ -129,9 +129,9 @@ func startGRPCExtProcCallout(t *testing.T) string {
 // TestSTSTaskScopedSecurityCUJ validates the Phase 3 Security Token Service (STS),
 // Task-Scoped Biscuit Attenuation, OAuth 2.1 / PKCE, Envoy ext_authz and ext_proc,
 // RFC 7009 Revocation, and Outbound Border JWT Minting journeys end-to-end across
-// real sam-control-plane, sam-router, and sam-node processes.
+// real agentmesh-control-plane, agentmesh-router, and agentmesh-node processes.
 func TestSTSTaskScopedSecurityCUJ(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	tmpDir := t.TempDir()
 	oidcURL, mintToken := startCustomMockOIDC(t)
 
@@ -350,7 +350,7 @@ egress:
 		contractorJWT := mintToken(map[string]any{"sub": "contractor-user", "email": "contractor@example.com"})
 
 		// Gateway proxy in front of caller node's mesh dataplane that consults
-		// caller node's /ext_authz before forwarding through /sam/<pepPeer>/egress/api.github.com.
+		// caller node's /ext_authz before forwarding through /mesh/<pepPeer>/egress/api.github.com.
 		extAuthzGateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			checkURL := "http://" + callerAPI + "/ext_authz/egress/api.github.com" + r.URL.Path
 			checkReq, err := http.NewRequestWithContext(r.Context(), r.Method, checkURL, nil)
@@ -473,7 +473,7 @@ egress:
 
 		// 2. Allowed by both developer role and tar_block: GET /repos/acme/public/readme
 		//    Also verifies the egress ext_proc callout mutated X-Ext-Proc-Inspected=true
-		//    and sam-node injected Authorization: Bearer ghp_upstream_secret.
+		//    and agentmesh-node injected Authorization: Bearer ghp_upstream_secret.
 		if got, body := doWithCred(http.MethodGet, "/repos/acme/public/readme", taskBiscuit); got != http.StatusOK || !strings.Contains(body, `"auth":"Bearer ghp_upstream_secret"`) {
 			t.Fatalf("GET /repos/acme/public/readme with taskBiscuit: status=%d body=%s", got, body)
 		}
@@ -545,7 +545,7 @@ egress:
 		}
 	})
 
-	t.Run("Gateway ext_proc over h2c datapath on live sam-node (egress credential injection and MCP tools/call across mesh)", func(t *testing.T) {
+	t.Run("Gateway ext_proc over h2c datapath on live agentmesh-node (egress credential injection and MCP tools/call across mesh)", func(t *testing.T) {
 		cc, err := grpc.NewClient("passthrough:///"+pepAPI, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			t.Fatalf("grpc.NewClient: %v", err)
@@ -646,7 +646,7 @@ egress:
 				applyMuts(bodyProcResp.GetRequestBody().GetResponse().GetHeaderMutation())
 			}
 
-			// Route /sam/... requests through caller node's real libp2p mesh proxy,
+			// Route /mesh/... requests through caller node's real libp2p mesh proxy,
 			// and direct egress Host-routed requests to upstream.
 			targetBase := upstream.URL
 			if strings.HasPrefix(r.URL.Path, "/mesh/") {

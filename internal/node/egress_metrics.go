@@ -27,7 +27,7 @@ import (
 var (
 	egressDecisionsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "sam_node_egress_decisions_total",
+			Name: "agentmesh_node_egress_decisions_total",
 			Help: "Requests for egress destinations this node serves, by destination and outcome (allow, deny, not_assigned, credential_unavailable)",
 		},
 		[]string{"destination", "outcome"},
@@ -35,7 +35,7 @@ var (
 
 	egressAssignmentsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "sam_node_egress_assignments_total",
+			Name: "agentmesh_node_egress_assignments_total",
 			Help: "Egress assignments applied from the control plane, by outcome (registered, withdrawn, refused)",
 		},
 		[]string{"outcome"},

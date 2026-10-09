@@ -32,9 +32,9 @@ import (
 //
 // The token is an ordinary bootstrap token (POST /enroll spends it), so the
 // URI grants exactly what the token grants: one enrollment, in the token's
-// role, until it expires, against any control plane deployment — sam-one or
-// a full sam-control-plane. The server URL is the same base URL a node
-// passes to `sam-node join`, and the same transport rule applies
+// role, until it expires, against any control plane deployment — agentmesh-one or
+// a full agentmesh-control-plane. The server URL is the same base URL a node
+// passes to `agentmesh-node join`, and the same transport rule applies
 // (ValidateControlPlaneTransport): https, or plaintext http only to a
 // loopback host, because whoever answers that URL becomes the device's trust
 // root. Clients (the mobile app, CLIs) parse the URI with ParseEnrollURI and

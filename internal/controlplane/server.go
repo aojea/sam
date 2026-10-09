@@ -53,7 +53,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-var logger = golog.Logger("sam-control-plane")
+var logger = golog.Logger("agentmesh-control-plane")
 
 // routerAddresses is the router list a member receives: every active router's
 // addresses, the routers in a fresh random order per response and each
@@ -90,7 +90,7 @@ const (
 	adminNodeActionUnban = "unban"
 )
 
-// Server implements the SAM Control Plane web app.
+// Server implements the Agent Mesh Control Plane web app.
 type Server struct {
 	config     Options
 	store      storage.Store
@@ -249,7 +249,7 @@ func (s *Server) Start() error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		logger.Infof("SAM Control Plane listening on http://%s", s.config.ListenAddr)
+		logger.Infof("Agent Mesh Control Plane listening on http://%s", s.config.ListenAddr)
 		if err := s.httpServer.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Errorf("HTTP Server error: %v", err)
 		}
@@ -2295,7 +2295,7 @@ func (s *Server) authenticateUser(r *http.Request) (*storage.User, error) {
 		if subtle.ConstantTimeCompare(tokenHash[:], adminHash[:]) == 1 {
 			return &storage.User{
 				ID:        "root-admin",
-				Email:     "admin@sam-mesh.local",
+				Email:     "admin@agentmesh.local",
 				Role:      "admin",
 				CreatedAt: time.Now(),
 			}, nil
@@ -2454,7 +2454,7 @@ func (s *Server) HandleAdminBootstrapTokens(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "Internal keygen error", http.StatusInternalServerError)
 		return
 	}
-	tokenVal := fmt.Sprintf("sam-bt-%x", randBytes)
+	tokenVal := fmt.Sprintf("mesh-bt-%x", randBytes)
 	tokenID := fmt.Sprintf("%x", sha256.Sum256([]byte(tokenVal)))
 
 	tokenRecord := &storage.BootstrapToken{
@@ -3158,7 +3158,7 @@ func (s *Server) HandleUserBootstrapTokens(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Internal keygen error", http.StatusInternalServerError)
 		return
 	}
-	tokenVal := fmt.Sprintf("sam-bt-%x", randBytes)
+	tokenVal := fmt.Sprintf("mesh-bt-%x", randBytes)
 	tokenID := fmt.Sprintf("%x", sha256.Sum256([]byte(tokenVal)))
 
 	tokenRecord := &storage.BootstrapToken{

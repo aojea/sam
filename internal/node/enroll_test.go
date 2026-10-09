@@ -76,7 +76,7 @@ func TestEnrollmentPinsIdentityKeySet(t *testing.T) {
 	if err := store.SaveControlPlaneURL(server.URL); err != nil {
 		t.Fatal(err)
 	}
-	node := &SamNode{Store: store, BiscuitTimeout: time.Second, config: Options{RequiredRole: api.RoleNode}}
+	node := &AgentMeshNode{Store: store, BiscuitTimeout: time.Second, config: Options{RequiredRole: api.RoleNode}}
 	if _, err := node.enrollHTTP(context.Background(), server.URL, "test-jwt", peerID, privateKey); err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestEnrollmentPinsIdentityKeySet(t *testing.T) {
 	if !node.identityPredatesRotation() {
 		t.Fatal("a key learned after issuance must mark the identity for refresh")
 	}
-	restarted := &SamNode{Store: store}
+	restarted := &AgentMeshNode{Store: store}
 	if stored, err := store.LoadTrustedKeys(); err != nil {
 		t.Fatal(err)
 	} else {
@@ -259,7 +259,7 @@ func TestStartRecoversStaleIdentityViaRefreshToken(t *testing.T) {
 	cpSrv := httptest.NewServer(cpMux)
 	defer cpSrv.Close()
 
-	if err := store.SaveOIDCConfig(oidcSrv.URL, "client_id_test", "sam"); err != nil {
+	if err := store.SaveOIDCConfig(oidcSrv.URL, "client_id_test", "agentmesh"); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SaveRefreshToken("stored_refresh"); err != nil {
@@ -278,7 +278,7 @@ func TestStartRecoversStaleIdentityViaRefreshToken(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	node, err := NewSamNode(Options{
+	node, err := NewAgentMeshNode(Options{
 		PrivKey:            privKey,
 		Store:              store,
 		ControlPlanePubKey: cpPub,
@@ -434,7 +434,7 @@ func TestStartRecoversStaleIdentityViaAutonomousRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	node, err := NewSamNode(Options{
+	node, err := NewAgentMeshNode(Options{
 		PrivKey:            privKey,
 		Store:              store,
 		ControlPlanePubKey: cpPub,
@@ -500,7 +500,7 @@ func TestStartStaleIdentityWithoutRefreshTokenFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	node, err := NewSamNode(Options{
+	node, err := NewAgentMeshNode(Options{
 		PrivKey:            privKey,
 		Store:              store,
 		ControlPlanePubKey: cpPub,
@@ -579,7 +579,7 @@ func TestEnroll_InvalidControlPlanePublicKeySize(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	priv, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-	node, err := NewSamNode(Options{
+	node, err := NewAgentMeshNode(Options{
 		PrivKey:     priv,
 		Store:       store,
 		ListenAddrs: []string{"/ip4/127.0.0.1/tcp/0"},
@@ -652,7 +652,7 @@ func TestEnrollTrustsRouterSignedByGraceKey(t *testing.T) {
 	cpSrv := httptest.NewServer(mux)
 	defer cpSrv.Close()
 
-	node, err := NewSamNode(Options{
+	node, err := NewAgentMeshNode(Options{
 		PrivKey:       privKey,
 		Store:         store,
 		ListenAddrs:   []string{"/ip4/127.0.0.1/tcp/0"},
@@ -695,7 +695,7 @@ func TestProcessEnrollResponse_Errors(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	priv, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-	node, err := NewSamNode(Options{
+	node, err := NewAgentMeshNode(Options{
 		PrivKey:     priv,
 		Store:       store,
 		ListenAddrs: []string{"/ip4/127.0.0.1/tcp/0"},
@@ -755,7 +755,7 @@ func TestConnectToRouters_EmptyAddrs(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	priv, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-	node, err := NewSamNode(Options{
+	node, err := NewAgentMeshNode(Options{
 		PrivKey:     priv,
 		Store:       store,
 		ListenAddrs: []string{"/ip4/127.0.0.1/tcp/0"},

@@ -93,7 +93,7 @@ func (s *A2AService) Probe(ctx context.Context) error {
 // a2aEgressGate runs the caller-side A2A checks on a raw egress request:
 // the fail-closed labels gate. On refusal it writes the HTTP error itself
 // and returns ok=false.
-func a2aEgressGate(node *SamNode, w http.ResponseWriter, r *http.Request, route egressRoute) (*http.Request, bool) {
+func a2aEgressGate(node *AgentMeshNode, w http.ResponseWriter, r *http.Request, route egressRoute) (*http.Request, bool) {
 	if labelsHeader := r.Header.Get(api.HeaderMeshRequiredLabels); labelsHeader != "" {
 		r.Header.Del(api.HeaderMeshRequiredLabels)
 		required, err := parseRequiredLabels(labelsHeader)
@@ -130,7 +130,7 @@ const maxAgentCardBytes = 1 << 20
 // pathful base URL as the card location, e.g. a2a-go; a root GET is not part
 // of any A2A binding, JSON-RPC being POST-only). Everything else is left to
 // the streaming egress proxy.
-func a2aServeAgentCard(node *SamNode, rt http.RoundTripper, w http.ResponseWriter, r *http.Request, route egressRoute) bool {
+func a2aServeAgentCard(node *AgentMeshNode, rt http.RoundTripper, w http.ResponseWriter, r *http.Request, route egressRoute) bool {
 	if r.Method != http.MethodGet || (route.upstreamPath != a2aAgentCardPath && route.upstreamPath != "") {
 		return false
 	}
@@ -179,7 +179,7 @@ func a2aServeAgentCard(node *SamNode, rt http.RoundTripper, w http.ResponseWrite
 // fetchRemoteAgentCard performs the mesh-side GET for the agent card, reusing
 // the headers already prepared for egress (biscuit, agent claim, passthrough
 // Authorization) on the incoming request.
-func fetchRemoteAgentCard(node *SamNode, rt http.RoundTripper, r *http.Request, route egressRoute) (*http.Response, error) {
+func fetchRemoteAgentCard(node *AgentMeshNode, rt http.RoundTripper, r *http.Request, route egressRoute) (*http.Response, error) {
 	ctx := allowLimitedEgressConn(r.Context())
 	if node != nil {
 		node.prepareEgressPeer(ctx, route.peerID)

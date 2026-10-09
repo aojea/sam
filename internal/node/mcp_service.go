@@ -109,7 +109,7 @@ func (m *MCPService) Probe(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	client := mcp.NewClient(&mcp.Implementation{Name: "sam-node-probe", Version: "0.1.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "agentmesh-node-probe", Version: "0.1.0"}, nil)
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		return fmt.Errorf("connect to backend of %q: %w", m.info.GetName(), err)
@@ -173,7 +173,7 @@ func (m *MCPService) Tools(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	client := mcp.NewClient(&mcp.Implementation{Name: "sam-node-discovery", Version: "0.1.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "agentmesh-node-discovery", Version: "0.1.0"}, nil)
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		return nil, fmt.Errorf("connect to backend of %q: %w", m.info.GetName(), err)
@@ -264,7 +264,7 @@ func (m *MCPService) HandleStreamPassThrough(s network.Stream, reqCtx RequestCon
 	// goroutine had just handed to Write to actually reach the peer. Close
 	// "does not guarantee receipt of the data"; the documented safe sequence
 	// is CloseWrite, then wait for the peer to finish reading (or hang up),
-	// then Close. That race is the root cause of google/sam#375: the
+	// then Close. That race is the root cause of google/agentmesh#375: the
 	// producer's write reports success, but the immediate teardown right
 	// behind it can still lose the response in flight, and the consumer
 	// sees EOF instead.

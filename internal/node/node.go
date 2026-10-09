@@ -132,7 +132,7 @@ type TrustedKey struct {
 }
 
 type nodeRelayACL struct {
-	node *SamNode
+	node *AgentMeshNode
 }
 
 func (a *nodeRelayACL) AllowReserve(p peer.ID, addr multiaddr.Multiaddr) bool {
@@ -148,7 +148,7 @@ func (a *nodeRelayACL) AllowConnect(src peer.ID, srcAddr multiaddr.Multiaddr, de
 // isAdmitted reports whether a peer completed the auth handshake and its token
 // has not lapsed since. The handshake only proves the token was valid at that
 // instant, so without this the relay ACL would honour an admission forever.
-func (n *SamNode) isAdmitted(p peer.ID) bool {
+func (n *AgentMeshNode) isAdmitted(p peer.ID) bool {
 	v, ok := n.authPeers.Load(p)
 	if !ok {
 		return false
@@ -161,7 +161,7 @@ func (n *SamNode) isAdmitted(p peer.ID) bool {
 	return true
 }
 
-type SamNode struct {
+type AgentMeshNode struct {
 	config               Options
 	Host                 host.Host
 	DHT                  *dht.IpfsDHT
@@ -220,20 +220,20 @@ type SamNode struct {
 
 // SetTokenSource configures the live platform/OIDC token source presented as
 // TokenRefreshRequest.jwt during RefreshEnrollment.
-func (n *SamNode) SetTokenSource(ts TokenSource) {
+func (n *AgentMeshNode) SetTokenSource(ts TokenSource) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.tokenSource = ts
 }
 
-func (n *SamNode) getTokenSource() TokenSource {
+func (n *AgentMeshNode) getTokenSource() TokenSource {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.tokenSource
 }
 
 // UpdateRelays updates the current relays used by AutoRelay.
-func (n *SamNode) UpdateRelays(addrs []multiaddr.Multiaddr) {
+func (n *AgentMeshNode) UpdateRelays(addrs []multiaddr.Multiaddr) {
 	newRelays := routerPeers(context.Background(), addrs)
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -245,7 +245,7 @@ func (n *SamNode) UpdateRelays(addrs []multiaddr.Multiaddr) {
 }
 
 // GetIdentity returns the node's biscuit identity, caching it in memory.
-func (n *SamNode) GetIdentity() []byte {
+func (n *AgentMeshNode) GetIdentity() []byte {
 	if val := n.cachedIdentity.Load(); val != nil {
 		b := val.([]byte)
 		if len(b) > 0 {
@@ -262,14 +262,14 @@ func (n *SamNode) GetIdentity() []byte {
 }
 
 // SetIdentityCache explicitly updates the cached identity.
-func (n *SamNode) SetIdentityCache(b []byte) {
+func (n *AgentMeshNode) SetIdentityCache(b []byte) {
 	if len(b) > 0 {
 		n.cachedIdentity.Store(b)
 	}
 }
 
 // RevokeBiscuitID records a Biscuit revocation ID (base64url- or hex-encoded) as revoked until expiry.
-func (n *SamNode) RevokeBiscuitID(revocationID string, expiry time.Time) {
+func (n *AgentMeshNode) RevokeBiscuitID(revocationID string, expiry time.Time) {
 	if revocationID == "" {
 		return
 	}
@@ -294,7 +294,7 @@ func (n *SamNode) RevokeBiscuitID(revocationID string, expiry time.Time) {
 // RevokeBiscuitToken revokes the outermost block of a Biscuit token locally.
 // Revoking the final block's RevocationId invalidates that task token and any
 // further attenuated descendants without revoking the parent token.
-func (n *SamNode) RevokeBiscuitToken(rawToken []byte, expiry time.Time) (string, error) {
+func (n *AgentMeshNode) RevokeBiscuitToken(rawToken []byte, expiry time.Time) (string, error) {
 	b, _, err := identity.UnmarshalInbound(rawToken)
 	if err != nil {
 		return "", err
@@ -309,7 +309,7 @@ func (n *SamNode) RevokeBiscuitToken(rawToken []byte, expiry time.Time) (string,
 }
 
 // IsBiscuitRevoked checks whether any block of b has been revoked.
-func (n *SamNode) IsBiscuitRevoked(b *biscuit.Biscuit) bool {
+func (n *AgentMeshNode) IsBiscuitRevoked(b *biscuit.Biscuit) bool {
 	if n == nil || n.revokedTokens == nil || b == nil {
 		return false
 	}
@@ -392,9 +392,9 @@ func routerPeers(ctx context.Context, addrs []multiaddr.Multiaddr) []peer.AddrIn
 	return out
 }
 
-// NewSamNode creates a new Agent instance secured with the 4-layer pipeline.
-// NewSamNode initializes options and structures without starting background tasks or network interfaces.
-func NewSamNode(cfg Options) (*SamNode, error) {
+// NewAgentMeshNode creates a new Agent instance secured with the 4-layer pipeline.
+// NewAgentMeshNode initializes options and structures without starting background tasks or network interfaces.
+func NewAgentMeshNode(cfg Options) (*AgentMeshNode, error) {
 	cfg.Default()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -420,7 +420,7 @@ func NewSamNode(cfg Options) (*SamNode, error) {
 		trustedKeys = append(trustedKeys, TrustedKey{Key: cfg.ControlPlanePubKey, ReceivedAt: time.Now()})
 	}
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		config:                  cfg,
 		Store:                   cfg.Store,
 		trustedKeys:             trustedKeys,
@@ -433,7 +433,7 @@ func NewSamNode(cfg Options) (*SamNode, error) {
 		controlPlaneSyncTrigger: make(chan struct{}, 1),
 		tokenSource:             cfg.TokenSource,
 		BiscuitTimeout:          cfg.BiscuitTimeout,
-		logger:                  golog.Logger("sam-node"),
+		logger:                  golog.Logger("agentmesh-node"),
 	}
 
 	var err error
@@ -462,9 +462,9 @@ func NewSamNode(cfg Options) (*SamNode, error) {
 }
 
 // labels reports this node's operator-declared labels, validated at load.
-// NewSamNode always leaves nodeConfig non-nil, but tests build SamNode
+// NewAgentMeshNode always leaves nodeConfig non-nil, but tests build AgentMeshNode
 // literals directly, so the guard lives here rather than at each caller.
-func (n *SamNode) labels() map[string]string {
+func (n *AgentMeshNode) labels() map[string]string {
 	if n.nodeConfig == nil {
 		return nil
 	}
@@ -472,7 +472,7 @@ func (n *SamNode) labels() map[string]string {
 }
 
 // Start initializes the libp2p host, DHT, connects to the routers, and starts runtime components.
-func (n *SamNode) Start(ctx context.Context) error {
+func (n *AgentMeshNode) Start(ctx context.Context) error {
 	if biscuitBytes := n.GetIdentity(); len(biscuitBytes) > 0 {
 		// The identity may be signed by any currently valid control plane
 		// key, not only the newest: after a rotation the biscuit's key can
@@ -805,14 +805,14 @@ func (n *SamNode) Start(ctx context.Context) error {
 
 // triggerReprovide asks the reprovide loop to run a cycle now, dropping the
 // request when one is already pending.
-func (n *SamNode) triggerReprovide() {
+func (n *AgentMeshNode) triggerReprovide() {
 	select {
 	case n.reprovideTrigger <- struct{}{}:
 	default:
 	}
 }
 
-func (n *SamNode) startReprovideLoop(ctx context.Context, interval time.Duration) {
+func (n *AgentMeshNode) startReprovideLoop(ctx context.Context, interval time.Duration) {
 	go func() {
 		initialDelay := 5 * time.Second
 		if n.config.DiscoveryInterval != "" {
@@ -854,7 +854,7 @@ func (n *SamNode) startReprovideLoop(ctx context.Context, interval time.Duration
 	}()
 }
 
-func (n *SamNode) IsConnected() bool {
+func (n *AgentMeshNode) IsConnected() bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if len(n.authenticatedRouters) == 0 {
@@ -871,7 +871,7 @@ func (n *SamNode) IsConnected() bool {
 // isAuthenticatedAndConnected reports whether this router was authenticated
 // on a session that is still open. The router forgets a peer once its last
 // connection drops, so a stale entry must not skip the handshake.
-func (n *SamNode) isAuthenticatedAndConnected(router peer.ID) bool {
+func (n *AgentMeshNode) isAuthenticatedAndConnected(router peer.ID) bool {
 	n.mu.Lock()
 	authed := n.authenticatedRouters[router]
 	n.mu.Unlock()
@@ -880,7 +880,7 @@ func (n *SamNode) isAuthenticatedAndConnected(router peer.ID) bool {
 
 // authenticatedRouterIDs lists the routers this node passed the handshake
 // with and is still connected to: the relays that will open a circuit for it.
-func (n *SamNode) authenticatedRouterIDs() []peer.ID {
+func (n *AgentMeshNode) authenticatedRouterIDs() []peer.ID {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	ids := make([]peer.ID, 0, len(n.authenticatedRouters))
@@ -892,19 +892,19 @@ func (n *SamNode) authenticatedRouterIDs() []peer.ID {
 	return ids
 }
 
-func (n *SamNode) LoadMeshConfig() ([]byte, []string, error) {
+func (n *AgentMeshNode) LoadMeshConfig() ([]byte, []string, error) {
 	return n.Store.LoadMeshConfig()
 }
 
-func (n *SamNode) LoadControlPlaneURL() (string, error) {
+func (n *AgentMeshNode) LoadControlPlaneURL() (string, error) {
 	return n.Store.LoadControlPlaneURL()
 }
 
-func (n *SamNode) SaveMeshConfig(pubKey []byte, addrs []string) error {
+func (n *AgentMeshNode) SaveMeshConfig(pubKey []byte, addrs []string) error {
 	return n.Store.SaveMeshConfig(pubKey, addrs)
 }
 
-func (n *SamNode) startConnectionMonitor(ctx context.Context, bootstrapDuration, checkInterval time.Duration, maxFailures int) {
+func (n *AgentMeshNode) startConnectionMonitor(ctx context.Context, bootstrapDuration, checkInterval time.Duration, maxFailures int) {
 	go func() {
 		// Wait for initial bootstrap to complete
 		select {
@@ -953,7 +953,7 @@ func (n *SamNode) startConnectionMonitor(ctx context.Context, bootstrapDuration,
 	}()
 }
 
-func (n *SamNode) RegisterStaticServices(ctx context.Context, services []api.ServiceConfig) error {
+func (n *AgentMeshNode) RegisterStaticServices(ctx context.Context, services []api.ServiceConfig) error {
 	// Wait for node to be connected to a router or DHT to be ready
 	// This avoids failure if we try to register immediately after enrollment
 	// before the connection is established.
@@ -1003,7 +1003,7 @@ dhtLoop:
 // listed a router that had gone. The dials still in flight finish in the
 // background and record their sessions as they land; the connection monitor
 // re-handshakes whatever drops later.
-func (n *SamNode) authWithRouters(ctx context.Context, routers []peer.AddrInfo) (authenticated bool, fatal error) {
+func (n *AgentMeshNode) authWithRouters(ctx context.Context, routers []peer.AddrInfo) (authenticated bool, fatal error) {
 	if len(routers) == 0 {
 		return false, nil
 	}
@@ -1027,7 +1027,7 @@ func (n *SamNode) authWithRouters(ctx context.Context, routers []peer.AddrInfo) 
 // dialRouters runs authRouter against every router at once and delivers one
 // outcome per router on the returned channel, in completion order. The
 // channel is buffered for all of them, so a caller may stop reading early.
-func (n *SamNode) dialRouters(ctx context.Context, routers []peer.AddrInfo, biscuitBytes []byte) <-chan error {
+func (n *AgentMeshNode) dialRouters(ctx context.Context, routers []peer.AddrInfo, biscuitBytes []byte) <-chan error {
 	results := make(chan error, len(routers))
 	for _, router := range routers {
 		go func() {
@@ -1049,7 +1049,7 @@ func (n *SamNode) dialRouters(ctx context.Context, routers []peer.AddrInfo, bisc
 // and a router that restarts alone is never re-handshaken at all, the
 // member keeping one router fewer after each rollout. One redial per router
 // runs at a time, and a router that stays away is left to the monitor.
-func (n *SamNode) redialRouter(ctx context.Context, router peer.ID) {
+func (n *AgentMeshNode) redialRouter(ctx context.Context, router peer.ID) {
 	if n.config.RouterRedialDelay < 0 {
 		return
 	}
@@ -1107,7 +1107,7 @@ func (n *SamNode) redialRouter(ctx context.Context, router peer.ID) {
 	}()
 }
 
-func (n *SamNode) loadIdentityForAuth() ([]byte, error) {
+func (n *AgentMeshNode) loadIdentityForAuth() ([]byte, error) {
 	biscuitBytes, err := n.Store.LoadIdentity()
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to load identity from store: %w", ErrFatalAuth, err)
@@ -1124,7 +1124,7 @@ func (n *SamNode) loadIdentityForAuth() ([]byte, error) {
 // handshake is not, and repeating it trips the router's per-peer handshake
 // limiter. The dial is bounded by RouterConnectTimeout so a router that is
 // down does not hold its caller for long.
-func (n *SamNode) authRouter(ctx context.Context, router peer.AddrInfo, biscuitBytes []byte) error {
+func (n *AgentMeshNode) authRouter(ctx context.Context, router peer.AddrInfo, biscuitBytes []byte) error {
 	if n.isAuthenticatedAndConnected(router.ID) {
 		return nil
 	}
@@ -1149,7 +1149,7 @@ func (n *SamNode) authRouter(ctx context.Context, router peer.AddrInfo, biscuitB
 // behind addr: one peer for a direct address, every router behind the name
 // for a dnsaddr. They are dialed at once and all are waited for; it succeeds
 // when at least one admitted this node.
-func (n *SamNode) ConnectAndAuthWithRouter(ctx context.Context, addr multiaddr.Multiaddr) error {
+func (n *AgentMeshNode) ConnectAndAuthWithRouter(ctx context.Context, addr multiaddr.Multiaddr) error {
 	biscuitBytes, err := n.loadIdentityForAuth()
 	if err != nil {
 		return err
@@ -1186,7 +1186,7 @@ func (n *SamNode) ConnectAndAuthWithRouter(ctx context.Context, addr multiaddr.M
 
 // authenticateRouterSession runs the auth handshake with a router this host
 // is connected to and records the session.
-func (n *SamNode) authenticateRouterSession(ctx context.Context, router peer.ID, biscuitBytes []byte) error {
+func (n *AgentMeshNode) authenticateRouterSession(ctx context.Context, router peer.ID, biscuitBytes []byte) error {
 	s, err := n.Host.NewStream(ctx, router, api.AuthProtocolID)
 	if err != nil {
 		return fmt.Errorf("failed to open auth stream: %w", err)
@@ -1214,7 +1214,7 @@ func (n *SamNode) authenticateRouterSession(ctx context.Context, router peer.ID,
 // node are refused once the old one lapses. A router that refuses is
 // dropped from the authenticated set; the connection monitor then dials and
 // handshakes afresh.
-func (n *SamNode) readmitRouters(ctx context.Context) {
+func (n *AgentMeshNode) readmitRouters(ctx context.Context) {
 	if n.Host == nil {
 		return
 	}
@@ -1235,7 +1235,7 @@ func (n *SamNode) readmitRouters(ctx context.Context) {
 	}
 }
 
-func (n *SamNode) performRouterAuthHandshake(s network.Stream, biscuitBytes []byte, expectedRouter peer.ID) (bool, error) {
+func (n *AgentMeshNode) performRouterAuthHandshake(s network.Stream, biscuitBytes []byte, expectedRouter peer.ID) (bool, error) {
 	writer := msgio.NewVarintWriter(s)
 	authFrame := &api.AuthFrame{Biscuit: biscuitBytes}
 	data, err := proto.Marshal(authFrame)
@@ -1289,7 +1289,7 @@ func (n *SamNode) performRouterAuthHandshake(s network.Stream, biscuitBytes []by
 	return true, nil
 }
 
-func (n *SamNode) StartRenewalLoop(ctx context.Context, issuerURL, clientID, clientSecret, jwtPath string) {
+func (n *AgentMeshNode) StartRenewalLoop(ctx context.Context, issuerURL, clientID, clientSecret, jwtPath string) {
 	src, continuous, err := ResolveTokenSource(ctx, TokenSourceConfig{
 		Node:         n,
 		IssuerURL:    issuerURL,
@@ -1307,7 +1307,7 @@ func (n *SamNode) StartRenewalLoop(ctx context.Context, issuerURL, clientID, cli
 	n.StartRenewalLoopWithSource(ctx, src)
 }
 
-func (n *SamNode) StartRenewalLoopWithSource(ctx context.Context, src TokenSource) {
+func (n *AgentMeshNode) StartRenewalLoopWithSource(ctx context.Context, src TokenSource) {
 	if src == nil {
 		src = n.getTokenSource()
 	}
@@ -1395,7 +1395,7 @@ func (e *RefreshError) Error() string {
 }
 
 // RefreshEnrollment trades the expiring biscuit token for a new one using a cryptographic challenge.
-func (n *SamNode) RefreshEnrollment(ctx context.Context) error {
+func (n *AgentMeshNode) RefreshEnrollment(ctx context.Context) error {
 	n.refreshMu.Lock()
 	defer n.refreshMu.Unlock()
 
@@ -1530,7 +1530,7 @@ func (n *SamNode) RefreshEnrollment(ctx context.Context) error {
 
 // verifyOwnBiscuit checks a token the control plane handed this node: signed
 // by a trusted key, bound to this peer, and carrying the configured role.
-func (n *SamNode) verifyOwnBiscuit(token []byte) error {
+func (n *AgentMeshNode) verifyOwnBiscuit(token []byte) error {
 	if len(token) == 0 {
 		return errors.New("empty biscuit token")
 	}
@@ -1566,7 +1566,7 @@ func (n *SamNode) verifyOwnBiscuit(token []byte) error {
 	return identity.VerifyBiscuitRole(token, key, n.config.RequiredRole, n.BiscuitTimeout)
 }
 
-func (n *SamNode) renewWithRefreshToken(ctx context.Context, clientSecret string) (string, error) {
+func (n *AgentMeshNode) renewWithRefreshToken(ctx context.Context, clientSecret string) (string, error) {
 	if n.Store == nil {
 		return "", fmt.Errorf("store is not initialized")
 	}
@@ -1613,7 +1613,7 @@ const (
 )
 
 // listenForControlPlaneEvents listens to the topic established by the control plane
-func (n *SamNode) listenForControlPlaneEvents(ctx context.Context) {
+func (n *AgentMeshNode) listenForControlPlaneEvents(ctx context.Context) {
 	topic, err := n.PubSub.Join(api.GossipEvents)
 	if err != nil {
 		return
@@ -1659,7 +1659,7 @@ func (n *SamNode) listenForControlPlaneEvents(ctx context.Context) {
 	}
 }
 
-func (n *SamNode) handleBannedEvent(event *api.MeshEvent) {
+func (n *AgentMeshNode) handleBannedEvent(event *api.MeshEvent) {
 	p, err := peer.Decode(event.PeerId)
 	if err != nil {
 		logger.Warnf("[Mesh Event] Ignoring BANNED event with undecodable peer ID %q: %v", event.PeerId, err)
@@ -1697,7 +1697,7 @@ func containsTrustedKey(keys []TrustedKey, key ed25519.PublicKey) bool {
 
 // addTrustedKey appends a control plane public key to the trust set (no-op
 // on duplicates) and persists the updated set so it survives restarts.
-func (n *SamNode) addTrustedKey(key ed25519.PublicKey) {
+func (n *AgentMeshNode) addTrustedKey(key ed25519.PublicKey) {
 	n.keysMu.Lock()
 	if containsTrustedKey(n.trustedKeys, key) {
 		n.keysMu.Unlock()
@@ -1709,7 +1709,7 @@ func (n *SamNode) addTrustedKey(key ed25519.PublicKey) {
 	n.persistTrustedKeys(snapshot)
 }
 
-func (n *SamNode) persistTrustedKeys(keys []TrustedKey) {
+func (n *AgentMeshNode) persistTrustedKeys(keys []TrustedKey) {
 	if n.Store == nil {
 		return
 	}
@@ -1718,7 +1718,7 @@ func (n *SamNode) persistTrustedKeys(keys []TrustedKey) {
 	}
 }
 
-func (n *SamNode) handleKeyRotationEvent(event *api.MeshEvent) {
+func (n *AgentMeshNode) handleKeyRotationEvent(event *api.MeshEvent) {
 	if len(event.NewPublicKey) != ed25519.PublicKeySize {
 		logger.Errorf("[Mesh Event] Key rotation failed: invalid public key size %d, expected %d", len(event.NewPublicKey), ed25519.PublicKeySize)
 		return
@@ -1751,7 +1751,7 @@ func pruneTrustedKeys(keys []TrustedKey, now time.Time, gracePeriod time.Duratio
 	return active
 }
 
-func (n *SamNode) startKeyPruning(ctx context.Context, gracePeriod time.Duration) {
+func (n *AgentMeshNode) startKeyPruning(ctx context.Context, gracePeriod time.Duration) {
 	if gracePeriod <= 0 {
 		return
 	}
@@ -1778,7 +1778,7 @@ func (n *SamNode) startKeyPruning(ctx context.Context, gracePeriod time.Duration
 	}()
 }
 
-func (n *SamNode) verifyEvent(event *api.MeshEvent) bool {
+func (n *AgentMeshNode) verifyEvent(event *api.MeshEvent) bool {
 	sig := event.Signature
 	event.Signature = nil
 	data, err := proto.MarshalOptions{Deterministic: true}.Marshal(event)
@@ -1809,7 +1809,7 @@ func (n *SamNode) verifyEvent(event *api.MeshEvent) bool {
 // signed the pubsub envelope still cannot get an unsigned event past here. A
 // stale event is ignored rather than rejected: it may be a genuine event
 // that arrived late, and there is no reason to penalize its forwarder.
-func (n *SamNode) validateMeshEvent(_ context.Context, from peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+func (n *AgentMeshNode) validateMeshEvent(_ context.Context, from peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 	var event api.MeshEvent
 	if err := proto.Unmarshal(msg.Data, &event); err != nil {
 		logger.Warnw("[Mesh Event] rejecting undecodable event", "event", meshEventSpoofingAttempt, "peer", from.String())
@@ -1831,7 +1831,7 @@ func (n *SamNode) validateMeshEvent(_ context.Context, from peer.ID, msg *pubsub
 	return pubsub.ValidationAccept
 }
 
-func (n *SamNode) startDiscovery(ctx context.Context, meshID string, interval time.Duration) {
+func (n *AgentMeshNode) startDiscovery(ctx context.Context, meshID string, interval time.Duration) {
 	awaitRoutingTable(ctx, n.DHT.RoutingTable().Size, interval)
 	routingDiscovery := routing.NewRoutingDiscovery(n.DHT)
 	util.Advertise(ctx, routingDiscovery, meshID)
@@ -1919,7 +1919,7 @@ func awaitRoutingTable(ctx context.Context, size func() int, bound time.Duration
 	}
 }
 
-func (n *SamNode) getTrustedPublicKeys() []ed25519.PublicKey {
+func (n *AgentMeshNode) getTrustedPublicKeys() []ed25519.PublicKey {
 	n.keysMu.RLock()
 	defer n.keysMu.RUnlock()
 	keys := make([]ed25519.PublicKey, 0, len(n.trustedKeys))
@@ -1938,7 +1938,7 @@ var authHandshakeTimeout = 10 * time.Second
 
 // HandleAuthHandshake is the core libp2p stream handler for /mesh/auth/1.0.0.
 // This is the "Admission Office" of the mesh node.
-func (n *SamNode) HandleAuthHandshake(s network.Stream) {
+func (n *AgentMeshNode) HandleAuthHandshake(s network.Stream) {
 	defer func() {
 		if err := s.Close(); err != nil {
 			logger.Errorf("[AuthN] Failed to close auth stream: %v", err)
@@ -1996,7 +1996,7 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 	}
 }
 
-func (n *SamNode) RegisterService(ctx context.Context, req *api.RegisterServiceRequest) error {
+func (n *AgentMeshNode) RegisterService(ctx context.Context, req *api.RegisterServiceRequest) error {
 	if req.Service == nil {
 		return fmt.Errorf("service field is required")
 	}
@@ -2013,13 +2013,13 @@ func (n *SamNode) RegisterService(ctx context.Context, req *api.RegisterServiceR
 	return n.services.Register(ctx, svc)
 }
 
-func (n *SamNode) UnregisterService(ctx context.Context, serviceName string) error {
+func (n *AgentMeshNode) UnregisterService(ctx context.Context, serviceName string) error {
 	return n.services.Unregister(ctx, serviceName)
 }
 
 // Teardown detaches all registered services and closes the libp2p host.
 // Store is owned by the caller and is not closed here.
-func (n *SamNode) Teardown() error {
+func (n *AgentMeshNode) Teardown() error {
 	if n.services != nil {
 		n.services.TeardownAll()
 	}
@@ -2037,7 +2037,7 @@ func (n *SamNode) Teardown() error {
 	return errors.Join(errs...)
 }
 
-func (n *SamNode) IsServiceRegistered(serviceName string) bool {
+func (n *AgentMeshNode) IsServiceRegistered(serviceName string) bool {
 	_, ok := n.services.Get(serviceName)
 	return ok
 }
@@ -2051,7 +2051,7 @@ const (
 
 // findProvidersByCID is the shared DHT-lookup primitive; bounds the
 // lookup so FindProvidersAsync's channel is guaranteed to close.
-func (n *SamNode) findProvidersByCID(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
+func (n *AgentMeshNode) findProvidersByCID(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
 	if n.DHT == nil {
 		return nil, fmt.Errorf("DHT not initialized")
 	}
@@ -2096,7 +2096,7 @@ func (n *SamNode) findProvidersByCID(ctx context.Context, c cid.Cid) ([]peer.Add
 }
 
 // FindProvidersByName returns peers hosting a specific {type, name} service.
-func (n *SamNode) FindProvidersByName(ctx context.Context, serviceType api.ServiceType, serviceName string) ([]peer.AddrInfo, error) {
+func (n *AgentMeshNode) FindProvidersByName(ctx context.Context, serviceType api.ServiceType, serviceName string) ([]peer.AddrInfo, error) {
 	c, err := serviceNameToCID(serviceType, serviceName)
 	if err != nil {
 		return nil, err
@@ -2105,7 +2105,7 @@ func (n *SamNode) FindProvidersByName(ctx context.Context, serviceType api.Servi
 }
 
 // FindProvidersByType returns peers hosting at least one service of the given type.
-func (n *SamNode) FindProvidersByType(ctx context.Context, serviceType api.ServiceType) ([]peer.AddrInfo, error) {
+func (n *AgentMeshNode) FindProvidersByType(ctx context.Context, serviceType api.ServiceType) ([]peer.AddrInfo, error) {
 	c, err := serviceTypeToCID(serviceType)
 	if err != nil {
 		return nil, err
@@ -2114,7 +2114,7 @@ func (n *SamNode) FindProvidersByType(ctx context.Context, serviceType api.Servi
 }
 
 // localProxyURL builds the loopback URL clients use to reach a remote service.
-func (n *SamNode) localProxyURL(peerID peer.ID, typeStr, serviceName string) string {
+func (n *AgentMeshNode) localProxyURL(peerID peer.ID, typeStr, serviceName string) string {
 	host := n.BoundHTTPAddr
 	if host == "" {
 		// Socket-only node: any host works once the caller dials the socket.
@@ -2126,7 +2126,7 @@ func (n *SamNode) localProxyURL(peerID peer.ID, typeStr, serviceName string) str
 
 // DiscoverRemoteServices dispatches to the named or type-only path
 // based on whether serviceName is provided.
-func (n *SamNode) DiscoverRemoteServices(ctx context.Context, serviceType api.ServiceType, serviceName string) ([]*api.DiscoveredProvider, error) {
+func (n *AgentMeshNode) DiscoverRemoteServices(ctx context.Context, serviceType api.ServiceType, serviceName string) ([]*api.DiscoveredProvider, error) {
 	typeStr, err := api.ServiceTypeToString(serviceType)
 	if err != nil {
 		return nil, err
@@ -2139,7 +2139,7 @@ func (n *SamNode) DiscoverRemoteServices(ctx context.Context, serviceType api.Se
 
 // DiscoverRemoteServicesStream performs service discovery and streams results down the returned channel.
 // The channel is closed automatically when discovery completes or the context is cancelled.
-func (n *SamNode) DiscoverRemoteServicesStream(ctx context.Context, serviceType api.ServiceType, serviceName string) (<-chan *api.DiscoveredProvider, error) {
+func (n *AgentMeshNode) DiscoverRemoteServicesStream(ctx context.Context, serviceType api.ServiceType, serviceName string) (<-chan *api.DiscoveredProvider, error) {
 	typeStr, err := api.ServiceTypeToString(serviceType)
 	if err != nil {
 		return nil, err
@@ -2228,7 +2228,7 @@ func (n *SamNode) DiscoverRemoteServicesStream(ctx context.Context, serviceType 
 }
 
 // discoverServicesByName: targeted DHT lookup, no fan-out.
-func (n *SamNode) discoverServicesByName(ctx context.Context, serviceType api.ServiceType, typeStr, serviceName string) ([]*api.DiscoveredProvider, error) {
+func (n *AgentMeshNode) discoverServicesByName(ctx context.Context, serviceType api.ServiceType, typeStr, serviceName string) ([]*api.DiscoveredProvider, error) {
 	peers, err := n.FindProvidersByName(ctx, serviceType, serviceName)
 	if err != nil {
 		return nil, err
@@ -2249,7 +2249,7 @@ func (n *SamNode) discoverServicesByName(ctx context.Context, serviceType api.Se
 
 // discoverServicesByType: rendezvous lookup → parallel list_local_services
 // fan-out → flat catalog. Failed peers are dropped with a log line.
-func (n *SamNode) discoverServicesByType(ctx context.Context, serviceType api.ServiceType, typeStr string) ([]*api.DiscoveredProvider, error) {
+func (n *AgentMeshNode) discoverServicesByType(ctx context.Context, serviceType api.ServiceType, typeStr string) ([]*api.DiscoveredProvider, error) {
 	peers, err := n.FindProvidersByType(ctx, serviceType)
 	if err != nil {
 		return nil, err
@@ -2312,7 +2312,7 @@ func (n *SamNode) discoverServicesByType(ctx context.Context, serviceType api.Se
 
 // ListLocalServices returns services registered on this node. If
 // typeFilter is SERVICE_TYPE_UNSPECIFIED, all services are returned.
-func (n *SamNode) ListLocalServices(typeFilter api.ServiceType) []*api.ServiceInfo {
+func (n *AgentMeshNode) ListLocalServices(typeFilter api.ServiceType) []*api.ServiceInfo {
 	return n.services.List(typeFilter)
 }
 
@@ -2354,7 +2354,7 @@ func (w *responseWriterWithCount) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
-func (n *SamNode) StartIngressServer(ctx context.Context) error {
+func (n *AgentMeshNode) StartIngressServer(ctx context.Context) error {
 	listener, err := gostream.Listen(n.Host, "/libp2p-http")
 	if err != nil {
 		return err
@@ -2456,8 +2456,8 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 				if svc, ok := n.services.GetTyped(serviceType, serviceName); ok {
 					reqCtx.Egress = egressFactsFor(svc)
 				}
-				if strings.EqualFold(r.Header.Get("Upgrade"), HeaderSamTunnelUpgrade) {
-					reqPort, _ := strconv.Atoi(r.Header.Get(HeaderSamEgressPort))
+				if strings.EqualFold(r.Header.Get("Upgrade"), HeaderMeshTunnelUpgrade) {
+					reqPort, _ := strconv.Atoi(r.Header.Get(HeaderMeshEgressPort))
 					reqCtx.HTTP = &HTTPRequestFacts{Method: http.MethodConnect, Path: ""}
 					reqCtx.Egress = &EgressFacts{Host: serviceName, Port: reqPort}
 				}
@@ -2563,7 +2563,7 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 // mesh (via Identify and DHT provider records). Relay addresses always pass:
 // their IP belongs to the router, and dropping one would strand a node behind
 // NAT.
-func (n *SamNode) announceFilter(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
+func (n *AgentMeshNode) announceFilter(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
 	announcePrivate := n.config.AnnouncePrivateAddrs == nil || *n.config.AnnouncePrivateAddrs
 	if n.config.AllowLoopback && announcePrivate {
 		return addrs
@@ -2634,7 +2634,7 @@ func hasCircuit(addr multiaddr.Multiaddr) bool {
 	return false
 }
 
-func (n *SamNode) syncMeshPolicy(ctx context.Context) error {
+func (n *AgentMeshNode) syncMeshPolicy(ctx context.Context) error {
 	controlPlaneURL, err := n.Store.LoadControlPlaneURL()
 	if err != nil || controlPlaneURL == "" {
 		return fmt.Errorf("control plane URL not found in store")
@@ -2672,7 +2672,7 @@ func (n *SamNode) syncMeshPolicy(ctx context.Context) error {
 // reportNodeCatalog self-reports this node's local service list to the
 // control plane (see internal/controlplane/catalog.go's HandleNodeCatalog),
 // so an admin console can show mesh-wide service topology.
-func (n *SamNode) reportNodeCatalog(ctx context.Context) error {
+func (n *AgentMeshNode) reportNodeCatalog(ctx context.Context) error {
 	controlPlaneURL, err := n.Store.LoadControlPlaneURL()
 	if err != nil || controlPlaneURL == "" {
 		return fmt.Errorf("control plane URL not found in store")
@@ -2696,7 +2696,7 @@ func (n *SamNode) reportNodeCatalog(ctx context.Context) error {
 // A failure is logged at Warn once and at Debug while it persists: the
 // usual causes (control plane unreachable, path not routed) do not change
 // from one tick to the next.
-func (n *SamNode) startCatalogReportLoop(ctx context.Context, initialDelay, interval time.Duration) {
+func (n *AgentMeshNode) startCatalogReportLoop(ctx context.Context, initialDelay, interval time.Duration) {
 	if interval <= 0 {
 		interval = 1 * time.Minute
 	}

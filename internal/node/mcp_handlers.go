@@ -35,7 +35,7 @@ type ListLocalServicesParams struct {
 }
 
 // handleListLocalServices implements the list_local_services tool.
-func (n *SamNode) handleListLocalServices(ctx context.Context, req *mcp.CallToolRequest, params ListLocalServicesParams) (*mcp.CallToolResult, any, error) {
+func (n *AgentMeshNode) handleListLocalServices(ctx context.Context, req *mcp.CallToolRequest, params ListLocalServicesParams) (*mcp.CallToolResult, any, error) {
 	typeFilter := api.ServiceType_SERVICE_TYPE_UNSPECIFIED
 	if params.Type != "" {
 		parsed, err := api.ParseServiceType(params.Type)
@@ -73,7 +73,7 @@ type DiscoverRemoteServicesParams struct {
 }
 
 // handleDiscoverRemoteServices implements the discover_remote_services tool.
-func (n *SamNode) handleDiscoverRemoteServices(ctx context.Context, req *mcp.CallToolRequest, params DiscoverRemoteServicesParams) (*mcp.CallToolResult, any, error) {
+func (n *AgentMeshNode) handleDiscoverRemoteServices(ctx context.Context, req *mcp.CallToolRequest, params DiscoverRemoteServicesParams) (*mcp.CallToolResult, any, error) {
 	serviceType, err := api.ParseServiceType(params.Type)
 	if err != nil || serviceType == api.ServiceType_SERVICE_TYPE_UNSPECIFIED {
 		return nil, nil, fmt.Errorf("invalid or unspecified service type: %s", params.Type)
@@ -119,7 +119,7 @@ func (n *SamNode) handleDiscoverRemoteServices(ctx context.Context, req *mcp.Cal
 type GetMeshInfoParams struct{}
 
 // handleGetMeshInfo implements the get_mesh_info tool.
-func (n *SamNode) handleGetMeshInfo(ctx context.Context, req *mcp.CallToolRequest, params GetMeshInfoParams) (*mcp.CallToolResult, any, error) {
+func (n *AgentMeshNode) handleGetMeshInfo(ctx context.Context, req *mcp.CallToolRequest, params GetMeshInfoParams) (*mcp.CallToolResult, any, error) {
 	resData, err := n.meshInfo()
 	if err != nil {
 		return nil, nil, err
@@ -138,7 +138,7 @@ func (n *SamNode) handleGetMeshInfo(ctx context.Context, req *mcp.CallToolReques
 // handleGetMeshInfoRemote is get_mesh_info as served to other peers over the
 // catalog stream: the local socket path, the router and the connected-peer
 // list are this node's business, not a remote caller's.
-func (n *SamNode) handleGetMeshInfoRemote(ctx context.Context, req *mcp.CallToolRequest, params GetMeshInfoParams) (*mcp.CallToolResult, any, error) {
+func (n *AgentMeshNode) handleGetMeshInfoRemote(ctx context.Context, req *mcp.CallToolRequest, params GetMeshInfoParams) (*mcp.CallToolResult, any, error) {
 	full, err := n.meshInfo()
 	if err != nil {
 		return nil, nil, err
@@ -168,7 +168,7 @@ type CallRemoteToolParams struct {
 }
 
 // handleCallRemoteTool implements the call_remote_tool tool.
-func (n *SamNode) handleCallRemoteTool(ctx context.Context, req *mcp.CallToolRequest, params CallRemoteToolParams) (*mcp.CallToolResult, any, error) {
+func (n *AgentMeshNode) handleCallRemoteTool(ctx context.Context, req *mcp.CallToolRequest, params CallRemoteToolParams) (*mcp.CallToolResult, any, error) {
 	logger.Infof("[MCP] call_remote_tool called for peer %s, tool %s", params.PeerID, params.ToolName)
 	targetPeer, err := peer.Decode(params.PeerID)
 	if err != nil {
@@ -217,7 +217,7 @@ type remoteToolRow struct {
 //   - params.Intent is accepted and logged at debug level, but does not
 //     filter or rank results in this implementation (placeholder for
 //     future semantic search).
-func (n *SamNode) handleFindRemoteTools(ctx context.Context, req *mcp.CallToolRequest, params FindRemoteToolsParams) (*mcp.CallToolResult, any, error) {
+func (n *AgentMeshNode) handleFindRemoteTools(ctx context.Context, req *mcp.CallToolRequest, params FindRemoteToolsParams) (*mcp.CallToolResult, any, error) {
 	if params.Intent != "" {
 		logger.Debugf("[find_remote_tools] intent (ignored): %q", params.Intent)
 	}
@@ -344,7 +344,7 @@ func gossipToolRows(provs []samdiscovery.Provider, toolName, serviceNameFilter s
 // verifyGossipToolRows treats unsolicited announcements as routing hints, not
 // authorization evidence. Each candidate is confirmed through the existing
 // authenticated MCP session and exact tools/list response before it is exposed.
-func (n *SamNode) verifyGossipToolRows(ctx context.Context, candidates []remoteToolRow) []remoteToolRow {
+func (n *AgentMeshNode) verifyGossipToolRows(ctx context.Context, candidates []remoteToolRow) []remoteToolRow {
 	return verifyGossipToolRowsWithFetcher(ctx, candidates, n.fetchRemoteToolDescription)
 }
 
@@ -451,7 +451,7 @@ func filterRowsByToolName(rows []remoteToolRow, toolName string) []remoteToolRow
 
 // annotateToolLabels fills in the operator-declared labels for peers the
 // gossip view knows, when not already known from a fresher source.
-func (n *SamNode) annotateToolLabels(rows []remoteToolRow) {
+func (n *AgentMeshNode) annotateToolLabels(rows []remoteToolRow) {
 	if n.Discovery == nil {
 		return
 	}
@@ -468,7 +468,7 @@ func (n *SamNode) annotateToolLabels(rows []remoteToolRow) {
 // fetchRemoteToolCatalogue gets the remote node's service catalogue,
 // then opens a separate libp2p stream to each MCP service to fetch its tools.
 // serviceNameFilter must already be canonical; see normalizeServiceFilter.
-func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.ID, serviceNameFilter string) ([]remoteToolRow, error) {
+func (n *AgentMeshNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.ID, serviceNameFilter string) ([]remoteToolRow, error) {
 	services, err := n.fetchRemoteServiceCatalog(ctx, targetPeer, "MCP")
 	if err != nil {
 		return nil, fmt.Errorf("fetch remote service catalog: %w", err)
@@ -501,7 +501,7 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 // lists its tools, and returns the matching rows. Per-service failures are
 // encoded as error rows (or omitted for AuthRejected); the session is always
 // closed when the function returns.
-func (n *SamNode) fetchToolsForRemoteService(
+func (n *AgentMeshNode) fetchToolsForRemoteService(
 	ctx context.Context,
 	targetPeer peer.ID,
 	connectService, targetService, serviceNameFilter string,
@@ -562,7 +562,7 @@ func (n *SamNode) fetchToolsForRemoteService(
 // fanOutFetch queries each peer's tool catalogue concurrently with a
 // small cap and returns the filtered rows. Per-peer failures are
 // logged at debug level and skipped — best-effort mesh-wide fetch.
-func (n *SamNode) fanOutFetch(ctx context.Context, peers []peer.ID, serviceName string) []remoteToolRow {
+func (n *AgentMeshNode) fanOutFetch(ctx context.Context, peers []peer.ID, serviceName string) []remoteToolRow {
 	const maxConcurrent = 8
 	sem := make(chan struct{}, maxConcurrent)
 
@@ -627,7 +627,7 @@ type DescribeRemoteToolParams struct {
 	ToolName string `json:"tool_name" jsonschema:"Namespaced server name as returned by find_remote_tools (e.g. 'mcp://code-reviewer/review_pr'). Required."`
 }
 
-func (n *SamNode) fetchRemoteToolDescription(ctx context.Context, pid peer.ID, toolName string) (*remoteToolDescription, error) {
+func (n *AgentMeshNode) fetchRemoteToolDescription(ctx context.Context, pid peer.ID, toolName string) (*remoteToolDescription, error) {
 	serviceName, actualToolName, err := api.SplitToolName(toolName)
 	if err != nil {
 		return nil, err
@@ -670,7 +670,7 @@ func (n *SamNode) fetchRemoteToolDescription(ctx context.Context, pid peer.ID, t
 }
 
 // handleDescribeRemoteTool implements the describe_remote_tool client-facing tool.
-func (n *SamNode) handleDescribeRemoteTool(ctx context.Context, req *mcp.CallToolRequest, params DescribeRemoteToolParams) (*mcp.CallToolResult, any, error) {
+func (n *AgentMeshNode) handleDescribeRemoteTool(ctx context.Context, req *mcp.CallToolRequest, params DescribeRemoteToolParams) (*mcp.CallToolResult, any, error) {
 	if params.PeerID == "" {
 		return nil, nil, fmt.Errorf("peer_id is required")
 	}

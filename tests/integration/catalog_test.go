@@ -145,7 +145,7 @@ func (a *authRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 }
 
 func TestCatalogRoutingAndFailover(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	_, routerAddr := startMockRouter(t)
 
 	homeA := t.TempDir()

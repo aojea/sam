@@ -64,17 +64,17 @@ var legacyKeys = []string{
 
 // Store is the node's persistent state: its private key and its
 // api.MemberCredential, in a bbolt database whose file lock also tells a
-// second sam-node that this data directory is in use.
+// second agentmesh-node that this data directory is in use.
 type Store struct {
 	db *bbolt.DB
 }
 
 // ErrStoreLocked reports that another process already holds the data
 // directory, which for a node data directory means a node is running.
-var ErrStoreLocked = errors.New("another sam-node instance is using this data directory")
+var ErrStoreLocked = errors.New("another agentmesh-node instance is using this data directory")
 
 func GetDefaultDataDir() (string, error) {
-	if envDir := strings.TrimSpace(os.Getenv("SAM_DATA_DIR")); envDir != "" {
+	if envDir := strings.TrimSpace(os.Getenv("AGENTMESH_DATA_DIR")); envDir != "" {
 		if err := os.MkdirAll(envDir, 0700); err != nil {
 			return "", err
 		}
@@ -84,7 +84,7 @@ func GetDefaultDataDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(base, "sam-mesh")
+	dir := filepath.Join(base, "agentmesh")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
 	}
@@ -245,7 +245,7 @@ func (s *Store) Credential() (*api.MemberCredential, error) {
 }
 
 // SetCredential replaces everything the node persists besides its private
-// key; `sam-node state import` uses it.
+// key; `agentmesh-node state import` uses it.
 func (s *Store) SetCredential(c *api.MemberCredential) error {
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		return putCredential(tx.Bucket([]byte(bucketIdentity)), c)

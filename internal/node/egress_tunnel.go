@@ -37,12 +37,12 @@ import (
 )
 
 const (
-	// HeaderSamEgressPort carries the requested TCP destination port when a
+	// HeaderMeshEgressPort carries the requested TCP destination port when a
 	// CONNECT tunnel is forwarded across /libp2p-http.
-	HeaderSamEgressPort = "X-Mesh-Egress-Port"
-	// HeaderSamTunnelUpgrade marks an HTTP/1.1 request over /libp2p-http as a
+	HeaderMeshEgressPort = "X-Mesh-Egress-Port"
+	// HeaderMeshTunnelUpgrade marks an HTTP/1.1 request over /libp2p-http as a
 	// raw TCP CONNECT tunnel.
-	HeaderSamTunnelUpgrade = "sam-tcp-tunnel"
+	HeaderMeshTunnelUpgrade = "mesh-tcp-tunnel"
 
 	clientHelloReadTimeout = 5 * time.Second
 )
@@ -198,7 +198,7 @@ func (s *EgressService) ServeTunnel(ctx context.Context, w http.ResponseWriter, 
 		logger.Warnw("Egress TCP Tunnel Verdict",
 			"destination", s.info.Name,
 			"port", reqPort,
-			"sam_task", callerCtx.task,
+			"mesh_task", callerCtx.task,
 			"verdict", "deny_port",
 		)
 		refuse(w, http.StatusForbidden, fmt.Sprintf("egress destination %q does not allow TCP port %d", s.info.Name, reqPort), proxyStatusDenied)
@@ -233,7 +233,7 @@ func (s *EgressService) ServeTunnel(ctx context.Context, w http.ResponseWriter, 
 			"destination", s.info.Name,
 			"port", reqPort,
 			"sni", sni,
-			"sam_task", callerCtx.task,
+			"mesh_task", callerCtx.task,
 			"verdict", "deny_sni",
 			"error", err.Error(),
 		)
@@ -249,7 +249,7 @@ func (s *EgressService) ServeTunnel(ctx context.Context, w http.ResponseWriter, 
 			"destination", s.info.Name,
 			"port", reqPort,
 			"sni", sni,
-			"sam_task", callerCtx.task,
+			"mesh_task", callerCtx.task,
 			"verdict", "dial_error",
 			"error", err.Error(),
 		)
@@ -290,7 +290,7 @@ func (s *EgressService) ServeTunnel(ctx context.Context, w http.ResponseWriter, 
 		"destination", s.info.Name,
 		"port", reqPort,
 		"sni", sni,
-		"sam_task", callerCtx.task,
+		"mesh_task", callerCtx.task,
 		"verdict", "allow",
 		"bytes_tx", txBytes,
 		"bytes_rx", rxBytes,
@@ -302,7 +302,7 @@ func (s *EgressService) ServeTunnel(ctx context.Context, w http.ResponseWriter, 
 // authenticates the caller via withCallerOrTokenAuth, and either serves the
 // tunnel locally (when this node serves egress://<host>) or forwards it across
 // the mesh to a serving egress node.
-func withConnectTunnel(node *SamNode, token string, next http.Handler) http.Handler {
+func withConnectTunnel(node *AgentMeshNode, token string, next http.Handler) http.Handler {
 	authedConnect := withCallerOrTokenAuth(node, token, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleConnectTunnel(node, w, r)
 	}))
@@ -339,7 +339,7 @@ func parseConnectHostPort(r *http.Request) (string, int, error) {
 	return host, port, nil
 }
 
-func handleConnectTunnel(node *SamNode, w http.ResponseWriter, r *http.Request) {
+func handleConnectTunnel(node *AgentMeshNode, w http.ResponseWriter, r *http.Request) {
 	host, port, err := parseConnectHostPort(r)
 	if err != nil {
 		refuse(w, http.StatusBadRequest, err.Error(), proxyStatusDenied)
@@ -435,7 +435,7 @@ func handleConnectTunnel(node *SamNode, w http.ResponseWriter, r *http.Request) 
 	refuse(w, http.StatusForbidden, "Required labels not attested by provider", proxyStatusDenied)
 }
 
-func forwardConnectTunnelToPeer(node *SamNode, w http.ResponseWriter, r *http.Request, targetPeer peer.ID, host string, port int, biscuitBytes []byte) {
+func forwardConnectTunnelToPeer(node *AgentMeshNode, w http.ResponseWriter, r *http.Request, targetPeer peer.ID, host string, port int, biscuitBytes []byte) {
 	dialCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	meshConn, err := gostream.Dial(dialCtx, node.Host, targetPeer, "/libp2p-http")
 	cancel()
@@ -449,8 +449,8 @@ func forwardConnectTunnelToPeer(node *SamNode, w http.ResponseWriter, r *http.Re
 		host,
 		host,
 		port,
-		HeaderSamTunnelUpgrade,
-		HeaderSamEgressPort,
+		HeaderMeshTunnelUpgrade,
+		HeaderMeshEgressPort,
 		port,
 		api.HeaderMeshBiscuit,
 		base64.StdEncoding.EncodeToString(biscuitBytes),

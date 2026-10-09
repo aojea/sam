@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package credprovider implements outbound credential brokering for SAM egress
+// Package credprovider implements outbound credential brokering for Agent Mesh egress
 // destinations (static secrets, RFC 8693 OIDC federation with optional Google
 // Service Account impersonation, AWS STS AssumeRoleWithWebIdentity with inline
 // IAM session policy compilation, and platform metadata identity) as well as
@@ -76,7 +76,7 @@ func CallerBiscuitFromContext(ctx context.Context) []byte {
 	return b
 }
 
-// Exchanger translates a verified SAM principal and its intersected
+// Exchanger translates a verified Agent Mesh principal and its intersected
 // TaskAuthorizationRule chain into a downscoped upstream credential.
 type Exchanger interface {
 	Exchange(ctx context.Context, principal string, rules []*api.TaskAuthorizationRule) (bearerToken string, expiry time.Time, err error)
@@ -432,7 +432,7 @@ func (e *AWSAssumeRoleExchanger) Exchange(ctx context.Context, principal string,
 
 func sanitizeAWSSessionName(principal string) string {
 	if principal == "" {
-		return "sam-session"
+		return "mesh-session"
 	}
 	var b strings.Builder
 	for _, r := range principal {
@@ -446,7 +446,7 @@ func sanitizeAWSSessionName(principal string) string {
 		}
 	}
 	if b.Len() < 2 {
-		return "sam-session"
+		return "mesh-session"
 	}
 	return b.String()
 }

@@ -48,7 +48,7 @@ const expiryMargin = 2 * time.Second
 // A real control plane mints a real biscuit over the real /register flow, and
 // the same token is then presented to both verification paths: the generic
 // verifier (identity.VerifyBiscuit) and the node dataplane authorizer
-// (SamNode.VerifyBiscuitToken, the tool-invocation path). Before the expiry
+// (AgentMeshNode.VerifyBiscuitToken, the tool-invocation path). Before the expiry
 // both accept it; after the expiry both must reject it. The bug was that the
 // dataplane kept accepting, because it never injected the time fact that the
 // expiration check reads.
@@ -58,7 +58,7 @@ const expiryMargin = 2 * time.Second
 // the node's proactive refresh) reports that same instant rather than the OIDC
 // token's own, much later, expiry.
 func TestBiscuitExpiryIsEnforcedOnEveryPath(t *testing.T) {
-	cpBin := buildBinary(t, "./cmd/sam-control-plane")
+	cpBin := buildBinary(t, "./cmd/agentmesh-control-plane")
 	tmpDir := t.TempDir()
 
 	oidcURL, mintToken := startCustomMockOIDC(t)
@@ -122,7 +122,7 @@ func TestBiscuitExpiryIsEnforcedOnEveryPath(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 
-	samNode, err := node.NewSamNode(node.Options{
+	samNode, err := node.NewAgentMeshNode(node.Options{
 		PrivKey:            privKey,
 		Store:              store,
 		ControlPlanePubKey: cpPubKey,

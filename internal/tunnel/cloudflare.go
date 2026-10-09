@@ -55,7 +55,7 @@ type Cloudflare struct {
 	// Timeout bounds how long Open waits for the URL and then for its
 	// hostname to be published in DNS; defaults to 30s.
 	Timeout time.Duration
-	// InstallDir is where a downloaded cloudflared is kept (sam-one uses
+	// InstallDir is where a downloaded cloudflared is kept (agentmesh-one uses
 	// <data-dir>/bin). Empty disables both the cache and downloads.
 	InstallDir string
 	// Consent is asked before downloading; installing cloudflared means
@@ -72,7 +72,7 @@ type Cloudflare struct {
 	// stub it.
 	LookupHost func(ctx context.Context, host string) ([]string, error)
 	// Token is an optional named tunnel token (from --tunnel-token-path
-	// or SAM_TUNNEL_TOKEN). When set, Open runs
+	// or AGENTMESH_TUNNEL_TOKEN). When set, Open runs
 	// `cloudflared tunnel --no-autoupdate run --url <target>` with
 	// TUNNEL_TOKEN in the child environment instead of a random
 	// trycloudflare.com quick tunnel, and publishes ExternalURL.
@@ -198,7 +198,7 @@ func (c *Cloudflare) awaitPublished(ctx context.Context, rawURL string, deadline
 // authoritativeLookup resolves host at its zone's own nameserver, bypassing
 // every cache in between. Asking a recursive resolver before the record
 // exists makes it cache the NXDOMAIN (the zone's SOA allows 30 minutes) and
-// strands every device behind that resolver, including a sam-node on this
+// strands every device behind that resolver, including a agentmesh-node on this
 // very machine; the authoritative server has no cache to poison.
 func authoritativeLookup(ctx context.Context, host string) ([]string, error) {
 	parts := strings.Split(host, ".")
@@ -268,7 +268,7 @@ func (c *Cloudflare) resolveBinary(ctx context.Context) (string, error) {
 	}
 	url := base + CloudflaredVersion + "/" + asset.Name
 	if c.Consent == nil || !c.Consent(CloudflaredVersion, url) {
-		return "", fmt.Errorf("%w on PATH and download not authorized (install it from %s, or allow sam-one to download the pinned release)", ErrCloudflaredUnavailable, CloudflaredLicenseURL)
+		return "", fmt.Errorf("%w on PATH and download not authorized (install it from %s, or allow agentmesh-one to download the pinned release)", ErrCloudflaredUnavailable, CloudflaredLicenseURL)
 	}
 	client := c.HTTPClient
 	if client == nil {

@@ -40,7 +40,7 @@ import (
 // buildAndSaveBiscuit builds a biscuit signed with rootPriv that identifies
 // node as caller, grants allow_mcp_server("*"), carries the node role as a
 // real enrollment does, and saves it to node's store.
-func buildAndSaveBiscuit(node *SamNode, rootPriv ed25519.PrivateKey) error {
+func buildAndSaveBiscuit(node *AgentMeshNode, rootPriv ed25519.PrivateKey) error {
 	callerID := node.Host.ID().String()
 	builder := biscuit.NewBuilder(rootPriv)
 	_ = builder.AddAuthorityFact(api.MarkerFact(api.FactTargetUnrestricted))
@@ -87,7 +87,7 @@ func buildAndSaveBiscuit(node *SamNode, rootPriv ed25519.PrivateKey) error {
 // of any pair verify each other (the caller through WithBiscuitAuth, the
 // provider through the label gate). Returns the root key pair for tests that
 // need to mint extra tokens.
-func enrollUnderRoot(t *testing.T, nodes ...*SamNode) (ed25519.PublicKey, ed25519.PrivateKey) {
+func enrollUnderRoot(t *testing.T, nodes ...*AgentMeshNode) (ed25519.PublicKey, ed25519.PrivateKey) {
 	t.Helper()
 	rootPub, rootPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -318,7 +318,7 @@ func TestHandleFindRemoteTools_MeshWide(t *testing.T) {
 	// Connect A to B, C, and D; every node is enrolled under one root so A's
 	// stream passes WithBiscuitAuth and each target passes A's provider gate.
 	enrollUnderRoot(t, nodeA, nodeB, nodeC, nodeD)
-	for _, target := range []*SamNode{nodeB, nodeC, nodeD} {
+	for _, target := range []*AgentMeshNode{nodeB, nodeC, nodeD} {
 		if err := nodeA.Host.Connect(ctx, peer.AddrInfo{ID: target.Host.ID(), Addrs: target.Host.Addrs()}); err != nil {
 			t.Fatalf("connect to %s: %v", target.Host.ID(), err)
 		}
@@ -431,7 +431,7 @@ func TestHandleFindRemoteTools_PartialFailure(t *testing.T) {
 	}
 }
 
-func buildAndSaveCustomBiscuit(node *SamNode, rootPriv ed25519.PrivateKey, allowedServices []string) error {
+func buildAndSaveCustomBiscuit(node *AgentMeshNode, rootPriv ed25519.PrivateKey, allowedServices []string) error {
 	callerID := node.Host.ID().String()
 	builder := biscuit.NewBuilder(rootPriv)
 	err := builder.AddAuthorityFact(api.MarkerFact(api.FactTargetUnrestricted))
@@ -834,7 +834,7 @@ func TestNewMCPHandler_AcceptsLegacyRequestWithProtocolVersionMeta(t *testing.T)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	srv := httptest.NewServer(NewMCPHandler(&SamNode{BiscuitTimeout: 500 * time.Millisecond}))
+	srv := httptest.NewServer(NewMCPHandler(&AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond}))
 	defer srv.Close()
 
 	body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"tc","version":"0.0.1"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-11-25"}}}`

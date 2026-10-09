@@ -32,7 +32,7 @@ import (
 var (
 	httpRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "sam_control_plane_http_requests_total",
+			Name: "agentmesh_control_plane_http_requests_total",
 			Help: "Control-plane HTTP requests by registered route and status code",
 		},
 		[]string{"route", "code"},
@@ -40,7 +40,7 @@ var (
 
 	httpRequestDurationSeconds = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "sam_control_plane_http_request_duration_seconds",
+			Name:    "agentmesh_control_plane_http_request_duration_seconds",
 			Help:    "Time a control-plane request occupied its handler",
 			Buckets: []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 		},
@@ -94,7 +94,7 @@ const (
 // Node admission states as reported by meshStateCollector. "admitted" is
 // what CheckAdmission says, not liveness: a node that enrolled once and went
 // away stays admitted until its session expires. Liveness is
-// sam_control_plane_mesh_connected_peers.
+// agentmesh_control_plane_mesh_connected_peers.
 const (
 	nodeStateAdmitted = "admitted"
 	nodeStateExpired  = "expired"
@@ -162,55 +162,55 @@ func newMeshStateCollector(store storage.Store) *meshStateCollector {
 		timeout: meshStateTimeout,
 		now:     time.Now,
 		nodesDesc: prometheus.NewDesc(
-			"sam_control_plane_enrolled_nodes",
+			"agentmesh_control_plane_enrolled_nodes",
 			"Enrolled identities by role and admission state",
 			[]string{"role", "state"}, nil),
 		usersDesc: prometheus.NewDesc(
-			"sam_control_plane_users",
+			"agentmesh_control_plane_users",
 			"Human identities that have enrolled",
 			nil, nil),
 		requestsDesc: prometheus.NewDesc(
-			"sam_control_plane_enrollment_requests",
+			"agentmesh_control_plane_enrollment_requests",
 			"Enrollment requests by status",
 			[]string{"status"}, nil),
 		tokensDesc: prometheus.NewDesc(
-			"sam_control_plane_bootstrap_tokens",
+			"agentmesh_control_plane_bootstrap_tokens",
 			"Bootstrap tokens by state",
 			[]string{"state"}, nil),
 		routersDesc: prometheus.NewDesc(
-			"sam_control_plane_routers_active",
+			"agentmesh_control_plane_routers_active",
 			"Routers holding an unexpired lease",
 			nil, nil),
 		routerPeersDesc: prometheus.NewDesc(
-			"sam_control_plane_router_connected_peers",
+			"agentmesh_control_plane_router_connected_peers",
 			"Peers a router reported connected on its last lease renewal",
 			[]string{"router"}, nil),
 		routerDHTDesc: prometheus.NewDesc(
-			"sam_control_plane_router_dht_size",
+			"agentmesh_control_plane_router_dht_size",
 			"DHT routing table size a router reported on its last lease renewal",
 			[]string{"router"}, nil),
 		routerLeaseDesc: prometheus.NewDesc(
-			"sam_control_plane_router_lease_renewed_timestamp_seconds",
+			"agentmesh_control_plane_router_lease_renewed_timestamp_seconds",
 			"Unix time of a router's last lease renewal",
 			[]string{"router"}, nil),
 		meshPeersDesc: prometheus.NewDesc(
-			"sam_control_plane_mesh_connected_peers",
+			"agentmesh_control_plane_mesh_connected_peers",
 			"Distinct non-router peers connected to at least one active router",
 			nil, nil),
 		signingKeysDesc: prometheus.NewDesc(
-			"sam_control_plane_signing_keys",
+			"agentmesh_control_plane_signing_keys",
 			"Signing keys a credential verifies against: 1, or 2 during the grace period after a rotation",
 			nil, nil),
 		retiringKeyDesc: prometheus.NewDesc(
-			"sam_control_plane_retiring_key_expiry_timestamp_seconds",
+			"agentmesh_control_plane_retiring_key_expiry_timestamp_seconds",
 			"Unix time the retiring signing key stops verifying; absent when no rotation is in its grace period",
 			nil, nil),
 		scrapeOKDesc: prometheus.NewDesc(
-			"sam_control_plane_mesh_state_scrape_success",
+			"agentmesh_control_plane_mesh_state_scrape_success",
 			"1 if the mesh state was read from the store, 0 if the last read failed",
 			nil, nil),
 		scrapeSampleDesc: prometheus.NewDesc(
-			"sam_control_plane_mesh_state_timestamp_seconds",
+			"agentmesh_control_plane_mesh_state_timestamp_seconds",
 			"Unix time the exported mesh state was read from the store",
 			nil, nil),
 	}
@@ -397,7 +397,7 @@ func countMeshPeers(routers []storage.RouterLease) int {
 // metricsHandler serves the process-wide registry, which carries the request
 // counters above and the Go runtime, alongside this server's own mesh state.
 // The mesh collector is per server rather than global so two servers in one
-// process (tests, sam-one) never fight over a registration.
+// process (tests, agentmesh-one) never fight over a registration.
 func (s *Server) metricsHandler() http.Handler {
 	return promhttp.HandlerFor(
 		prometheus.Gatherers{prometheus.DefaultGatherer, s.metricsRegistry},

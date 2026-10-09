@@ -21,19 +21,19 @@ import (
 )
 
 func TestBackendEnvStripsNodeSecrets(t *testing.T) {
-	t.Setenv("SAM_API_TOKEN", "node-secret")
-	t.Setenv("SAM_CLIENT_SECRET", "oidc-secret")
-	t.Setenv("SAM_API_TOKEN_SUFFIX", "kept") // only exact names are stripped
+	t.Setenv("AGENTMESH_API_TOKEN", "node-secret")
+	t.Setenv("AGENTMESH_CLIENT_SECRET", "oidc-secret")
+	t.Setenv("AGENTMESH_API_TOKEN_SUFFIX", "kept") // only exact names are stripped
 	t.Setenv("HARMLESS", "kept")
 
 	env := backendEnv(map[string]string{"BACKEND_KEY": "value"})
 
 	for _, kv := range env {
-		if strings.HasPrefix(kv, "SAM_API_TOKEN=") || strings.HasPrefix(kv, "SAM_CLIENT_SECRET=") {
+		if strings.HasPrefix(kv, "AGENTMESH_API_TOKEN=") || strings.HasPrefix(kv, "AGENTMESH_CLIENT_SECRET=") {
 			t.Errorf("node secret leaked into backend env: %s", kv)
 		}
 	}
-	for _, want := range []string{"HARMLESS=kept", "SAM_API_TOKEN_SUFFIX=kept", "BACKEND_KEY=value"} {
+	for _, want := range []string{"HARMLESS=kept", "AGENTMESH_API_TOKEN_SUFFIX=kept", "BACKEND_KEY=value"} {
 		if !slices.Contains(env, want) {
 			t.Errorf("backend env missing %q", want)
 		}

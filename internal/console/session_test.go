@@ -41,7 +41,7 @@ func TestHandleSessionDoesNotReturnTheToken(t *testing.T) {
 
 	t.Run("active session", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/auth/session", nil)
-		req.AddCookie(&http.Cookie{Name: "sam_session", Value: secret})
+		req.AddCookie(&http.Cookie{Name: "agentmesh_session", Value: secret})
 
 		rec := httptest.NewRecorder()
 		srv.HandleSession(rec, req)

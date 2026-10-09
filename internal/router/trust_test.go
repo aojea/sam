@@ -48,8 +48,8 @@ func TestOptionsValidateControlPlaneTransport(t *testing.T) {
 	}{
 		{"http://127.0.0.1:8080", false, false},
 		{"https://cp.example.com", false, false},
-		{"http://sam-mesh-control-plane:8080", false, true},
-		{"http://sam-mesh-control-plane:8080", true, false},
+		{"http://agentmesh-control-plane:8080", false, true},
+		{"http://agentmesh-control-plane:8080", true, false},
 	}
 	for _, tt := range tests {
 		o := Options{ControlPlaneURL: tt.url, AllowInsecureControlPlane: tt.insecure}
@@ -68,7 +68,7 @@ func TestOptionsValidateControlPlaneTransport(t *testing.T) {
 // plaintext URL is refused just like a flag-supplied one.
 func TestControlPlaneClientRefusesPlaintextHop(t *testing.T) {
 	r := &Router{config: Options{}}
-	req, err := http.NewRequest(http.MethodGet, "http://sam-mesh-control-plane:8080/keys", nil)
+	req, err := http.NewRequest(http.MethodGet, "http://agentmesh-control-plane:8080/keys", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

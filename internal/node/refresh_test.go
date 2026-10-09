@@ -39,7 +39,7 @@ import (
 // refreshHarness is a node with a stored identity and a mock control plane
 // whose /refresh answer the test chooses.
 type refreshHarness struct {
-	node     *SamNode
+	node     *AgentMeshNode
 	cpPub    ed25519.PublicKey
 	cpPriv   ed25519.PrivateKey
 	peerID   peer.ID
@@ -102,7 +102,7 @@ func newRefreshHarness(t *testing.T, refresh http.HandlerFunc) *refreshHarness {
 		t.Fatal(err)
 	}
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		Store:          store,
 		trustedKeys:    []TrustedKey{{Key: cpPub, ReceivedAt: time.Now()}},
 		BiscuitTimeout: 500 * time.Millisecond,
@@ -232,7 +232,7 @@ func TestRotationRefreshSurvivesRestart(t *testing.T) {
 			harness.storedIdentityUnchanged(t)
 
 			// Restart: only what the store holds carries over.
-			restarted, err := NewSamNode(Options{PrivKey: GetOrGenerateKey(store), Store: store, ControlPlanePubKey: harness.cpPub, RequiredRole: api.RoleNode, BiscuitTimeout: time.Second})
+			restarted, err := NewAgentMeshNode(Options{PrivKey: GetOrGenerateKey(store), Store: store, ControlPlanePubKey: harness.cpPub, RequiredRole: api.RoleNode, BiscuitTimeout: time.Second})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -145,12 +145,12 @@ func deterministicPeerID(seed string) peer.ID {
 func strPtr(s string) *string { return &s }
 
 func buildConformanceSuite() tarConformanceSuite {
-	cpSeed := sha256.Sum256([]byte("sam-tar-conformance-cp-root-key-v1"))
+	cpSeed := sha256.Sum256([]byte("agentmesh-tar-conformance-cp-root-key-v1"))
 	cpPriv := ed25519.NewKeyFromSeed(cpSeed[:])
 	cpPub := cpPriv.Public().(ed25519.PublicKey)
 
-	callerPeer := deterministicPeerID("sam-tar-conformance-caller-peer-v1")
-	providerPeer := deterministicPeerID("sam-tar-conformance-provider-peer-v1")
+	callerPeer := deterministicPeerID("agentmesh-tar-conformance-caller-peer-v1")
+	providerPeer := deterministicPeerID("agentmesh-tar-conformance-provider-peer-v1")
 
 	evalTime := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
 	authExp := time.Date(2035, 1, 1, 0, 0, 0, 0, time.UTC)

@@ -22,15 +22,15 @@ import (
 var (
 	inferenceTokensTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "sam_node_inference_tokens_total",
-			Help: "Total number of inference tokens tracked by sam-node",
+			Name: "agentmesh_node_inference_tokens_total",
+			Help: "Total number of inference tokens tracked by agentmesh-node",
 		},
 		[]string{"peer_id", "model", "token_type"},
 	)
 
 	facadeRejectionsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "sam_node_facade_rejections_total",
+			Name: "agentmesh_node_facade_rejections_total",
 			Help: "Providers excluded by the OpenAI facade scorer, by reason",
 		},
 		[]string{"reason"},
@@ -38,7 +38,7 @@ var (
 
 	facadeRetriesTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
-			Name: "sam_node_facade_retries_total",
+			Name: "agentmesh_node_facade_retries_total",
 			Help: "Completion attempts retried on another provider after a retryable failure",
 		},
 	)

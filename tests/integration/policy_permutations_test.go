@@ -82,7 +82,7 @@ func callMCPAllowError(t *testing.T, mcpAddr string, apiToken string, toolName s
 }
 
 func TestPolicyPermutations(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 
 	tmpDir := t.TempDir()
 

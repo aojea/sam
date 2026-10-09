@@ -113,7 +113,7 @@ func (t *trackingStream) Write(p []byte) (n int, err error) {
 }
 
 // WithBiscuitAuth enforces a Protobuf handshake on a stream before calling the next handler.
-func (n *SamNode) WithBiscuitAuth(next func(network.Stream, RequestContext)) network.StreamHandler {
+func (n *AgentMeshNode) WithBiscuitAuth(next func(network.Stream, RequestContext)) network.StreamHandler {
 	return func(s network.Stream) {
 		ts := &trackingStream{Stream: s}
 		remotePeer := s.Conn().RemotePeer()
@@ -203,12 +203,12 @@ func (n *SamNode) WithBiscuitAuth(next func(network.Stream, RequestContext)) net
 }
 
 // VerifyBiscuitToken checks revocation, cache, and evaluates the token against trusted keys and local policies.
-func (n *SamNode) VerifyBiscuitToken(biscuitBytes []byte, reqCtx RequestContext) error {
+func (n *AgentMeshNode) VerifyBiscuitToken(biscuitBytes []byte, reqCtx RequestContext) error {
 	_, err := n.verifyBiscuitTokenWithRules(biscuitBytes, reqCtx)
 	return err
 }
 
-func (n *SamNode) verifyBiscuitTokenWithRules(biscuitBytes []byte, reqCtx RequestContext) ([]*api.TaskAuthorizationRule, error) {
+func (n *AgentMeshNode) verifyBiscuitTokenWithRules(biscuitBytes []byte, reqCtx RequestContext) ([]*api.TaskAuthorizationRule, error) {
 	remotePeer := reqCtx.PeerID
 
 	// Check revocation cache
@@ -247,12 +247,12 @@ func (n *SamNode) verifyBiscuitTokenWithRules(biscuitBytes []byte, reqCtx Reques
 	return taskRules, nil
 }
 
-func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.PublicKey) error {
+func (n *AgentMeshNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.PublicKey) error {
 	_, err := n.authorizeWithRules(rawToken, req, pubKey)
 	return err
 }
 
-func (n *SamNode) authorizeWithRules(rawToken []byte, req RequestContext, pubKey ed25519.PublicKey) ([]*api.TaskAuthorizationRule, error) {
+func (n *AgentMeshNode) authorizeWithRules(rawToken []byte, req RequestContext, pubKey ed25519.PublicKey) ([]*api.TaskAuthorizationRule, error) {
 	if len(pubKey) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("invalid public key size: %d", len(pubKey))
 	}
@@ -479,7 +479,7 @@ func (req RequestContext) auditFields() []any {
 	return fields
 }
 
-func (n *SamNode) injectIdentityFacts(authorizer biscuit.Authorizer, pubKey ed25519.PublicKey) error {
+func (n *AgentMeshNode) injectIdentityFacts(authorizer biscuit.Authorizer, pubKey ed25519.PublicKey) error {
 	ourIdentity := n.GetIdentity()
 	if ourIdentity == nil {
 		logger.Debugf("[Auth] Node identity is missing, skipping target fact injection")

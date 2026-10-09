@@ -420,7 +420,7 @@ func (s *CalloutSession) RunResponsePhase(
 // IsProtectedEgressHeader reports whether a header name is off-limits to an
 // ext_proc inspector. Inspectors may add/modify application headers, or block a
 // request, but must never select or overwrite credentials, host routing, or
-// SAM identity headers.
+// Agent Mesh identity headers.
 func IsProtectedEgressHeader(name string) bool {
 	lower := strings.ToLower(strings.TrimSpace(name))
 	switch lower {

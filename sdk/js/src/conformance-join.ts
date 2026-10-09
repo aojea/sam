@@ -188,26 +188,26 @@ async function handle(session: MeshSession, command: Command): Promise<unknown> 
 }
 
 async function main(): Promise<void> {
-  const controlPlaneUrl = requireEnv("SAM_CONTROL_PLANE_URL");
+  const controlPlaneUrl = requireEnv("AGENTMESH_CONTROL_PLANE_URL");
   // Enrollment is with a bootstrap token or a platform JWT, as the examples
   // offer; a JWT file is read again at every refresh.
-  const bootstrapTokenPath = process.env.SAM_BOOTSTRAP_TOKEN_PATH;
-  const jwtPath = process.env.SAM_JWT_PATH;
+  const bootstrapTokenPath = process.env.AGENTMESH_BOOTSTRAP_TOKEN_PATH;
+  const jwtPath = process.env.AGENTMESH_JWT_PATH;
   if ((bootstrapTokenPath === undefined) === (jwtPath === undefined)) {
-    throw new Error("exactly one of SAM_BOOTSTRAP_TOKEN_PATH or SAM_JWT_PATH is required");
+    throw new Error("exactly one of AGENTMESH_BOOTSTRAP_TOKEN_PATH or AGENTMESH_JWT_PATH is required");
   }
-  const stateDir = requireEnv("SAM_SDK_STATE_DIR");
-  const allowInsecure = process.env.SAM_INSECURE_CONTROL_PLANE === "1";
-  const listenAddrs = (process.env.SAM_SDK_LISTEN_ADDRS ?? "").split(",").filter((a) => a !== "");
+  const stateDir = requireEnv("AGENTMESH_SDK_STATE_DIR");
+  const allowInsecure = process.env.AGENTMESH_INSECURE_CONTROL_PLANE === "1";
+  const listenAddrs = (process.env.AGENTMESH_SDK_LISTEN_ADDRS ?? "").split(",").filter((a) => a !== "");
   // Labels this member declares at enrollment; the policy's allowed_labels
-  // decide whether the control plane attests them. SAM_SDK_EGRESS_REQUIRE_LABELS
+  // decide whether the control plane attests them. AGENTMESH_SDK_EGRESS_REQUIRE_LABELS
   // is the floor every provider this member calls must attest.
-  const labels = labelsFromEnv("SAM_SDK_LABELS");
-  const egressRequireLabels = labelsFromEnv("SAM_SDK_EGRESS_REQUIRE_LABELS");
-  // SAM_SDK_RELAY_CHECK_SECONDS shortens how often the relay reservation is
+  const labels = labelsFromEnv("AGENTMESH_SDK_LABELS");
+  const egressRequireLabels = labelsFromEnv("AGENTMESH_SDK_EGRESS_REQUIRE_LABELS");
+  // AGENTMESH_SDK_RELAY_CHECK_SECONDS shortens how often the relay reservation is
   // checked, so a test that moves a router sees the member follow it within
   // its budget.
-  const relayCheck = process.env.SAM_SDK_RELAY_CHECK_SECONDS;
+  const relayCheck = process.env.AGENTMESH_SDK_RELAY_CHECK_SECONDS;
   const relayOptions = relayCheck !== undefined && relayCheck !== "" ? { relayCheckIntervalMs: Number(relayCheck) * 1000 } : {};
 
   const mesh = await AgentMesh.enroll({
@@ -220,9 +220,9 @@ async function main(): Promise<void> {
     ...(Object.keys(labels).length > 0 ? { labels } : {}),
   });
   // The test drives every pull itself; only gossip events bring one forward.
-  // SAM_SDK_ROUTERS, peer IDs, joins through those routers only, so the test
+  // AGENTMESH_SDK_ROUTERS, peer IDs, joins through those routers only, so the test
   // can put two members on different routers.
-  const only = new Set((process.env.SAM_SDK_ROUTERS ?? "").split(",").filter((id) => id !== ""));
+  const only = new Set((process.env.AGENTMESH_SDK_ROUTERS ?? "").split(",").filter((id) => id !== ""));
   const routerAddresses = only.size === 0 ? undefined : mesh.credential.routerAddresses.filter((a) => [...only].some((id) => a.endsWith(`/p2p/${id}`)));
   const session = await mesh.join({
     listenAddrs,

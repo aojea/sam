@@ -122,13 +122,13 @@ func TestSyncTrustedKeys(t *testing.T) {
 	currentPub, currentPriv := mustGenerateKey(t)
 	strangerPub, strangerPriv := mustGenerateKey(t)
 
-	newNode := func(t *testing.T) *SamNode {
+	newNode := func(t *testing.T) *AgentMeshNode {
 		store, err := NewStore(t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = store.Close() })
-		return &SamNode{Store: store, trustedKeys: []TrustedKey{{Key: currentPub, ReceivedAt: time.Now()}}}
+		return &AgentMeshNode{Store: store, trustedKeys: []TrustedKey{{Key: currentPub, ReceivedAt: time.Now()}}}
 	}
 
 	t.Run("adopts the set a trusted key vouches for", func(t *testing.T) {
@@ -202,7 +202,7 @@ func TestReconcileBannedPeers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := &SamNode{revokedPeers: cache}
+	n := &AgentMeshNode{revokedPeers: cache}
 	fetchedAt := time.Now()
 	n.revokedPeers.Add(stillBanned.String(), fetchedAt.Add(-time.Hour).UnixMilli())
 	n.revokedPeers.Add(unbanned.String(), fetchedAt.Add(-time.Hour).UnixMilli())
@@ -257,7 +257,7 @@ func TestSyncControlPlane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := &SamNode{Store: store, revokedPeers: cache, trustedKeys: []TrustedKey{{Key: oldPub, ReceivedAt: time.Now()}}}
+	n := &AgentMeshNode{Store: store, revokedPeers: cache, trustedKeys: []TrustedKey{{Key: oldPub, ReceivedAt: time.Now()}}}
 	n.SetIdentityCache([]byte("identity"))
 
 	err = n.SyncControlPlane(context.Background())
@@ -341,7 +341,7 @@ func TestSyncMeshPolicyUsesDatalogRules(t *testing.T) {
 			if err := store.SaveControlPlaneURL(srv.URL); err != nil {
 				t.Fatal(err)
 			}
-			n := &SamNode{Store: store}
+			n := &AgentMeshNode{Store: store}
 			n.SetIdentityCache([]byte("identity"))
 
 			err = n.syncMeshPolicy(context.Background())
@@ -385,7 +385,7 @@ func TestControlPlaneSyncLoop(t *testing.T) {
 	}
 
 	priv := GetOrGenerateKey(store)
-	n := &SamNode{
+	n := &AgentMeshNode{
 		Store:                   store,
 		trustedKeys:             []TrustedKey{{Key: oldPub, ReceivedAt: time.Now()}},
 		controlPlaneSyncTrigger: make(chan struct{}, 1),
@@ -479,7 +479,7 @@ func TestFetchControlPlaneInfo_InvalidProto(t *testing.T) {
 	}
 }
 
-// A node built from stored config, as sam-node run does, must come out of
+// A node built from stored config, as agentmesh-node run does, must come out of
 // its pre-start pull with the control plane's current router addresses and
 // the full key set, both in memory and on disk; and an unreachable control
 // plane must leave the stored config in place rather than blank it.
@@ -510,7 +510,7 @@ func TestSyncControlPlaneBeforeStart(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	newStoredNode := func(t *testing.T, controlPlaneURL string) *SamNode {
+	newStoredNode := func(t *testing.T, controlPlaneURL string) *AgentMeshNode {
 		t.Helper()
 		store, err := NewStore(t.TempDir())
 		if err != nil {
@@ -535,7 +535,7 @@ func TestSyncControlPlaneBeforeStart(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		n, err := NewSamNode(Options{PrivKey: priv, Store: store, ControlPlanePubKey: cpPub, RouterAddrs: []multiaddr.Multiaddr{stale}})
+		n, err := NewAgentMeshNode(Options{PrivKey: priv, Store: store, ControlPlanePubKey: cpPub, RouterAddrs: []multiaddr.Multiaddr{stale}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -629,7 +629,7 @@ func TestSyncControlPlaneRefusesUntrustedKeySet(t *testing.T) {
 			if err := store.SaveTrustedKeys([]TrustedKey{{Key: cpPub, ReceivedAt: time.Now()}}); err != nil {
 				t.Fatal(err)
 			}
-			n := &SamNode{Store: store, trustedKeys: []TrustedKey{{Key: cpPub, ReceivedAt: time.Now()}}}
+			n := &AgentMeshNode{Store: store, trustedKeys: []TrustedKey{{Key: cpPub, ReceivedAt: time.Now()}}}
 			n.SetIdentityCache([]byte("identity"))
 
 			err = n.SyncControlPlane(context.Background())
@@ -663,7 +663,7 @@ func TestControlPlaneClientRefusesPlaintextToNonLoopback(t *testing.T) {
 	defer server.Close()
 	// httptest binds 127.0.0.1; spell it as a non-loopback name that the
 	// transport must refuse before any connection is attempted.
-	nonLoopbackURL := strings.Replace(server.URL, "127.0.0.1", "sam-control-plane.invalid", 1)
+	nonLoopbackURL := strings.Replace(server.URL, "127.0.0.1", "agentmesh-control-plane.invalid", 1)
 
 	t.Cleanup(func() { SetAllowInsecureControlPlane(false) })
 
@@ -699,8 +699,8 @@ func TestReportNodeCatalog(t *testing.T) {
 		if r.URL.Path != "/nodes/catalog" {
 			t.Errorf("Expected path /nodes/catalog, got %s", r.URL.Path)
 		}
-		if userAgent := r.UserAgent(); !strings.HasPrefix(userAgent, "sam-node/") || userAgent == "sam-node/" {
-			t.Errorf("Expected versioned sam-node User-Agent, got %q", userAgent)
+		if userAgent := r.UserAgent(); !strings.HasPrefix(userAgent, "agentmesh-node/") || userAgent == "agentmesh-node/" {
+			t.Errorf("Expected versioned agentmesh-node User-Agent, got %q", userAgent)
 		}
 		gotAuth = r.Header.Get("Authorization")
 		gotContentType = r.Header.Get("Content-Type")
@@ -747,10 +747,10 @@ func TestReportNodeCatalog_HTTPError(t *testing.T) {
 	}
 }
 
-// newCatalogTestNode is a SamNode with just enough state for the catalog
+// newCatalogTestNode is a AgentMeshNode with just enough state for the catalog
 // loop: a store holding the control-plane URL, a cached identity, and a
 // registry with one service.
-func newCatalogTestNode(t *testing.T, controlPlaneURL string) *SamNode {
+func newCatalogTestNode(t *testing.T, controlPlaneURL string) *AgentMeshNode {
 	t.Helper()
 	store, err := NewStore(t.TempDir())
 	if err != nil {
@@ -762,7 +762,7 @@ func newCatalogTestNode(t *testing.T, controlPlaneURL string) *SamNode {
 			t.Fatalf("SaveControlPlaneURL: %v", err)
 		}
 	}
-	node := &SamNode{Store: store, services: newServiceRegistryForTest(&fakeDHT{})}
+	node := &AgentMeshNode{Store: store, services: newServiceRegistryForTest(&fakeDHT{})}
 	node.services.insertService(newFakeSvc("calc", api.ServiceType_SERVICE_TYPE_MCP))
 	return node
 }

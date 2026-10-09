@@ -32,7 +32,7 @@ import (
 
 func TestMCPHandler_HTTP(t *testing.T) {
 	// Setup a dummy node
-	node := &SamNode{
+	node := &AgentMeshNode{
 		BiscuitTimeout: 500 * time.Millisecond,
 	}
 	handler := NewMCPHandler(node)
@@ -93,7 +93,7 @@ func TestResolveRelayAddresses(t *testing.T) {
 	}
 	defer func() { _ = kdht.Close() }()
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		Host:           localHost,
 		DHT:            kdht,
 		BiscuitTimeout: 500 * time.Millisecond,
@@ -189,7 +189,7 @@ func TestPreparePeerAddrsFallsBackToAuthenticatedRouters(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		Host:                 localHost,
 		DHT:                  kdht,
 		BiscuitTimeout:       500 * time.Millisecond,
@@ -241,7 +241,7 @@ func TestSplitToolName(t *testing.T) {
 		},
 		{
 			name:    "No scheme path",
-			input:   "sam.catalog/some-tool",
+			input:   "mesh.catalog/some-tool",
 			wantErr: true,
 		},
 		{

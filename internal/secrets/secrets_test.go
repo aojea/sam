@@ -66,36 +66,36 @@ func TestFromPathOrEnv(t *testing.T) {
 	}
 
 	t.Run("file wins over env", func(t *testing.T) {
-		t.Setenv("SAM_TEST_SECRET", "env-secret")
-		got, err := FromPathOrEnv("api-token", tokenFile, "SAM_TEST_SECRET")
+		t.Setenv("AGENTMESH_TEST_SECRET", "env-secret")
+		got, err := FromPathOrEnv("api-token", tokenFile, "AGENTMESH_TEST_SECRET")
 		if err != nil || got != "file-secret" {
 			t.Errorf("got %q, %v; want file-secret", got, err)
 		}
-		if _, still := os.LookupEnv("SAM_TEST_SECRET"); still {
+		if _, still := os.LookupEnv("AGENTMESH_TEST_SECRET"); still {
 			t.Error("env var must be removed from the process environment")
 		}
 	})
 
 	t.Run("env fallback trimmed", func(t *testing.T) {
-		t.Setenv("SAM_TEST_SECRET", " env-secret \n")
-		got, err := FromPathOrEnv("api-token", "", "SAM_TEST_SECRET")
+		t.Setenv("AGENTMESH_TEST_SECRET", " env-secret \n")
+		got, err := FromPathOrEnv("api-token", "", "AGENTMESH_TEST_SECRET")
 		if err != nil || got != "env-secret" {
 			t.Errorf("got %q, %v; want env-secret", got, err)
 		}
-		if _, still := os.LookupEnv("SAM_TEST_SECRET"); still {
+		if _, still := os.LookupEnv("AGENTMESH_TEST_SECRET"); still {
 			t.Error("env var must be removed from the process environment")
 		}
 	})
 
 	t.Run("unset means unconfigured", func(t *testing.T) {
-		got, err := FromPathOrEnv("api-token", "", "SAM_TEST_SECRET_UNSET")
+		got, err := FromPathOrEnv("api-token", "", "AGENTMESH_TEST_SECRET_UNSET")
 		if err != nil || got != "" {
 			t.Errorf("got %q, %v; want empty", got, err)
 		}
 	})
 
 	t.Run("missing file is an error", func(t *testing.T) {
-		if _, err := FromPathOrEnv("api-token", filepath.Join(dir, "nope"), "SAM_TEST_SECRET"); err == nil {
+		if _, err := FromPathOrEnv("api-token", filepath.Join(dir, "nope"), "AGENTMESH_TEST_SECRET"); err == nil {
 			t.Error("expected error for missing file")
 		}
 	})
@@ -105,7 +105,7 @@ func TestFromPathOrEnv(t *testing.T) {
 		if err := os.WriteFile(empty, []byte("\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := FromPathOrEnv("api-token", empty, "SAM_TEST_SECRET"); err == nil {
+		if _, err := FromPathOrEnv("api-token", empty, "AGENTMESH_TEST_SECRET"); err == nil {
 			t.Error("expected error for empty file")
 		}
 	})

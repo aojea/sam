@@ -88,7 +88,7 @@ func buildBinary(t *testing.T, pkgPath string) string {
 	b := entry.(*binaryBuild)
 	b.once.Do(func() {
 		root := repoRoot(t)
-		dir, err := os.MkdirTemp("", "sam-integration-bin-")
+		dir, err := os.MkdirTemp("", "agentmesh-integration-bin-")
 		if err != nil {
 			b.err = err
 			return
@@ -407,12 +407,12 @@ func startControlPlaneAndRouter(t *testing.T, tmpDir string, oidcURL string, min
 	return cpPort, cleanup
 }
 
-// startControlPlane starts a sam-control-plane under tmpDir, trusting oidcURL
+// startControlPlane starts a agentmesh-control-plane under tmpDir, trusting oidcURL
 // and holding the policy in policyFile with the router role added, plus any
 // extra flags. It returns the port and a stop function.
 func startControlPlane(t *testing.T, tmpDir string, oidcURL string, policyFile string, extra ...string) (int, func()) {
 	t.Helper()
-	cpBin := buildBinary(t, "./cmd/sam-control-plane")
+	cpBin := buildBinary(t, "./cmd/agentmesh-control-plane")
 	cpPort := getFreePort(t)
 
 	// Automatically adjust the policy file to grant the "router" role to group "routers"
@@ -444,13 +444,13 @@ func startControlPlane(t *testing.T, tmpDir string, oidcURL string, policyFile s
 	return cpPort, stop
 }
 
-// startRouter starts a sam-router named name against the control plane on
+// startRouter starts a agentmesh-router named name against the control plane on
 // cpPort, renewing its lease every second so the control plane's view of the
 // router's peers is current. It returns the router's p2p address and a stop
 // function.
 func startRouter(t *testing.T, tmpDir string, cpPort int, mintToken func(map[string]interface{}) string, name string) (string, func()) {
 	t.Helper()
-	routerBin := buildBinary(t, "./cmd/sam-router")
+	routerBin := buildBinary(t, "./cmd/agentmesh-router")
 	routerPort := getFreePort(t)
 
 	routerJWT := mintToken(map[string]interface{}{

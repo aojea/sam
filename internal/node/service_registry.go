@@ -41,7 +41,7 @@ type backendProber interface {
 // defaultDHTProbeTimeout is the default bound on one backend probe before
 // advertising, used when a ServiceRegistry isn't given an explicit
 // BackendProbeTimeout (see Options.BackendProbeTimeout / --backend-probe-
-// timeout). Command-spawned backends (sam-node.yaml's `command`, launched as
+// timeout). Command-spawned backends (agentmesh-node.yaml's `command`, launched as
 // a local subprocess) can need longer than this to answer their first
 // request - a moderately-featured interpreted-language MCP server's own
 // import/startup cost alone can exceed 2s - so this is a floor, not

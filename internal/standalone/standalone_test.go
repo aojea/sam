@@ -64,7 +64,7 @@ func TestExternalMultiaddr(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{url: "https://my-sam.a.run.app", want: "/dns4/my-sam.a.run.app/tcp/443/wss"},
+		{url: "https://my-agentmesh.a.run.app", want: "/dns4/my-agentmesh.a.run.app/tcp/443/wss"},
 		{url: "http://192-168-1-50.nip.io:8080", want: "/dns4/192-168-1-50.nip.io/tcp/8080/ws"},
 		{url: "http://192.168.1.50:8080", want: "/ip4/192.168.1.50/tcp/8080/ws"},
 		{url: "https://mesh.example:8443", want: "/dns4/mesh.example/tcp/8443/wss"},
@@ -95,10 +95,10 @@ func TestEnsureRouterKeyDeterministic(t *testing.T) {
 	key1 := filepath.Join(dir1, routerKeyFile)
 	key2 := filepath.Join(dir2, routerKeyFile)
 
-	if err := ensureRouterKey(key1, "sam_adm_fixed_secret"); err != nil {
+	if err := ensureRouterKey(key1, "mesh_adm_fixed_secret"); err != nil {
 		t.Fatalf("ensureRouterKey(key1): %v", err)
 	}
-	if err := ensureRouterKey(key2, "sam_adm_fixed_secret"); err != nil {
+	if err := ensureRouterKey(key2, "mesh_adm_fixed_secret"); err != nil {
 		t.Fatalf("ensureRouterKey(key2): %v", err)
 	}
 
@@ -125,7 +125,7 @@ func TestEnsureRouterKeyDeterministic(t *testing.T) {
 	}
 
 	// Existing key file must not be overwritten by a different admin token.
-	if err := ensureRouterKey(key1, "sam_adm_other_secret"); err != nil {
+	if err := ensureRouterKey(key1, "mesh_adm_other_secret"); err != nil {
 		t.Fatalf("ensureRouterKey existing: %v", err)
 	}
 	b1After, err := os.ReadFile(key1)
@@ -141,10 +141,10 @@ func TestInferredRequestMultiaddr(t *testing.T) {
 	const testPeerID = "12D3KooWBzUDQCkZhz2rWrYBhpjcCH8VnrRNcwCW6DoF36iADYrY"
 
 	reqCloudRun, _ := http.NewRequest(http.MethodGet, "http://0.0.0.0:8080/info", nil)
-	reqCloudRun.Host = "sam-one-xyz-uc.a.run.app"
+	reqCloudRun.Host = "agentmesh-one-xyz-uc.a.run.app"
 	reqCloudRun.Header.Set("X-Forwarded-Proto", "https")
 	got, ok := inferredRequestMultiaddr(reqCloudRun, testPeerID)
-	want := "/dns4/sam-one-xyz-uc.a.run.app/tcp/443/wss/p2p/" + testPeerID
+	want := "/dns4/agentmesh-one-xyz-uc.a.run.app/tcp/443/wss/p2p/" + testPeerID
 	if !ok || got != want {
 		t.Fatalf("CloudRun inferredRequestMultiaddr = (%q, %v), want (%q, true)", got, ok, want)
 	}
@@ -166,7 +166,7 @@ func TestInferredRequestMultiaddr(t *testing.T) {
 }
 
 func TestPrependInferredRouterAddr(t *testing.T) {
-	const inferred = "/dns4/sam-one-xyz.a.run.app/tcp/443/wss/p2p/12D3KooWBzUDQCkZhz2rWrYBhpjcCH8VnrRNcwCW6DoF36iADYrY"
+	const inferred = "/dns4/agentmesh-one-xyz.a.run.app/tcp/443/wss/p2p/12D3KooWBzUDQCkZhz2rWrYBhpjcCH8VnrRNcwCW6DoF36iADYrY"
 	const local = "/ip4/127.0.0.1/tcp/8080/ws/p2p/12D3KooWBzUDQCkZhz2rWrYBhpjcCH8VnrRNcwCW6DoF36iADYrY"
 
 	enrollIn, _ := proto.Marshal(&api.BootstrapEnrollResponse{

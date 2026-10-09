@@ -119,14 +119,14 @@ func RouterLeaseChallenge(peerID string, ts int64) []byte {
 	return []byte("mesh:routers-lease:" + peerID + ":" + strconv.FormatInt(ts, 10))
 }
 
-// TokenExchangeChallenge is the payload an enrolled sam-node signs with its
+// TokenExchangeChallenge is the payload an enrolled agentmesh-node signs with its
 // identity key at POST /token/exchange to prove possession of the channel key
 // that will carry the minted Delegated Session Biscuit.
 func TokenExchangeChallenge(peerID string, ts int64) []byte {
 	return []byte("mesh:token-exchange:" + peerID + ":" + strconv.FormatInt(ts, 10))
 }
 
-// STSTokenChallenge is the payload an enrolled egress sam-node signs with its
+// STSTokenChallenge is the payload an enrolled egress agentmesh-node signs with its
 // identity key at POST /sts/token when asking the control plane to mint an
 // ES256 border JWT for an outbound destination.
 func STSTokenChallenge(peerID string, ts int64) []byte {
@@ -178,7 +178,7 @@ const (
 	// GrantTypeAuthorizationCode is the standard OAuth 2.1 authorization_code grant type.
 	GrantTypeAuthorizationCode = "authorization_code"
 
-	// TokenTypeBiscuit is the token type URI identifying a SAM Biscuit token in RFC 8693 exchanges.
+	// TokenTypeBiscuit is the token type URI identifying a Agent Mesh Biscuit token in RFC 8693 exchanges.
 	TokenTypeBiscuit = "urn:agentmesh:params:oauth:token-type:biscuit"
 
 	// TokenTypeJWT is the RFC 8693 JWT token type URI.
@@ -192,7 +192,7 @@ const (
 )
 
 // ============================================================================
-// SAM Custom HTTP Headers
+// Agent Mesh Custom HTTP Headers
 // ============================================================================
 
 const (
@@ -200,7 +200,7 @@ const (
 	// Biscuit token containing the node's identity credentials when forwarding requests
 	// over libp2p HTTP between nodes in the mesh.
 	//
-	// This header is internal to the SAM mesh datapath and is stripped before requests
+	// This header is internal to the Agent Mesh datapath and is stripped before requests
 	// are forwarded to backend services.
 	HeaderMeshBiscuit = "X-Mesh-Biscuit"
 
@@ -222,8 +222,8 @@ const (
 
 	// HeaderMeshAuthentication is the custom HTTP header used to authenticate a local
 	// process to this node's sidecar API (the shared secret configured via
-	// "--api-token-path" or the SAM_API_TOKEN environment variable). Using a
-	// SAM-specific header name — instead of the standard
+	// "--api-token-path" or the AGENTMESH_API_TOKEN environment variable). Using a
+	// Agent Mesh-specific header name — instead of the standard
 	// "Authorization" header — leaves "Authorization" free to always mean what
 	// every HTTP client expects: the credential for the destination being called.
 	// The sidecar strips this header before forwarding any request off-node, so

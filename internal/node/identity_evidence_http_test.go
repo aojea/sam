@@ -40,11 +40,11 @@ func TestIdentityEvidenceRoutesHaveOwnMetricClass(t *testing.T) {
 }
 
 func TestIdentityEvidenceTrailingSlashReturnsNotFound(t *testing.T) {
-	node := &SamNode{
+	node := &AgentMeshNode{
 		BiscuitTimeout: 500 * time.Millisecond,
 		services:       NewServiceRegistry(&fakeDHT{}, 0),
 	}
-	socketPath := filepath.Join(t.TempDir(), "sam.sock")
+	socketPath := filepath.Join(t.TempDir(), "agentmesh.sock")
 
 	srv, err := StartSidecarServer(node, "", socketPath, "", "", "", "")
 	if err != nil {
@@ -73,8 +73,8 @@ func TestIdentityEvidenceTrailingSlashReturnsNotFound(t *testing.T) {
 func TestIdentityEvidenceHandlersRejectUnavailableNode(t *testing.T) {
 	tests := []struct {
 		name    string
-		handler func(*SamNode, http.ResponseWriter, *http.Request)
-		node    *SamNode
+		handler func(*AgentMeshNode, http.ResponseWriter, *http.Request)
+		node    *AgentMeshNode
 		path    string
 	}{
 		{
@@ -85,7 +85,7 @@ func TestIdentityEvidenceHandlersRejectUnavailableNode(t *testing.T) {
 		{
 			name:    "identity nil host",
 			handler: handleIdentityEvidence,
-			node:    &SamNode{},
+			node:    &AgentMeshNode{},
 			path:    "/mesh/identity",
 		},
 		{
@@ -96,7 +96,7 @@ func TestIdentityEvidenceHandlersRejectUnavailableNode(t *testing.T) {
 		{
 			name:    "peer nil host",
 			handler: handlePeerEvidence,
-			node:    &SamNode{},
+			node:    &AgentMeshNode{},
 			path:    "/mesh/peer/unavailable/evidence",
 		},
 	}

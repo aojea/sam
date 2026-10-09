@@ -33,7 +33,7 @@ import (
 func newTestStore(t *testing.T) Store {
 	t.Helper()
 	// Use a temporary file for SQLite testing to avoid concurrency sharing bugs in parallel tests
-	tempDir, err := os.MkdirTemp("", "sam-store-test-*")
+	tempDir, err := os.MkdirTemp("", "agentmesh-store-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}

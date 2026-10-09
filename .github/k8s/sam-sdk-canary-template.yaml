@@ -34,13 +34,13 @@ spec:
         image: ghcr.io/google/sam-sdk-js:${IMAGE_TAG}
         command: ["/bin/sh", "-c", "node build/examples/a2a-agent.js 2>&1 | tee /var/run/sam/agent.log"]
         env:
-        - name: SAM_CONTROL_PLANE_URL
+        - name: AGENTMESH_CONTROL_PLANE_URL
           value: "http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
-        - name: SAM_INSECURE_CONTROL_PLANE
+        - name: AGENTMESH_INSECURE_CONTROL_PLANE
           value: "true"
-        - name: SAM_JWT_PATH
+        - name: AGENTMESH_JWT_PATH
           value: /var/run/secrets/tokens/sam-token
-        - name: SAM_STATE_DIR
+        - name: AGENTMESH_STATE_DIR
           value: /var/run/sam/agent
         securityContext:
           allowPrivilegeEscalation: false
@@ -63,13 +63,13 @@ spec:
         image: ghcr.io/google/sam-sdk-python:${IMAGE_TAG}
         command: ["/bin/sh", "/etc/sam-canary/canary.sh"]
         env:
-        - name: SAM_CONTROL_PLANE_URL
+        - name: AGENTMESH_CONTROL_PLANE_URL
           value: "http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
-        - name: SAM_INSECURE_CONTROL_PLANE
+        - name: AGENTMESH_INSECURE_CONTROL_PLANE
           value: "true"
-        - name: SAM_JWT_PATH
+        - name: AGENTMESH_JWT_PATH
           value: /var/run/secrets/tokens/sam-token
-        - name: SAM_STATE_DIR
+        - name: AGENTMESH_STATE_DIR
           value: /var/run/sam/caller
         - name: PYTHONUNBUFFERED
           value: "1"
@@ -140,13 +140,13 @@ spec:
         image: ghcr.io/google/sam-sdk-python:${IMAGE_TAG}
         command: ["/bin/sh", "-c", "python examples/a2a_agent.py 2>&1 | tee /var/run/sam/agent.log"]
         env:
-        - name: SAM_CONTROL_PLANE_URL
+        - name: AGENTMESH_CONTROL_PLANE_URL
           value: "http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
-        - name: SAM_INSECURE_CONTROL_PLANE
+        - name: AGENTMESH_INSECURE_CONTROL_PLANE
           value: "true"
-        - name: SAM_JWT_PATH
+        - name: AGENTMESH_JWT_PATH
           value: /var/run/secrets/tokens/sam-token
-        - name: SAM_STATE_DIR
+        - name: AGENTMESH_STATE_DIR
           value: /var/run/sam/agent
         - name: PYTHONUNBUFFERED
           value: "1"
@@ -171,13 +171,13 @@ spec:
         image: ghcr.io/google/sam-sdk-js:${IMAGE_TAG}
         command: ["/bin/sh", "/etc/sam-canary/canary.sh"]
         env:
-        - name: SAM_CONTROL_PLANE_URL
+        - name: AGENTMESH_CONTROL_PLANE_URL
           value: "http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
-        - name: SAM_INSECURE_CONTROL_PLANE
+        - name: AGENTMESH_INSECURE_CONTROL_PLANE
           value: "true"
-        - name: SAM_JWT_PATH
+        - name: AGENTMESH_JWT_PATH
           value: /var/run/secrets/tokens/sam-token
-        - name: SAM_STATE_DIR
+        - name: AGENTMESH_STATE_DIR
           value: /var/run/sam/caller
         - name: CANARY
           value: js-calls-python-agent
@@ -233,15 +233,15 @@ data:
     #!/bin/sh
     # Sends the agent beside this container a message with the A2A SDK's
     # client every INTERVAL seconds, by the peer ID it printed to
-    # $SAM_CANARY_DIR/agent.log, and keeps $SAM_CANARY_DIR/reachable present
+    # $AGENTMESH_CANARY_DIR/agent.log, and keeps $AGENTMESH_CANARY_DIR/reachable present
     # while the last call succeeded; the readiness probe reads it. One JSON
     # line per call, for a log-based metric. The first call enrolls with the
-    # projected token; the later ones resume from SAM_STATE_DIR.
+    # projected token; the later ones resume from AGENTMESH_STATE_DIR.
     # tests/integration runs this script against the example programs.
     set -u
     INTERVAL=${INTERVAL:-300}
-    LOG=${SAM_CANARY_DIR:-/var/run/sam}/agent.log
-    REACHABLE=${SAM_CANARY_DIR:-/var/run/sam}/reachable
+    LOG=${AGENTMESH_CANARY_DIR:-/var/run/sam}/agent.log
+    REACHABLE=${AGENTMESH_CANARY_DIR:-/var/run/sam}/reachable
 
     verdict() {
       printf '{"canary":"%s","ok":%s,"agent_peer":"%s","call_s":%d,"error":"%s","detail":"%s"}\n' \

@@ -26,11 +26,11 @@ import (
 )
 
 // The state directory is the layout the native SDKs keep a member in, and
-// what `sam-node state export` writes and `sam-node state import` reads:
+// what `agentmesh-node state export` writes and `agentmesh-node state import` reads:
 // the private key in the libp2p PrivateKey encoding and the
 // api.MemberCredential as protojson with proto field names. Files are
 // owner-only; unknown fields in the credential are an error, as on every
-// SAM surface.
+// Agent Mesh surface.
 const (
 	StateDirIdentityFile   = "identity.key"
 	StateDirCredentialFile = "credential.json"

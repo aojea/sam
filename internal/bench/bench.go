@@ -58,7 +58,7 @@ type Options struct {
 	// against it.
 	UnixTarget string
 
-	// Target is the URL to request, e.g. http://mesh.sam.alt/v1/models.
+	// Target is the URL to request, e.g. http://mesh.alt/v1/models.
 	Target string
 
 	// Method and Body are the request to issue. An empty Method means GET.

@@ -34,7 +34,7 @@ const (
 )
 
 var nodesDeletedTotal = promauto.NewCounter(prometheus.CounterOpts{
-	Name: "sam_control_plane_nodes_deleted_total",
+	Name: "agentmesh_control_plane_nodes_deleted_total",
 	Help: "Enrolled node records removed after outliving their session by the retention period",
 })
 

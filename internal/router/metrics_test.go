@@ -63,10 +63,10 @@ func TestRouterMetricsListener(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("/metrics = %d: %s", code, body)
 	}
-	if !strings.Contains(body, "sam_router_ready 0") {
-		t.Error("/metrics missing sam_router_ready 0 before start")
+	if !strings.Contains(body, "agentmesh_router_ready 0") {
+		t.Error("/metrics missing agentmesh_router_ready 0 before start")
 	}
-	if strings.Contains(body, "sam_router_authenticated_peers") {
+	if strings.Contains(body, "agentmesh_router_authenticated_peers") {
 		t.Error("/metrics exported host state before the host existed")
 	}
 
@@ -97,29 +97,29 @@ func TestRouterMetricsListener(t *testing.T) {
 	}
 	_, body = getBody(t, base+"/metrics")
 	for _, want := range []string{
-		"sam_router_ready 1",
-		`sam_router_info{peer_id="` + host.ID().String() + `"} 1`,
+		"agentmesh_router_ready 1",
+		`agentmesh_router_info{peer_id="` + host.ID().String() + `"} 1`,
 		// The derived cap: a quarter of the default high watermark.
-		"sam_router_conns_per_source_ip_limit 1000",
-		"sam_router_draining 0",
-		`sam_router_connections{direction="inbound"} 0`,
-		`sam_router_connections{direction="outbound"} 0`,
-		`sam_router_connection_watermark{level="high"} 4000`,
-		`sam_router_relay_limit{limit="reservations"} 4000`,
-		`sam_router_relay_limit{limit="reservations_per_ip"} 1000`,
-		`sam_router_relay_limit{limit="circuits_per_peer"} 1024`,
-		"sam_router_inbound_connections_refused_total",
-		"sam_router_authenticated_peers 2",
-		"sam_router_banned_peers 1",
-		"sam_router_connected_peers 0",
-		"sam_router_dht_routing_table_size 0",
+		"agentmesh_router_conns_per_source_ip_limit 1000",
+		"agentmesh_router_draining 0",
+		`agentmesh_router_connections{direction="inbound"} 0`,
+		`agentmesh_router_connections{direction="outbound"} 0`,
+		`agentmesh_router_connection_watermark{level="high"} 4000`,
+		`agentmesh_router_relay_limit{limit="reservations"} 4000`,
+		`agentmesh_router_relay_limit{limit="reservations_per_ip"} 1000`,
+		`agentmesh_router_relay_limit{limit="circuits_per_peer"} 1024`,
+		"agentmesh_router_inbound_connections_refused_total",
+		"agentmesh_router_authenticated_peers 2",
+		"agentmesh_router_banned_peers 1",
+		"agentmesh_router_connected_peers 0",
+		"agentmesh_router_dht_routing_table_size 0",
 		// The text format renders values with strconv 'g', so a unix time
 		// comes out in scientific notation.
-		"sam_router_biscuit_expiry_timestamp_seconds " + strconv.FormatFloat(float64(expiry.Unix()), 'g', -1, 64),
+		"agentmesh_router_biscuit_expiry_timestamp_seconds " + strconv.FormatFloat(float64(expiry.Unix()), 'g', -1, 64),
 		// libp2p registers into the default registry, which the listener
 		// serves alongside the router's own state.
 		"libp2p_",
-		"sam_router_auth_handshakes_total",
+		"agentmesh_router_auth_handshakes_total",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/metrics missing %q", want)

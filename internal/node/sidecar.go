@@ -41,7 +41,7 @@ import (
 // StartSidecarServer serves the node's local API on a TCP address, on a Unix
 // socket, or on both. An empty addr disables the TCP listener; an empty
 // socketPath disables the socket.
-func StartSidecarServer(node *SamNode, addr, socketPath, token, certFile, keyFile, caFile string) (*http.Server, error) {
+func StartSidecarServer(node *AgentMeshNode, addr, socketPath, token, certFile, keyFile, caFile string) (*http.Server, error) {
 	mux := http.NewServeMux()
 
 	// Public endpoints
@@ -196,7 +196,7 @@ func serveSocket(server *http.Server, listener net.Listener, socketPath string) 
 // serveTCP starts the sidecar's TCP listener, which — unlike the Unix socket —
 // is reachable by any local process and therefore always demands a token or
 // mutual TLS.
-func serveTCP(server *http.Server, node *SamNode, addr, token, certFile, keyFile, caFile string) error {
+func serveTCP(server *http.Server, node *AgentMeshNode, addr, token, certFile, keyFile, caFile string) error {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", addr, err)
@@ -386,7 +386,7 @@ func handleReadyz(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func withMeshConnection(node *SamNode, next http.Handler) http.Handler {
+func withMeshConnection(node *AgentMeshNode, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if node != nil && !node.IsConnected() {
 			logger.Warnf("[SidecarAuth] Request %s %s rejected: node not connected to mesh", r.Method, r.URL.Path)
@@ -503,7 +503,7 @@ func constantTimeEqual(got, want string) bool {
 // against memory-exhaustion from oversized payloads.
 const maxRequestBodyBytes = 1 << 20 // 1 MiB
 
-func handleDiscoverService(node *SamNode, w http.ResponseWriter, r *http.Request) {
+func handleDiscoverService(node *AgentMeshNode, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -629,11 +629,11 @@ func handleDiscoverService(node *SamNode, w http.ResponseWriter, r *http.Request
 type egressMiddleware struct {
 	// gateRequest may refuse the request (writing the HTTP error itself,
 	// returning false) or return a derived request to forward.
-	gateRequest func(node *SamNode, w http.ResponseWriter, r *http.Request, route egressRoute) (*http.Request, bool)
+	gateRequest func(node *AgentMeshNode, w http.ResponseWriter, r *http.Request, route egressRoute) (*http.Request, bool)
 	// serveLocal may fully handle the request at this node (returning true)
 	// instead of letting it stream through the proxy; nil means no hook.
 	// It runs after the egress headers (biscuit, agent claim) are prepared.
-	serveLocal func(node *SamNode, rt http.RoundTripper, w http.ResponseWriter, r *http.Request, route egressRoute) bool
+	serveLocal func(node *AgentMeshNode, rt http.RoundTripper, w http.ResponseWriter, r *http.Request, route egressRoute) bool
 }
 
 // egressRoute is the parsed /mesh/{peer}/{type}/{svc}/{upstream} egress path,
@@ -667,7 +667,7 @@ func parseEgressRoute(path string) (egressRoute, bool) {
 
 // applyEgressMiddleware routes a raw egress request through the middleware
 // registered for its service type, if any.
-func applyEgressMiddleware(node *SamNode, w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
+func applyEgressMiddleware(node *AgentMeshNode, w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
 	route, ok := parseEgressRoute(r.URL.Path)
 	if !ok {
 		return r, true
@@ -682,7 +682,7 @@ func applyEgressMiddleware(node *SamNode, w http.ResponseWriter, r *http.Request
 // serveEgressLocally gives the service type's middleware a chance to answer
 // the request from this node (e.g. agent-card regeneration) instead of
 // proxying; it reports whether the request was handled.
-func serveEgressLocally(node *SamNode, rt http.RoundTripper, w http.ResponseWriter, r *http.Request) bool {
+func serveEgressLocally(node *AgentMeshNode, rt http.RoundTripper, w http.ResponseWriter, r *http.Request) bool {
 	route, ok := parseEgressRoute(r.URL.Path)
 	if !ok {
 		return false
@@ -702,7 +702,7 @@ func allowLimitedEgressConn(ctx context.Context) context.Context {
 
 // prepareEgressPeer warms up connectivity to the destination peer of an
 // egress request if it is not already connected.
-func (node *SamNode) prepareEgressPeer(ctx context.Context, peerID string) {
+func (node *AgentMeshNode) prepareEgressPeer(ctx context.Context, peerID string) {
 	pid, err := peer.Decode(peerID)
 	if err != nil {
 		return
@@ -712,7 +712,7 @@ func (node *SamNode) prepareEgressPeer(ctx context.Context, peerID string) {
 	}
 }
 
-func createEgressProxy(node *SamNode) http.Handler {
+func createEgressProxy(node *AgentMeshNode) http.Handler {
 	transport := libp2phttp.NewTransport(node.Host)
 
 	proxy := &httputil.ReverseProxy{

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package secrets resolves secret configuration for SAM binaries.
+// Package secrets resolves secret configuration for Agent Mesh binaries.
 //
 // Daemon-lifetime secrets are never accepted as flag values: command lines
 // leak via /proc/<pid>/cmdline (world-readable), shell history, CI logs, and

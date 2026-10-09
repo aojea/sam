@@ -633,7 +633,7 @@ Both testnets run the example programs, unchanged, as canaries beside the
 `sam-node` ones (`.github/k8s/sam-sdk-canary-template.yaml`): two pairs, an
 agent written with one SDK and the official A2A SDK (`a2a-agent.ts`,
 `a2a_agent.py`) and a caller written with the other in one pod, enrolled
-with the pod's projected service account token through `SAM_JWT_PATH`. The
+with the pod's projected service account token through `AGENTMESH_JWT_PATH`. The
 agent accepts `a2a://agent`; the caller reads its peer ID from the line it
 prints, through a volume the pod shares, sends it a message with the A2A
 SDK's client every five minutes and is Ready while the last answer named

@@ -67,7 +67,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-var logger = golog.Logger("sam-router")
+var logger = golog.Logger("agentmesh-router")
 
 const (
 	DefaultLowWaterMark  = 1000
@@ -879,7 +879,7 @@ func (r *Router) controlPlane(timeout time.Duration) *cpclient.Client {
 // controlPlaneClient is the client for every request to the control plane;
 // its transport re-checks the plaintext policy on each hop, redirects included.
 func (r *Router) controlPlaneClient(timeout time.Duration) *http.Client {
-	return cpclient.NewHTTPClient(timeout, func() bool { return r.config.AllowInsecureControlPlane }, "sam-router")
+	return cpclient.NewHTTPClient(timeout, func() bool { return r.config.AllowInsecureControlPlane }, "agentmesh-router")
 }
 
 func (r *Router) getTrustedPublicKeys() []ed25519.PublicKey {

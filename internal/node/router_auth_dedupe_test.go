@@ -40,7 +40,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// fakeRouter is a libp2p host answering the SAM auth protocol. It counts
+// fakeRouter is a libp2p host answering the Agent Mesh auth protocol. It counts
 // handshakes so a test can tell a fresh session from a reused one, and keeps
 // the last biscuit it was shown.
 type fakeRouter struct {
@@ -121,7 +121,7 @@ func newFakeRouter(t *testing.T, listenAddrs ...string) *fakeRouter {
 
 // startNode brings up a node enrolled against this router and authenticated.
 // Each tweak may adjust the options before the node is built.
-func (r *fakeRouter) startNode(t *testing.T, ctx context.Context, routerAddrs []multiaddr.Multiaddr, tweaks ...func(*Options)) *SamNode {
+func (r *fakeRouter) startNode(t *testing.T, ctx context.Context, routerAddrs []multiaddr.Multiaddr, tweaks ...func(*Options)) *AgentMeshNode {
 	t.Helper()
 	store, err := NewStore(t.TempDir())
 	if err != nil {
@@ -148,7 +148,7 @@ func (r *fakeRouter) startNode(t *testing.T, ctx context.Context, routerAddrs []
 	for _, tweak := range tweaks {
 		tweak(&opts)
 	}
-	node, err := NewSamNode(opts)
+	node, err := NewAgentMeshNode(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func (r *fakeRouter) startNode(t *testing.T, ctx context.Context, routerAddrs []
 
 // waitForConnectedness polls until the node's view of the router matches want,
 // and reports the last state it saw if the deadline passes first.
-func waitForConnectedness(t *testing.T, node *SamNode, router peer.ID, want network.Connectedness) {
+func waitForConnectedness(t *testing.T, node *AgentMeshNode, router peer.ID, want network.Connectedness) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	var got network.Connectedness
@@ -385,7 +385,7 @@ func TestStartIsReadyOnceOneRouterAdmitsTheNode(t *testing.T) {
 	if err := store.SaveIdentity(live.mint(pid.String(), api.RoleNode)); err != nil {
 		t.Fatal(err)
 	}
-	node, err := NewSamNode(Options{
+	node, err := NewAgentMeshNode(Options{
 		PrivKey:              privKey,
 		Store:                store,
 		ControlPlanePubKey:   live.cpPub,

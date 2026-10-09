@@ -6,11 +6,11 @@ published nothing, reached by its peer ID.
     python call.py inference://ollama /v1/models
     python call.py 12D3KooW... a2a://agent /card
 
-SAM_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
-SAM_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or SAM_JWT_PATH
+AGENTMESH_CONTROL_PLANE_URL names the mesh. The first run enrolls with the file
+AGENTMESH_BOOTSTRAP_TOKEN_PATH (a token the mesh operator gave you) or AGENTMESH_JWT_PATH
 (a workload identity token your platform issues, such as a Kubernetes
 projected service account token), and keeps the identity and credential in
-SAM_STATE_DIR; later runs resume from there without it.
+AGENTMESH_STATE_DIR; later runs resume from there without it.
 """
 
 import json
@@ -30,12 +30,12 @@ tool_or_path = argv[1] if len(argv) > 1 else ("/card" if peer_id else "echo")
 args = json.loads(argv[2]) if len(argv) > 2 else {"message": "hi"}
 
 mesh = AgentMesh.enroll(
-    os.environ.get("SAM_CONTROL_PLANE_URL", "https://mesh.example.com"),
-    bootstrap_token_path=os.environ.get("SAM_BOOTSTRAP_TOKEN_PATH"),
-    jwt_path=os.environ.get("SAM_JWT_PATH"),
-    state_dir=os.environ.get("SAM_STATE_DIR", "~/.config/sam-mesh/caller"),
+    os.environ.get("AGENTMESH_CONTROL_PLANE_URL", "https://mesh.example.com"),
+    bootstrap_token_path=os.environ.get("AGENTMESH_BOOTSTRAP_TOKEN_PATH"),
+    jwt_path=os.environ.get("AGENTMESH_JWT_PATH"),
+    state_dir=os.environ.get("AGENTMESH_STATE_DIR", "~/.config/agentmesh/caller"),
     # A plaintext http:// control plane is otherwise accepted only on loopback.
-    allow_insecure=os.environ.get("SAM_INSECURE_CONTROL_PLANE") == "true",
+    allow_insecure=os.environ.get("AGENTMESH_INSECURE_CONTROL_PLANE") == "true",
 )
 
 

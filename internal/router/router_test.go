@@ -1181,7 +1181,7 @@ func TestRouterRefreshEnrollmentReattestsJWT(t *testing.T) {
 	tempDir := t.TempDir()
 	jwtPath := filepath.Join(tempDir, "router.jwt")
 	initialJWT := mintToken(map[string]interface{}{
-		"sub":    "system:serviceaccount:sam-system:sam-router",
+		"sub":    "system:serviceaccount:agentmesh-system:agentmesh-router",
 		"groups": []string{"routers"},
 	})
 	if err := os.WriteFile(jwtPath, []byte(initialJWT+"\n"), 0600); err != nil {
@@ -1207,9 +1207,9 @@ func TestRouterRefreshEnrollmentReattestsJWT(t *testing.T) {
 	defer func() { _ = r.Close() }()
 
 	rotatedJWT := mintToken(map[string]interface{}{
-		"sub":    "system:serviceaccount:sam-system:sam-router",
+		"sub":    "system:serviceaccount:agentmesh-system:agentmesh-router",
 		"groups": []string{"routers"},
-		"email":  "sam-router@cluster.local",
+		"email":  "agentmesh-router@cluster.local",
 	})
 	if err := os.WriteFile(jwtPath, []byte(rotatedJWT), 0600); err != nil {
 		t.Fatal(err)
@@ -1223,7 +1223,7 @@ func TestRouterRefreshEnrollmentReattestsJWT(t *testing.T) {
 	if err != nil || rec == nil {
 		t.Fatalf("GetNode: %v", err)
 	}
-	if !strings.Contains(rec.ClaimsJSON, "sam-router@cluster.local") {
+	if !strings.Contains(rec.ClaimsJSON, "agentmesh-router@cluster.local") {
 		t.Errorf("ClaimsJSON = %s, want updated claim from rotated router JWT", rec.ClaimsJSON)
 	}
 }

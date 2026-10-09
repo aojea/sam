@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package skill installs the SAM agent skill into the directories local AI
+// Package skill installs the Agent Mesh agent skill into the directories local AI
 // agents scan, so an agent can bootstrap a node and drive the mesh without the
 // user pasting instructions by hand.
 package skill
@@ -22,18 +22,18 @@ import (
 	"os"
 	"path/filepath"
 
-	samskill "github.com/google/agentmesh/agents/skills/sam-mesh"
+	agentmeshskill "github.com/google/agentmesh/agents/skills/agentmesh"
 )
 
 const (
 	// Name is the directory an installed skill lives in.
-	Name = "sam-mesh"
+	Name = "agentmesh"
 	// fileName is the document every agent skill runtime looks for.
 	fileName = "SKILL.md"
 )
 
 // Content is the skill document installed for local agents.
-var Content = samskill.Markdown
+var Content = agentmeshskill.Markdown
 
 // Target is a directory tree that an agent scans for skills.
 type Target struct {

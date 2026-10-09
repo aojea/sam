@@ -37,7 +37,7 @@ var requestBuckets = []float64{
 var (
 	requestTTFBSeconds = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "sam_node_request_ttfb_seconds",
+			Name:    "agentmesh_node_request_ttfb_seconds",
 			Help:    "Time from accepting a sidecar request to its first response byte",
 			Buckets: requestBuckets,
 		},
@@ -46,7 +46,7 @@ var (
 
 	requestDurationSeconds = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "sam_node_request_duration_seconds",
+			Name:    "agentmesh_node_request_duration_seconds",
 			Help:    "Time a sidecar request occupied its handler, including streaming",
 			Buckets: requestBuckets,
 		},
@@ -55,7 +55,7 @@ var (
 
 	requestsInFlight = promauto.NewGauge(
 		prometheus.GaugeOpts{
-			Name: "sam_node_requests_in_flight",
+			Name: "agentmesh_node_requests_in_flight",
 			Help: "Sidecar requests currently being served",
 		},
 	)

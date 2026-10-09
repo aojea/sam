@@ -46,13 +46,13 @@ import (
 // Any other error (validation, role resolution, or minting) still fails the
 // test. Probe further with e.g.:
 //
-//	SAM_POLICY_SCALE_MAX=5000 go test ./internal/controlplane -run TestPolicyScale -v
+//	AGENTMESH_POLICY_SCALE_MAX=5000 go test ./internal/controlplane -run TestPolicyScale -v
 func TestPolicyScale(t *testing.T) {
 	tiers := []int{10, 100, 500}
-	if extra := os.Getenv("SAM_POLICY_SCALE_MAX"); extra != "" {
+	if extra := os.Getenv("AGENTMESH_POLICY_SCALE_MAX"); extra != "" {
 		n, err := strconv.Atoi(extra)
 		if err != nil {
-			t.Fatalf("invalid SAM_POLICY_SCALE_MAX=%q: %v", extra, err)
+			t.Fatalf("invalid AGENTMESH_POLICY_SCALE_MAX=%q: %v", extra, err)
 		}
 		tiers = append(tiers, n)
 	}
@@ -152,13 +152,13 @@ func TestPolicyScale(t *testing.T) {
 // facts (one granted_service_set + one granted_target_set) regardless of how
 // many exact entries it grants. Probe further with e.g.:
 //
-//	SAM_POLICY_SCALE_SET_MAX=20000 go test ./internal/controlplane -run TestPolicyScaleSetEncoding -v
+//	AGENTMESH_POLICY_SCALE_SET_MAX=20000 go test ./internal/controlplane -run TestPolicyScaleSetEncoding -v
 func TestPolicyScaleSetEncoding(t *testing.T) {
 	entryTiers := []int{10, 100, 2000}
-	if extra := os.Getenv("SAM_POLICY_SCALE_SET_MAX"); extra != "" {
+	if extra := os.Getenv("AGENTMESH_POLICY_SCALE_SET_MAX"); extra != "" {
 		n, err := strconv.Atoi(extra)
 		if err != nil {
-			t.Fatalf("invalid SAM_POLICY_SCALE_SET_MAX=%q: %v", extra, err)
+			t.Fatalf("invalid AGENTMESH_POLICY_SCALE_SET_MAX=%q: %v", extra, err)
 		}
 		entryTiers = append(entryTiers, n)
 	}
@@ -276,13 +276,13 @@ func TestValidatePolicyConfigFactBudget(t *testing.T) {
 // dynamically from live claims at request time and so cannot pre-merge
 // grants across roles the way mint time can. Probe further with e.g.:
 //
-//	SAM_POLICY_SCALE_ROLES_MAX=900 go test ./internal/controlplane -run TestPolicyScaleManyRoles -v
+//	AGENTMESH_POLICY_SCALE_ROLES_MAX=900 go test ./internal/controlplane -run TestPolicyScaleManyRoles -v
 func TestPolicyScaleManyRoles(t *testing.T) {
 	roleTiers := []int{10, 100, 800}
-	if extra := os.Getenv("SAM_POLICY_SCALE_ROLES_MAX"); extra != "" {
+	if extra := os.Getenv("AGENTMESH_POLICY_SCALE_ROLES_MAX"); extra != "" {
 		n, err := strconv.Atoi(extra)
 		if err != nil {
-			t.Fatalf("invalid SAM_POLICY_SCALE_ROLES_MAX=%q: %v", extra, err)
+			t.Fatalf("invalid AGENTMESH_POLICY_SCALE_ROLES_MAX=%q: %v", extra, err)
 		}
 		roleTiers = append(roleTiers, n)
 	}

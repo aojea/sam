@@ -68,9 +68,9 @@ async def pick_model(inference_url, requested):
 async def main():
     parser = argparse.ArgumentParser(description="Chaos Monkey Agent via LangChain & MCP")
     parser.add_argument("task", nargs="?", default="", help="Instruction to run; same positional interface as the agent harness, so one sandbox init serves both")
-    parser.add_argument("--mcp-url", default=os.environ.get("SAM_MCP_URL", "http://mesh.sam.alt/mcp"), help="MCP endpoint; a mesh name the boundary resolves")
-    parser.add_argument("--inference-url", default=os.environ.get("SAM_INFERENCE_URL", "http://mesh.sam.alt/v1"), help="OpenAI-compatible endpoint")
-    parser.add_argument("--model", default=os.environ.get("SAM_MODEL", ""), help="Model to ask for; default is whatever the mesh offers first")
+    parser.add_argument("--mcp-url", default=os.environ.get("AGENTMESH_MCP_URL", "http://mesh.alt/mcp"), help="MCP endpoint; a mesh name the boundary resolves")
+    parser.add_argument("--inference-url", default=os.environ.get("AGENTMESH_INFERENCE_URL", "http://mesh.alt/v1"), help="OpenAI-compatible endpoint")
+    parser.add_argument("--model", default=os.environ.get("AGENTMESH_MODEL", ""), help="Model to ask for; default is whatever the mesh offers first")
     parser.add_argument("--rounds", type=int, default=int(os.environ.get("CHAOS_ROUNDS", "0")), help="Rounds to run; 0 keeps going until stopped")
     parser.add_argument("--sleep", type=float, default=float(os.environ.get("CHAOS_SLEEP", "30")), help="Seconds between rounds, jittered")
     parser.add_argument("--auth", default="", help="Only needed outside a sandbox; inside one the boundary authenticates")

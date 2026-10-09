@@ -45,7 +45,7 @@ type canaryVerdict struct {
 // agent example in one language writes its output to the directory the pod
 // shares, and the script calls it with the other language's A2A example,
 // both enrolled with the same projected token, the caller resuming its
-// identity from SAM_STATE_DIR on the second call. The script reports each
+// identity from AGENTMESH_STATE_DIR on the second call. The script reports each
 // call as one JSON line and keeps the readiness file while the last call
 // succeeded; a failed call is reported by the line that names the error.
 func TestSDKCanaryScript(t *testing.T) {
@@ -97,15 +97,15 @@ func TestSDKCanaryScript(t *testing.T) {
 		t.Run(caller.name+"-calls-"+agent.name+"-agent", func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			jwtPath := filepath.Join(dir, "sam-token")
+			jwtPath := filepath.Join(dir, "agentmesh-token")
 			jwt := mesh.mintToken(map[string]interface{}{"sub": "mock-user", "roles": []string{api.RoleNode}})
 			if err := os.WriteFile(jwtPath, []byte(jwt+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			env := []string{
-				"SAM_CONTROL_PLANE_URL=" + mesh.baseURL,
-				"SAM_INSECURE_CONTROL_PLANE=true",
-				"SAM_JWT_PATH=" + jwtPath,
+				"AGENTMESH_CONTROL_PLANE_URL=" + mesh.baseURL,
+				"AGENTMESH_INSECURE_CONTROL_PLANE=true",
+				"AGENTMESH_JWT_PATH=" + jwtPath,
 				"PYTHONUNBUFFERED=1",
 			}
 
@@ -115,7 +115,7 @@ func TestSDKCanaryScript(t *testing.T) {
 				t.Fatal(err)
 			}
 			agentCmd, _ := agent.cmd(context.Background(), mesh.root, "a2a-agent")
-			agentCmd.Env = append(os.Environ(), append(env, "SAM_STATE_DIR="+filepath.Join(dir, "agent"))...)
+			agentCmd.Env = append(os.Environ(), append(env, "AGENTMESH_STATE_DIR="+filepath.Join(dir, "agent"))...)
 			agentCmd.Dir = mesh.root
 			agentCmd.Stdout, agentCmd.Stderr = logFile, logFile
 			if err := agentCmd.Start(); err != nil {
@@ -133,7 +133,7 @@ func TestSDKCanaryScript(t *testing.T) {
 
 			callCmd, _ := caller.cmd(context.Background(), mesh.root, "a2a-call")
 			verdicts := runCanaryScript(t, script, dir, caller.name+"-calls-"+agent.name+"-agent", strings.Join(callCmd.Args, " "),
-				append(env, "SAM_STATE_DIR="+filepath.Join(dir, "caller"), "INTERVAL=0"))
+				append(env, "AGENTMESH_STATE_DIR="+filepath.Join(dir, "caller"), "INTERVAL=0"))
 			for i := 0; i < 2; i++ {
 				v := <-verdicts
 				if !v.OK || v.Error != "" || v.AgentPeer == "" {
@@ -183,7 +183,7 @@ func runCanaryScript(t *testing.T, script, dir, canary, call string, env []strin
 	t.Helper()
 	cmd := exec.Command("sh", script)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), append(env, "SAM_CANARY_DIR="+dir, "CANARY="+canary, "CALL="+call)...)
+	cmd.Env = append(os.Environ(), append(env, "AGENTMESH_CANARY_DIR="+dir, "CANARY="+canary, "CALL="+call)...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

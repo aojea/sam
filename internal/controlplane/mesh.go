@@ -105,7 +105,7 @@ type P2PMeshAdapter struct {
 	store storage.Store
 	mu    sync.Mutex
 	// close tears down what NewMeshPublisher built; nil when the host and
-	// topic belong to someone else (sam-one's embedded router).
+	// topic belong to someone else (agentmesh-one's embedded router).
 	close func() error
 }
 

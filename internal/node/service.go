@@ -175,7 +175,7 @@ func buildRegisterRequest(sCfg api.ServiceConfig) (*api.RegisterServiceRequest, 
 	return req, nil
 }
 
-// serviceKeyToCID hashes "sam:service[:part]..." into a DHT rendezvous CID.
+// serviceKeyToCID hashes "mesh:service[:part]..." into a DHT rendezvous CID.
 func serviceKeyToCID(parts ...string) (cid.Cid, error) {
 	srvKey := strings.Join(append([]string{"mesh:service"}, parts...), ":")
 	hash, err := multihash.Sum([]byte(srvKey), multihash.SHA2_256, -1)

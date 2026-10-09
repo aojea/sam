@@ -55,7 +55,7 @@ func (s *safeBuffer) String() string {
 // next start (a redeploy moves every router's address); the node must ask
 // the control plane for the current ones, reach one, and remember it.
 func TestSelfHealingHTTPFallback(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	tmpDir := t.TempDir()
 	oidcURL, mintToken := startCustomMockOIDC(t)
 

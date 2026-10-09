@@ -163,7 +163,7 @@ func TestAuthorize(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		Store:          store,
 		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 		BiscuitTimeout: 500 * time.Millisecond,
@@ -179,7 +179,7 @@ func TestAuthorize(t *testing.T) {
 	}
 }
 
-// TestAuthorizeRejectsExpiredBiscuit reproduces #296: SamNode.Authorize did not
+// TestAuthorizeRejectsExpiredBiscuit reproduces #296: AgentMeshNode.Authorize did not
 // inject the time(now) fact nor the ControlPlaneStaticTimeCheck, so an expired
 // biscuit that would be rejected by identity.VerifyBiscuit was still accepted
 // on the node dataplane.
@@ -237,7 +237,7 @@ func TestAuthorizeRejectsExpiredBiscuit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		Store:          store,
 		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 		BiscuitTimeout: 500 * time.Millisecond,
@@ -300,7 +300,7 @@ func TestAuthorizeRejectsAppendedPeerBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 		BiscuitTimeout: 500 * time.Millisecond,
 	}
@@ -437,7 +437,7 @@ func TestBaselineRules(t *testing.T) {
 			b, _ := builder.Build()
 			tokenBytes, _ := b.Serialize()
 
-			node := &SamNode{
+			node := &AgentMeshNode{
 				trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 				BiscuitTimeout: 500 * time.Millisecond,
 			}
@@ -600,7 +600,7 @@ attenuation:
 				}
 			}
 
-			node := &SamNode{
+			node := &AgentMeshNode{
 				trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 				nodeConfig:     nodeConfigComplete,
 				BiscuitTimeout: 500 * time.Millisecond,
@@ -662,7 +662,7 @@ func TestRevocation(t *testing.T) {
 
 	cache, _ := lru.New[string, int64](10000)
 	rl, _ := ratelimit.NewPeerRateLimiter(100)
-	node := &SamNode{
+	node := &AgentMeshNode{
 		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 		revokedPeers:   cache,
 		rateLimiter:    rl,
@@ -751,7 +751,7 @@ func TestWithBiscuitAuth_MutualBiscuit(t *testing.T) {
 	}
 
 	rl, _ := ratelimit.NewPeerRateLimiter(100)
-	node := &SamNode{
+	node := &AgentMeshNode{
 		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 		rateLimiter:    rl,
 		BiscuitTimeout: 500 * time.Millisecond,
@@ -807,7 +807,7 @@ func TestVerifyEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 		BiscuitTimeout: 500 * time.Millisecond,
 	}
@@ -982,7 +982,7 @@ func TestMiddlewareTargetChecks(t *testing.T) {
 			idB, _ := idBuilder.Build()
 			idTokenBytes, _ := idB.Serialize()
 
-			node := &SamNode{
+			node := &AgentMeshNode{
 				trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 				BiscuitTimeout: 500 * time.Millisecond,
 			}
@@ -1115,7 +1115,7 @@ func TestAuthorize_WithTARBlocks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 		BiscuitTimeout: 500 * time.Millisecond,
 	}
@@ -1204,7 +1204,7 @@ func TestTARConformanceVectors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		trustedKeys:     []TrustedKey{{Key: rootPub, ReceivedAt: time.Now()}},
 		MeshPolicyRules: meshRules,
 		BiscuitTimeout:  500 * time.Millisecond,

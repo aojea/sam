@@ -62,7 +62,7 @@ func TestKeyRotationWhileMembersOffline(t *testing.T) {
 	// The SDK members start again from their state directories concurrently.
 	// The token path names no file: the member resumes or fails, it cannot enroll.
 	resumed := make([]*sdkMember, len(members.sdk))
-	noToken := "SAM_BOOTSTRAP_TOKEN_PATH=" + filepath.Join(t.TempDir(), "no-token")
+	noToken := "AGENTMESH_BOOTSTRAP_TOKEN_PATH=" + filepath.Join(t.TempDir(), "no-token")
 	var wg sync.WaitGroup
 	for i, s := range members.sdk {
 		i, s := i, s
@@ -144,7 +144,7 @@ type offlineSDKMember struct {
 func (s *offlineSDKMember) start(t *testing.T, mesh *sdkMesh, suffix string, env ...string) *sdkMember {
 	t.Helper()
 	cmd, _ := s.launcher.cmd(mesh.root)
-	return launchSDKMember(t, s.launcher.name+suffix, cmd, mesh.root, mesh.baseURL, mesh.adminToken, append([]string{"SAM_SDK_STATE_DIR=" + s.stateDir}, env...)...)
+	return launchSDKMember(t, s.launcher.name+suffix, cmd, mesh.root, mesh.baseURL, mesh.adminToken, append([]string{"AGENTMESH_SDK_STATE_DIR=" + s.stateDir}, env...)...)
 }
 
 // assertBackUnderKey checks the member came back as the identity it kept,
@@ -183,7 +183,7 @@ type offlineMembers struct {
 
 func enrollMembersThenStop(t *testing.T, mesh *sdkMesh) *offlineMembers {
 	t.Helper()
-	members := &offlineMembers{nodeBin: buildBinary(t, "./cmd/sam-node")}
+	members := &offlineMembers{nodeBin: buildBinary(t, "./cmd/agentmesh-node")}
 
 	// A token is read only to enroll, so the file can go once the member
 	// holds a credential.
@@ -208,7 +208,7 @@ func enrollMembersThenStop(t *testing.T, mesh *sdkMesh) *offlineMembers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			slots[i].member = launchSDKMember(t, slots[i].launcher.name, slots[i].cmd, mesh.root, mesh.baseURL, mesh.adminToken, "SAM_SDK_STATE_DIR="+slots[i].stateDir)
+			slots[i].member = launchSDKMember(t, slots[i].launcher.name, slots[i].cmd, mesh.root, mesh.baseURL, mesh.adminToken, "AGENTMESH_SDK_STATE_DIR="+slots[i].stateDir)
 		}()
 	}
 	wg.Wait()
@@ -225,7 +225,7 @@ func enrollMembersThenStop(t *testing.T, mesh *sdkMesh) *offlineMembers {
 		t.Fatal(err)
 	}
 	members.nodeEnv = append(os.Environ(), "HOME="+members.nodeHome, "XDG_CONFIG_HOME="+filepath.Join(members.nodeHome, ".config"))
-	socketDir, err := os.MkdirTemp("", "sam-rot-")
+	socketDir, err := os.MkdirTemp("", "agentmesh-rot-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func (o *offlineMembers) assertNodeBackUnderKey(t *testing.T, node *backgroundNo
 	waitForPeerOnRouter(t, mesh.cpPort, mesh.adminToken, o.nodeBefore.PeerId, 10*time.Second)
 }
 
-// rotateSigningKey rotates as the sam-control-plane binary does: a new
+// rotateSigningKey rotates as the agentmesh-control-plane binary does: a new
 // current key, the old one retiring over grace, the event on the mesh. It
 // returns once every router presents a credential under the new key.
 func rotateSigningKey(t *testing.T, ctx context.Context, mesh *sdkMesh, grace time.Duration) ed25519.PublicKey {

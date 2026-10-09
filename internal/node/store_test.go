@@ -218,7 +218,7 @@ func TestStore_OIDCConfig(t *testing.T) {
 
 	issuer := "https://auth.example.com"
 	clientID := "client-123"
-	audience := "sam-mesh"
+	audience := "agentmesh"
 
 	if err := store.SaveOIDCConfig(issuer, clientID, audience); err != nil {
 		t.Fatalf("SaveOIDCConfig failed: %v", err)
@@ -415,7 +415,7 @@ func TestStore_MigratesLegacyLayout(t *testing.T) {
 	}
 }
 
-// TestStore_CredentialRoundTrip is what `sam-node state export | import`
+// TestStore_CredentialRoundTrip is what `agentmesh-node state export | import`
 // relies on: the message out is the message in.
 func TestStore_CredentialRoundTrip(t *testing.T) {
 	store, err := NewStore(t.TempDir())
@@ -568,11 +568,11 @@ func TestGetDefaultDataDir(t *testing.T) {
 		t.Error("Expected non-empty directory path")
 	}
 
-	custom := filepath.Join(t.TempDir(), "custom-sam-dir")
-	t.Setenv("SAM_DATA_DIR", custom)
+	custom := filepath.Join(t.TempDir(), "custom-agentmesh-dir")
+	t.Setenv("AGENTMESH_DATA_DIR", custom)
 	got, err := GetDefaultDataDir()
 	if err != nil {
-		t.Fatalf("GetDefaultDataDir with SAM_DATA_DIR failed: %v", err)
+		t.Fatalf("GetDefaultDataDir with AGENTMESH_DATA_DIR failed: %v", err)
 	}
 	if got != custom {
 		t.Fatalf("GetDefaultDataDir = %q, want %q", got, custom)

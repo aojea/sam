@@ -149,7 +149,7 @@ func TestEnrollStatusPollingCollectsBiscuit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to generate node key: %v", err)
 	}
-	samNode, err := node.NewSamNode(node.Options{
+	samNode, err := node.NewAgentMeshNode(node.Options{
 		PrivKey:       priv,
 		Store:         nodeStore,
 		ListenAddrs:   []string{"/ip4/127.0.0.1/tcp/0"},

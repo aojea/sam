@@ -20,11 +20,11 @@ import (
 	"time"
 )
 
-func TestSamControlPlaneHelp(t *testing.T) {
-	cpBin := buildBinary(t, "./cmd/sam-control-plane")
+func TestAgentMeshControlPlaneHelp(t *testing.T) {
+	cpBin := buildBinary(t, "./cmd/agentmesh-control-plane")
 	stdout, stderr, err := runCommand(t, repoRoot(t), 10*time.Second, nil, "", cpBin, "--help")
 	if err != nil {
-		t.Fatalf("sam-control-plane --help failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		t.Fatalf("agentmesh-control-plane --help failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 	out := stdout + stderr
 	if !strings.Contains(out, "Agent Mesh - Control Plane") {
@@ -32,11 +32,11 @@ func TestSamControlPlaneHelp(t *testing.T) {
 	}
 }
 
-func TestSamRouterHelp(t *testing.T) {
-	routerBin := buildBinary(t, "./cmd/sam-router")
+func TestAgentMeshRouterHelp(t *testing.T) {
+	routerBin := buildBinary(t, "./cmd/agentmesh-router")
 	stdout, stderr, err := runCommand(t, repoRoot(t), 10*time.Second, nil, "", routerBin, "--help")
 	if err != nil {
-		t.Fatalf("sam-router --help failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		t.Fatalf("agentmesh-router --help failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 	out := stdout + stderr
 	if !strings.Contains(out, "Agent Mesh - libp2p Router Node") {

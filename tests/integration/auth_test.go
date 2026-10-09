@@ -27,7 +27,7 @@ import (
 )
 
 func TestNodeAuthEnforcementIntegration(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	_, mockRouterAddr := startMockRouter(t)
 
 	home := t.TempDir()
@@ -93,7 +93,7 @@ func TestNodeAuthEnforcementIntegration(t *testing.T) {
 		{"readyz is public", "GET", "/readyz", http.StatusOK, false},
 		// Services are declared in configuration only: the former runtime
 		// registration endpoints are gone, so /mesh/service/register is just
-		// another egress-proxy path behind auth like any /sam/ path.
+		// another egress-proxy path behind auth like any /mesh/ path.
 		{"discover is protected", "GET", "/mesh/service/discover?type=mcp&name=test", http.StatusUnauthorized, false},
 		{"egress proxy is protected", "GET", "/mesh/", http.StatusUnauthorized, false},
 		{"register path is protected like any egress path", "POST", "/mesh/service/register", http.StatusUnauthorized, false},

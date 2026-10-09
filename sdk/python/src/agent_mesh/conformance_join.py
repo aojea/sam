@@ -171,25 +171,25 @@ async def _handle(session: MeshSession, command: dict) -> dict:
 async def main() -> None:
     # stdout carries the protocol lines only; every log goes to stderr.
     logging.basicConfig(stream=sys.stderr, level=logging.WARNING, force=True)
-    control_plane_url = _require_env("SAM_CONTROL_PLANE_URL")
+    control_plane_url = _require_env("AGENTMESH_CONTROL_PLANE_URL")
     # Enrollment is with a bootstrap token or a platform JWT, as the examples
     # offer; a JWT file is read again at every refresh.
-    bootstrap_token_path = os.environ.get("SAM_BOOTSTRAP_TOKEN_PATH")
-    jwt_path = os.environ.get("SAM_JWT_PATH")
+    bootstrap_token_path = os.environ.get("AGENTMESH_BOOTSTRAP_TOKEN_PATH")
+    jwt_path = os.environ.get("AGENTMESH_JWT_PATH")
     if (bootstrap_token_path is None) == (jwt_path is None):
-        raise RuntimeError("exactly one of SAM_BOOTSTRAP_TOKEN_PATH or SAM_JWT_PATH is required")
-    state_dir = _require_env("SAM_SDK_STATE_DIR")
-    allow_insecure = os.environ.get("SAM_INSECURE_CONTROL_PLANE") == "1"
-    listen = [a for a in os.environ.get("SAM_SDK_LISTEN_ADDRS", "").split(",") if a]
+        raise RuntimeError("exactly one of AGENTMESH_BOOTSTRAP_TOKEN_PATH or AGENTMESH_JWT_PATH is required")
+    state_dir = _require_env("AGENTMESH_SDK_STATE_DIR")
+    allow_insecure = os.environ.get("AGENTMESH_INSECURE_CONTROL_PLANE") == "1"
+    listen = [a for a in os.environ.get("AGENTMESH_SDK_LISTEN_ADDRS", "").split(",") if a]
     # Labels this member declares at enrollment; the policy's allowed_labels
-    # decide whether the control plane attests them. SAM_SDK_EGRESS_REQUIRE_LABELS
+    # decide whether the control plane attests them. AGENTMESH_SDK_EGRESS_REQUIRE_LABELS
     # is the floor every provider this member calls must attest.
-    labels = _labels_from_env("SAM_SDK_LABELS")
-    egress_require_labels = _labels_from_env("SAM_SDK_EGRESS_REQUIRE_LABELS")
-    # SAM_SDK_RELAY_CHECK_SECONDS shortens how often the relay reservation is
+    labels = _labels_from_env("AGENTMESH_SDK_LABELS")
+    egress_require_labels = _labels_from_env("AGENTMESH_SDK_EGRESS_REQUIRE_LABELS")
+    # AGENTMESH_SDK_RELAY_CHECK_SECONDS shortens how often the relay reservation is
     # checked and how soon a failed renewal is retried, so a test that moves
     # a router sees the member follow it within its budget.
-    relay_check = os.environ.get("SAM_SDK_RELAY_CHECK_SECONDS")
+    relay_check = os.environ.get("AGENTMESH_SDK_RELAY_CHECK_SECONDS")
     relay_options = {"reservation_check_interval": float(relay_check), "refresh_retry": float(relay_check)} if relay_check else {}
 
     mesh = AgentMesh.enroll(
@@ -202,9 +202,9 @@ async def main() -> None:
         poll_interval=0.2,
     )
     # The test drives every pull itself; only gossip events bring one forward.
-    # SAM_SDK_ROUTERS, peer IDs, joins through those routers only, so the test
+    # AGENTMESH_SDK_ROUTERS, peer IDs, joins through those routers only, so the test
     # can put two members on different routers.
-    only = {p for p in os.environ.get("SAM_SDK_ROUTERS", "").split(",") if p}
+    only = {p for p in os.environ.get("AGENTMESH_SDK_ROUTERS", "").split(",") if p}
     router_addresses = [a for a in mesh.credential.router_addresses if any(a.endswith(f"/p2p/{p}") for p in only)] if only else None
     async with mesh.join(
         listen_addrs=listen,

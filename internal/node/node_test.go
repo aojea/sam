@@ -98,7 +98,7 @@ func TestAnnounceFilter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			n := &SamNode{config: Options{
+			n := &AgentMeshNode{config: Options{
 				AllowLoopback:        tt.allowLoopback,
 				AnnouncePrivateAddrs: tt.announcePrivate,
 			}}
@@ -127,7 +127,7 @@ func TestHandleBannedEvent(t *testing.T) {
 
 	for _, spelling := range []string{banned.String(), peer.ToCid(banned).String()} {
 		revokedCache, _ := lru.New[string, int64](10)
-		node := &SamNode{
+		node := &AgentMeshNode{
 			revokedPeers:   revokedCache,
 			BiscuitTimeout: 500 * time.Millisecond,
 		}
@@ -163,7 +163,7 @@ func TestBannedPeerCanonicalisation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create revocation cache: %v", err)
 	}
-	node := &SamNode{
+	node := &AgentMeshNode{
 		revokedPeers:      revokedCache,
 		peerLastEventTime: make(map[string]int64),
 		BiscuitTimeout:    500 * time.Millisecond,
@@ -185,7 +185,7 @@ func TestBannedPeerCanonicalisation(t *testing.T) {
 }
 
 func TestHandleKeyRotationEvent(t *testing.T) {
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond}
 
 	pub, _, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -221,7 +221,7 @@ func TestKeyRotationEventSurvivesRestart(t *testing.T) {
 	enrollKey, _, _ := ed25519.GenerateKey(nil)
 	rotatedKey, _, _ := ed25519.GenerateKey(nil)
 
-	node := &SamNode{Store: store, trustedKeys: []TrustedKey{{Key: enrollKey, ReceivedAt: time.Now()}}}
+	node := &AgentMeshNode{Store: store, trustedKeys: []TrustedKey{{Key: enrollKey, ReceivedAt: time.Now()}}}
 	node.handleKeyRotationEvent(&api.MeshEvent{
 		Type:         api.MeshEvent_KEY_ROTATION,
 		NewPublicKey: rotatedKey,
@@ -236,7 +236,7 @@ func TestKeyRotationEventSurvivesRestart(t *testing.T) {
 
 	// "Restart": a fresh node built from the same store must trust the rotated key
 	priv, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-	restarted, err := NewSamNode(Options{PrivKey: priv, Store: store, ControlPlanePubKey: enrollKey})
+	restarted, err := NewAgentMeshNode(Options{PrivKey: priv, Store: store, ControlPlanePubKey: enrollKey})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestKeyRotationEventSurvivesRestart(t *testing.T) {
 	}
 }
 
-func TestNewSamNodeIgnoresCorruptPersistedKeys(t *testing.T) {
+func TestNewAgentMeshNodeIgnoresCorruptPersistedKeys(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -267,7 +267,7 @@ func TestNewSamNodeIgnoresCorruptPersistedKeys(t *testing.T) {
 	}
 
 	priv, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-	node, err := NewSamNode(Options{PrivKey: priv, Store: store})
+	node, err := NewAgentMeshNode(Options{PrivKey: priv, Store: store})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +342,7 @@ func TestHandleAuthHandshake(t *testing.T) {
 	}
 	defer func() { _ = clientHost.Close() }()
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 		BiscuitTimeout: time.Second,
 	}
@@ -463,7 +463,7 @@ func TestHandleAuthHandshakeBoundsUnauthenticatedPeers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node := &SamNode{
+	node := &AgentMeshNode{
 		trustedKeys:      []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 		BiscuitTimeout:   time.Second,
 		handshakeLimiter: limiter,
@@ -563,7 +563,7 @@ func TestPerformRouterAuthHandshakeRequiresRouterRole(t *testing.T) {
 	}
 	defer func() { _ = clientHost.Close() }()
 
-	node := &SamNode{
+	node := &AgentMeshNode{
 		trustedKeys:    []TrustedKey{{Key: cpPub, ReceivedAt: time.Now()}},
 		BiscuitTimeout: time.Second,
 	}
@@ -615,7 +615,7 @@ func TestStartRenewalLoop_ExpiredAndFails(t *testing.T) {
 		// Set expiration to the past
 		_ = store.SaveIdentityExpiration(time.Now().Add(-1 * time.Hour).Unix())
 
-		node := &SamNode{
+		node := &AgentMeshNode{
 			BiscuitTimeout: 500 * time.Millisecond,
 			Store:          store,
 		}
@@ -641,7 +641,7 @@ func TestConnectionMonitor_CrashesAfterFailures(t *testing.T) {
 	if os.Getenv("BE_CRASHER_MONITOR") == "1" {
 		priv, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 		store, _ := NewStore(t.TempDir())
-		node, err := NewSamNode(Options{
+		node, err := NewAgentMeshNode(Options{
 			PrivKey:           priv,
 			RouterAddrs:       nil,
 			Store:             store,
@@ -656,7 +656,7 @@ func TestConnectionMonitor_CrashesAfterFailures(t *testing.T) {
 			MonitorInterval:   1 * time.Minute,
 		})
 		if err != nil {
-			os.Exit(0) // Ignore NewSamNode errors for this crasher
+			os.Exit(0) // Ignore NewAgentMeshNode errors for this crasher
 		}
 		if err := node.Start(context.Background()); err != nil {
 			os.Exit(0)
@@ -678,13 +678,13 @@ func TestConnectionMonitor_CrashesAfterFailures(t *testing.T) {
 	t.Fatalf("process ran with err %v, want exit status 1 (fatal crash)", err)
 }
 
-func TestNewSamNode_Validation(t *testing.T) {
+func TestNewAgentMeshNode_Validation(t *testing.T) {
 	priv, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	store, _ := NewStore(t.TempDir())
 	defer func() { _ = store.Close() }()
 
 	t.Run("nil PrivKey", func(t *testing.T) {
-		_, err := NewSamNode(Options{
+		_, err := NewAgentMeshNode(Options{
 			PrivKey: nil,
 			Store:   store,
 		})
@@ -694,7 +694,7 @@ func TestNewSamNode_Validation(t *testing.T) {
 	})
 
 	t.Run("nil Store", func(t *testing.T) {
-		_, err := NewSamNode(Options{
+		_, err := NewAgentMeshNode(Options{
 			PrivKey: priv,
 			Store:   nil,
 		})
@@ -704,18 +704,18 @@ func TestNewSamNode_Validation(t *testing.T) {
 	})
 }
 
-func TestNewSamNode_BiscuitTimeout(t *testing.T) {
+func TestNewAgentMeshNode_BiscuitTimeout(t *testing.T) {
 	priv, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	store, _ := NewStore(t.TempDir())
 	defer func() { _ = store.Close() }()
 
 	t.Run("defaults when unset", func(t *testing.T) {
-		node, err := NewSamNode(Options{
+		node, err := NewAgentMeshNode(Options{
 			PrivKey: priv,
 			Store:   store,
 		})
 		if err != nil {
-			t.Fatalf("NewSamNode: %v", err)
+			t.Fatalf("NewAgentMeshNode: %v", err)
 		}
 		if node.BiscuitTimeout != identity.DefaultAuthorizerTimeout {
 			t.Errorf("BiscuitTimeout = %v, want default %v", node.BiscuitTimeout, identity.DefaultAuthorizerTimeout)
@@ -723,13 +723,13 @@ func TestNewSamNode_BiscuitTimeout(t *testing.T) {
 	})
 
 	t.Run("explicit value respected", func(t *testing.T) {
-		node, err := NewSamNode(Options{
+		node, err := NewAgentMeshNode(Options{
 			PrivKey:        priv,
 			Store:          store,
 			BiscuitTimeout: 10 * time.Second,
 		})
 		if err != nil {
-			t.Fatalf("NewSamNode: %v", err)
+			t.Fatalf("NewAgentMeshNode: %v", err)
 		}
 		if node.BiscuitTimeout != 10*time.Second {
 			t.Errorf("BiscuitTimeout = %v, want 10s", node.BiscuitTimeout)
@@ -737,7 +737,7 @@ func TestNewSamNode_BiscuitTimeout(t *testing.T) {
 	})
 }
 
-func TestNewSamNode_DHTOptions(t *testing.T) {
+func TestNewAgentMeshNode_DHTOptions(t *testing.T) {
 	priv, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	store, _ := NewStore(t.TempDir())
 	defer func() { _ = store.Close() }()
@@ -752,7 +752,7 @@ func TestNewSamNode_DHTOptions(t *testing.T) {
 		DiscoveryConcurrency: 5,
 	}
 
-	node, err := NewSamNode(opts)
+	node, err := NewAgentMeshNode(opts)
 	if err != nil {
 		t.Fatalf("failed to create node with DHT options: %v", err)
 	}
@@ -771,7 +771,7 @@ func TestNewSamNode_DHTOptions(t *testing.T) {
 	}
 }
 
-// newDHTHost returns a host wired to a DHT on the /sam prefix. Client mode
+// newDHTHost returns a host wired to a DHT on the /mesh prefix. Client mode
 // keeps the host out of its peers' routing tables, so nothing dials it except
 // the code under test.
 func newDHTHost(t *testing.T, mode dht.ModeOpt) (host.Host, *dht.IpfsDHT) {
@@ -824,7 +824,7 @@ func TestFindProvidersSkipsRevoked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node := &SamNode{Host: hostA, DHT: dhtA, revokedPeers: revokedCache}
+	node := &AgentMeshNode{Host: hostA, DHT: dhtA, revokedPeers: revokedCache}
 
 	// Positive control: the provider record is findable before the ban, so a
 	// later empty result is the guard and not a lookup that never worked.
@@ -875,7 +875,7 @@ func TestStartDiscoverySkipsRevoked(t *testing.T) {
 		t.Fatal(err)
 	}
 	revokedCache.Add(revokedHost.ID().String(), time.Now().UnixMilli())
-	node := &SamNode{Host: hostA, DHT: dhtA, revokedPeers: revokedCache}
+	node := &AgentMeshNode{Host: hostA, DHT: dhtA, revokedPeers: revokedCache}
 
 	go node.startDiscovery(ctx, meshID, 200*time.Millisecond)
 

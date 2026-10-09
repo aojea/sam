@@ -112,7 +112,7 @@ func startCustomMockOIDC(t *testing.T) (string, func(claims map[string]interface
 func setupTestServer(t *testing.T, oidcIssuer string, overrides ...func(*Options)) (*Server, storage.Store, string) {
 	t.Helper()
 
-	tempDir, err := os.MkdirTemp("", "sam-cp-test-*")
+	tempDir, err := os.MkdirTemp("", "agentmesh-cp-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestControlPlaneBasic(t *testing.T) {
 			DriverName:       "sqlite",
 			DataSourceName:   dbPath,
 			OIDCIssuer:       issuer,
-			OIDCClientID:     "sam-cli-app",
+			OIDCClientID:     "agentmesh-cli-app",
 			AllowedAudiences: []string{"agentmesh-audience"},
 		}, st)
 		if err != nil {
@@ -242,7 +242,7 @@ func TestControlPlaneBasic(t *testing.T) {
 		if err := proto.Unmarshal(rec.Body.Bytes(), &info2); err != nil {
 			t.Fatalf("failed to unmarshal ControlPlaneInfoResponse: %v", err)
 		}
-		if info2.ClientId != "sam-cli-app" || info2.Audience != "agentmesh-audience" {
+		if info2.ClientId != "agentmesh-cli-app" || info2.Audience != "agentmesh-audience" {
 			t.Errorf("unexpected client id/audience: %+v", &info2)
 		}
 	})
@@ -2266,14 +2266,14 @@ func TestNodeProactiveTokenRefresh(t *testing.T) {
 
 	// The node trusts the key enrollment handed it, as a real node would; the
 	// refreshed token is verified against that key before it is adopted.
-	n, err := node.NewSamNode(node.Options{
+	n, err := node.NewAgentMeshNode(node.Options{
 		PrivKey:            privNode,
 		Store:              nStore,
 		ControlPlanePubKey: enrollNodeResp.ControlPlanePublicKey,
 		ListenAddrs:        []string{"/ip4/127.0.0.1/tcp/0"},
 	})
 	if err != nil {
-		t.Fatalf("NewSamNode: %v", err)
+		t.Fatalf("NewAgentMeshNode: %v", err)
 	}
 
 	// Trigger proactive refresh
@@ -3285,7 +3285,7 @@ func TestMeshSurfaceCORS(t *testing.T) {
 }
 
 // TestAdminBootstrapTokensList pins the admin listing surface used by
-// `sam-one token list`: created tokens show up, and the list is admin-gated.
+// `agentmesh-one token list`: created tokens show up, and the list is admin-gated.
 func TestAdminBootstrapTokensList(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "cp-admin-tokens.db")
 	store, err := storage.NewSQLStore("sqlite", dbPath)

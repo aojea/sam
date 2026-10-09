@@ -26,7 +26,7 @@ import (
 )
 
 func TestNodeRelayACL_AllowConnect(t *testing.T) {
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond}
 	acl := &nodeRelayACL{node: node}
 
 	srcPeer := peer.ID("src-peer")
@@ -60,7 +60,7 @@ func TestNodeRelayACL_AllowConnect(t *testing.T) {
 }
 
 func TestNodeRelayACL_AllowReserve(t *testing.T) {
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond}
 	acl := &nodeRelayACL{node: node}
 
 	peerID := peer.ID("some-peer")
@@ -80,7 +80,7 @@ func TestNodeRelayACL_AllowReserve(t *testing.T) {
 // admitted. The handshake only proves validity at that instant, so the ACL has
 // to re-check, otherwise one handshake buys relay rights forever.
 func TestExpiredAdmissionLosesRelayRights(t *testing.T) {
-	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond}
 	acl := &nodeRelayACL{node: node}
 
 	peerID := peer.ID("lapsed-peer")
@@ -109,7 +109,7 @@ func TestBannedPeerLosesRelayRights(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node := &SamNode{revokedPeers: revokedCache, BiscuitTimeout: 500 * time.Millisecond}
+	node := &AgentMeshNode{revokedPeers: revokedCache, BiscuitTimeout: 500 * time.Millisecond}
 	acl := &nodeRelayACL{node: node}
 
 	peerID, err := peer.Decode("12D3KooWAFv4iJst5G6MjwXhZ66K5zS1tP7A9vSg4vK8f1T7X8t9")

@@ -35,20 +35,20 @@ go.work.sum
 bin/
 dist/
 # State of `make testnet` (database, router key, tokens)
-.sam-one/
+.agentmesh-one/
 # Stray binaries from `go build ./cmd/<name>/` in the repo root
-/sam-node
-/sam-one
-/sam-box
-/sam-router
-/sam-console
+/agentmesh-node
+/agentmesh-one
+/agentmesh-box
+/agentmesh-router
+/agentmesh-console
 
 # Playwright console UI tests
 node_modules/
 tests/ui/playwright-report/
 tests/ui/test-results/
-/sam-control-plane
-/sam-bench
+/agentmesh-control-plane
+/agentmesh-bench
 /mcp-client
 /nano-init
 tests/e2e/logs/

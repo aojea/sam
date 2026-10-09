@@ -35,7 +35,7 @@ import (
 // addresses are known before it starts, because the test chooses the ports
 // and the node's key lives in its store, so nothing has to be read back out.
 
-// backgroundNode is a `sam-node run` started by a test.
+// backgroundNode is a `agentmesh-node run` started by a test.
 type backgroundNode struct {
 	cmd     *exec.Cmd
 	apiAddr string  // host:port the sidecar API listens on
@@ -78,7 +78,7 @@ func launchNode(t *testing.T, nodeBin string, env []string, logDir string, args 
 	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {
 		_ = logFile.Close()
-		t.Fatalf("start sam-node: %v", err)
+		t.Fatalf("start agentmesh-node: %v", err)
 	}
 	n := &backgroundNode{
 		cmd:     cmd,
@@ -116,9 +116,9 @@ func nodeDataDir(env []string, args []string) string {
 		}
 	}
 	if xdg != "" {
-		return filepath.Join(xdg, "sam-mesh")
+		return filepath.Join(xdg, "agentmesh")
 	}
-	return filepath.Join(home, ".config", "sam-mesh")
+	return filepath.Join(home, ".config", "agentmesh")
 }
 
 // ensureNodeKey creates the node's key in dataDir if there is none, exactly
@@ -153,7 +153,7 @@ func nodeToken(t *testing.T, env []string, args []string) string {
 		}
 	}
 	for _, e := range env {
-		if v, ok := strings.CutPrefix(e, "SAM_API_TOKEN="); ok {
+		if v, ok := strings.CutPrefix(e, "AGENTMESH_API_TOKEN="); ok {
 			return v
 		}
 	}
@@ -167,7 +167,7 @@ func startBackgroundNode(t *testing.T, nodeBin string, routerAddr string, homeDi
 	env := append(os.Environ(),
 		"HOME="+homeDir,
 		"XDG_CONFIG_HOME="+filepath.Join(homeDir, ".config"),
-		"SAM_API_TOKEN=test-token", // per-test overrides use --api-token-path, which wins
+		"AGENTMESH_API_TOKEN=test-token", // per-test overrides use --api-token-path, which wins
 	)
 	allArgs := append([]string{"run", "--control-plane", routerAddr, "--jwt", "test-jwt", "--allow-loopback"}, args...)
 	return launchNode(t, nodeBin, env, homeDir, allArgs...)
@@ -202,7 +202,7 @@ func (n *backgroundNode) waitForAPI(t *testing.T) string {
 		select {
 		case err := <-n.exited:
 			n.exited <- err
-			t.Fatalf("sam-node exited (%v) before serving its API.\n--- node.log ---\n%s", err, n.log())
+			t.Fatalf("agentmesh-node exited (%v) before serving its API.\n--- node.log ---\n%s", err, n.log())
 		default:
 		}
 		resp, err := client.Get("http://" + n.apiAddr + "/healthz")
@@ -214,7 +214,7 @@ func (n *backgroundNode) waitForAPI(t *testing.T) string {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("sam-node did not serve its API at %s in time.\n--- node.log ---\n%s", n.apiAddr, n.log())
+	t.Fatalf("agentmesh-node did not serve its API at %s in time.\n--- node.log ---\n%s", n.apiAddr, n.log())
 	return ""
 }
 
@@ -226,7 +226,7 @@ func (n *backgroundNode) exitsWithin(t *testing.T, d time.Duration) error {
 		n.exited <- err
 		return err
 	case <-time.After(d):
-		t.Fatalf("sam-node still running after %s.\n--- node.log ---\n%s", d, n.log())
+		t.Fatalf("agentmesh-node still running after %s.\n--- node.log ---\n%s", d, n.log())
 		return nil
 	}
 }
@@ -237,7 +237,7 @@ func (n *backgroundNode) staysUp(t *testing.T, d time.Duration) {
 	select {
 	case err := <-n.exited:
 		n.exited <- err
-		t.Fatalf("sam-node exited (%v) within %s.\n--- node.log ---\n%s", err, d, n.log())
+		t.Fatalf("agentmesh-node exited (%v) within %s.\n--- node.log ---\n%s", err, d, n.log())
 	case <-time.After(d):
 	}
 }
@@ -254,7 +254,7 @@ func (n *backgroundNode) waitForEnrollmentSidecar(t *testing.T) {
 		select {
 		case err := <-n.exited:
 			n.exited <- err
-			t.Fatalf("sam-node exited (%v) before serving its enrollment sidecar.\n--- node.log ---\n%s", err, n.log())
+			t.Fatalf("agentmesh-node exited (%v) before serving its enrollment sidecar.\n--- node.log ---\n%s", err, n.log())
 		default:
 		}
 		tools, err := listMCPTools(n.apiAddr)
@@ -269,7 +269,7 @@ func (n *backgroundNode) waitForEnrollmentSidecar(t *testing.T) {
 		last = err
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("sam-node at %s did not serve the enrollment sidecar in time: %v\n--- node.log ---\n%s", n.apiAddr, last, n.log())
+	t.Fatalf("agentmesh-node at %s did not serve the enrollment sidecar in time: %v\n--- node.log ---\n%s", n.apiAddr, last, n.log())
 }
 
 // listMCPTools opens a token-less MCP session against apiAddr and returns the

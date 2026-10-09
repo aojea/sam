@@ -218,7 +218,7 @@ func TestRefreshEnrollmentSendsPlatformJWT(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	n, err := NewSamNode(Options{
+	n, err := NewAgentMeshNode(Options{
 		PrivKey:            privNode,
 		Store:              nStore,
 		ControlPlanePubKey: cpPub,

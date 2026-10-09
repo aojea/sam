@@ -35,9 +35,9 @@ import (
 )
 
 func TestRouterFederationAndRelay(t *testing.T) {
-	cpBin := buildBinary(t, "./cmd/sam-control-plane")
-	routerBin := buildBinary(t, "./cmd/sam-router")
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	cpBin := buildBinary(t, "./cmd/agentmesh-control-plane")
+	routerBin := buildBinary(t, "./cmd/agentmesh-router")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	clientBin := buildBinary(t, "./cmd/mcp-client")
 
 	tmpDir := t.TempDir()
@@ -146,7 +146,7 @@ roles:
 	var stdoutRouterA, stderrRouterA safeBuffer
 	cmdRouterA.Stdout = &stdoutRouterA
 	cmdRouterA.Stderr = &stderrRouterA
-	cmdRouterA.Env = append(os.Environ(), "SAM_TEST_DNS_SERVER="+dnsServer.conn.LocalAddr().String())
+	cmdRouterA.Env = append(os.Environ(), "AGENTMESH_TEST_DNS_SERVER="+dnsServer.conn.LocalAddr().String())
 	if err := cmdRouterA.Start(); err != nil {
 		t.Fatalf("failed to start Router A: %v", err)
 	}
@@ -164,7 +164,7 @@ roles:
 	var stdoutRouterB, stderrRouterB safeBuffer
 	cmdRouterB.Stdout = &stdoutRouterB
 	cmdRouterB.Stderr = &stderrRouterB
-	cmdRouterB.Env = append(os.Environ(), "SAM_TEST_DNS_SERVER="+dnsServer.conn.LocalAddr().String())
+	cmdRouterB.Env = append(os.Environ(), "AGENTMESH_TEST_DNS_SERVER="+dnsServer.conn.LocalAddr().String())
 	if err := cmdRouterB.Start(); err != nil {
 		t.Fatalf("failed to start Router B: %v", err)
 	}
@@ -226,7 +226,7 @@ roles:
 			svcDecl{Type: "mcp", Name: "federated-tool", TargetURL: mcpServer.URL},
 			svcDecl{Type: "mcp", Name: "raw-pipe", TargetURL: rawServer.URL}),
 	)
-	nodeACmd.Env = append(os.Environ(), "SAM_TEST_DNS_SERVER="+dnsServer.conn.LocalAddr().String())
+	nodeACmd.Env = append(os.Environ(), "AGENTMESH_TEST_DNS_SERVER="+dnsServer.conn.LocalAddr().String())
 	var nodeStdoutA, nodeStderrA safeBuffer
 	nodeACmd.Stdout = io.MultiWriter(os.Stdout, &nodeStdoutA)
 	nodeACmd.Stderr = io.MultiWriter(os.Stderr, &nodeStderrA)
@@ -247,7 +247,7 @@ roles:
 		"--discovery-interval", "100ms",
 		"--allow-loopback=true",
 	)
-	nodeBCmd.Env = append(os.Environ(), "SAM_TEST_DNS_SERVER="+dnsServer.conn.LocalAddr().String())
+	nodeBCmd.Env = append(os.Environ(), "AGENTMESH_TEST_DNS_SERVER="+dnsServer.conn.LocalAddr().String())
 	var nodeStdoutB, nodeStderrB safeBuffer
 	nodeBCmd.Stdout = io.MultiWriter(os.Stdout, &nodeStdoutB)
 	nodeBCmd.Stderr = io.MultiWriter(os.Stderr, &nodeStderrB)

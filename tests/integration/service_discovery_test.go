@@ -29,7 +29,7 @@ import (
 )
 
 func TestServiceDiscovery(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	_, routerAddr := startMockRouter(t)
 
 	homeA := t.TempDir()
@@ -123,7 +123,7 @@ func TestServiceDiscovery(t *testing.T) {
 }
 
 func TestServiceDiscoveryStreaming(t *testing.T) {
-	nodeBin := buildBinary(t, "./cmd/sam-node")
+	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
 	_, routerAddr := startMockRouter(t)
 
 	homeA := t.TempDir()

@@ -167,9 +167,9 @@ func TestNativeSDKs(t *testing.T) {
 			cmd.Stderr = &stderr
 			cmd.Dir = root
 			cmd.Env = append(os.Environ(),
-				"SAM_CONTROL_PLANE_URL="+baseURL,
-				"SAM_BOOTSTRAP_TOKEN_PATH="+tokenPath,
-				"SAM_SDK_STATE_DIR="+stateDir,
+				"AGENTMESH_CONTROL_PLANE_URL="+baseURL,
+				"AGENTMESH_BOOTSTRAP_TOKEN_PATH="+tokenPath,
+				"AGENTMESH_SDK_STATE_DIR="+stateDir,
 			)
 			if err := cmd.Start(); err != nil {
 				t.Fatalf("failed to start %s runner: %v", runner.name, err)
@@ -197,7 +197,7 @@ func TestNativeSDKs(t *testing.T) {
 			}
 			verifySDKReport(t, ctx, store, cpPub, peerID, routerAddr, &report)
 
-			// The state directory holds the identity in the encoding sam-node
+			// The state directory holds the identity in the encoding agentmesh-node
 			// uses and nothing world-readable.
 			keyBytes, err := os.ReadFile(filepath.Join(stateDir, "identity.key"))
 			if err != nil {

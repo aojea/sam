@@ -91,7 +91,7 @@ func (r *boundedResponseRecorder) Write(p []byte) (int, error) {
 	return r.body.Write(p)
 }
 
-func buildSamAttributesStruct(destName string, ec egressCallerContext) map[string]*structpb.Struct {
+func buildMeshAttributesStruct(destName string, ec egressCallerContext) map[string]*structpb.Struct {
 	st, err := structpb.NewStruct(map[string]any{
 		"principal":   ec.principal,
 		"roles":       strings.Join(ec.roles, ","),
@@ -118,10 +118,10 @@ func writeImmediateResponse(w http.ResponseWriter, imm *extprocv3.ImmediateRespo
 	if details == "" {
 		details = "ext_proc_blocked"
 	}
-	w.Header().Set("Proxy-Status", fmt.Sprintf("sam-node; error=%s; details=%q", proxyStatusDenied, details))
+	w.Header().Set("Proxy-Status", fmt.Sprintf("agentmesh-node; error=%s; details=%q", proxyStatusDenied, details))
 	logger.Infow("Egress Inspection Verdict",
 		"destination", destName,
-		"sam_task", task,
+		"mesh_task", task,
 		"tier", "ext_proc",
 		"verdict", "block",
 		"status", status,
@@ -249,7 +249,7 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 				if !kind.ModelArmor.GetFailOpen() {
 					logger.Warnw("Egress Inspection Verdict",
 						"destination", s.info.Name,
-						"sam_task", callerCtx.task,
+						"mesh_task", callerCtx.task,
 						"tier", "model_armor",
 						"verdict", "error_fail_closed",
 						"error", err.Error(),
@@ -259,7 +259,7 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 				}
 				logger.Warnw("Egress Inspection Verdict",
 					"destination", s.info.Name,
-					"sam_task", callerCtx.task,
+					"mesh_task", callerCtx.task,
 					"tier", "model_armor",
 					"verdict", "error_fail_open",
 					"error", err.Error(),
@@ -267,12 +267,12 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 			} else if blocked {
 				logger.Infow("Egress Inspection Verdict",
 					"destination", s.info.Name,
-					"sam_task", callerCtx.task,
+					"mesh_task", callerCtx.task,
 					"tier", "model_armor",
 					"verdict", "block",
 					"phase", "request",
 				)
-				w.Header().Set("Proxy-Status", fmt.Sprintf("sam-node; error=%s; details=\"model_armor\"", proxyStatusDenied))
+				w.Header().Set("Proxy-Status", fmt.Sprintf("agentmesh-node; error=%s; details=\"model_armor\"", proxyStatusDenied))
 				http.Error(w, "Request blocked by Model Armor policy", http.StatusForbidden)
 				return
 			}
@@ -290,14 +290,14 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 			var imm *extprocv3.ImmediateResponse
 			var newBody []byte
 			if err == nil {
-				attrs := buildSamAttributesStruct(s.info.Name, callerCtx)
+				attrs := buildMeshAttributesStruct(s.info.Name, callerCtx)
 				session, imm, newBody, err = client.RunRequestPhase(r, ep, s.info.Name, reqBody, attrs)
 			}
 			if err != nil {
 				if !ep.GetFailureModeAllow() {
 					logger.Warnw("Egress Inspection Verdict",
 						"destination", s.info.Name,
-						"sam_task", callerCtx.task,
+						"mesh_task", callerCtx.task,
 						"tier", "ext_proc",
 						"verdict", "error_fail_closed",
 						"error", err.Error(),
@@ -307,7 +307,7 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 				}
 				logger.Warnw("Egress Inspection Verdict",
 					"destination", s.info.Name,
-					"sam_task", callerCtx.task,
+					"mesh_task", callerCtx.task,
 					"tier", "ext_proc",
 					"verdict", "error_fail_open",
 					"error", err.Error(),
@@ -356,7 +356,7 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 	if !needResponseBuffer {
 		logger.Infow("Egress Inspection Verdict",
 			"destination", s.info.Name,
-			"sam_task", callerCtx.task,
+			"mesh_task", callerCtx.task,
 			"tier", "inspection_chain",
 			"verdict", "allow",
 		)
@@ -441,12 +441,12 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 		} else if blocked {
 			logger.Infow("Egress Inspection Verdict",
 				"destination", s.info.Name,
-				"sam_task", callerCtx.task,
+				"mesh_task", callerCtx.task,
 				"tier", "model_armor",
 				"verdict", "block",
 				"phase", "response",
 			)
-			w.Header().Set("Proxy-Status", fmt.Sprintf("sam-node; error=%s; details=\"model_armor_response\"", proxyStatusDenied))
+			w.Header().Set("Proxy-Status", fmt.Sprintf("agentmesh-node; error=%s; details=\"model_armor_response\"", proxyStatusDenied))
 			http.Error(w, "Response blocked by Model Armor policy", http.StatusForbidden)
 			return
 		}
@@ -454,7 +454,7 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 
 	logger.Infow("Egress Inspection Verdict",
 		"destination", s.info.Name,
-		"sam_task", callerCtx.task,
+		"mesh_task", callerCtx.task,
 		"tier", "inspection_chain",
 		"verdict", "allow",
 	)
