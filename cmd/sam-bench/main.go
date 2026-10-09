@@ -150,7 +150,7 @@ func main() {
 	if err := runCmd.MarkFlagRequired("target"); err != nil {
 		panic(err)
 	}
-	rootCmd.AddCommand(runCmd, newReportCmd(), newSTSCmd())
+	rootCmd.AddCommand(runCmd, newReportCmd(), newSTSCmd(), newJoinCmd())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -194,6 +194,102 @@ func newSTSCmd() *cobra.Command {
 	flags.IntVar(&opts.Workloads, "workloads", 8, "Simulated active workloads on the node")
 	flags.IntVar(&opts.RequestsPerMinute, "requests-per-minute", 60, "Per-workload request rate for 5m SVID and 1h projected token cache simulation")
 	flags.StringVar(&out, "out", "", "File to write the JSON report to; default stdout")
+	return cmd
+}
+
+// joinObservation is one fleet's journey, with what the mesh's own processes
+// reported before and after it, in the same shape as an observation.
+type joinObservation struct {
+	Labels  map[string]string             `json:"labels,omitempty"`
+	Started time.Time                     `json:"started"`
+	Join    *bench.JoinReport             `json:"join"`
+	Before  map[string]map[string]float64 `json:"metrics_before,omitempty"`
+	After   map[string]map[string]float64 `json:"metrics_after,omitempty"`
+}
+
+func newJoinCmd() *cobra.Command {
+	var (
+		opts   bench.JoinOptions
+		marker string
+		scrape []string
+		labels []string
+		out    string
+	)
+	cmd := &cobra.Command{
+		Use:   "join",
+		Short: "Start a fleet of members and record what joining cost each of them",
+		Long: "Starts N sam-node processes from one bootstrap token and times each one from start\n" +
+			"to an authenticated router connection to its first call of a service through the\n" +
+			"mesh. With --hold the fleet then stays resident and every member's readiness is\n" +
+			"sampled, so a router rollout or a key rotation that happens meanwhile shows up as\n" +
+			"outage windows. The processes all share this host's source address.",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			tags, err := parseLabels(labels)
+			if err != nil {
+				return err
+			}
+			if opts.Dir == "" {
+				if opts.Dir, err = os.MkdirTemp("", "sam-join-"); err != nil {
+					return err
+				}
+			}
+			opts.Log = os.Stderr
+
+			obs := joinObservation{Labels: tags, Started: time.Now()}
+			// A hold can run for a day; the join numbers are written as soon
+			// as they exist and the marker tells a script the fleet is up.
+			opts.OnResident = func(r *bench.JoinReport) {
+				obs.Join = r
+				if out != "" {
+					if err := write(out, obs); err != nil {
+						fmt.Fprintf(os.Stderr, "sam-bench: %v\n", err)
+					}
+				}
+				if marker != "" {
+					stamp := []byte(time.Now().UTC().Format(time.RFC3339) + "\n")
+					if err := os.WriteFile(marker, stamp, 0o600); err != nil {
+						fmt.Fprintf(os.Stderr, "sam-bench: %v\n", err)
+					}
+				}
+			}
+			obs.Before, err = scrapeAll(cmd.Context(), scrape)
+			if err != nil {
+				return err
+			}
+			obs.Join, err = bench.RunJoin(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			// The fleet is gone by now; a scrape that fails here would lose the
+			// report over a metrics endpoint, so it is reported and not fatal.
+			if obs.After, err = scrapeAll(context.Background(), scrape); err != nil {
+				fmt.Fprintf(os.Stderr, "sam-bench: metrics after the run: %v\n", err)
+			}
+			return write(out, obs)
+		},
+	}
+	flags := cmd.Flags()
+	flags.StringVar(&opts.NodeBin, "node-bin", "sam-node", "sam-node binary to start one process of per member")
+	flags.IntVar(&opts.Count, "count", 10, "Members to start")
+	flags.StringVar(&opts.Dir, "dir", "", "Empty directory for member state, sockets and logs; default a new temporary one")
+	flags.StringVar(&opts.ControlPlane, "control-plane", "", "Control plane URL every member enrolls with (required)")
+	flags.StringVar(&opts.BootstrapTokenPath, "bootstrap-token-path", "", "File holding the bootstrap token the members enroll with; it needs --count usages left")
+	flags.StringVar(&opts.Service, "service", "everything", "MCP service each member finds and calls once ready; empty ends the journey at readiness")
+	flags.Float64Var(&opts.Ramp, "ramp", 0, "Members started per second; 0 starts them all at once")
+	flags.DurationVar(&opts.ReadyTimeout, "ready-timeout", 180*time.Second, "Bound on one member's enrollment and router authentication")
+	flags.DurationVar(&opts.CallTimeout, "call-timeout", 120*time.Second, "Bound on one member's discovery and first call, from readiness")
+	flags.DurationVar(&opts.Hold, "hold", 0, "Keep the fleet resident this long after the journeys end, sampling readiness; 0 tears it down at once")
+	flags.DurationVar(&opts.SampleInterval, "sample-interval", 10*time.Second, "How often each resident member's readiness is read during --hold")
+	flags.IntVar(&opts.MetricsBasePort, "metrics-base-port", 20000, "Member i serves /readyz on 127.0.0.1:(port+i)")
+	flags.StringArrayVar(&opts.NodeArgs, "node-arg", nil, "Extra argument for every sam-node, repeatable (e.g. --node-arg=--insecure-control-plane)")
+	flags.StringVar(&marker, "resident-marker", "", "File to create once the fleet is resident and the hold has begun")
+	flags.StringArrayVar(&scrape, "scrape", nil, "Metrics endpoint to record before and after the run, repeatable")
+	flags.StringArrayVar(&labels, "label", nil, "Condition to record with the observation as name=value, repeatable")
+	flags.StringVar(&out, "out", "", "File to write the observation to; default stdout")
+	if err := cmd.MarkFlagRequired("control-plane"); err != nil {
+		panic(err)
+	}
 	return cmd
 }
 
@@ -246,7 +342,7 @@ func parseLabels(raw []string) (map[string]string, error) {
 	return labels, nil
 }
 
-func write(path string, obs observation) error {
+func write(path string, obs any) error {
 	encoded, err := json.MarshalIndent(obs, "", "  ")
 	if err != nil {
 		return err
