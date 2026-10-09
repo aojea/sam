@@ -9,8 +9,6 @@ and an identity every other node can verify. Nodes connect directly when they
 can and through relays when they cannot, so the network works across laptops,
 containers, clusters and phones behind NAT.
 
-> We have updated the name to Agent Mesh to better align with the goals of the
-> project in the ecosystem.
 
 Two properties hold everywhere:
 
