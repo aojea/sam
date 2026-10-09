@@ -413,7 +413,10 @@ jobs:
             echo "::warning::PodMonitoring CRD not found; managed collection is off on this cluster, metrics will not be scraped"
           fi
           
-          kubectl rollout status deployment/sam-control-plane-${ENV_NAME} -n ${NAMESPACE} --timeout=120s || {
+          # The pod is Ready only once the load balancer's NEG controller has
+          # seen it healthy, which has taken anywhere from half a minute to
+          # several minutes; two replicas roll one after the other.
+          kubectl rollout status deployment/sam-control-plane-${ENV_NAME} -n ${NAMESPACE} --timeout=600s || {
             echo "Control Plane Deployment failed!"
             print_rollout_diagnostics "${NAMESPACE}" "deployment/sam-control-plane-${ENV_NAME}" "app=sam-control-plane-${ENV_NAME}"
             exit 1
@@ -465,7 +468,9 @@ jobs:
             exit 1
           }
 
-          kubectl rollout status statefulset/sam-router-${ENV_NAME} -n ${NAMESPACE} --timeout=120s || {
+          # Three routers, each held 90s after it is ready (minReadySeconds)
+          # so members re-attach before the next one goes.
+          kubectl rollout status statefulset/sam-router-${ENV_NAME} -n ${NAMESPACE} --timeout=600s || {
             echo "Router Deployment failed!"
             print_rollout_diagnostics "${NAMESPACE}" "statefulset/sam-router-${ENV_NAME}" "app=sam-router-${ENV_NAME}"
 
