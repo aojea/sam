@@ -31,7 +31,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	go.etcd.io/bbolt v1.5.0
 	go.uber.org/zap v1.28.0
-	golang.org/x/net v0.59.0
+	golang.org/x/net v0.60.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sys v0.48.0
 	golang.org/x/time v0.16.0
