@@ -40,8 +40,8 @@ from .host import dial, open_stream
 
 logger = logging.getLogger("agent_mesh")
 
-# go-libp2p-kad-dht with dht.ProtocolPrefix("/sam").
-DHT_PROTOCOL = TProtocol("/sam/kad/1.0.0")
+# go-libp2p-kad-dht with dht.ProtocolPrefix("/mesh").
+DHT_PROTOCOL = TProtocol("/mesh/kad/1.0.0")
 
 ServiceType = Literal["mcp", "inference", "a2a", "egress"]
 
@@ -61,9 +61,9 @@ class DiscoveredProvider:
 
 
 def service_key(service_type: ServiceType, name: str | None = None) -> bytes:
-    """The DHT key of a service: the sha256 multihash of "sam:service:<type>[:<name>]".
+    """The DHT key of a service: the sha256 multihash of "mesh:service:<type>[:<name>]".
     go-libp2p-kad-dht keys provider records by the multihash, not the CID."""
-    parts = ["sam:service", service_type] + ([name] if name else [])
+    parts = ["mesh:service", service_type] + ([name] if name else [])
     digest = hashlib.sha256(":".join(parts).encode()).digest()
     return b"\x12\x20" + digest
 

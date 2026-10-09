@@ -39,7 +39,7 @@ helm upgrade --install sam-mesh ./charts/sam-mesh \
   --set controlPlane.workloadIssuer="$ISSUER" \
   --set controlPlane.insecureSkipTlsVerify=true \
   --set bootstrap.nodeMembers='{user:system:serviceaccount:sam-nodes:calc-mcp-sam-node}' \
-  --set bootstrap.nodeServices='{mcp://calculator,system://sam.catalog}'
+  --set bootstrap.nodeServices='{mcp://calculator,system://mesh.catalog}'
 ```
 
 `controlPlane.workloadIssuer` marks the cluster issuer as a workload identity
@@ -53,7 +53,7 @@ does not need the flag.
 
 The three `bootstrap.*` values write the initial policy:
 
-- `nodeMembers`: the identities that may enroll as `sam:role:node`. If
+- `nodeMembers`: the identities that may enroll as `mesh:role:node`. If
   empty, no node can join until you post a policy.
 - `nodeServices`: the services that nodes may call. If empty, nodes can call
   nothing.
@@ -200,7 +200,7 @@ keep, review these settings:
   you control. If you hand out bootstrap tokens, consider setting it to
   `false` and approving enrollments in the console.
 - **Policy.** Grant nodes only the services they need. Do not bind
-  `sam:system:authenticated` to a role with wide grants: on a public
+  `mesh:system:authenticated` to a role with wide grants: on a public
   identity provider it means everyone. The testnets bind it on purpose. A
   private mesh should bind groups or service accounts.
 - **Signing keys.** `--key-grace-period` defaults to one hour. A node that is

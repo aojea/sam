@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// The /sam/auth/1.0.0 handshake, both sides. One varint-length-prefixed
+// The /mesh/auth/1.0.0 handshake, both sides. One varint-length-prefixed
 // AuthFrame, one AuthResponse back; go-msgio framing on the Go side is
 // the same unsigned varint prefix lpStream uses.
 
@@ -21,10 +21,10 @@ import type { Connection, Stream, StreamHandler } from "@libp2p/interface";
 import { lpStream } from "@libp2p/utils";
 import { BiscuitVerificationError, verifyPeerBiscuit, type VerifiedBiscuit } from "./biscuit.ts";
 import { decodeAuthResponse } from "./credential.ts";
-import { AuthFrameSchema, AuthResponseSchema } from "./gen/sam_pb.ts";
+import { AuthFrameSchema, AuthResponseSchema } from "./gen/agentmesh_pb.ts";
 
-export const AUTH_PROTOCOL = "/sam/auth/1.0.0";
-export const MCP_PROTOCOL = "/sam/mcp/1.0.0";
+export const AUTH_PROTOCOL = "/mesh/auth/1.0.0";
+export const MCP_PROTOCOL = "/mesh/mcp/1.0.0";
 
 /** The first frame on a stream is capped, as msgio.NewVarintReaderSize(s, 64 KiB). */
 export const MAX_AUTH_FRAME_BYTES = 64 * 1024;
@@ -43,7 +43,7 @@ function framed(stream: Stream) {
 }
 
 /**
- * Client side: presents frame on a new /sam/auth/1.0.0 stream and returns
+ * Client side: presents frame on a new /mesh/auth/1.0.0 stream and returns
  * the peer's verified credential. trustedKeys are the control plane keys.
  */
 export async function authenticateWithPeer(conn: Connection, frame: Uint8Array, trustedKeys: Uint8Array[]): Promise<VerifiedBiscuit> {
@@ -81,7 +81,7 @@ export interface AuthServerOptions {
 export const AUTH_HANDLER_OPTIONS = { runOnLimitedConnection: true };
 
 /**
- * Server side of /sam/auth/1.0.0, mirroring sam-node's HandleAuthHandshake:
+ * Server side of /mesh/auth/1.0.0, mirroring sam-node's HandleAuthHandshake:
  * verify the caller's biscuit against the control plane keys and its
  * connection peer ID, then answer with our own. A failed verification gets
  * no answer, only a closed stream, as on the Go side.

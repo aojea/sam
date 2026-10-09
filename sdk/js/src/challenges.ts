@@ -22,7 +22,7 @@ function challenge(domain: string, peerId: string, ts: number): Uint8Array {
   if (!Number.isSafeInteger(ts) || ts <= 0) {
     throw new Error(`challenge timestamp must be a positive integer, got ${ts}`);
   }
-  return encoder.encode(`sam:${domain}:${peerId}:${ts}`);
+  return encoder.encode(`mesh:${domain}:${peerId}:${ts}`);
 }
 
 /** Signed at POST /enroll (bootstrap token enrollment). */

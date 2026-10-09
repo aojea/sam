@@ -11,7 +11,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE"/>
-    <!-- Scanning the sam://enroll QR code shown by the control plane. -->
+    <!-- Scanning the mesh://enroll QR code shown by the control plane. -->
     <uses-permission android:name="android.permission.CAMERA"/>
     <application
         android:label="SAM Connect"
@@ -39,7 +39,7 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
-            <!-- sam://enroll links are handled by MainActivity's enroll_link
+            <!-- mesh://enroll links are handled by MainActivity's enroll_link
                  channel; without this the engine also pushes them as a
                  Navigator route, which MaterialApp has no page for. -->
             <meta-data
@@ -49,13 +49,13 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-            <!-- sam://enroll?server=...&token=... links: a stock camera app
+            <!-- mesh://enroll?server=...&token=... links: a stock camera app
                  scanning the enrollment QR hands the payload to this app. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="sam" android:host="enroll"/>
+                <data android:scheme="mesh" android:host="enroll"/>
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

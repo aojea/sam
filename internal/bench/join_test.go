@@ -84,7 +84,7 @@ func fakeNode(args []string) int {
 		w.WriteHeader(http.StatusOK)
 	})
 	sidecar := http.NewServeMux()
-	sidecar.HandleFunc("/sam/service/discover", func(w http.ResponseWriter, _ *http.Request) {
+	sidecar.HandleFunc("/mesh/service/discover", func(w http.ResponseWriter, _ *http.Request) {
 		var out []map[string]string
 		for _, p := range providers {
 			if p != "" {
@@ -93,8 +93,8 @@ func fakeNode(args []string) int {
 		}
 		_ = json.NewEncoder(w).Encode(out)
 	})
-	sidecar.HandleFunc("/sam/", func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/sam/dead/") {
+	sidecar.HandleFunc("/mesh/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/mesh/dead/") {
 			http.Error(w, "no route to peer", http.StatusBadGateway)
 			return
 		}

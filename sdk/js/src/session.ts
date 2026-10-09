@@ -24,7 +24,7 @@ import { ROLE_NODE } from "./controlplane.ts";
 import { encodeAuthFrame } from "./credential.ts";
 import { canonicalPeerId } from "./identity.ts";
 import { isServiceType, parseServiceTarget, serviceCID } from "./discovery.ts";
-import type { TaskAuthorizationRuleSchema } from "./gen/sam_pb.ts";
+import type { TaskAuthorizationRuleSchema } from "./gen/agentmesh_pb.ts";
 import { createMeshHost, listenThroughRelay, type MeshHost, type MeshHostOptions, type RelayListener } from "./host.ts";
 import { openMCPSession, requireEgressLabels, type MCPSession, type MCPSessionOptions } from "./mcp.ts";
 import type { AgentMesh, ControlPlaneSync } from "./mesh.ts";
@@ -260,7 +260,7 @@ export class MeshSession {
 
   /**
    * The URL a fetch bound to this session (fetch()) takes for a service on a
-   * peer: http://mesh/sam/<peer-id>/<type>/<name>/<path>, the shape of
+   * peer: http://mesh/mesh/<peer-id>/<type>/<name>/<path>, the shape of
    * sam-node's egress proxy and of an agent card it rewrote.
    */
   static meshURL(peerId: string, targetService: string, path = ""): string {
@@ -735,7 +735,7 @@ export class MeshSession {
 
   /**
    * Calls an inference or A2A service on a provider over /libp2p-http, the
-   * way sam-node's egress proxy does for /sam/<peer>/<type>/<name>/<path>.
+   * way sam-node's egress proxy does for /mesh/<peer>/<type>/<name>/<path>.
    */
   async request(peer: Peer, targetService: string, path: string, options: HTTPRequestOptions = {}): Promise<HTTPResponse> {
     const conn = await this.#egressConnection(peer, options.signal);
@@ -763,7 +763,7 @@ export class MeshSession {
 
   /**
    * A `fetch` bound to the mesh, for clients built on fetch such as the A2A
-   * SDK's (`fetchImpl`): a request to http://mesh/sam/<peer-id>/<type>/<name>/<path>
+   * SDK's (`fetchImpl`): a request to http://mesh/mesh/<peer-id>/<type>/<name>/<path>
    * is carried to that peer over /libp2p-http with this member's credential.
    * Response bodies stream, so message/stream works. See MeshSession.meshURL.
    */

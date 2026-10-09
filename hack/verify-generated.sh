@@ -33,14 +33,15 @@ trap cleanup EXIT
 
 # Move to worktree root and sync current proto + generator script
 cd "${TMP_DIR}"
-cp "${REPO_ROOT}/api/sam.proto" "${TMP_DIR}/api/sam.proto"
+rm -f "${TMP_DIR}/api/agentmesh.proto" "${TMP_DIR}/api/agentmesh.pb.go"
+cp "${REPO_ROOT}/api/agentmesh.proto" "${TMP_DIR}/api/agentmesh.proto"
 cp "${REPO_ROOT}/hack/gen-proto.sh" "${TMP_DIR}/hack/gen-proto.sh"
 
 echo "Running code generation..."
 ./hack/gen-proto.sh
 
 echo "Checking for differences..."
-if ! diff -u -I $'^// \tprotoc        v' "${REPO_ROOT}/api/sam.pb.go" "${TMP_DIR}/api/sam.pb.go"; then
+if ! diff -u -I $'^// \tprotoc        v' "${REPO_ROOT}/api/agentmesh.pb.go" "${TMP_DIR}/api/agentmesh.pb.go"; then
   echo "ERROR: Generated code is not up to date."
   echo "Please run ./hack/gen-proto.sh locally and commit the changes."
   exit 1

@@ -22,7 +22,7 @@ see the [SkyPilot guide](../skypilot/).)*
 ```bash
 PROJECT=my-gcp-project
 REGION=us-central1
-JOIN_TOKEN="sam_tok_$(openssl rand -hex 16)"
+JOIN_TOKEN="mesh_tok_$(openssl rand -hex 16)"
 ADMIN_TOKEN="sam_adm_$(openssl rand -hex 16)"
 
 gcloud run deploy sam-one \
@@ -123,7 +123,7 @@ discovery, Biscuit authorization, and WebSocket relay routing across two nodes:
 
 ```bash
 export SAM_ADMIN_TOKEN="$ADMIN_TOKEN"
-sam-one token create --server "$URL" --role sam:role:node --max-usages 1
+sam-one token create --server "$URL" --role mesh:role:node --max-usages 1
 sam-one token qr     --server "$URL"
 sam-one token list   --server "$URL"
 sam-one token revoke <token-id> --server "$URL"

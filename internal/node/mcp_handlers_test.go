@@ -501,9 +501,9 @@ func TestFetchRemoteToolCatalogue_AuthRejectedHidden(t *testing.T) {
 
 	// Both enrolled under one root; A's identity is then narrowed to a
 	// biscuit that DOES NOT allow "summarizer", only "some_other_service"
-	// and "system://sam.catalog".
+	// and "system://mesh.catalog".
 	_, rootPrivEd := enrollUnderRoot(t, nodeA, nodeC)
-	if err := buildAndSaveCustomBiscuit(nodeA, rootPrivEd, []string{"mcp://some_other_service", "system://sam.catalog"}); err != nil {
+	if err := buildAndSaveCustomBiscuit(nodeA, rootPrivEd, []string{"mcp://some_other_service", "system://mesh.catalog"}); err != nil {
 		t.Fatalf("buildAndSaveCustomBiscuit: %v", err)
 	}
 

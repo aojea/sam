@@ -15,15 +15,15 @@ sam-router [flags]
 
 ## Enrollment
 
-A router enrolls like a node, requesting `sam:role:router`, with one of:
+A router enrolls like a node, requesting `mesh:role:router`, with one of:
 
 | Flag | Meaning |
 |---|---|
 | `--jwt-path` | File containing an OIDC token (a projected service account token, for example). |
-| `--bootstrap-token-path` | File containing a bootstrap token minted with `"role": "sam:role:router"`. |
+| `--bootstrap-token-path` | File containing a bootstrap token minted with `"role": "mesh:role:router"`. |
 | `--oidc-token`, `--bootstrap-token` | The same tokens as values. Visible in process listings. The file forms are preferred. |
 
-The mesh policy must bind the router's identity to `sam:role:router`. The
+The mesh policy must bind the router's identity to `mesh:role:router`. The
 `sam-mesh` Helm chart handles this: its bootstrap job binds the router's
 service account and mints a bootstrap token with `max_usages` equal to the
 replica count.
@@ -54,7 +54,7 @@ replica count.
 ## What it does at run time
 
 1. Fetches `/keys` and enrolls. The credential carries
-   `role("sam:role:router")` and the relay right.
+   `role("mesh:role:router")` and the relay right.
 2. Starts the libp2p host, the DHT in server mode, the relay service and
    GossipSub.
 3. Registers a lease at `POST /routers/lease` with its announced addresses

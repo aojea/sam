@@ -50,9 +50,9 @@ import (
 var logger = golog.Logger("sam-one")
 
 const (
-	joinTokenPrefix   = "sam_tok_"
+	joinTokenPrefix   = "mesh_tok_"
 	adminTokenPrefix  = "sam_adm_"
-	deviceTokenPrefix = "sam_dev_"
+	deviceTokenPrefix = "mesh_dev_"
 
 	joinTokenFile  = "join-token"
 	adminTokenFile = "admin-token"

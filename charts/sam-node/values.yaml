@@ -13,7 +13,7 @@ controlPlaneUrl: ""
 
 # Audience of the projected ServiceAccount token; must be one of the control
 # plane's allowedAudiences.
-audience: sam-mesh-audience
+audience: agentmesh-audience
 
 # Bearer token protecting the node's local REST API. Leave empty to generate a
 # random one on first install (kept stable across upgrades) in the Secret

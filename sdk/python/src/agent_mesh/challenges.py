@@ -20,7 +20,7 @@ verifies nowhere else. Mirrors api/network.go; ts is unix milliseconds."""
 def _challenge(domain: str, peer_id: str, ts: int) -> bytes:
     if not isinstance(ts, int) or ts <= 0:
         raise ValueError(f"challenge timestamp must be a positive integer, got {ts!r}")
-    return f"sam:{domain}:{peer_id}:{ts}".encode()
+    return f"mesh:{domain}:{peer_id}:{ts}".encode()
 
 
 def enroll_challenge(peer_id: str, ts: int) -> bytes:

@@ -43,7 +43,7 @@ gossip-fed; retry for a few seconds after startup if the list comes back empty.
 ## 5. See the card rewrite
 
 ```sh
-curl -s -H 'X-Sam-Authentication: Bearer devtoken' \
+curl -s -H 'X-Mesh-Authentication: Bearer devtoken' \
   "http://127.0.0.1:9099/sam/$PEER/a2a/chat/.well-known/agent-card.json" | jq
 ```
 

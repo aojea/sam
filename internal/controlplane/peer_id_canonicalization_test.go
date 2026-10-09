@@ -291,7 +291,7 @@ func TestRevokeBansTheIdentityNotTheSpelling(t *testing.T) {
 				"iss":   issuer,
 				"sub":   user.ID,
 				"email": user.Email,
-				"aud":   "sam-mesh-audience",
+				"aud":   "agentmesh-audience",
 			})
 			if status := tc.revoke(t, baseURL, alias, token, "super-secret-admin-token", client); status != http.StatusOK {
 				t.Fatalf("revoking through an alias: got %d, want 200", status)

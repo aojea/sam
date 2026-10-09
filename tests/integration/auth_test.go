@@ -92,15 +92,15 @@ func TestNodeAuthEnforcementIntegration(t *testing.T) {
 		{"healthz is public", "GET", "/healthz", http.StatusOK, false},
 		{"readyz is public", "GET", "/readyz", http.StatusOK, false},
 		// Services are declared in configuration only: the former runtime
-		// registration endpoints are gone, so /sam/service/register is just
+		// registration endpoints are gone, so /mesh/service/register is just
 		// another egress-proxy path behind auth like any /sam/ path.
-		{"discover is protected", "GET", "/sam/service/discover?type=mcp&name=test", http.StatusUnauthorized, false},
-		{"egress proxy is protected", "GET", "/sam/", http.StatusUnauthorized, false},
-		{"register path is protected like any egress path", "POST", "/sam/service/register", http.StatusUnauthorized, false},
+		{"discover is protected", "GET", "/mesh/service/discover?type=mcp&name=test", http.StatusUnauthorized, false},
+		{"egress proxy is protected", "GET", "/mesh/", http.StatusUnauthorized, false},
+		{"register path is protected like any egress path", "POST", "/mesh/service/register", http.StatusUnauthorized, false},
 		{"mcp root is protected", "GET", "/mcp", http.StatusUnauthorized, false},
 
-		// /sam/service/discover expects node to be connected.
-		{"discover with token", "GET", "/sam/service/discover?type=mcp&name=test", http.StatusOK, true},
+		// /mesh/service/discover expects node to be connected.
+		{"discover with token", "GET", "/mesh/service/discover?type=mcp&name=test", http.StatusOK, true},
 		// The sessionless MCP server has no standalone stream: GET is 405.
 		{"mcp root with token", "GET", "/mcp", http.StatusMethodNotAllowed, true},
 	}
@@ -112,7 +112,7 @@ func TestNodeAuthEnforcementIntegration(t *testing.T) {
 				t.Fatalf("Failed to create request: %v", err)
 			}
 			if tt.needsToken {
-				req.Header.Set(api.HeaderSamAuthentication, "Bearer "+apiToken)
+				req.Header.Set(api.HeaderMeshAuthentication, "Bearer "+apiToken)
 			}
 
 			resp, err := client.Do(req)

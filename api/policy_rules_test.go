@@ -51,7 +51,7 @@ func TestBuildPolicyRules(t *testing.T) {
 	bindings := []*PolicyBinding{
 		{
 			Role:    "test-role",
-			Members: []string{"sam:system:authenticated", "user:alice", "role:admin", "agent:spoofed", "node:" + nodeCID, "node:not-a-peer-id"},
+			Members: []string{"mesh:system:authenticated", "user:alice", "role:admin", "agent:spoofed", "node:" + nodeCID, "node:not-a-peer-id"},
 		},
 	}
 

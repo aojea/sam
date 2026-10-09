@@ -106,7 +106,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
   final _jwtController = TextEditingController();
   // Saved by the FFI at enrollment so Re-enroll can skip the browser.
   String _refreshToken = '';
-  // Bootstrap token typed or pasted by hand; a pasted sam://enroll link is
+  // Bootstrap token typed or pasted by hand; a pasted mesh://enroll link is
   // accepted here too and fills the URL field.
   final _joinTokenController = TextEditingController();
   bool _manualEntry = false;
@@ -116,7 +116,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
   // on unenroll.
   static const _joinedWithTokenFile = 'joined-with-token';
   bool _joinedWithToken = false;
-  // sam://enroll links delivered by MainActivity (stock camera app, browser).
+  // mesh://enroll links delivered by MainActivity (stock camera app, browser).
   static const _enrollLinkChannel = MethodChannel('dev.sammesh.connect/enroll_link');
   // Bearer token for the sidecar API on 127.0.0.1:5005. Android loopback is
   // shared by every installed app, so a fixed value would let any of them
@@ -814,7 +814,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
     if (!mounted) return;
     final link = parseEnrollLink(raw);
     if (link == null) {
-      setState(() => _status = 'Ignored link: not a sam://enroll code');
+      setState(() => _status = 'Ignored link: not a mesh://enroll code');
       return;
     }
     if (_isEnrolled == true) {
@@ -867,11 +867,11 @@ class _NodeControlPageState extends State<NodeControlPage> {
   }
 
   // Manual entry: the token field takes either a bare token (with the URL
-  // field naming the control plane) or a whole sam://enroll link.
+  // field naming the control plane) or a whole mesh://enroll link.
   Future<void> _joinWithToken() async {
     final typed = _joinTokenController.text.trim();
     if (typed.isEmpty) {
-      setState(() => _status = 'Enter an enrollment token or a sam://enroll link');
+      setState(() => _status = 'Enter an enrollment token or a mesh://enroll link');
       return;
     }
     final link = parseEnrollLink(typed);
@@ -1578,7 +1578,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Opening a sam://enroll link from another app works too.',
+            'Opening a mesh://enroll link from another app works too.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
@@ -1611,7 +1611,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
               enabled: !busy,
               inputFormatters: [FilteringTextInputFormatter.deny(RegExp(r'\s'))],
               onChanged: (text) {
-                // A pasted sam://enroll link names the control plane itself.
+                // A pasted mesh://enroll link names the control plane itself.
                 final link = parseEnrollLink(text);
                 if (link != null && _controlPlaneController.text != link.server) {
                   setState(() => _controlPlaneController.text = link.server);
@@ -1620,7 +1620,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
               decoration: const InputDecoration(
                 labelText: 'Enrollment token',
                 border: OutlineInputBorder(),
-                hintText: 'sam_dev_… or a sam://enroll link',
+                hintText: 'mesh_dev_… or a mesh://enroll link',
               ),
             ),
             const SizedBox(height: 12),

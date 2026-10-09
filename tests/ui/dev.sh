@@ -51,12 +51,12 @@ echo "Seeding mesh policy..."
 api POST /policies -H "Content-Type: application/json" -d '{
   "roles": [
     {"name": "sam-admin", "allowed_services": ["*"], "allowed_targets": ["*"]},
-    {"name": "sam:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]},
-    {"name": "sam:role:node", "allowed_services": ["mcp://*", "system://sam.catalog"], "allowed_targets": ["*"]}
+    {"name": "mesh:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]},
+    {"name": "mesh:role:node", "allowed_services": ["mcp://*", "system://mesh.catalog"], "allowed_targets": ["*"]}
   ],
   "bindings": [
-    {"role": "sam:role:router", "members": ["group:routers"]},
-    {"role": "sam:role:node", "members": ["group:users"]},
+    {"role": "mesh:role:router", "members": ["group:routers"]},
+    {"role": "mesh:role:node", "members": ["group:users"]},
     {"role": "sam-admin", "members": ["user:root-admin"]}
   ]
 }' >/dev/null
@@ -71,7 +71,7 @@ mint_token() {
 }
 
 echo "Enrolling a router..."
-ROUTER_TOKEN=$(mint_token "sam:role:router" "ui-dev router")
+ROUTER_TOKEN=$(mint_token "mesh:role:router" "ui-dev router")
 "${REPO_ROOT}/bin/sam-router" \
   --control-plane "${STACK_CP_URL}" \
   --listen "/ip4/127.0.0.1/tcp/5101" \
@@ -82,7 +82,7 @@ ROUTER_TOKEN=$(mint_token "sam:role:router" "ui-dev router")
 PIDS+=($!)
 
 echo "Enrolling a node..."
-NODE_TOKEN=$(mint_token "sam:role:node" "ui-dev node")
+NODE_TOKEN=$(mint_token "mesh:role:node" "ui-dev node")
 NODE_DIR="${WORK_DIR}/node"
 mkdir -p "${NODE_DIR}"
 cat >"${NODE_DIR}/sam-node.yaml" <<'EOF'
@@ -97,8 +97,8 @@ EOF
   >"${WORK_DIR}/node-join.log" 2>&1 || echo "  node join failed, see ${WORK_DIR}/node-join.log" >&2
 
 # A couple left over so the Bootstrap Tokens table is not empty.
-mint_token "sam:role:node" "spare node token" >/dev/null
-mint_token "sam:role:router" "spare router token" >/dev/null
+mint_token "mesh:role:node" "spare node token" >/dev/null
+mint_token "mesh:role:router" "spare router token" >/dev/null
 
 cat <<EOF
 

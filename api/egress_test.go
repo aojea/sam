@@ -114,13 +114,13 @@ func TestValidateEgressDestination(t *testing.T) {
 
 func TestEgressServedBy(t *testing.T) {
 	d := &EgressDestination{Name: "api.github.com", ServedBy: []string{"pep", "site=eu"}}
-	if !EgressServedBy(d, []string{"sam:role:node", "pep"}, nil) {
+	if !EgressServedBy(d, []string{"mesh:role:node", "pep"}, nil) {
 		t.Error("role match missed")
 	}
-	if !EgressServedBy(d, []string{"sam:role:node"}, map[string]string{"site": "eu"}) {
+	if !EgressServedBy(d, []string{"mesh:role:node"}, map[string]string{"site": "eu"}) {
 		t.Error("label match missed")
 	}
-	if EgressServedBy(d, []string{"sam:role:node"}, map[string]string{"site": "us"}) {
+	if EgressServedBy(d, []string{"mesh:role:node"}, map[string]string{"site": "us"}) {
 		t.Error("matched a node it does not select")
 	}
 	if EgressTargetURL(d) != "https://api.github.com" {

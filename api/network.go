@@ -32,27 +32,27 @@ import (
 
 const (
 	// EnrollProtocolID is the libp2p protocol identifier for node enrollment.
-	EnrollProtocolID protocol.ID = "/sam/enroll/1.0.0"
+	EnrollProtocolID protocol.ID = "/mesh/enroll/1.0.0"
 
 	// MCPProtocolID is the libp2p protocol identifier for Model Context Protocol streams.
-	MCPProtocolID protocol.ID = "/sam/mcp/1.0.0"
+	MCPProtocolID protocol.ID = "/mesh/mcp/1.0.0"
 
 	// AuthProtocolID is the libp2p protocol identifier for the zero-trust auth handshake.
-	AuthProtocolID protocol.ID = "/sam/auth/1.0.0"
+	AuthProtocolID protocol.ID = "/mesh/auth/1.0.0"
 
 	// GossipEvents is the GossipSub topic used to broadcast mesh event updates (e.g., node bans).
-	GossipEvents = "/sam/mesh/events/v1"
+	GossipEvents = "/mesh/events/v1"
 
 	// GossipControlPlaneSync is the GossipSub topic used by the control plane to sync cluster state.
-	GossipControlPlaneSync = "/sam/control-plane/sync/v1"
+	GossipControlPlaneSync = "/mesh/control-plane/sync/v1"
 
 	// DiscoveryTopicPrefix is the GossipSub topic namespace for interest-scoped
 	// service announcements (ServiceAnnounce messages). Full topics are built
 	// with DiscoveryTopic; the version segment allows wire evolution.
-	DiscoveryTopicPrefix = "/sam/discovery/v1"
+	DiscoveryTopicPrefix = "/mesh/discovery/v1"
 
 	// DefaultAudience is the default audience string used in OIDC token validation.
-	DefaultAudience = "sam-mesh-audience"
+	DefaultAudience = "agentmesh-audience"
 )
 
 // ============================================================================
@@ -82,7 +82,7 @@ const (
 // fields. Binding the peer ID keeps a captured signature useless for any
 // other peer; the domain prefix keeps it useless at any other endpoint.
 func EnrollChallenge(peerID string, ts int64) []byte {
-	return []byte("sam:enroll:" + peerID + ":" + strconv.FormatInt(ts, 10))
+	return []byte("mesh:enroll:" + peerID + ":" + strconv.FormatInt(ts, 10))
 }
 
 // EnrollStatusChallenge is the payload a bootstrap enrollee signs to prove
@@ -91,7 +91,7 @@ func EnrollChallenge(peerID string, ts int64) []byte {
 // HeaderChallengeSignature header (unpadded base64url) alongside
 // HeaderChallengeTimestamp.
 func EnrollStatusChallenge(peerID string, ts int64) []byte {
-	return []byte("sam:enroll-status:" + peerID + ":" + strconv.FormatInt(ts, 10))
+	return []byte("mesh:enroll-status:" + peerID + ":" + strconv.FormatInt(ts, 10))
 }
 
 // RefreshChallenge is the payload an enrolled peer signs to prove possession
@@ -100,7 +100,7 @@ func EnrollStatusChallenge(peerID string, ts int64) []byte {
 // shape as the other enrollment challenges: peer- and endpoint-bound, so a
 // captured signature is useless anywhere else.
 func RefreshChallenge(peerID string, ts int64) []byte {
-	return []byte("sam:refresh:" + peerID + ":" + strconv.FormatInt(ts, 10))
+	return []byte("mesh:refresh:" + peerID + ":" + strconv.FormatInt(ts, 10))
 }
 
 // RegisterChallenge is the payload an OIDC enrollee signs to prove possession
@@ -108,7 +108,7 @@ func RefreshChallenge(peerID string, ts int64) []byte {
 // timestamp/challenge_signature fields. The JWT says who is asking; this says
 // they hold the key they are binding.
 func RegisterChallenge(peerID string, ts int64) []byte {
-	return []byte("sam:register:" + peerID + ":" + strconv.FormatInt(ts, 10))
+	return []byte("mesh:register:" + peerID + ":" + strconv.FormatInt(ts, 10))
 }
 
 // RouterLeaseChallenge is the payload a router signs with its enrolled key at
@@ -116,49 +116,49 @@ func RegisterChallenge(peerID string, ts int64) []byte {
 // timestamp/challenge_signature fields. The router's biscuit is not proof on
 // its own: routers send it to every peer they authenticate.
 func RouterLeaseChallenge(peerID string, ts int64) []byte {
-	return []byte("sam:routers-lease:" + peerID + ":" + strconv.FormatInt(ts, 10))
+	return []byte("mesh:routers-lease:" + peerID + ":" + strconv.FormatInt(ts, 10))
 }
 
 // TokenExchangeChallenge is the payload an enrolled sam-node signs with its
 // identity key at POST /token/exchange to prove possession of the channel key
 // that will carry the minted Delegated Session Biscuit.
 func TokenExchangeChallenge(peerID string, ts int64) []byte {
-	return []byte("sam:token-exchange:" + peerID + ":" + strconv.FormatInt(ts, 10))
+	return []byte("mesh:token-exchange:" + peerID + ":" + strconv.FormatInt(ts, 10))
 }
 
 // STSTokenChallenge is the payload an enrolled egress sam-node signs with its
 // identity key at POST /sts/token when asking the control plane to mint an
 // ES256 border JWT for an outbound destination.
 func STSTokenChallenge(peerID string, ts int64) []byte {
-	return []byte("sam:sts-token:" + peerID + ":" + strconv.FormatInt(ts, 10))
+	return []byte("mesh:sts-token:" + peerID + ":" + strconv.FormatInt(ts, 10))
 }
 
 // PoliciesChallenge is the payload an enrolled peer signs with its identity
 // key at GET /policies in the HeaderChallengeTimestamp and
 // HeaderChallengeSignature headers.
 func PoliciesChallenge(peerID string, ts int64) []byte {
-	return []byte("sam:policies:" + peerID + ":" + strconv.FormatInt(ts, 10))
+	return []byte("mesh:policies:" + peerID + ":" + strconv.FormatInt(ts, 10))
 }
 
 // EgressChallenge is the payload an enrolled peer signs with its identity key
 // at GET /egress in the HeaderChallengeTimestamp and HeaderChallengeSignature
 // headers.
 func EgressChallenge(peerID string, ts int64) []byte {
-	return []byte("sam:egress:" + peerID + ":" + strconv.FormatInt(ts, 10))
+	return []byte("mesh:egress:" + peerID + ":" + strconv.FormatInt(ts, 10))
 }
 
 // RevocationsChallenge is the payload an enrolled peer signs with its identity
 // key at GET /revocations in the HeaderChallengeTimestamp and
 // HeaderChallengeSignature headers.
 func RevocationsChallenge(peerID string, ts int64) []byte {
-	return []byte("sam:revocations:" + peerID + ":" + strconv.FormatInt(ts, 10))
+	return []byte("mesh:revocations:" + peerID + ":" + strconv.FormatInt(ts, 10))
 }
 
 // NodesCatalogChallenge is the payload an enrolled node signs with its
 // identity key at POST /nodes/catalog in the HeaderChallengeTimestamp and
 // HeaderChallengeSignature headers.
 func NodesCatalogChallenge(peerID string, ts int64) []byte {
-	return []byte("sam:nodes-catalog:" + peerID + ":" + strconv.FormatInt(ts, 10))
+	return []byte("mesh:nodes-catalog:" + peerID + ":" + strconv.FormatInt(ts, 10))
 }
 
 // ErrStaleChallengeTimestampMessage is the stable substring returned in a 401
@@ -179,7 +179,7 @@ const (
 	GrantTypeAuthorizationCode = "authorization_code"
 
 	// TokenTypeBiscuit is the token type URI identifying a SAM Biscuit token in RFC 8693 exchanges.
-	TokenTypeBiscuit = "urn:sam-mesh:params:oauth:token-type:biscuit"
+	TokenTypeBiscuit = "urn:agentmesh:params:oauth:token-type:biscuit"
 
 	// TokenTypeJWT is the RFC 8693 JWT token type URI.
 	TokenTypeJWT = "urn:ietf:params:oauth:token-type:jwt"
@@ -196,13 +196,13 @@ const (
 // ============================================================================
 
 const (
-	// HeaderSamBiscuit is the custom HTTP header used to carry the base64-encoded
+	// HeaderMeshBiscuit is the custom HTTP header used to carry the base64-encoded
 	// Biscuit token containing the node's identity credentials when forwarding requests
 	// over libp2p HTTP between nodes in the mesh.
 	//
 	// This header is internal to the SAM mesh datapath and is stripped before requests
 	// are forwarded to backend services.
-	HeaderSamBiscuit = "X-Sam-Biscuit"
+	HeaderMeshBiscuit = "X-Mesh-Biscuit"
 
 	// HeaderChallengeTimestamp and HeaderChallengeSignature carry the signed
 	// freshness challenge on GET /enroll/status, GET /policies, GET /egress,
@@ -210,8 +210,8 @@ const (
 	// unpadded base64url signature over the endpoint's challenge payload.
 	// Headers rather than query parameters, so the signature never lands in
 	// access logs, where it would be replayable for its freshness window.
-	HeaderChallengeTimestamp = "X-Sam-Challenge-Ts"
-	HeaderChallengeSignature = "X-Sam-Challenge-Sig"
+	HeaderChallengeTimestamp = "X-Mesh-Challenge-Ts"
+	HeaderChallengeSignature = "X-Mesh-Challenge-Sig"
 
 	// HeaderPeerID carries the authenticated libp2p peer ID of the caller.
 	// The mesh ingress handler stamps it after authorization succeeds,
@@ -220,7 +220,7 @@ const (
 	// same way for locally served requests.
 	HeaderPeerID = "X-Peer-Id"
 
-	// HeaderSamAuthentication is the custom HTTP header used to authenticate a local
+	// HeaderMeshAuthentication is the custom HTTP header used to authenticate a local
 	// process to this node's sidecar API (the shared secret configured via
 	// "--api-token-path" or the SAM_API_TOKEN environment variable). Using a
 	// SAM-specific header name — instead of the standard
@@ -233,16 +233,16 @@ const (
 	// header, purely-local endpoints (that never forward it anywhere) also accept
 	// "Authorization" as an alias. The egress/inference proxy does NOT: there,
 	// "Authorization" is reserved exclusively for the destination's credential.
-	HeaderSamAuthentication = "X-Sam-Authentication"
+	HeaderMeshAuthentication = "X-Mesh-Authentication"
 
-	// HeaderSamNoTrailingSlash is the custom HTTP header set by the ingress handler
+	// HeaderMeshNoTrailingSlash is the custom HTTP header set by the ingress handler
 	// to indicate that the original request had no trailing slash.
 	//
 	// This helps backward-compatibility with services that strictly distinguish
 	// between a root path "/" and an empty path "".
-	HeaderSamNoTrailingSlash = "X-Sam-No-Trailing-Slash"
+	HeaderMeshNoTrailingSlash = "X-Mesh-No-Trailing-Slash"
 
-	// HeaderSamRequiredLabels constrains an inference request on the sidecar's
+	// HeaderMeshRequiredLabels constrains an inference request on the sidecar's
 	// OpenAI-compatible endpoints (/v1/*) to providers attested with every
 	// pair of a comma-separated list of "key=value" label requirements (see
 	// api/labels.go and LabelCheck); invalid entries are rejected with HTTP
@@ -252,16 +252,16 @@ const (
 	// Reserved as part of the sidecar contract; enforced by the provider
 	// scorer. Label declarations are routing hints until attested via the
 	// node's Biscuit (see api/labels.go).
-	HeaderSamRequiredLabels = "X-Sam-Required-Labels"
+	HeaderMeshRequiredLabels = "X-Mesh-Required-Labels"
 
-	// HeaderSamPrincipal, HeaderSamRoles, HeaderSamTask, and HeaderSamTaskID carry
+	// HeaderMeshPrincipal, HeaderMeshRoles, HeaderMeshTask, and HeaderMeshTaskID carry
 	// verified caller attribution injected by ext_authz or forwarded to an
 	// operator inspection chain when forward_context is enabled.
-	HeaderSamPrincipal     = "X-Sam-Principal"
-	HeaderSamRoles         = "X-Sam-Roles"
-	HeaderSamTask          = "X-Sam-Task"
-	HeaderSamTaskID        = "X-Sam-Task-Id"
-	HeaderSamTargetService = "X-Sam-Target-Service"
+	HeaderMeshPrincipal     = "X-Mesh-Principal"
+	HeaderMeshRoles         = "X-Mesh-Roles"
+	HeaderMeshTask          = "X-Mesh-Task"
+	HeaderMeshTaskID        = "X-Mesh-Task-Id"
+	HeaderMeshTargetService = "X-Mesh-Target-Service"
 )
 
 // ============================================================================
@@ -270,11 +270,11 @@ const (
 
 const (
 	// SystemNamespace is the namespace reserved for built-in mesh services and protocols.
-	SystemNamespace = "sam:system"
+	SystemNamespace = "mesh:system"
 
 	// CatalogTarget is the special system service name used to retrieve tool catalogs.
-	// In policy rules, it must be referred to explicitly as: system://sam.catalog
-	CatalogTarget = "sam.catalog"
+	// In policy rules, it must be referred to explicitly as: system://mesh.catalog
+	CatalogTarget = "mesh.catalog"
 
 	// MCPServicePrefix is the scheme prefix for Model Context Protocol services.
 	// Fully qualified MCP services use the URI format: mcp://<service-name>

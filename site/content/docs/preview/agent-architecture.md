@@ -86,7 +86,7 @@ borders:
 
 1. **Inbound border (`POST /token/exchange` on the control plane, `POST /oauth/token` on the node):**
    The origin `sam-node` presents its own node Biscuit, a proof-of-possession
-   signature over `sam:token-exchange:<peer_id>:<challenge_unix_ms>`, and the
+   signature over `mesh:token-exchange:<peer_id>:<challenge_unix_ms>`, and the
    caller's `subject_token` (an OIDC JWT, Kubernetes projected SA token, or
    SPIFFE JWT-SVID). The control plane verifies both, resolves the caller's
    roles from the mesh policy, and mints a short-lived **Delegated Session
@@ -161,8 +161,8 @@ interfaces:
 1. **Envoy `ext_authz` (on the local API listeners):** evaluates standing
    policy and `tar_block` chains on incoming `CheckRequest` calls. The caller
    presents a Biscuit, or a platform JWT that `sam-node` exchanges at the
-   control plane into a delegated Biscuit. On `OK` it returns `X-Sam-Biscuit`,
-   `X-Sam-Principal`, `X-Sam-Roles`, `X-Sam-Task-Id` and, for `egress://`
+   control plane into a delegated Biscuit. On `OK` it returns `X-Mesh-Biscuit`,
+   `X-Mesh-Principal`, `X-Mesh-Roles`, `X-Mesh-Task-Id` and, for `egress://`
    targets with a credential broker, the brokered `Authorization` header.
 2. **Envoy `ext_proc` (`envoy.service.ext_proc.v3.ExternalProcessor`):** the
    body-aware counterpart to `ext_authz`. Because MCP tool names travel inside
@@ -205,14 +205,14 @@ reach an external service:
     `tools/call`, and A2A payloads, blocking findings with `403` and replacing
     SDP de-identified text.
   - **Envoy `ext_proc` (`ext_proc`):** streams headers, bodies, and trailers to
-    an external gRPC processor with `ProcessingRequest.attributes["sam"]`
+    an external gRPC processor with `ProcessingRequest.attributes["mesh"]`
     populated (`principal`, `roles`, `actor_node`, `task`, `service`,
     `destination`), while refusing any processor mutation to `Authorization`,
-    `Host`, `:authority`, or `X-Sam-*`.
+    `Host`, `:authority`, or `X-Mesh-*`.
   - **Operator inspection chain (`preserve_host`, `forward_context`):** routes
     through an explicit outbound proxy while preserving the destination `Host`
-    header and optionally forwarding `X-Sam-Principal`, `X-Sam-Roles`, and
-    `X-Sam-Task`.
+    header and optionally forwarding `X-Mesh-Principal`, `X-Mesh-Roles`, and
+    `X-Mesh-Task`.
 - **Named TCP tunnels (`mode: EGRESS_MODE_TCP`):**
   For non-HTTP TLS protocols (PostgreSQL, Cloud SQL, AlloyDB, Redis, SSH), the
   egress node exposes named `CONNECT host:port` tunnels and the local

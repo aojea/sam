@@ -28,10 +28,10 @@ import (
 
 func TestIdentityEvidenceRoutesHaveOwnMetricClass(t *testing.T) {
 	for _, path := range []string{
-		"/sam/identity",
-		"/sam/identity/",
-		"/sam/identity/extra",
-		"/sam/peer/12D3KooWpeer/evidence",
+		"/mesh/identity",
+		"/mesh/identity/",
+		"/mesh/identity/extra",
+		"/mesh/peer/12D3KooWpeer/evidence",
 	} {
 		if got := classifyRoute(path); got != "identity-evidence" {
 			t.Errorf("classifyRoute(%q) = %q, want %q", path, got, "identity-evidence")
@@ -53,9 +53,9 @@ func TestIdentityEvidenceTrailingSlashReturnsNotFound(t *testing.T) {
 	defer func() { _ = srv.Close() }()
 
 	client := waitForSocket(t, socketPath)
-	resp, err := client.Get("http://localhost/sam/identity/")
+	resp, err := client.Get("http://localhost/mesh/identity/")
 	if err != nil {
-		t.Fatalf("GET /sam/identity/: %v", err)
+		t.Fatalf("GET /mesh/identity/: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
@@ -80,24 +80,24 @@ func TestIdentityEvidenceHandlersRejectUnavailableNode(t *testing.T) {
 		{
 			name:    "identity nil node",
 			handler: handleIdentityEvidence,
-			path:    "/sam/identity",
+			path:    "/mesh/identity",
 		},
 		{
 			name:    "identity nil host",
 			handler: handleIdentityEvidence,
 			node:    &SamNode{},
-			path:    "/sam/identity",
+			path:    "/mesh/identity",
 		},
 		{
 			name:    "peer nil node",
 			handler: handlePeerEvidence,
-			path:    "/sam/peer/unavailable/evidence",
+			path:    "/mesh/peer/unavailable/evidence",
 		},
 		{
 			name:    "peer nil host",
 			handler: handlePeerEvidence,
 			node:    &SamNode{},
-			path:    "/sam/peer/unavailable/evidence",
+			path:    "/mesh/peer/unavailable/evidence",
 		},
 	}
 
@@ -127,7 +127,7 @@ func TestHandleIdentityEvidenceRejectsRevokedLocalPeer(t *testing.T) {
 	node.revokedPeers.Add(node.Host.ID().String(), time.Now().Unix())
 
 	recorder := httptest.NewRecorder()
-	handleIdentityEvidence(node, recorder, localSocketRequest(http.MethodGet, "/sam/identity"))
+	handleIdentityEvidence(node, recorder, localSocketRequest(http.MethodGet, "/mesh/identity"))
 
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, body = %q, want %d", recorder.Code, recorder.Body.String(), http.StatusForbidden)
@@ -148,7 +148,7 @@ func TestHandlePeerEvidenceErrorContract(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = provider.Close() })
 
-	validPath := "/sam/peer/" + provider.ID().String() + "/evidence"
+	validPath := "/mesh/peer/" + provider.ID().String() + "/evidence"
 	tests := []struct {
 		name       string
 		method     string
@@ -162,7 +162,7 @@ func TestHandlePeerEvidenceErrorContract(t *testing.T) {
 		{
 			name:       "bad peer ID",
 			method:     http.MethodGet,
-			path:       "/sam/peer/not-a-peer/evidence",
+			path:       "/mesh/peer/not-a-peer/evidence",
 			wantStatus: http.StatusBadRequest,
 			wantBody:   "Invalid peer ID",
 		},
@@ -190,7 +190,7 @@ func TestHandlePeerEvidenceErrorContract(t *testing.T) {
 		{
 			name:       "wrong path shape",
 			method:     http.MethodGet,
-			path:       "/sam/peer/" + provider.ID().String(),
+			path:       "/mesh/peer/" + provider.ID().String(),
 			wantStatus: http.StatusNotFound,
 			wantBody:   "Not found",
 		},

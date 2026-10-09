@@ -157,7 +157,7 @@ echo "dev-secret" > "$WORK_DIR/dev-api.token"
 echo "dev2-secret" > "$WORK_DIR/dev2-api.token"
 echo "contractor-secret" > "$WORK_DIR/contractor-api.token"
 chmod 600 "$WORK_DIR"/*.token
-printf 'header = "X-Sam-Authentication: Bearer caller-secret"\n' > "$WORK_DIR/.curlrc"
+printf 'header = "X-Mesh-Authentication: Bearer caller-secret"\n' > "$WORK_DIR/.curlrc"
 
 # Start real SQLite MCP server (orders_mcp.py) and LLM-backed A2A agents (support_agent.py)
 "$PYTHON" "$HERE/orders_mcp.py" > "$WORK_DIR/orders-mcp.log" 2>&1 &
@@ -317,7 +317,7 @@ V1_STAGING=$(tmux capture-pane -J -p -t "$NODE" -S -50 | awk '/PeerID:/ {print $
 tmux send-keys -t "$CALLER" "V1_PEER=$V1_STAGING; clear" Enter
 wait_for "$CALLER" 'caller\$' 10
 expect "$CALLER" "cat node-caller.yaml" 'env: prod' 15
-expect "$CALLER" "curl -i -s \$NODE/sam/\$V1_PEER/a2a/support.acme/.well-known/agent-card.json | head -n 5" '403 Forbidden' 30
+expect "$CALLER" "curl -i -s \$NODE/mesh/\$V1_PEER/a2a/support.acme/.well-known/agent-card.json | head -n 5" '403 Forbidden' 30
 pause 3
 
 caption "Now the Automated Quality Gate validates Alice's A2A 1.0 AgentCard and updates policy.json to allow env=prod. Alice restarts in env=prod, and the exact same call returns 200 OK."
@@ -332,20 +332,20 @@ V1_PROD=$(tmux capture-pane -J -p -t "$NODE" -S -30 | awk '/PeerID:/ {p=$2} END 
 tmux send-keys -t "$CALLER" "V1_PEER=$V1_PROD" Enter
 wait_for "$CALLER" 'caller\$' 10
 for _ in $(seq 1 20); do
-  curl -sf -H "X-Sam-Authentication: Bearer caller-secret" \
-    "http://127.0.0.1:19102/sam/$V1_PROD/a2a/support.acme/.well-known/agent-card.json" >/dev/null 2>&1 && break
+  curl -sf -H "X-Mesh-Authentication: Bearer caller-secret" \
+    "http://127.0.0.1:19102/mesh/$V1_PROD/a2a/support.acme/.well-known/agent-card.json" >/dev/null 2>&1 && break
   sleep 0.5
 done
-expect "$CALLER" "curl -s \$NODE/sam/\$V1_PEER/a2a/support.acme/.well-known/agent-card.json | jq '{name, url: .supportedInterfaces[0].url}'" 'Acme Support' 30
+expect "$CALLER" "curl -s \$NODE/mesh/\$V1_PEER/a2a/support.acme/.well-known/agent-card.json | jq '{name, url: .supportedInterfaces[0].url}'" 'Acme Support' 30
 pause 3
 
 # --- Act 2: Zero-Downtime Replica Swap & Label Point 3 (Agent Intent) -------
 
-caption "Act 2 (Platform / Networking & Point 3 — Agent Intent): Within the Input Node's env=prod floor, the caller passes X-Sam-Required-Labels: replica=v1-laptop on Turn 1."
-expect "$CALLER" "python3 a2a_client.py \$NODE/sam/\$V1_PEER/a2a/support.acme ctx-acme-1042 'Check order #1042 for alice@acme.com' replica=v1-laptop" 'v1-laptop' 45
+caption "Act 2 (Platform / Networking & Point 3 — Agent Intent): Within the Input Node's env=prod floor, the caller passes X-Mesh-Required-Labels: replica=v1-laptop on Turn 1."
+expect "$CALLER" "python3 a2a_client.py \$NODE/mesh/\$V1_PEER/a2a/support.acme ctx-acme-1042 'Check order #1042 for alice@acme.com' replica=v1-laptop" 'v1-laptop' 45
 pause 3
 
-caption "A Cloud Run replica (node-v2.yaml, replica=v2-cloudrun) joins the mesh. On Turn 2, the caller passes X-Sam-Required-Labels: replica=v2-cloudrun and keeps full conversation context."
+caption "A Cloud Run replica (node-v2.yaml, replica=v2-cloudrun) joins the mesh. On Turn 2, the caller passes X-Mesh-Required-Labels: replica=v2-cloudrun and keeps full conversation context."
 expect "$CALLER" "cat node-v2.yaml" 'v2-cloudrun' 15
 "$SAM_NODE" run \
   --control-plane "$CP_URL" --insecure-control-plane \
@@ -360,21 +360,21 @@ for _ in $(seq 1 40); do
 done
 V2_PEER=$(awk '/PeerID:/ {print $2; exit}' "$WORK_DIR/node-v2.log")
 for _ in $(seq 1 20); do
-  curl -sf -H "X-Sam-Authentication: Bearer caller-secret" \
-    "http://127.0.0.1:19102/sam/$V2_PEER/a2a/support.acme/.well-known/agent-card.json" >/dev/null 2>&1 && break
+  curl -sf -H "X-Mesh-Authentication: Bearer caller-secret" \
+    "http://127.0.0.1:19102/mesh/$V2_PEER/a2a/support.acme/.well-known/agent-card.json" >/dev/null 2>&1 && break
   sleep 0.5
 done
 tmux send-keys -t "$CALLER" "V2_PEER=$V2_PEER" Enter
 wait_for "$CALLER" 'caller\$' 10
-expect "$CALLER" "python3 a2a_client.py \$NODE/sam/\$V2_PEER/a2a/support.acme ctx-acme-1042 'What item did Alice order and has it shipped?' replica=v2-cloudrun" 'v2-cloudrun' 60
+expect "$CALLER" "python3 a2a_client.py \$NODE/mesh/\$V2_PEER/a2a/support.acme ctx-acme-1042 'What item did Alice order and has it shipped?' replica=v2-cloudrun" 'v2-cloudrun' 60
 pause 3
 
 # --- Act 3: 3-Tier Guardrails -----------------------------------------------
 
 caption "Act 3, Layer 1 (Central Security): policy.json grants GET /repos/google/sam/pulls* on egress://api.github.com and injects secrets/github-ro. POST is blocked with 403."
 expect "$ADMIN" "jq -c '.roles[0].http[0], .egress[0]' policy.json" 'github-ro' 15
-expect "$CALLER" "curl -s \"\$NODE/sam/\$V1_PEER/egress/api.github.com/repos/google/sam/pulls?state=open&per_page=1\" | jq -c '.[0] | {number, title}'" 'number' 30
-expect "$CALLER" "curl -i -s -X POST \$NODE/sam/\$V1_PEER/egress/api.github.com/repos/google/sam/pulls -d '{}' | head -n 5" '403 Forbidden' 30
+expect "$CALLER" "curl -s \"\$NODE/mesh/\$V1_PEER/egress/api.github.com/repos/google/sam/pulls?state=open&per_page=1\" | jq -c '.[0] | {number, title}'" 'number' 30
+expect "$CALLER" "curl -i -s -X POST \$NODE/mesh/\$V1_PEER/egress/api.github.com/repos/google/sam/pulls -d '{}' | head -n 5" '403 Forbidden' 30
 pause 3
 
 caption "Act 3, Layer 2 (Department Lead — Point 2b, Egress Node Label Check): node-v1.yaml requires positive 'check if label(\"team\", \"support\")', so node-contractor.yaml (team=contractor) is rejected."

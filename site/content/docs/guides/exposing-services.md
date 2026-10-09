@@ -134,7 +134,7 @@ by URL only:
     target_url: "http://127.0.0.1:9999"
 ```
 
-Remote callers reach it at `/sam/<peer-id>/a2a/triage/` on their own node.
+Remote callers reach it at `/mesh/<peer-id>/a2a/triage/` on their own node.
 The agent card gets special treatment. The caller's node fetches
 `/.well-known/agent-card.json` from the agent and serves a regenerated card
 whose interface URLs point at the mesh path. Bindings that the mesh cannot
@@ -159,11 +159,11 @@ A policy that grants the service to a role bound to your users:
 ```json
 {
   "roles": [
-    { "name": "sam:role:node", "allowed_labels": ["region=*"] },
+    { "name": "mesh:role:node", "allowed_labels": ["region=*"] },
     { "name": "calc-users", "allowed_services": ["mcp://calculator"] }
   ],
   "bindings": [
-    { "role": "sam:role:node", "members": ["group:engineering"] },
+    { "role": "mesh:role:node", "members": ["group:engineering"] },
     { "role": "calc-users",    "members": ["group:engineering"] }
   ]
 }
@@ -178,9 +178,9 @@ curl -fsS -X POST https://mesh.example.com/policies \
   --data @policy.json
 ```
 
-Discovery (`system://sam.catalog`) follows the same rule. A role that should
-be able to browse what a node offers needs `system://sam.catalog` in its
-grants. On a mesh where everyone may browse, grant it to `sam:role:node`.
+Discovery (`system://mesh.catalog`) follows the same rule. A role that should
+be able to browse what a node offers needs `system://mesh.catalog` in its
+grants. On a mesh where everyone may browse, grant it to `mesh:role:node`.
 
 ## Labels
 
@@ -196,7 +196,7 @@ labels:
 Labels are attested at enrollment, so the role the node enrolls with must
 permit them (`allowed_labels: ["region=*", "team=platform"]`, or `["*"]`).
 Enrollment is refused if a label is not allowed by the role. Once attested,
-callers can require the labels (`X-Sam-Required-Labels: region=eu-west-1`;
+callers can require the labels (`X-Mesh-Required-Labels: region=eu-west-1`;
 several pairs must all be attested), and the node can require labels from
 its callers:
 
@@ -237,7 +237,7 @@ If the service is missing, check these causes in order:
 
 1. The backend did not answer the probe. Look for "Withholding" in the
    node log.
-2. The caller's role lacks `system://sam.catalog`.
+2. The caller's role lacks `system://mesh.catalog`.
 3. The two nodes have not exchanged discovery state yet. Wait a few seconds
    and try again.
 

@@ -847,7 +847,7 @@ func TestSTSSecurityHardening(t *testing.T) {
 		t.Fatalf("expected 200 from authorized ServedBy node, got %d", okResp.StatusCode)
 	}
 
-	// 3. Router credentials (sam:role:router) must be forbidden on /token/exchange and /sts/token
+	// 3. Router credentials (mesh:role:router) must be forbidden on /token/exchange and /sts/token
 	routerPriv, routerPub, err := crypto.GenerateEd25519Key(rand.Reader)
 	if err != nil {
 		t.Fatalf("GenerateEd25519Key: %v", err)

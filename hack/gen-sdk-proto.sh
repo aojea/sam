@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # Regenerates the protobuf bindings the native SDKs under sdk/ ship for
-# api/sam.proto, and the baseline Datalog artifact from api/datalog.go. The
+# api/agentmesh.proto, and the baseline Datalog artifact from api/datalog.go. The
 # Go bindings are gen-proto.sh's job. Requires protoc and, for JavaScript,
 # an `npm install` in sdk/js (protoc-gen-es).
 
@@ -59,14 +59,14 @@ mkdir -p "${JS_GEN_DIR}"
   --plugin="protoc-gen-es=${PROTOC_GEN_ES}" \
   --es_out="${JS_GEN_DIR}" \
   --es_opt=target=ts \
-  api/sam.proto
+  api/agentmesh.proto
 
 echo "Generating Python protobuf code..."
 mkdir -p "${PY_GEN_DIR}"
 "${PROTOC_BIN}" -I api \
   --python_out="${PY_GEN_DIR}" \
   --pyi_out="${PY_GEN_DIR}" \
-  api/sam.proto
+  api/agentmesh.proto
 # The relay v2 client speaks go-libp2p's circuit.proto directly; see the
 # proto's header for why the SDK carries a copy.
 "${PROTOC_BIN}" -I sdk/python/proto \

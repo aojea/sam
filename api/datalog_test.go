@@ -367,7 +367,7 @@ func TestOIDCClaimToFact(t *testing.T) {
 		t.Errorf("OIDCClaimToFact() = %v, want %v", facts, want)
 	}
 	// role() is minted from mesh policy only. An issuer whose "roles" claim
-	// landed there could name sam:role:router and become a router.
+	// landed there could name mesh:role:router and become a router.
 	for claim, fact := range facts {
 		if fact == FactRole {
 			t.Errorf("claim %q maps to the mesh role fact %q", claim, FactRole)

@@ -442,15 +442,15 @@ jobs:
             -d '{
               "roles": [
                 {"name": "sam-canary", "allowed_services": ["*"], "allowed_targets": ["*"]},
-                {"name": "sam:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]},
-                {"name": "sam:role:node"},
+                {"name": "mesh:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]},
+                {"name": "mesh:role:node"},
                 {"name": "public-mesh", "allowed_services": ["*"], "allowed_targets": ["*"]}
               ],
               "bindings": [
                 {"role": "sam-canary", "members": ["user:system:serviceaccount:sam-canary-'"${ENV_NAME}"':sam-node-sa"]},
-                {"role": "sam:role:router", "members": ["group:routers", "user:system:serviceaccount:'"${NAMESPACE}"':sam-router-sa"]},
-                {"role": "sam:role:node", "members": ["sam:system:authenticated"]},
-                {"role": "public-mesh", "members": ["sam:system:authenticated"]}
+                {"role": "mesh:role:router", "members": ["group:routers", "user:system:serviceaccount:'"${NAMESPACE}"':sam-router-sa"]},
+                {"role": "mesh:role:node", "members": ["mesh:system:authenticated"]},
+                {"role": "public-mesh", "members": ["mesh:system:authenticated"]}
               ]
             }' \
             http://localhost:8080/policies || {
@@ -526,7 +526,7 @@ jobs:
           TOKEN_JSON=$(curl -fsS -X POST \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-            -d '{"role": "sam:role:router", "max_usages": 1}' \
+            -d '{"role": "mesh:role:router", "max_usages": 1}' \
             http://localhost:8080/admin/bootstrap-tokens) || {
             echo "ERROR: bootstrap token request failed"
             kill $PF_PID

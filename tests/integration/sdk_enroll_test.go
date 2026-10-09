@@ -120,7 +120,7 @@ func TestNativeSDKs(t *testing.T) {
 		ListenAddr:            "127.0.0.1:0",
 		AdminToken:            adminToken,
 		OIDCIssuer:            oidcURL,
-		AllowedAudiences:      []string{"sam-mesh-audience"},
+		AllowedAudiences:      []string{"agentmesh-audience"},
 		AutoApproveEnrollment: false,
 	}, store)
 	if err != nil {

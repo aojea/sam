@@ -123,7 +123,7 @@ for i in range(1, len(steps) + 1):
         continue
     codes = delta_by(b, a, "sam_control_plane_http_requests_total", "code")
     p99 = p99_of_delta(b, a, "sam_control_plane_http_request_duration_seconds")
-    nodes = max([v for (n, labels), v in a.items() if n == "sam_control_plane_enrolled_nodes" and dict(labels).get("role") == "sam:role:node"] or [0])
+    nodes = max([v for (n, labels), v in a.items() if n == "sam_control_plane_enrolled_nodes" and dict(labels).get("role") == "mesh:role:node"] or [0])
     peers = max([v for (n, labels), v in a.items() if n == "sam_control_plane_mesh_connected_peers"] or [0])
     print(f"\nstep {i} control plane: requests {codes}; p99 <= {p99} s; enrolled nodes {nodes:.0f}; mesh peers seen {peers:.0f}")
     for r in sorted({re.sub(r"-step\d+-(before|after)\.prom$", "", os.path.basename(p)) for p in glob.glob(os.path.join(out, f"sam-router-*-step{i}-after.prom"))}):

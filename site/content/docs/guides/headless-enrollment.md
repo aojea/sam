@@ -32,7 +32,7 @@ volumes:
         - serviceAccountToken:
             path: sam-token
             expirationSeconds: 3600
-            audience: sam-mesh-audience
+            audience: agentmesh-audience
 ```
 
 ```bash
@@ -44,7 +44,7 @@ chart) and the audience in `--allowed-audiences`; add the cluster issuer to
 `--workload-issuer` (`controlPlane.workloadIssuer`) as well to keep workload
 tokens off `/user/*` and `/oauth/authorize`. Bind either a specific service
 account (`user:system:serviceaccount:<namespace>:<name>`) or a namespace prefix
-(`user:system:serviceaccount:<namespace>:*`) to `sam:role:node`. Routers enroll
+(`user:system:serviceaccount:<namespace>:*`) to `mesh:role:node`. Routers enroll
 the same way with `sam-router --jwt-path`. The [Kubernetes guide](../kubernetes/)
 shows the complete setup.
 
@@ -71,11 +71,11 @@ accounts remain able to use `/user/*` and `/oauth/authorize`:
 sam-control-plane \
   --issuer https://accounts.google.com \
   --workload-issuer https://accounts.google.com=.gserviceaccount.com \
-  --allowed-audiences sam-mesh-audience
+  --allowed-audiences agentmesh-audience
 ```
 
 In the mesh policy, bind the service account email or project suffix (for
-example, `email:*@my-project.iam.gserviceaccount.com`) to `sam:role:node`.
+example, `email:*@my-project.iam.gserviceaccount.com`) to `mesh:role:node`.
 
 ### SPIFFE / SPIRE (`spiffe-helper` + `--jwt-path`)
 
@@ -88,7 +88,7 @@ the file at `--jwt-path` rotated across the SVID's lifetime:
 # spiffe-helper.conf
 agent_address = "/run/spire/sockets/agent.sock"
 cert_dir      = "/run/sam"
-jwt_svids     = [{ jwt_audience = "sam-mesh-audience", jwt_svid_file_name = "jwt_svid.token" }]
+jwt_svids     = [{ jwt_audience = "agentmesh-audience", jwt_svid_file_name = "jwt_svid.token" }]
 ```
 
 ```bash
@@ -97,7 +97,7 @@ sam-node run --control-plane https://mesh.example.com --jwt-path /run/sam/jwt_sv
 
 List the SPIRE OIDC Discovery Provider URL in `--issuer` and `--workload-issuer`
 on the control plane, and bind the SPIFFE ID or path prefix
-(`user:spiffe://example.org/ns/prod/*`) to `sam:role:node`.
+(`user:spiffe://example.org/ns/prod/*`) to `mesh:role:node`.
 
 ### OAuth client credentials
 
@@ -120,15 +120,15 @@ from the `SAM_ADMIN_TOKEN` environment variable.
 curl -fsS -X POST https://mesh.example.com/admin/bootstrap-tokens \
   -H "Authorization: Bearer $SAM_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"role":"sam:role:node","ttl_hours":24,"max_usages":1,"description":"build-runner-3"}'
+  -d '{"role":"mesh:role:node","ttl_hours":24,"max_usages":1,"description":"build-runner-3"}'
 ```
 
 ```json
-{"id":"62e92ffca…","token":"sam-bt-72fb0175788dee0…","role":"sam:role:node","expire_time":"2026-09-20T15:00:00Z"}
+{"id":"62e92ffca…","token":"sam-bt-72fb0175788dee0…","role":"mesh:role:node","expire_time":"2026-09-20T15:00:00Z"}
 ```
 
 The plaintext `token` is shown once. The control plane keeps only its hash.
-`role` is the role that the token enrolls into (`sam:role:router` for a
+`role` is the role that the token enrolls into (`mesh:role:router` for a
 router). `ttl_hours` defaults to 24 and `max_usages` to 1. The Bootstrap
 Tokens view in the console and `sam-one token create` do the same thing. An
 OIDC user who is already enrolled can mint tokens for their own machines
@@ -229,7 +229,7 @@ afterwards:
 
 ```bash
 # on the token, at mint time
--d '{"role":"sam:role:node","max_usages":10,"autonomous_recovery":true}'
+-d '{"role":"mesh:role:node","max_usages":10,"autonomous_recovery":true}'
 
 # on an enrolled node
 curl -fsS -X POST https://mesh.example.com/admin/nodes/<peer-id>/autonomous-recovery \

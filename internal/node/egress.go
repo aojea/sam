@@ -229,7 +229,7 @@ func (s *EgressService) Init(ctx context.Context) error {
 			// destination, which sees the node's own credential only.
 			for name := range pr.Out.Header {
 				lower := strings.ToLower(name)
-				if lower == "authorization" || lower == "cookie" || strings.HasPrefix(lower, "x-sam-") || strings.HasPrefix(lower, "x-forwarded-") || strings.EqualFold(name, api.HeaderPeerID) {
+				if lower == "authorization" || lower == "cookie" || strings.HasPrefix(lower, "x-mesh-") || strings.HasPrefix(lower, "x-forwarded-") || strings.EqualFold(name, api.HeaderPeerID) {
 					delete(pr.Out.Header, name)
 				}
 			}
@@ -239,13 +239,13 @@ func (s *EgressService) Init(ctx context.Context) error {
 			if s.destination.GetForwardContext() {
 				if ec, ok := pr.In.Context().Value(egressContextKey{}).(egressCallerContext); ok {
 					if ec.principal != "" {
-						pr.Out.Header.Set(api.HeaderSamPrincipal, ec.principal)
+						pr.Out.Header.Set(api.HeaderMeshPrincipal, ec.principal)
 					}
 					if len(ec.roles) > 0 {
-						pr.Out.Header.Set(api.HeaderSamRoles, strings.Join(ec.roles, ","))
+						pr.Out.Header.Set(api.HeaderMeshRoles, strings.Join(ec.roles, ","))
 					}
 					if ec.task != "" {
-						pr.Out.Header.Set(api.HeaderSamTask, ec.task)
+						pr.Out.Header.Set(api.HeaderMeshTask, ec.task)
 					}
 				}
 			}
@@ -477,12 +477,12 @@ func handleLocalEgress(node *SamNode, w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
-	requiredLabels, err := parseRequiredLabels(r.Header.Get(api.HeaderSamRequiredLabels))
+	requiredLabels, err := parseRequiredLabels(r.Header.Get(api.HeaderMeshRequiredLabels))
 	if err != nil {
-		refuse(w, http.StatusBadRequest, fmt.Sprintf("Invalid %s header: %v", api.HeaderSamRequiredLabels, err), proxyStatusDenied)
+		refuse(w, http.StatusBadRequest, fmt.Sprintf("Invalid %s header: %v", api.HeaderMeshRequiredLabels, err), proxyStatusDenied)
 		return
 	}
-	r.Header.Del(api.HeaderSamRequiredLabels)
+	r.Header.Del(api.HeaderMeshRequiredLabels)
 
 	host, upstreamPath, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/egress/"), "/")
 	host = api.NormalizeMeshHost(host)
@@ -526,7 +526,7 @@ func handleLocalEgress(node *SamNode, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	recordEgressDecision(host, egressOutcomeAllow)
-	r.Header.Del(api.HeaderSamBiscuit)
+	r.Header.Del(api.HeaderMeshBiscuit)
 	r.Header.Set(api.HeaderPeerID, node.Host.ID().String())
 	r.URL.Path = "/" + upstreamPath
 	r.URL.RawPath = ""

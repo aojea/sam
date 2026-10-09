@@ -46,7 +46,7 @@ func (h headerRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func meshHTTPClient(token string, extra map[string]string) *http.Client {
-	headers := map[string]string{api.HeaderSamAuthentication: "Bearer " + token}
+	headers := map[string]string{api.HeaderMeshAuthentication: "Bearer " + token}
 	for k, v := range extra {
 		headers[k] = v
 	}
@@ -94,7 +94,7 @@ func TestA2ACUJ(t *testing.T) {
 	mux.Handle(a2asrv.WellKnownAgentCardPath, a2asrv.NewStaticAgentCardHandler(agentCard))
 	mux.Handle("/", a2asrv.NewJSONRPCHandler(a2asrv.NewHandler(echo)))
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get(api.HeaderSamRequiredLabels) != "" {
+		if r.Header.Get(api.HeaderMeshRequiredLabels) != "" {
 			sawLabelsHeader.Store(true)
 		}
 		mux.ServeHTTP(w, r)
@@ -128,7 +128,7 @@ func TestA2ACUJ(t *testing.T) {
 	}
 	peerA := addrA[idx+len("/p2p/"):]
 
-	meshBase := "http://" + apiAddrB + "/sam/" + peerA + "/a2a/echo-agent"
+	meshBase := "http://" + apiAddrB + "/mesh/" + peerA + "/a2a/echo-agent"
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -164,7 +164,7 @@ func TestA2ACUJ(t *testing.T) {
 	// CUJ step 2: a stock SDK client built from that card, constrained to
 	// region=eu, is admitted and gets the echo back.
 	euClient, err := a2aclient.NewFromCard(ctx, card,
-		a2aclient.WithJSONRPCTransport(meshHTTPClient(apiToken, map[string]string{api.HeaderSamRequiredLabels: "region=eu"})))
+		a2aclient.WithJSONRPCTransport(meshHTTPClient(apiToken, map[string]string{api.HeaderMeshRequiredLabels: "region=eu"})))
 	if err != nil {
 		t.Fatalf("stock client rejected the regenerated card: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestA2ACUJ(t *testing.T) {
 	// the agent backend must never see the request.
 	before := sendCount.Load()
 	usClient, err := a2aclient.NewFromCard(ctx, card,
-		a2aclient.WithJSONRPCTransport(meshHTTPClient(apiToken, map[string]string{api.HeaderSamRequiredLabels: "region=us-east-1"})))
+		a2aclient.WithJSONRPCTransport(meshHTTPClient(apiToken, map[string]string{api.HeaderMeshRequiredLabels: "region=us-east-1"})))
 	if err != nil {
 		t.Fatalf("client construction failed: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestA2ACUJ(t *testing.T) {
 
 	// Zero-trust invariant: the labels header never crosses the mesh.
 	if sawLabelsHeader.Load() {
-		t.Errorf("%s header leaked to the agent backend", api.HeaderSamRequiredLabels)
+		t.Errorf("%s header leaked to the agent backend", api.HeaderMeshRequiredLabels)
 	}
 
 	t.Log("A2A CUJ test passed.")

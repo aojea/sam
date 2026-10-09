@@ -46,7 +46,7 @@ function mint(facts: string[], keyPair = cpKeyPair, expiration = "2035-01-01T00:
 
 /** A token as the control plane mints it for a node bound to peerId. */
 function nodeToken(peerId: string, extra: string[] = [], keyPair = cpKeyPair): Uint8Array {
-  return mint([`node(${JSON.stringify(peerId)})`, `client_peer_id(${JSON.stringify(peerId)})`, `role("sam:role:node")`, ...extra], keyPair);
+  return mint([`node(${JSON.stringify(peerId)})`, `client_peer_id(${JSON.stringify(peerId)})`, `role("mesh:role:node")`, ...extra], keyPair);
 }
 
 before(async () => {
@@ -65,20 +65,20 @@ function options(policyRules: string[], ownBiscuit?: Uint8Array) {
 }
 
 function request(biscuit: Uint8Array, targetService = "mcp://calc"): AuthorizeRequest {
-  return { biscuit, peerId: CALLER, targetService, protocol: "/sam/mcp/1.0.0" };
+  return { biscuit, peerId: CALLER, targetService, protocol: "/mesh/mcp/1.0.0" };
 }
 
 // The role grants the service through the mesh policy rules, exactly as the
 // control plane renders them; the token itself carries only the role.
 const NODE_ROLE_GRANTS = [
-  `granted_service_set("mcp", ["calc"]) <- role("sam:role:node")`,
-  `target_unrestricted(true) <- role("sam:role:node")`,
+  `granted_service_set("mcp", ["calc"]) <- role("mesh:role:node")`,
+  `target_unrestricted(true) <- role("mesh:role:node")`,
 ];
 
 test("a role granted the service by the mesh policy is allowed", async () => {
   const verified = await authorizeCaller(request(nodeToken(CALLER)), options(NODE_ROLE_GRANTS));
   assert.equal(verified.peerId, CALLER);
-  assert.deepEqual(verified.roles, ["sam:role:node"]);
+  assert.deepEqual(verified.roles, ["mesh:role:node"]);
 });
 
 test("grants minted into the token are enough on their own", async () => {
@@ -87,7 +87,7 @@ test("grants minted into the token are enough on their own", async () => {
 });
 
 test("the empty target is the protocol in the system namespace", async () => {
-  const token = nodeToken(CALLER, [`granted_service_all("sam:system")`, `target_unrestricted(true)`]);
+  const token = nodeToken(CALLER, [`granted_service_all("mesh:system")`, `target_unrestricted(true)`]);
   await authorizeCaller(request(token, ""), options([]));
   await assert.rejects(authorizeCaller(request(token, "mcp://calc"), options([])), AuthorizationError);
 });
@@ -100,7 +100,7 @@ test("a service the role was not granted is denied, and the refusal names the ch
 });
 
 test("a role with no grants at all is denied", async () => {
-  const guest = mint([`node(${JSON.stringify(CALLER)})`, `client_peer_id(${JSON.stringify(CALLER)})`, `role("sam:role:guest")`]);
+  const guest = mint([`node(${JSON.stringify(CALLER)})`, `client_peer_id(${JSON.stringify(CALLER)})`, `role("mesh:role:guest")`]);
   await assert.rejects(authorizeCaller(request(guest), options(NODE_ROLE_GRANTS)), AuthorizationError);
 });
 
@@ -133,7 +133,7 @@ test("a token under an untrusted key is denied", async () => {
 
 test("target grants are matched against the provider's own identity", async () => {
   const provider = nodeToken(PROVIDER, [`group("backend")`]);
-  const rules = [`granted_service_all_types(true) <- role("sam:role:node")`, `target_restricted(true) <- role("sam:role:node")`];
+  const rules = [`granted_service_all_types(true) <- role("mesh:role:node")`, `target_restricted(true) <- role("mesh:role:node")`];
   // Granted group:backend, which the provider carries: allowed.
   await authorizeCaller(request(nodeToken(CALLER, [`granted_target_set("group", ["backend"])`])), options(rules, provider));
   // Granted group:frontend only: the provider is not an intended target.
@@ -150,10 +150,10 @@ test("a grant narrowed by PolicyRole.http follows the request's method and path"
   // http: [{service: "mcp://calc", methods: ["GET"], paths: ["/v1/*"]}]:
   // the plain grant is withheld, the narrowed facts take its place.
   const rules = [
-    `http_granted_service_exact("mcp", "calc") <- role("sam:role:node")`,
-    `granted_method("mcp", "calc", ["GET"]) <- role("sam:role:node")`,
-    `granted_path_prefix("mcp", "calc", "/v1/") <- role("sam:role:node")`,
-    `target_unrestricted(true) <- role("sam:role:node")`,
+    `http_granted_service_exact("mcp", "calc") <- role("mesh:role:node")`,
+    `granted_method("mcp", "calc", ["GET"]) <- role("mesh:role:node")`,
+    `granted_path_prefix("mcp", "calc", "/v1/") <- role("mesh:role:node")`,
+    `target_unrestricted(true) <- role("mesh:role:node")`,
   ];
   const http = (method: string, path: string): AuthorizeRequest => ({ ...request(nodeToken(CALLER)), method, path });
   await authorizeCaller(http("GET", "/v1/models"), options(rules));
@@ -299,7 +299,7 @@ test("appended blocks carrying anything but one tar_block fact are refused", asy
   };
 
   const malformed: Record<string, Uint8Array> = {
-    rule: append((b) => b.addRule(wasm.Rule.fromString(`role("sam:role:router") <- role("sam:role:node")`))),
+    rule: append((b) => b.addRule(wasm.Rule.fromString(`role("mesh:role:router") <- role("mesh:role:node")`))),
     check: append((b) => b.addCheck(wasm.Check.fromString(`check if true`))),
     "extra fact": append((b) => {
       b.addFact(wasm.Fact.fromString(tarFact));
@@ -307,7 +307,7 @@ test("appended blocks carrying anything but one tar_block fact are refused", asy
     }),
     "rule beside tar_block": append((b) => {
       b.addFact(wasm.Fact.fromString(tarFact));
-      b.addRule(wasm.Rule.fromString(`granted_service_all_types(true) <- role("sam:role:node")`));
+      b.addRule(wasm.Rule.fromString(`granted_service_all_types(true) <- role("mesh:role:node")`));
     }),
   };
   for (const [name, token] of Object.entries(malformed)) {

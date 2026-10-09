@@ -438,7 +438,7 @@ func TestHandleAuthHandshake(t *testing.T) {
 	}
 }
 
-// Any internet peer can open /sam/auth streams. An idle one must be closed on
+// Any internet peer can open /mesh/auth streams. An idle one must be closed on
 // the node's schedule, not the peer's, and a peer opening them in a tight loop
 // must be cut off before the node verifies every frame it sends.
 func TestHandleAuthHandshakeBoundsUnauthenticatedPeers(t *testing.T) {
@@ -781,7 +781,7 @@ func newDHTHost(t *testing.T, mode dht.ModeOpt) (host.Host, *dht.IpfsDHT) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = h.Close() })
-	d, err := dht.New(h, dht.Mode(mode), dht.ProtocolPrefix("/sam"))
+	d, err := dht.New(h, dht.Mode(mode), dht.ProtocolPrefix("/mesh"))
 	if err != nil {
 		t.Fatal(err)
 	}

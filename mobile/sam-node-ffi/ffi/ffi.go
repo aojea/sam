@@ -367,7 +367,7 @@ func EnrollNode(dataDir string, controlPlaneURL string, jwt string, allowLoopbac
 }
 
 // EnrollNodeBootstrap enrolls a node with a pre-shared bootstrap token (the
-// join token or the one carried by a sam://enroll QR code) through POST
+// join token or the one carried by a mesh://enroll QR code) through POST
 // /enroll; no identity provider is involved. The control plane spends the
 // token, so a single-use token is burned by this call whether or not the
 // node later keeps its identity.

@@ -14,7 +14,7 @@
 
 # Native SDKs (sdk/): unit tests per language, then both SDKs on a mesh with
 # a real control plane, router and sam-node through tests/integration, and
-# the example programs the docs embed run the same way. api/sam.proto is a
+# the example programs the docs embed run the same way. api/agentmesh.proto is a
 # trigger because the SDKs ship bindings generated from it; the docs are
 # because they embed the examples.
 name: SDK
@@ -24,7 +24,7 @@ on:
     branches: [main]
     paths:
       - 'sdk/**'
-      - 'api/sam.proto'
+      - 'api/agentmesh.proto'
       - 'hack/gen-sdk-proto.sh'
       - 'hack/gen-sdk-docs/**'
       - 'hack/verify-sdk-generated.sh'
@@ -36,7 +36,7 @@ on:
     branches: [main]
     paths:
       - 'sdk/**'
-      - 'api/sam.proto'
+      - 'api/agentmesh.proto'
       - 'hack/gen-sdk-proto.sh'
       - 'hack/gen-sdk-docs/**'
       - 'hack/verify-sdk-generated.sh'

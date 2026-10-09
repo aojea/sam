@@ -17,7 +17,9 @@ set -e
 
 echo "Installing protobuf Go plugins..."
 # Keep in sync with the google.golang.org/protobuf version in go.mod.
-go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+if ! command -v protoc-gen-go >/dev/null 2>&1; then
+  go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+fi
 
 resolve_protoc() {
   if [[ -n "${PROTOC:-}" ]]; then
@@ -39,6 +41,6 @@ PROTOC_BIN=$(resolve_protoc)
 
 echo "Generating Go protobuf code..."
 mkdir -p api
-"${PROTOC_BIN}" --go_out=paths=source_relative:. api/sam.proto
+"${PROTOC_BIN}" --go_out=paths=source_relative:. api/agentmesh.proto
 
 echo "Protobuf generation complete."

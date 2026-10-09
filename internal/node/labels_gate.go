@@ -30,7 +30,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// parseRequiredLabels splits the X-Sam-Required-Labels header value
+// parseRequiredLabels splits the X-Mesh-Required-Labels header value
 // (comma-separated "key=value" pairs) into a label map; any malformed entry
 // rejects the whole request.
 //

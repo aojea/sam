@@ -427,7 +427,7 @@ func IsProtectedEgressHeader(name string) bool {
 	case "authorization", "host", ":authority", "cookie":
 		return true
 	}
-	return strings.HasPrefix(lower, "x-sam-") || strings.HasPrefix(lower, "x-forwarded-")
+	return strings.HasPrefix(lower, "x-mesh-") || strings.HasPrefix(lower, "x-forwarded-")
 }
 
 // ApplySafeHeaderMutations applies non-protected header mutations from mut to h.

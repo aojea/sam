@@ -55,7 +55,7 @@ import {
   TokenRefreshRequestSchema,
   TokenRefreshResponseSchema,
   type KeysResponse,
-} from "./gen/sam_pb.ts";
+} from "./gen/agentmesh_pb.ts";
 import { Identity, verifyEd25519 } from "./identity.ts";
 
 type Handler = (req: Request, body: Uint8Array) => Response | Promise<Response>;
@@ -198,13 +198,13 @@ test("register carries the JWT and the register-bound challenge", async () => {
         const r = fromBinary(EnrollRequestSchema, body);
         assert.equal(r.jwt, "eyJ.fake.jwt");
         assert.equal(r.peerId, id.peerId);
-        assert.equal(r.requestedRole, "sam:role:custom");
+        assert.equal(r.requestedRole, "mesh:role:custom");
         assert.ok(verifyEd25519(id.publicKeyRaw, registerChallenge(r.peerId, Number(r.challengeUnixMs)), r.challengeSignature));
         return proto(toBinary(EnrollResponseSchema, create(EnrollResponseSchema, { biscuitToken: biscuit, controlPlanePublicKey: cpKey.publicKeyRaw, expireTime: timestampFromMs(7_000) })));
       },
     }),
   });
-  const e = await client.register({ identity: id, jwt: "eyJ.fake.jwt", role: "sam:role:custom" });
+  const e = await client.register({ identity: id, jwt: "eyJ.fake.jwt", role: "mesh:role:custom" });
   assert.deepEqual(e.biscuit, biscuit);
   assert.equal(e.expiration, 7);
 
@@ -243,7 +243,7 @@ test("refresh presents the biscuit as a bearer and signs the refresh challenge",
 
 test("policyRules presents the biscuit and signs the policies challenge", async () => {
   const id = Identity.generate();
-  const rules = ['granted_service("mcp", "echo") <- role("sam:role:node")'];
+  const rules = ['granted_service("mcp", "echo") <- role("mesh:role:node")'];
   const client = new ControlPlaneClient({
     url: "http://127.0.0.1:1",
     fetch: fakeFetch({
@@ -261,10 +261,10 @@ test("policyRules presents the biscuit and signs the policies challenge", async 
 
   // Domain-separated challenge payloads match api/network.go.
   const dec = new TextDecoder();
-  assert.equal(dec.decode(policiesChallenge("peer1", 42)), "sam:policies:peer1:42");
-  assert.equal(dec.decode(egressChallenge("peer1", 42)), "sam:egress:peer1:42");
-  assert.equal(dec.decode(revocationsChallenge("peer1", 42)), "sam:revocations:peer1:42");
-  assert.equal(dec.decode(nodesCatalogChallenge("peer1", 42)), "sam:nodes-catalog:peer1:42");
+  assert.equal(dec.decode(policiesChallenge("peer1", 42)), "mesh:policies:peer1:42");
+  assert.equal(dec.decode(egressChallenge("peer1", 42)), "mesh:egress:peer1:42");
+  assert.equal(dec.decode(revocationsChallenge("peer1", 42)), "mesh:revocations:peer1:42");
+  assert.equal(dec.decode(nodesCatalogChallenge("peer1", 42)), "mesh:nodes-catalog:peer1:42");
 });
 
 test("clock skew: +10 min client clock retries once using response Date header; other 401s are not retried", async () => {

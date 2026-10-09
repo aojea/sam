@@ -144,7 +144,7 @@ if cp_before and cp_after:
     errors = sum(v for c, v in codes.items() if c and c.startswith("5"))
     p99 = p99_of_delta(cp_before, cp_after, "sam_control_plane_http_request_duration_seconds")
     # Both replicas export the same store-derived gauge; take one.
-    nodes = tuple(max([v for (n, labels), v in s.items() if n == "sam_control_plane_enrolled_nodes" and dict(labels).get("role") == "sam:role:node"] or [0])
+    nodes = tuple(max([v for (n, labels), v in s.items() if n == "sam_control_plane_enrolled_nodes" and dict(labels).get("role") == "mesh:role:node"] or [0])
                   for s in (cp_before, cp_after))
     print(f"control plane: requests by code {codes}; p99 <= {p99} s; enrolled nodes {nodes[0]:.0f} -> {nodes[1]:.0f}")
     check("control plane: no 5xx during the run", errors == 0, f"{errors:.0f} responses")

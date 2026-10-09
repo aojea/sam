@@ -43,7 +43,7 @@ data:
         
     staticClients:
     # This ID becomes the 'aud' claim in the JWT consumed by sam-hub
-    - id: sam-mesh-audience
+    - id: agentmesh-audience
       name: 'SAM Mesh CLI'
       public: true # Allows PKCE flow for CLIs without exposing the secret
       redirectURIs:

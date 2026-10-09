@@ -242,7 +242,7 @@ func (s *testExtProcInspector) Process(stream extprocv3.ExternalProcessor_Proces
 		if err != nil {
 			return err
 		}
-		if samStruct := req.GetAttributes()["sam"]; samStruct != nil {
+		if samStruct := req.GetAttributes()["mesh"]; samStruct != nil {
 			if v := samStruct.GetFields()["destination"]; v != nil {
 				s.mu.Lock()
 				s.capturedDestAttr = v.GetStringValue()
@@ -277,7 +277,7 @@ func (s *testExtProcInspector) Process(stream extprocv3.ExternalProcessor_Proces
 				}
 			default:
 				// Request body + response body via ModeOverride, and attempt to mutate
-				// both a safe header (X-Custom-Inspector) and forbidden headers (Authorization, Host, X-Sam-Principal).
+				// both a safe header (X-Custom-Inspector) and forbidden headers (Authorization, Host, X-Mesh-Principal).
 				resp = &extprocv3.ProcessingResponse{
 					Response: &extprocv3.ProcessingResponse_RequestHeaders{
 						RequestHeaders: &extprocv3.HeadersResponse{
@@ -288,7 +288,7 @@ func (s *testExtProcInspector) Process(stream extprocv3.ExternalProcessor_Proces
 										{Header: &corev3.HeaderValue{Key: "X-Custom-Inspector", Value: "checked"}},
 										{Header: &corev3.HeaderValue{Key: "Authorization", Value: "Bearer attacker-token"}},
 										{Header: &corev3.HeaderValue{Key: "Host", Value: "evil.example.com"}},
-										{Header: &corev3.HeaderValue{Key: "X-Sam-Principal", Value: "spoofed"}},
+										{Header: &corev3.HeaderValue{Key: "X-Mesh-Principal", Value: "spoofed"}},
 									},
 								},
 							},
@@ -425,7 +425,7 @@ func TestExtProcEgressClient(t *testing.T) {
 		t.Fatalf("expected 0 exchanger calls on ImmediateResponse, got %d", exCalls.Load())
 	}
 
-	// 2. Full request + response body mutation, attributes["sam"], and forbidden header protection.
+	// 2. Full request + response body mutation, attributes["mesh"], and forbidden header protection.
 	reqOK := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"prompt":"my secret value"}`))
 	recOK := httptest.NewRecorder()
 	svc.Handler().ServeHTTP(recOK, reqOK)
@@ -447,8 +447,8 @@ func TestExtProcEgressClient(t *testing.T) {
 	if upstreamHdr.Get("Authorization") != "Bearer legit-broker-token" {
 		t.Fatalf("expected brokered Authorization to win over ext_proc mutation, got %q", upstreamHdr.Get("Authorization"))
 	}
-	if upstreamHdr.Get("X-Sam-Principal") != "" {
-		t.Fatalf("expected X-Sam-Principal mutation to be refused, got %q", upstreamHdr.Get("X-Sam-Principal"))
+	if upstreamHdr.Get("X-Mesh-Principal") != "" {
+		t.Fatalf("expected X-Mesh-Principal mutation to be refused, got %q", upstreamHdr.Get("X-Mesh-Principal"))
 	}
 	if recOK.Header().Get("X-Callout-Response") != "verified" {
 		t.Fatalf("expected response header X-Callout-Response=verified, got %q", recOK.Header().Get("X-Callout-Response"))
@@ -542,7 +542,7 @@ func TestGatewayExtProcServer(t *testing.T) {
 				Headers: &corev3.HeaderMap{
 					Headers: []*corev3.HeaderValue{
 						{Key: ":method", Value: "POST"},
-						{Key: ":path", Value: "/sam/mcp/github"},
+						{Key: ":path", Value: "/mesh/mcp/github"},
 						{Key: "authorization", Value: "Bearer " + b64Biscuit},
 					},
 				},
@@ -583,12 +583,12 @@ func TestGatewayExtProcServer(t *testing.T) {
 		if val == "" {
 			val = string(h.GetHeader().GetRawValue())
 		}
-		if strings.EqualFold(h.GetHeader().GetKey(), "X-Sam-Task-Id") && val == "task-extproc-gateway" {
+		if strings.EqualFold(h.GetHeader().GetKey(), "X-Mesh-Task-Id") && val == "task-extproc-gateway" {
 			foundTaskID = true
 		}
 	}
 	if !foundTaskID {
-		t.Fatalf("expected X-Sam-Task-Id=task-extproc-gateway in HeaderMutation, got %+v", setHdrs)
+		t.Fatalf("expected X-Mesh-Task-Id=task-extproc-gateway in HeaderMutation, got %+v", setHdrs)
 	}
 	_ = stream1.CloseSend()
 
@@ -604,7 +604,7 @@ func TestGatewayExtProcServer(t *testing.T) {
 				Headers: &corev3.HeaderMap{
 					Headers: []*corev3.HeaderValue{
 						{Key: ":method", Value: "POST"},
-						{Key: ":path", Value: "/sam/mcp/github"},
+						{Key: ":path", Value: "/mesh/mcp/github"},
 						{Key: "authorization", Value: "Bearer " + b64Biscuit},
 					},
 				},
@@ -641,7 +641,7 @@ func TestGatewayExtProcServer(t *testing.T) {
 				Headers: &corev3.HeaderMap{
 					Headers: []*corev3.HeaderValue{
 						{Key: ":method", Value: "POST"},
-						{Key: ":path", Value: "/sam/egress/api.github.com/repos/google/sam"},
+						{Key: ":path", Value: "/mesh/egress/api.github.com/repos/google/sam"},
 						{Key: "authorization", Value: "Bearer " + b64Biscuit},
 					},
 				},

@@ -46,7 +46,7 @@ func TestMultiMasterControlPlane(t *testing.T) {
 	// to resolve from a binding, so bind it to the test node's identity.
 	policyFile := filepath.Join(tmpDir, "policies.yaml")
 	policyContent := `bindings:
-  - role: sam:role:node
+  - role: mesh:role:node
     members: ["user:mock-user"]
 roles: []
 `

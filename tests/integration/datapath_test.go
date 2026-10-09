@@ -78,8 +78,8 @@ func TestIntegrationStdioDatapath(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Node B calls Node A's service via its local egress proxy
-	// URL format: http://localhost:<port>/sam/{peer_id}/{service_type}/{service_name}/{upstream_path}
-	postURL := fmt.Sprintf("http://%s/sam/%s/mcp/%s/", actualApiAddrB, peerIDA, serviceName)
+	// URL format: http://localhost:<port>/mesh/{peer_id}/{service_type}/{service_name}/{upstream_path}
+	postURL := fmt.Sprintf("http://%s/mesh/%s/mcp/%s/", actualApiAddrB, peerIDA, serviceName)
 
 	client := &http.Client{}
 
@@ -91,7 +91,7 @@ func TestIntegrationStdioDatapath(t *testing.T) {
 	var err error
 	for i := 0; i < 3; i++ {
 		postReq, _ := http.NewRequest("POST", postURL, bytes.NewBufferString(testMessage))
-		postReq.Header.Set(api.HeaderSamAuthentication, "Bearer "+apiToken)
+		postReq.Header.Set(api.HeaderMeshAuthentication, "Bearer "+apiToken)
 		postReq.Header.Set("Content-Type", "application/json")
 		postReq.Header.Set("Accept", "application/json")
 
@@ -157,7 +157,7 @@ func TestIntegrationHTTPDatapath(t *testing.T) {
 	dummyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hdrMu.Lock()
 		gotPeerID = r.Header.Get(api.HeaderPeerID)
-		gotBiscuit = r.Header.Get(api.HeaderSamBiscuit)
+		gotBiscuit = r.Header.Get(api.HeaderMeshBiscuit)
 		hdrMu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -202,14 +202,14 @@ func TestIntegrationHTTPDatapath(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Node B calls Node A's service via its local egress proxy
-	url := fmt.Sprintf("http://%s/sam/%s/mcp/%s/testpath", actualApiAddrB, peerIDA, serviceName)
+	url := fmt.Sprintf("http://%s/mesh/%s/mcp/%s/testpath", actualApiAddrB, peerIDA, serviceName)
 
 	client := &http.Client{}
 	var httpResp *http.Response
 	var err error
 	for i := 0; i < 3; i++ {
 		req, _ := http.NewRequest("GET", url, nil)
-		req.Header.Set(api.HeaderSamAuthentication, "Bearer "+apiToken)
+		req.Header.Set(api.HeaderMeshAuthentication, "Bearer "+apiToken)
 		// Spoof attempt: the backend must see the verified peer id, not this.
 		req.Header.Set(api.HeaderPeerID, "spoofed-peer")
 		req.Close = true // Force close the connection so the libp2p stream terminates and flushed accounting logs
@@ -244,7 +244,7 @@ func TestIntegrationHTTPDatapath(t *testing.T) {
 		t.Errorf("backend %s: got %q, want verified caller %q (spoofed inbound value must be overwritten)", api.HeaderPeerID, gotPeerID, peerIDB)
 	}
 	if gotBiscuit != "" {
-		t.Errorf("%s leaked to backend: %q", api.HeaderSamBiscuit, gotBiscuit)
+		t.Errorf("%s leaked to backend: %q", api.HeaderMeshBiscuit, gotBiscuit)
 	}
 	hdrMu.Unlock()
 

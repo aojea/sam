@@ -40,7 +40,7 @@ tests:
     asserts:
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: '"name": "sam:role:node".*"allowed_labels": \[\]'
+          pattern: '"name": "mesh:role:node".*"allowed_labels": \[\]'
 
   - it: router bootstrap token is spent after one use per replica
     set:
@@ -51,7 +51,7 @@ tests:
     asserts:
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: '"role": "sam:role:router", "max_usages": 3\}'
+          pattern: '"role": "mesh:role:router", "max_usages": 3\}'
       - notMatchRegex:
           path: spec.template.spec.containers[0].args[0]
           pattern: '999999'
@@ -63,7 +63,7 @@ tests:
     asserts:
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: '"name": "sam:role:node", "allowed_services": \[\]'
+          pattern: '"name": "mesh:role:node", "allowed_services": \[\]'
 
   - it: no identity may enroll as a node by default (fail closed)
     documentSelector:
@@ -72,7 +72,7 @@ tests:
     asserts:
       - notMatchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: '"role":"sam:role:node"'
+          pattern: '"role":"mesh:role:node"'
 
   - it: node enrollment is granted to exactly the configured members
     documentSelector:
@@ -84,7 +84,7 @@ tests:
     asserts:
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: '\{"members":\["user:test-user","group:eng"\],"role":"sam:role:node"\}'
+          pattern: '\{"members":\["user:test-user","group:eng"\],"role":"mesh:role:node"\}'
 
   - it: node role grants only the configured services
     documentSelector:
@@ -92,11 +92,11 @@ tests:
       value: Job
     set:
       bootstrap:
-        nodeServices: ["mcp://calculator", "system://sam.catalog"]
+        nodeServices: ["mcp://calculator", "system://mesh.catalog"]
     asserts:
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: '"name": "sam:role:node", "allowed_services": \["mcp://calculator","system://sam.catalog"\]'
+          pattern: '"name": "mesh:role:node", "allowed_services": \["mcp://calculator","system://mesh.catalog"\]'
 
   - it: node role grants only the configured label patterns
     documentSelector:
@@ -108,4 +108,4 @@ tests:
     asserts:
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: '"name": "sam:role:node".*"allowed_labels": \["region=\*","team=platform"\]'
+          pattern: '"name": "mesh:role:node".*"allowed_labels": \["region=\*","team=platform"\]'

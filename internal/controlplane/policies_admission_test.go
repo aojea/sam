@@ -124,7 +124,7 @@ func TestPoliciesRequiresAnAdmissibleNode(t *testing.T) {
 			if err := proto.Unmarshal(body, &policy); err != nil {
 				t.Fatalf("decoding PolicyConfigGetResponse: %v", err)
 			}
-			if want := `role("sam:role:node") <- group("users")`; !slices.Contains(policy.DatalogRules, want) {
+			if want := `role("mesh:role:node") <- group("users")`; !slices.Contains(policy.DatalogRules, want) {
 				t.Errorf("datalog_rules = %q, want it to contain %q", policy.DatalogRules, want)
 			}
 			if len(policy.ProtoReflect().GetUnknown()) > 0 {

@@ -12,7 +12,7 @@
       "type": "http",
       "url": "http://localhost:8080/mcp",
       "headers": {
-        "X-Sam-Authentication": "Bearer ${input:sam-api-token}"
+        "X-Mesh-Authentication": "Bearer ${input:sam-api-token}"
       }
     }
   }

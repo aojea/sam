@@ -57,7 +57,7 @@ Tunnel:       https://octocat-sam-abc123-8080.app.github.dev -> http://0.0.0.0:8
 Web Console:  https://octocat-sam-abc123-8080.app.github.dev/console
 Router Peer:  12D3KooWBzUDQCkZhz2rWrYBhpjcCH8VnrRNcwCW6DoF36iADYrY
 Admin Token:  sam_adm_…
-Join Token:   sam_tok_…
+Join Token:   mesh_tok_…
 
 To enroll a node:
   sam-node join https://octocat-sam-abc123-8080.app.github.dev --bootstrap-token-path /workspaces/sam/.sam-one/join-token
@@ -117,7 +117,7 @@ save the join token from the banner to a file, and join:
 
 ```bash
 URL=https://octocat-sam-abc123-8080.app.github.dev
-echo -n 'sam_tok_…' > join-token
+echo -n 'mesh_tok_…' > join-token
 
 sam-node join "$URL" --bootstrap-token-path join-token
 sam-node run --daemonize

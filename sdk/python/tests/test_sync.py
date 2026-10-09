@@ -30,7 +30,7 @@ from cid import make_cid
 from libp2p.peer.peerinfo import info_from_p2p_addr
 
 from agent_mesh import base58
-from agent_mesh._proto import sam_pb2 as pb
+from agent_mesh._proto import agentmesh_pb2 as pb
 from agent_mesh.auth import AUTH_PROTOCOL, auth_stream_handler, authenticate_with_peer
 from agent_mesh.biscuit import ROLE_ROUTER, verify_peer_biscuit
 from agent_mesh.controlplane import ROLE_NODE

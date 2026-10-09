@@ -248,7 +248,7 @@ func enrollMembersThenStop(t *testing.T, mesh *sdkMesh) *offlineMembers {
 	node := members.startNode(t, true)
 	members.socketClient = identityEvidenceSocketClient(nodeSocket)
 	waitForIdentityEvidenceSocket(t, members.socketClient)
-	getIdentityEvidenceJSON(t, members.socketClient, "/sam/identity", &members.nodeBefore)
+	getIdentityEvidenceJSON(t, members.socketClient, "/mesh/identity", &members.nodeBefore)
 	members.nodePeer, err = peer.Decode(members.nodeBefore.PeerId)
 	if err != nil {
 		t.Fatal(err)
@@ -277,7 +277,7 @@ func (o *offlineMembers) assertNodeBackUnderKey(t *testing.T, node *backgroundNo
 	t.Helper()
 	waitForIdentityEvidenceSocket(t, o.socketClient)
 	var after api.IdentityEvidenceResponse
-	getIdentityEvidenceJSON(t, o.socketClient, "/sam/identity", &after)
+	getIdentityEvidenceJSON(t, o.socketClient, "/mesh/identity", &after)
 	if after.PeerId != o.nodeBefore.PeerId {
 		t.Fatalf("node came back as %s, want its stored identity %s", after.PeerId, o.nodeBefore.PeerId)
 	}

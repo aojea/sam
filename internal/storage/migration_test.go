@@ -71,12 +71,12 @@ func TestMigrationConvertsSecondsToMillis(t *testing.T) {
 	}
 	exec(`INSERT INTO users (id, issuer, email, role, created_at) VALUES ('alice', 'https://idp', 'alice@example.com', 'user', ?)`, created.Unix())
 	exec(`INSERT INTO bootstrap_tokens (id, token_hash, role, max_usages, usages_count, description, created_at, expires_at, revoked_at)
-		VALUES ('old', 'old', 'sam:role:node', 2, 0, 'seconds era', ?, ?, NULL)`, created.Unix(), expires.Unix())
+		VALUES ('old', 'old', 'mesh:role:node', 2, 0, 'seconds era', ?, ?, NULL)`, created.Unix(), expires.Unix())
 	exec(`INSERT INTO bootstrap_tokens (id, token_hash, role, max_usages, usages_count, description, created_at, expires_at, revoked_at)
-		VALUES ('old-revoked', 'old-revoked', 'sam:role:node', 1, 0, 'seconds era', ?, ?, ?)`, created.Unix(), expires.Unix(), revoked.Unix())
+		VALUES ('old-revoked', 'old-revoked', 'mesh:role:node', 1, 0, 'seconds era', ?, ?, ?)`, created.Unix(), expires.Unix(), revoked.Unix())
 	// A row written in milliseconds must come through the guard untouched.
 	exec(`INSERT INTO bootstrap_tokens (id, token_hash, role, max_usages, usages_count, description, created_at, expires_at, revoked_at)
-		VALUES ('new', 'new', 'sam:role:node', 1, 0, 'millis era', ?, ?, NULL)`, created.UnixMilli(), expires.UnixMilli())
+		VALUES ('new', 'new', 'mesh:role:node', 1, 0, 'millis era', ?, ?, NULL)`, created.UnixMilli(), expires.UnixMilli())
 	exec(`INSERT INTO enrollment_requests (id, peer_id, public_key, token_id, status, created_at, resolved_at, resolved_by)
 		VALUES ('req', '12D3KooWPeer', X'00', 'old', ?, ?, ?, 'admin')`, int(api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED), created.Unix(), resolved.Unix())
 	exec(`INSERT INTO banned_identities (identity, banned_at) VALUES ('https://idp|mallory', ?)`, created.Unix())

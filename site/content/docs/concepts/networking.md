@@ -14,7 +14,7 @@ An agent does not speak to the mesh directly. It speaks to the `sam-node` on
 its own machine, through one of two listeners:
 
 - **TCP**, `127.0.0.1:8080` by default (`--bind-addr`). Every request must
-  carry the node's API token as `X-Sam-Authentication: Bearer <token>`.
+  carry the node's API token as `X-Mesh-Authentication: Bearer <token>`.
 - **A Unix socket**, `<data-dir>/sam.sock` by default (`--socket-path`),
   created with mode `0600`. No token is needed, because only the user who
   owns the socket can open it. `docker.sock` works the same way.
@@ -23,11 +23,11 @@ You can turn either listener off by passing an empty value. With
 `--bind-addr=`, the node has no listening port and no secret to manage. This
 is a good setup when everything that uses the node runs as the same user.
 
-The token travels in `X-Sam-Authentication` and not in `Authorization`, so
+The token travels in `X-Mesh-Authentication` and not in `Authorization`, so
 that `Authorization` always means the same thing: the credential for the
 service that is being called through the node. On the proxy path that header
 is forwarded unchanged. The endpoints that never forward anything (`/mcp`,
-`/v1/*`, `/sam/service/*`) also accept the token in `Authorization`, for
+`/v1/*`, `/mesh/service/*`) also accept the token in `Authorization`, for
 clients that cannot set a custom header.
 
 The API has four parts:
@@ -36,8 +36,8 @@ The API has four parts:
 |---|---|
 | `/mcp` | An MCP server (Streamable HTTP). Its tools are the mesh operations: list and discover services, find and describe tools, call a tool on a peer. |
 | `/v1/models`, `/v1/chat/completions`, `/v1/completions` | An OpenAI-compatible endpoint. `/v1/models` lists every model that a reachable `inference://` provider serves. A completion request is routed to a provider that serves the requested model. |
-| `/sam/<peer-id>/<type>/<name>/<path>` | A reverse proxy to one specific service on one specific node, for every service type. `<type>` is `mcp`, `inference` or `a2a`, and `<path>` is passed through to the backend. This is how a caller reaches an A2A agent: `/sam/<peer-id>/a2a/<name>/` serves the agent's card, rewritten for the mesh, and its JSON-RPC endpoint. |
-| `/sam/service/discover` | Service discovery over plain HTTP, with the same results as the `discover_remote_services` tool. |
+| `/mesh/<peer-id>/<type>/<name>/<path>` | A reverse proxy to one specific service on one specific node, for every service type. `<type>` is `mcp`, `inference` or `a2a`, and `<path>` is passed through to the backend. This is how a caller reaches an A2A agent: `/mesh/<peer-id>/a2a/<name>/` serves the agent's card, rewritten for the mesh, and its JSON-RPC endpoint. |
+| `/mesh/service/discover` | Service discovery over plain HTTP, with the same results as the `discover_remote_services` tool. |
 
 The [node API reference](../../reference/node-api/) lists every route.
 
@@ -59,7 +59,7 @@ service and, if the provider declared labels, what those labels are. Nothing
 is authorized on that basis. The provider's credential is verified when the
 connection is made.
 
-Every node also runs the built-in `system://sam.catalog` service, which
+Every node also runs the built-in `system://mesh.catalog` service, which
 answers the question "what do you host?" for callers whose credential grants
 it. `find_remote_tools` uses it to list a peer's tools.
 
@@ -115,7 +115,7 @@ through the `/v1` endpoint and, with `/v1/...` appended, through the proxy
 path.
 
 A caller can restrict which providers are acceptable with
-`X-Sam-Required-Labels: key=value[,key=value]`. The node then verifies the
+`X-Mesh-Required-Labels: key=value[,key=value]`. The node then verifies the
 provider's credential and confirms that every listed label is attested in it
 before forwarding. The header is removed before the request leaves the node.
 An operator can set a floor that every provider must meet with

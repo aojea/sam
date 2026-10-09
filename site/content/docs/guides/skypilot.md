@@ -65,7 +65,7 @@ Tunnel:       https://distinct-kent-bradford-elderly.trycloudflare.com -> http:/
 Web Console:  https://distinct-kent-bradford-elderly.trycloudflare.com/console
 Router Peer:  12D3KooWScRWXVx2zSaPWC7NectYnuyhaGxpLYkNgCkp2g2tkfkY
 Admin Token:  sam_adm_e4075529d72bb22d78446799f683dd89
-Join Token:   sam_tok_05a5d01cf091187c980e68e1bd7d7d7a
+Join Token:   mesh_tok_05a5d01cf091187c980e68e1bd7d7d7a
 
 To enroll a node:
   sam-node join https://distinct-kent-bradford-elderly.trycloudflare.com --bootstrap-token-path /home/gcpuser/sam-one/join-token
@@ -76,7 +76,7 @@ Copy the `API URL` and `Join Token` from the banner:
 
 ```bash
 URL="https://distinct-kent-bradford-elderly.trycloudflare.com"
-echo -n "sam_tok_05a5d01cf091187c980e68e1bd7d7d7a" > join-token
+echo -n "mesh_tok_05a5d01cf091187c980e68e1bd7d7d7a" > join-token
 ```
 
 ## 3. Verify the dataplane with two nodes
@@ -118,7 +118,7 @@ sky status sam-hub
 
 # Administer tokens and policies remotely using sam-one
 export SAM_ADMIN_TOKEN="sam_adm_..."
-sam-one token create --server "$URL" --role sam:role:node --max-usages 1
+sam-one token create --server "$URL" --role mesh:role:node --max-usages 1
 sam-one token list   --server "$URL"
 
 # Tear down the cluster when no longer needed

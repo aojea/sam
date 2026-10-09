@@ -36,7 +36,7 @@ import { after, before, test } from "node:test";
 import { AUTH_HANDLER_OPTIONS, AUTH_PROTOCOL, AuthRejectedError, authenticateWithPeer, authStreamHandler } from "./auth.ts";
 import { BiscuitVerificationError, ROLE_ROUTER, loadBiscuit, verifyPeerBiscuit } from "./biscuit.ts";
 import { ROLE_NODE } from "./controlplane.ts";
-import { BootstrapEnrollRequestSchema, BootstrapEnrollResponseSchema, ControlPlaneInfoResponseSchema, EnrollmentStatus, KeysResponseSchema, AuthFrameSchema, TokenRefreshRequestSchema, TokenRefreshResponseSchema } from "./gen/sam_pb.ts";
+import { BootstrapEnrollRequestSchema, BootstrapEnrollResponseSchema, ControlPlaneInfoResponseSchema, EnrollmentStatus, KeysResponseSchema, AuthFrameSchema, TokenRefreshRequestSchema, TokenRefreshResponseSchema } from "./gen/agentmesh_pb.ts";
 import { Identity } from "./identity.ts";
 import { HTTP_HANDLER_OPTIONS, HTTP_PROTOCOL, a2aEndpoint, httpIngressHandler } from "./libp2p-http.ts";
 import { LabelsNotSatisfiedError } from "./mcp.ts";
@@ -76,9 +76,9 @@ function mint(peerId: string, role: string, expiration = "2035-01-01T00:00:00Z",
 // What the control plane renders for a policy granting the node role every
 // A2A service on any target, and nothing else.
 const POLICY_RULES = [
-  `granted_service_all("a2a") <- role("sam:role:node")`,
-  `granted_service_all("sam:system") <- role("sam:role:node")`,
-  `target_unrestricted(true) <- role("sam:role:node")`,
+  `granted_service_all("a2a") <- role("mesh:role:node")`,
+  `granted_service_all("mesh:system") <- role("mesh:role:node")`,
+  `target_unrestricted(true) <- role("mesh:role:node")`,
 ];
 
 function proto(bytes: Uint8Array): Response {
@@ -465,7 +465,7 @@ test("join fails closed when the router is not a router", async () => {
     await impostor.handle(AUTH_PROTOCOL, authStreamHandler({ ownBiscuit: () => impostorBiscuit, trustedKeys: () => [cpKey] }));
     const addr = (impostor.getMultiaddrs()[0] as ReturnType<typeof multiaddr>).toString();
     const mesh = await AgentMesh.enroll({ controlPlaneUrl: "http://127.0.0.1:1", bootstrapToken: "sbt", fetch: fakeControlPlane([addr]) });
-    await assert.rejects(mesh.join(), /lacks expected role "sam:role:router"/);
+    await assert.rejects(mesh.join(), /lacks expected role "mesh:role:router"/);
   } finally {
     await impostor.stop();
   }
@@ -500,7 +500,7 @@ test("an explicit rejection is reported with its reason", async () => {
 });
 
 test("an egress floor stated at join is held on the HTTP path, and the provider is verified with or without one", async () => {
-  // A provider answering /sam/auth and /libp2p-http as a member does, with
+  // A provider answering /mesh/auth and /libp2p-http as a member does, with
   // whatever credential mintFor gives it; the handshakes it answers are counted.
   const handshakes: string[] = [];
   const serve = async (mintFor: (peerId: string) => Uint8Array): Promise<Libp2p> => {
@@ -560,7 +560,7 @@ test("an egress floor stated at join is held on the HTTP path, and the provider 
     plain.banned.add(provider.peerId.toString(), Date.now());
     await assert.rejects(plain.request(addrOf(provider), "a2a://agent", "/card"), /banned/);
     // Only nodes host services, as sam-node's checkPeerLabels requires.
-    await assert.rejects(held.request(addrOf(notANode), "a2a://agent", "/card"), /lacks expected role "sam:role:node"/);
+    await assert.rejects(held.request(addrOf(notANode), "a2a://agent", "/card"), /lacks expected role "mesh:role:node"/);
   } finally {
     await Promise.all([...sessions.map((s) => s.close()), provider.stop(), impostor.stop(), notANode.stop()]);
   }

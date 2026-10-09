@@ -103,8 +103,8 @@ Publishing is keyless: [`hack/publish-play.sh`](../../hack/publish-play.sh) driv
 
 Once launched, the app (installed as **SAM Connect**, application id `dev.sammesh.connect`) asks you to enroll, then shows the dashboard:
 
-1.  **Scan enrollment code**: The primary path. `sam-one` prints a single-use `sam://enroll?server=...&token=...` QR code at startup (and on demand with `sam-one token qr`); scan it, confirm the control plane hostname, and the app enrolls through `POST /enroll` with no identity provider involved. The phone's stock camera app can scan it too: the `sam://` link opens SAM Connect. Only `https://` control planes are accepted (plaintext `http://` for loopback only), because the control plane is the device's trust root. See [Your own mesh](../../site/content/docs/getting-started/your-own-mesh.md).
-2.  **Enter details manually**: Paste a whole `sam://enroll` link or a bare bootstrap token together with the **Control plane URL**, then **Join with token**. On a full control plane, mint the token with `POST /admin/bootstrap-tokens` (see `development/kind/run-local-node.sh`); on `sam-one`, `sam-one token create`. Below it, **Login & Enroll (Browser)** and **Device Login** are the OIDC alternatives: the app reads the issuer from the control plane's `/info` endpoint and opens a login.
+1.  **Scan enrollment code**: The primary path. `sam-one` prints a single-use `mesh://enroll?server=...&token=...` QR code at startup (and on demand with `sam-one token qr`); scan it, confirm the control plane hostname, and the app enrolls through `POST /enroll` with no identity provider involved. The phone's stock camera app can scan it too: the `mesh://` link opens SAM Connect. Only `https://` control planes are accepted (plaintext `http://` for loopback only), because the control plane is the device's trust root. See [Your own mesh](../../site/content/docs/getting-started/your-own-mesh.md).
+2.  **Enter details manually**: Paste a whole `mesh://enroll` link or a bare bootstrap token together with the **Control plane URL**, then **Join with token**. On a full control plane, mint the token with `POST /admin/bootstrap-tokens` (see `development/kind/run-local-node.sh`); on `sam-one`, `sam-one token create`. Below it, **Login & Enroll (Browser)** and **Device Login** are the OIDC alternatives: the app reads the issuer from the control plane's `/info` endpoint and opens a login.
 3.  **Local API Token**: The bearer token that secures the local sidecar REST API. It is generated on first launch and kept in the app's private storage; view, copy or regenerate it on the **Config** tab. There is no default: Android loopback is shared by every installed app, so a fixed value would let any of them act as this node.
 4.  **Labels**: Set on the **Config** tab *before* enrolling; they are attested into the node's Biscuit at that point.
 5.  **Start Node**: Launches the Go node runtime in the background. It will bind its local MCP sidecar to `127.0.0.1:5005`.
@@ -154,7 +154,7 @@ You can query the phone's telemetry from a remote machine (or another node) usin
     # Query the local SAM node proxy for tools hosted by the phone-sensors peer
     # (-token is your own node's API token, not the phone's)
     go run cmd/mcp-client/main.go \
-      -url "http://localhost:8080/sam/<PHONE_PEER_ID>/mcp/phone-sensors" \
+      -url "http://localhost:8080/mesh/<PHONE_PEER_ID>/mcp/phone-sensors" \
       -token "$(cat ~/.config/sam-mesh/api-token)" \
       -list
     ```
@@ -165,7 +165,7 @@ You can query the phone's telemetry from a remote machine (or another node) usin
 2.  **Query the location**:
     ```bash
     go run cmd/mcp-client/main.go \
-      -url "http://localhost:8080/sam/<PHONE_PEER_ID>/mcp/phone-sensors" \
+      -url "http://localhost:8080/mesh/<PHONE_PEER_ID>/mcp/phone-sensors" \
       -token "$(cat ~/.config/sam-mesh/api-token)" \
       -tool "get_location"
     ```

@@ -196,7 +196,7 @@ Scan with the SAM app to enroll a device into used-encryption-assumptions-miller
 █████████████████████████████████████████████████████████
 ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
 
-sam://enroll?server=https%3A%2F%2Fused-encryption-assumptions-miller.trycloudflare.com&token=[redacted]
+mesh://enroll?server=https%3A%2F%2Fused-encryption-assumptions-miller.trycloudflare.com&token=[redacted]
 Token ID: 2542ac5fa60e (revoke early with: sam-one token revoke 2542ac5fa60e)
 ```
 
@@ -218,7 +218,7 @@ sam-one token qr --data-dir ~/sam-one \
   --server https://YOUR-HOSTNAME.trycloudflare.com
 ```
 
-If scanning is unavailable, paste the complete `sam://enroll?...` link
+If scanning is unavailable, paste the complete `mesh://enroll?...` link
 from the operator into **Enrollment token** under **Enter details
 manually**. Check the populated **Control plane URL**, then tap **Join
 with token**. The link contains a credential. Keep it and the QR code out
@@ -367,8 +367,8 @@ app in the foreground.
 From any enrolled node, the phone is a peer with an MCP service:
 
 ```bash
-mcp-client -url "http://127.0.0.1:8080/sam/<phone-peer-id>/mcp/phone-sensors" -token "$TOKEN" -list
-mcp-client -url "http://127.0.0.1:8080/sam/<phone-peer-id>/mcp/phone-sensors" -token "$TOKEN" -tool get_battery_status
+mcp-client -url "http://127.0.0.1:8080/mesh/<phone-peer-id>/mcp/phone-sensors" -token "$TOKEN" -list
+mcp-client -url "http://127.0.0.1:8080/mesh/<phone-peer-id>/mcp/phone-sensors" -token "$TOKEN" -tool get_battery_status
 ```
 
 ```json

@@ -70,10 +70,10 @@ def test_tokens_minted_here_verify_and_report_their_facts():
     token = ba.BiscuitBuilder(
         'node("12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB");'
         "expiration(2035-01-01T00:00:00Z); expiration(2034-06-01T00:00:00Z);"
-        'role("sam:role:node"); label("team", "plat\\"form");'
+        'role("mesh:role:node"); label("team", "plat\\"form");'
     ).build(kp.private_key)
     verified = verify_peer_biscuit(token.to_bytes(), "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB", [kp.public_key.to_bytes()], NOW)
     # The earliest expiration binds.
     assert verified.expiration == datetime(2034, 6, 1, tzinfo=timezone.utc)
     assert verified.labels == {"team": 'plat"form'}
-    assert verified.roles == ["sam:role:node"]
+    assert verified.roles == ["mesh:role:node"]

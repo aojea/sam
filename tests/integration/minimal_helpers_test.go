@@ -278,7 +278,7 @@ func startMockRouterWithControlPlaneKey(t *testing.T) (peer.ID, string, ed25519.
 		_ = writer.WriteMsg(respBytes)
 	})
 
-	kdht, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	kdht, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mesh"))
 	if err != nil {
 		t.Fatalf("failed to create DHT on mock router: %v", err)
 	}
@@ -811,11 +811,11 @@ func waitForDiscoverableService(t *testing.T, apiAddr, token, svcType, svcName s
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		req, err := http.NewRequest(http.MethodGet,
-			"http://"+apiAddr+"/sam/service/discover?type="+svcType+"&name="+svcName, nil)
+			"http://"+apiAddr+"/mesh/service/discover?type="+svcType+"&name="+svcName, nil)
 		if err != nil {
 			t.Fatalf("NewRequest: %v", err)
 		}
-		req.Header.Set(api.HeaderSamAuthentication, "Bearer "+token)
+		req.Header.Set(api.HeaderMeshAuthentication, "Bearer "+token)
 
 		resp, err := http.DefaultClient.Do(req)
 		if err == nil {

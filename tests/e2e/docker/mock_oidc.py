@@ -115,17 +115,17 @@ class Handler(BaseHTTPRequestHandler):
 
             # Assign groups and roles based on client_id
             groups = ['data-scientist']
-            roles = ['sam:role:node']
+            roles = ['mesh:role:node']
             if client_id == 'admin-client':
                 groups = ['admin']
-                roles = ['sam:role:admin']
+                roles = ['mesh:role:admin']
             elif client_id == 'router-client':
                 groups = ['routers']
-                roles = ['sam:role:router']
+                roles = ['mesh:role:router']
 
             payload = {
                 'iss': ISSUER,
-                'aud': 'sam-mesh-audience',
+                'aud': 'agentmesh-audience',
                 'sub': 'test-user',
                 'exp': int(time.time()) + 3600,
                 'groups': groups,

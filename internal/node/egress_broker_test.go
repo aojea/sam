@@ -51,9 +51,9 @@ func TestEgressServicePreserveHostAndForwardContext(t *testing.T) {
 	operatorChain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotHost = r.Host
 		gotAuth = r.Header.Get("Authorization")
-		gotPrincipal = r.Header.Get(api.HeaderSamPrincipal)
-		gotRoles = r.Header.Get(api.HeaderSamRoles)
-		gotTask = r.Header.Get(api.HeaderSamTask)
+		gotPrincipal = r.Header.Get(api.HeaderMeshPrincipal)
+		gotRoles = r.Header.Get(api.HeaderMeshRoles)
+		gotTask = r.Header.Get(api.HeaderMeshTask)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer operatorChain.Close()
@@ -80,7 +80,7 @@ func TestEgressServicePreserveHostAndForwardContext(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://localhost/bigquery/v2/projects/p/datasets", nil)
 	// Include spoofed headers that must be stripped and replaced by verified Biscuit context.
 	req.Header.Set("Authorization", "Bearer caller-secret-must-be-stripped")
-	req.Header.Set(api.HeaderSamPrincipal, "spoofed-principal")
+	req.Header.Set(api.HeaderMeshPrincipal, "spoofed-principal")
 	req = req.WithContext(WithCallerBiscuit(req.Context(), taskBiscuit))
 
 	rec := httptest.NewRecorder()
@@ -95,12 +95,12 @@ func TestEgressServicePreserveHostAndForwardContext(t *testing.T) {
 		t.Fatalf("expected brokered Authorization, got %q", gotAuth)
 	}
 	if gotPrincipal != "alice@example.com" {
-		t.Fatalf("expected X-Sam-Principal alice@example.com, got %q", gotPrincipal)
+		t.Fatalf("expected X-Mesh-Principal alice@example.com, got %q", gotPrincipal)
 	}
 	if !strings.Contains(gotRoles, api.RoleNode) {
-		t.Fatalf("expected X-Sam-Roles to contain %s, got %q", api.RoleNode, gotRoles)
+		t.Fatalf("expected X-Mesh-Roles to contain %s, got %q", api.RoleNode, gotRoles)
 	}
 	if gotTask != "tasks/inspect-chain" {
-		t.Fatalf("expected X-Sam-Task tasks/inspect-chain, got %q", gotTask)
+		t.Fatalf("expected X-Mesh-Task tasks/inspect-chain, got %q", gotTask)
 	}
 }

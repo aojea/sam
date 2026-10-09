@@ -155,7 +155,7 @@ func TestFacade_Completions_ForwardsToRemote(t *testing.T) {
 		b, _ := io.ReadAll(r.Body)
 		gotBody = string(b)
 		gotAuth = r.Header.Get("Authorization")
-		gotSamAuth = r.Header.Get(api.HeaderSamAuthentication)
+		gotSamAuth = r.Header.Get(api.HeaderMeshAuthentication)
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -164,21 +164,21 @@ func TestFacade_Completions_ForwardsToRemote(t *testing.T) {
 	// Post-gate state: the gate stripped the credential it consumed; a
 	// surviving Authorization header is the backend's own credential.
 	req.Header.Set("Authorization", "Bearer backend-credential")
-	req.Header.Set(api.HeaderSamAuthentication, "Bearer sidecar-token")
+	req.Header.Set(api.HeaderMeshAuthentication, "Bearer sidecar-token")
 	rec := httptest.NewRecorder()
 	f.handleCompletions(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want %d", rec.Code, http.StatusOK)
 	}
-	if want := "/sam/peerA/inference/srvA/v1/chat/completions"; gotPath != want {
+	if want := "/mesh/peerA/inference/srvA/v1/chat/completions"; gotPath != want {
 		t.Errorf("forwarded path: got %q, want %q", gotPath, want)
 	}
 	if gotBody != body {
 		t.Errorf("forwarded body: got %q, want %q", gotBody, body)
 	}
 	if gotSamAuth != "" {
-		t.Errorf("%s must never travel off-node, got %q", api.HeaderSamAuthentication, gotSamAuth)
+		t.Errorf("%s must never travel off-node, got %q", api.HeaderMeshAuthentication, gotSamAuth)
 	}
 	if gotAuth != "Bearer backend-credential" {
 		t.Errorf("backend Authorization must pass through, got %q", gotAuth)
@@ -201,7 +201,7 @@ func TestFacade_Completions_LegacyCompletionsPath(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/completions", strings.NewReader(`{"model":"m1","prompt":"hi"}`))
 	f.handleCompletions(httptest.NewRecorder(), req)
 
-	if want := "/sam/peerA/inference/srvA/v1/completions"; gotPath != want {
+	if want := "/mesh/peerA/inference/srvA/v1/completions"; gotPath != want {
 		t.Errorf("forwarded path: got %q, want %q", gotPath, want)
 	}
 }
@@ -348,7 +348,7 @@ func TestFacade_GossipViewServesRegistryMiss(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m-gossip"}`))
 	f.handleCompletions(httptest.NewRecorder(), req)
 
-	if want := "/sam/peerG/inference/srvG/v1/chat/completions"; gotPath != want {
+	if want := "/mesh/peerG/inference/srvG/v1/chat/completions"; gotPath != want {
 		t.Errorf("forwarded path: got %q, want %q", gotPath, want)
 	}
 	if interestCalls != 1 {
@@ -376,7 +376,7 @@ func TestFacade_RegistryHitBeatsGossipView(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m1"}`))
 	f.handleCompletions(httptest.NewRecorder(), req)
 
-	if want := "/sam/peerA/inference/srvA/v1/chat/completions"; gotPath != want {
+	if want := "/mesh/peerA/inference/srvA/v1/chat/completions"; gotPath != want {
 		t.Errorf("forwarded path: got %q, want %q", gotPath, want)
 	}
 }
@@ -599,7 +599,7 @@ func TestFacade_Completions_ContentfulRequiredLabelsNamingNoLabelIsRejected(t *t
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
 		strings.NewReader(`{"model":"m1","messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set(api.HeaderSamRequiredLabels, ",,")
+	req.Header.Set(api.HeaderMeshRequiredLabels, ",,")
 	rec := httptest.NewRecorder()
 	f.handleCompletions(rec, req)
 
@@ -711,19 +711,19 @@ func TestFacade_Completions_LabelRequirement(t *testing.T) {
 	var gotPath, gotLabelsHeader string
 	f.forward = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		gotLabelsHeader = r.Header.Get(api.HeaderSamRequiredLabels)
+		gotLabelsHeader = r.Header.Get(api.HeaderMeshRequiredLabels)
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m1"}`))
-	req.Header.Set(api.HeaderSamRequiredLabels, "region=eu-de")
+	req.Header.Set(api.HeaderMeshRequiredLabels, "region=eu-de")
 	rec := httptest.NewRecorder()
 	f.handleCompletions(rec, req)
 
-	if want := "/sam/peerEU/inference/srvEU/v1/chat/completions"; gotPath != want {
+	if want := "/mesh/peerEU/inference/srvEU/v1/chat/completions"; gotPath != want {
 		t.Errorf("forwarded path: got %q, want %q", gotPath, want)
 	}
 	if gotLabelsHeader != "" {
-		t.Errorf("%s must not travel to the provider, got %q", api.HeaderSamRequiredLabels, gotLabelsHeader)
+		t.Errorf("%s must not travel to the provider, got %q", api.HeaderMeshRequiredLabels, gotLabelsHeader)
 	}
 	if len(attested) != 1 || attested[0] != [2]string{"peerEU", "eu-de"} {
 		t.Errorf("expected one attestation for peerEU/eu-de, got %v", attested)
@@ -731,7 +731,7 @@ func TestFacade_Completions_LabelRequirement(t *testing.T) {
 
 	// No provider satisfies the requirement (valid entry, no claimant).
 	req = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m1"}`))
-	req.Header.Set(api.HeaderSamRequiredLabels, "region=oc")
+	req.Header.Set(api.HeaderMeshRequiredLabels, "region=oc")
 	rec = httptest.NewRecorder()
 	f.handleCompletions(rec, req)
 	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "no_eligible_provider") {
@@ -740,7 +740,7 @@ func TestFacade_Completions_LabelRequirement(t *testing.T) {
 
 	// Malformed label entries are rejected outright.
 	req = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m1"}`))
-	req.Header.Set(api.HeaderSamRequiredLabels, "noequals")
+	req.Header.Set(api.HeaderMeshRequiredLabels, "noequals")
 	rec = httptest.NewRecorder()
 	f.handleCompletions(rec, req)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_request") {
@@ -774,11 +774,11 @@ func TestFacade_Completions_LabelAttestation(t *testing.T) {
 		})
 
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m1"}`))
-		req.Header.Set(api.HeaderSamRequiredLabels, "region=eu-de")
+		req.Header.Set(api.HeaderMeshRequiredLabels, "region=eu-de")
 		rec := httptest.NewRecorder()
 		f.handleCompletions(rec, req)
 
-		if want := "/sam/peerEU2/inference/srv2/v1/chat/completions"; gotPath != want {
+		if want := "/mesh/peerEU2/inference/srv2/v1/chat/completions"; gotPath != want {
 			t.Errorf("forwarded path: got %q, want %q", gotPath, want)
 		}
 	})
@@ -791,7 +791,7 @@ func TestFacade_Completions_LabelAttestation(t *testing.T) {
 		})
 
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m1"}`))
-		req.Header.Set(api.HeaderSamRequiredLabels, "region=eu-de")
+		req.Header.Set(api.HeaderMeshRequiredLabels, "region=eu-de")
 		rec := httptest.NewRecorder()
 		f.handleCompletions(rec, req)
 
@@ -976,7 +976,7 @@ func TestFacade_Completions_FloorGatesSilentCaller(t *testing.T) {
 		return f
 	}
 	silentRequest := func() *http.Request {
-		// No X-Sam-Required-Labels header: the caller requires nothing.
+		// No X-Mesh-Required-Labels header: the caller requires nothing.
 		return httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m1"}`))
 	}
 

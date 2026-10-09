@@ -51,7 +51,7 @@ func TestEnrollStatusPollingCollectsBiscuit(t *testing.T) {
 		ListenAddr:            "127.0.0.1:0",
 		AdminToken:            adminToken,
 		OIDCIssuer:            oidcURL,
-		AllowedAudiences:      []string{"sam-mesh-audience"},
+		AllowedAudiences:      []string{"agentmesh-audience"},
 		AutoApproveEnrollment: false,
 	}
 	srv, err := controlplane.NewServer(opts, store)
@@ -106,7 +106,7 @@ func TestEnrollStatusPollingCollectsBiscuit(t *testing.T) {
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	adminReqBody := []byte(`{
-		"role": "sam:role:node",
+		"role": "mesh:role:node",
 		"ttl_hours": 2,
 		"max_usages": 1,
 		"description": "enroll status polling"

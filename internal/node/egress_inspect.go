@@ -103,7 +103,7 @@ func buildSamAttributesStruct(destName string, ec egressCallerContext) map[strin
 	if err != nil {
 		return nil
 	}
-	return map[string]*structpb.Struct{"sam": st}
+	return map[string]*structpb.Struct{"mesh": st}
 }
 
 // writeImmediateResponse writes an ImmediateResponse from an ext_proc processor
@@ -214,10 +214,10 @@ func (s *EgressService) serveInspectedEgress(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	// Strip caller auth and X-Sam-* headers on a working copy before any inspector sees them.
+	// Strip caller auth and X-Mesh-* headers on a working copy before any inspector sees them.
 	for name := range r.Header {
 		lower := strings.ToLower(name)
-		if lower == "authorization" || lower == "cookie" || strings.HasPrefix(lower, "x-sam-") || strings.HasPrefix(lower, "x-forwarded-") || strings.EqualFold(name, api.HeaderPeerID) {
+		if lower == "authorization" || lower == "cookie" || strings.HasPrefix(lower, "x-mesh-") || strings.HasPrefix(lower, "x-forwarded-") || strings.EqualFold(name, api.HeaderPeerID) {
 			delete(r.Header, name)
 		}
 	}

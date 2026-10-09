@@ -61,10 +61,10 @@ func TestEgressPolicyIsDistributedToServingNodes(t *testing.T) {
 	policy := `{
 	  "roles": [
 	    {"name": "pep", "allowed_services": ["egress://api.github.com"], "allowed_targets": ["*"], "allowed_labels": ["*"]},
-	    {"name": "sam:role:node", "allowed_services": ["egress://mam.internal.example.com"], "allowed_targets": ["*"], "allowed_labels": ["*"],
+	    {"name": "mesh:role:node", "allowed_services": ["egress://mam.internal.example.com"], "allowed_targets": ["*"], "allowed_labels": ["*"],
 	     "http": [{"service": "egress://mam.internal.example.com", "methods": ["GET"], "paths": ["/v2/public/*"]}]}
 	  ],
-	  "bindings": [{"role": "sam:role:node", "members": ["sam:system:authenticated"]}],
+	  "bindings": [{"role": "mesh:role:node", "members": ["mesh:system:authenticated"]}],
 	  "egress": [
 	    {"name": "api.github.com", "credential": "github-eu", "served_by": ["pep"]},
 	    {"name": "mam.internal.example.com", "target_url": "http://mam.internal.example.com:8080", "served_by": ["site=dc1"]}
@@ -191,8 +191,8 @@ func TestEgressPolicyIsDistributedToServingNodes(t *testing.T) {
 	for _, want := range []string{
 		`granted_service_exact("egress", "api.github.com") <- role("pep")`,
 		`granted_service_exact("egress", "mam.internal.example.com") <- label("site", "dc1")`,
-		`http_granted_service_exact("egress", "mam.internal.example.com") <- role("sam:role:node")`,
-		`granted_method("egress", "mam.internal.example.com", ["GET"]) <- role("sam:role:node")`,
+		`http_granted_service_exact("egress", "mam.internal.example.com") <- role("mesh:role:node")`,
+		`granted_method("egress", "mam.internal.example.com", ["GET"]) <- role("mesh:role:node")`,
 	} {
 		if !slices.Contains(rules.DatalogRules, want) {
 			t.Errorf("datalog_rules lack %q:\n%s", want, strings.Join(rules.DatalogRules, "\n"))

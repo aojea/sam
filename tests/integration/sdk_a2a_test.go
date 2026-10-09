@@ -121,11 +121,11 @@ func TestNativeSDKA2A(t *testing.T) {
 	// A sam-node reaches the same agent card through its egress proxy, and
 	// rewrites the card's URL so an A2A client behind the node can use it.
 	for _, a := range agents {
-		status, body := egressGet(t, mesh.nodeAPI, "node-token", "/sam/"+a.peerID+"/a2a/agent/.well-known/agent-card.json")
+		status, body := egressGet(t, mesh.nodeAPI, "node-token", "/mesh/"+a.peerID+"/a2a/agent/.well-known/agent-card.json")
 		if status != 200 || !strings.Contains(body, `"Echo agent"`) {
 			t.Fatalf("agent card of the %s agent through the node: %d %s", a.name, status, body)
 		}
-		if !strings.Contains(body, "/sam/"+a.peerID+"/a2a/agent") {
+		if !strings.Contains(body, "/mesh/"+a.peerID+"/a2a/agent") {
 			t.Fatalf("agent card of the %s agent through the node does not name the mesh path: %s", a.name, body)
 		}
 	}

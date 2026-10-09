@@ -82,7 +82,7 @@ test("tokens minted here verify and report their facts", async () => {
   builder.addFact(wasm.Fact.fromString('node("12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB")'));
   builder.addFact(wasm.Fact.fromString("expiration(2035-01-01T00:00:00Z)"));
   builder.addFact(wasm.Fact.fromString("expiration(2034-06-01T00:00:00Z)"));
-  builder.addFact(wasm.Fact.fromString('role("sam:role:node")'));
+  builder.addFact(wasm.Fact.fromString('role("mesh:role:node")'));
   builder.addFact(wasm.Fact.fromString('label("team", "plat\\"form")'));
   const token = builder.build(kp.getPrivateKey());
   const key = new Uint8Array(Buffer.from(kp.getPublicKey().toString().replace(/^ed25519\//, ""), "hex"));
@@ -91,7 +91,7 @@ test("tokens minted here verify and report their facts", async () => {
   // The earliest expiration binds.
   assert.equal(verified.expiration.toISOString(), "2034-06-01T00:00:00.000Z");
   assert.deepEqual(verified.labels, { team: 'plat"form' });
-  assert.deepEqual(verified.roles, ["sam:role:node"]);
+  assert.deepEqual(verified.roles, ["mesh:role:node"]);
 });
 
 test("a fact-generation pass longer than biscuit-wasm's own 1 ms budget still completes", async () => {

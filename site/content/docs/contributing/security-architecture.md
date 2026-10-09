@@ -194,7 +194,7 @@ control-plane role resolution (`resolveRoles`) and node-side Datalog generation
 To prevent accidental open bindings and Datalog rule injection:
 
 - Bare `<prefix>:*` (such as `user:*` or `email:*`) is rejected as a disguised
-  `sam:system:authenticated`.
+  `mesh:system:authenticated`.
 - Interior wildcards (`a*b`) and wildcards on `node:<peer_id>` are rejected.
 - `ValidateBindingMember` and `ValidateRoleName` reject `"`, `\`, and control
   characters while permitting spaces, `;`, and UTF-8 (such as
@@ -205,7 +205,7 @@ To prevent accidental open bindings and Datalog rule injection:
 
 Without separation between human and workload OIDC tokens, any workload token
 from a trusted `--issuer` could call `/user/bootstrap-tokens` and mint
-`sam:role:node` bootstrap tokens.
+`mesh:role:node` bootstrap tokens.
 
 `--workload-issuer` (a subset of `--issuer`, automatically added to the OIDC
 verifier pool) classifies tokens as workload identities:
@@ -351,8 +351,8 @@ as a standard OIDC issuer:
 | Surface | Mechanism | What it binds | Replay defense |
 | :--- | :--- | :--- | :--- |
 | **libp2p data path** (node-to-node, node-to-router) | Channel binding: Block 0 `client_peer_id` must equal the `connection_peer_id` authenticated by the libp2p Noise or TLS handshake. | The transport private key | None needed; the token is unusable on any other connection. |
-| **Control plane mesh protocol** (`/enroll`, `/enroll/status`, `/register`, `/refresh`, `/routers/lease`, `/token/exchange`, `/sts/token`) | Ed25519 signature over `sam:<endpoint>:<peer_id>:<challenge_unix_ms>`, carried in protobuf fields (`challenge_unix_ms`, `challenge_signature`) or `X-Sam-Challenge-Ts` / `X-Sam-Challenge-Sig` on `GET /enroll/status`. | Endpoint name, peer ID, timestamp | 5-minute freshness window (`challengeMaxAge`) with one-shot `Date`-header clock-skew recovery on `401`; `/refresh` additionally redeems only the last Biscuit issued to the peer. |
-| **Control plane read & report endpoints** (`GET /policies`, `GET /egress`, `GET /revocations`, `POST /nodes/catalog`) | Bearer Member Biscuit of an admitted node (`admittedNodeWithChallenge`) plus `X-Sam-Challenge-Ts` / `X-Sam-Challenge-Sig` signed over `sam:<endpoint>:<peer_id>:<ts>` (`policies`, `egress`, `revocations`, `nodes-catalog`), verified against the node's stored Ed25519 public key via `verifyFreshChallenge`. | Enrolled node credential, endpoint name, peer ID, timestamp | 5-minute freshness window (`challengeMaxAge`) with one-shot `Date`-header clock-skew recovery on `401`, bounded by Biscuit TTL and ban/revocation list. |
+| **Control plane mesh protocol** (`/enroll`, `/enroll/status`, `/register`, `/refresh`, `/routers/lease`, `/token/exchange`, `/sts/token`) | Ed25519 signature over `sam:<endpoint>:<peer_id>:<challenge_unix_ms>`, carried in protobuf fields (`challenge_unix_ms`, `challenge_signature`) or `X-Mesh-Challenge-Ts` / `X-Mesh-Challenge-Sig` on `GET /enroll/status`. | Endpoint name, peer ID, timestamp | 5-minute freshness window (`challengeMaxAge`) with one-shot `Date`-header clock-skew recovery on `401`; `/refresh` additionally redeems only the last Biscuit issued to the peer. |
+| **Control plane read & report endpoints** (`GET /policies`, `GET /egress`, `GET /revocations`, `POST /nodes/catalog`) | Bearer Member Biscuit of an admitted node (`admittedNodeWithChallenge`) plus `X-Mesh-Challenge-Ts` / `X-Mesh-Challenge-Sig` signed over `sam:<endpoint>:<peer_id>:<ts>` (`policies`, `egress`, `revocations`, `nodes-catalog`), verified against the node's stored Ed25519 public key via `verifyFreshChallenge`. | Enrolled node credential, endpoint name, peer ID, timestamp | 5-minute freshness window (`challengeMaxAge`) with one-shot `Date`-header clock-skew recovery on `401`, bounded by Biscuit TTL and ban/revocation list. |
 | **OAuth 2.1 external client surface** (`/oauth/authorize`, `/oauth/token`, `/mcp` over HTTPS) | Authorization Code + PKCE (`S256`) on the code grant. The `client_peer_id` of the minted Biscuit is the calling node's when a node calls, otherwise the `actor_peer_id` form parameter or the control plane's own peer ID (`resolveDefaultActorPeer`). | A claimed peer ID (the Biscuit is a bearer token on the HTTPS `/mcp` hop unless sender-constrained with DPoP; see §5.2) | Single-use authorization codes with PKCE verifier check on the code exchange; none on the resulting bearer Biscuit. |
 
 ---
@@ -367,11 +367,11 @@ as a standard OIDC issuer:
 1. Envoy `ext_authz` (`/ext_authz` and
    `/envoy.service.auth.v3.Authorization/Check`) evaluates standing Datalog
    policy and `tar_block` rules on incoming Envoy `CheckRequest` calls. The
-   caller presents a Biscuit (`X-Sam-Biscuit`, or a Bearer value in
-   `X-Sam-Authentication` or `Authorization`) or a platform JWT, which
+   caller presents a Biscuit (`X-Mesh-Biscuit`, or a Bearer value in
+   `X-Mesh-Authentication` or `Authorization`) or a platform JWT, which
    `sam-node` exchanges at the control plane into a delegated Biscuit. On `OK`
-   it returns `X-Sam-Biscuit`, `X-Sam-Principal`, `X-Sam-Roles`,
-   `X-Sam-Task-Id` and, for `egress://` targets with a credential broker, the
+   it returns `X-Mesh-Biscuit`, `X-Mesh-Principal`, `X-Mesh-Roles`,
+   `X-Mesh-Task-Id` and, for `egress://` targets with a credential broker, the
    brokered upstream `Authorization` header.
 2. Envoy `ext_proc` (`/envoy.service.ext_proc.v3.ExternalProcessor/Process`)
    inspects buffered JSON-RPC request bodies so `operation.allowed_tools` on
@@ -383,9 +383,9 @@ as a standard OIDC issuer:
    `/.well-known/oauth-protected-resource` pointing unauthenticated MCP clients
    to the control plane's OAuth 2.1 Authorization Server.
 
-On `/sam/{peer}/{type}/{svc}/...`, the `Authorization` header is reserved for
+On `/mesh/{peer}/{type}/{svc}/...`, the `Authorization` header is reserved for
 the destination service's own credential and passes through untouched; callers
-pass their SAM Biscuit or JWT in `X-Sam-Authentication`. Transparent JWT
+pass their SAM Biscuit or JWT in `X-Mesh-Authentication`. Transparent JWT
 exchange on `Authorization: Bearer <JWT>` applies only to `/mcp` and `/v1/*`.
 
 #### Content inspection at the egress node (`inspection.inspectors`)
@@ -406,14 +406,14 @@ inspector never sees destination credentials:
 3. Envoy `ext_proc` callouts (`ext_proc`) stream headers, bodies, and trailers
    over gRPC (`internal/envoy`, backed by `google.golang.org/grpc` and
    `github.com/envoyproxy/go-control-plane/envoy`) with
-   `ProcessingRequest.attributes["sam"]` populated (`principal`, `roles`,
+   `ProcessingRequest.attributes["mesh"]` populated (`principal`, `roles`,
    `actor_node`, `task`, `service`, `destination`). Any mutation to
-   `Authorization`, `Host`, `:authority`, or `X-Sam-*` by the processor is
+   `Authorization`, `Host`, `:authority`, or `X-Mesh-*` by the processor is
    refused.
 4. Operator inspection chains (`preserve_host`, `forward_context`) route
    through an explicit outbound proxy (such as Secure Web Proxy or
    `agentgateway`) while preserving the destination `Host` header and optionally
-   forwarding `X-Sam-Principal`, `X-Sam-Roles`, and `X-Sam-Task`.
+   forwarding `X-Mesh-Principal`, `X-Mesh-Roles`, and `X-Mesh-Task`.
 
 #### Named TCP tunnels (`EGRESS_MODE_TCP`)
 
@@ -442,8 +442,8 @@ flowchart LR
   Mesh(["SAM Mesh & Providers"])
 
   Harness -- "Plain HTTP to sam-node:8080/mcp & /v1" --> OSProxy
-  OSProxy -- "Injects X-Sam-Authentication:<br/>Bearer <Sealed-Task-Biscuit>" --> SamNode
-  SamNode -- "X-Sam-Biscuit: <Sealed-Task-Biscuit>" --> Mesh
+  OSProxy -- "Injects X-Mesh-Authentication:<br/>Bearer <Sealed-Task-Biscuit>" --> SamNode
+  SamNode -- "X-Mesh-Biscuit: <Sealed-Task-Biscuit>" --> Mesh
 ```
 
 The orchestrator exchanges and attenuates a Task Biscuit via `POST /oauth/token`
@@ -581,9 +581,9 @@ response directly).
    `MaxTARBytes = 4096`) run before any Datalog authorizer is constructed in Go,
    TypeScript, and Python.
 4. Egress nodes prevent confused-deputy attacks by stripping caller
-   `Authorization`, `Cookie`, and `X-Sam-*` headers, running content inspectors
+   `Authorization`, `Cookie`, and `X-Mesh-*` headers, running content inspectors
    before credential injection, refusing inspector mutations to `Authorization`,
-   `Host`, `:authority`, or `X-Sam-*`, and never allowing a holder-authored TAR
+   `Host`, `:authority`, or `X-Mesh-*`, and never allowing a holder-authored TAR
    block to select a broker, role, or audience.
 5. Workload issuers configured via `--workload-issuer` can enroll, refresh, and
    exchange credentials on the mesh surface, and are refused at `/user/*` and

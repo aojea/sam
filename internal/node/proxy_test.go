@@ -179,7 +179,7 @@ func TestDatapathIntegration(t *testing.T) {
 	// 4. Execution: Node B makes a request via its local Egress Proxy
 
 	// We need to create the egress proxy for Node B.
-	// The user request says: "Implement a reverse proxy on the local `sam-node` HTTP server that intercepts requests to `/sam/`"
+	// The user request says: "Implement a reverse proxy on the local `sam-node` HTTP server that intercepts requests to `/mesh/`"
 	// In sidecar.go we have `createEgressProxy(node)`. We can use it here.
 
 	proxyHandler := createEgressProxy(nodeB)
@@ -189,8 +189,8 @@ func TestDatapathIntegration(t *testing.T) {
 	defer proxyServer.Close()
 
 	// Construct the URL targeting Node A's service
-	// http://localhost:<port>/sam/{peer_id}/{service_type}/{service_name}/{upstream_path}
-	url := fmt.Sprintf("%s/sam/%s/mcp/%s/api/v1/test", proxyServer.URL, nodeA.Host.ID().String(), serviceName)
+	// http://localhost:<port>/mesh/{peer_id}/{service_type}/{service_name}/{upstream_path}
+	url := fmt.Sprintf("%s/mesh/%s/mcp/%s/api/v1/test", proxyServer.URL, nodeA.Host.ID().String(), serviceName)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -320,7 +320,7 @@ func TestDatapathIntegration_Unauthenticated(t *testing.T) {
 	}()
 
 	// NOTE: We do NOT setup an identity for Node B (caller).
-	// This means the Egress Proxy will not inject an X-Sam-Biscuit header,
+	// This means the Egress Proxy will not inject an X-Mesh-Biscuit header,
 	// and the request should be rejected by Node A's ingress server.
 
 	// Connect Node B to Node A directly
@@ -359,7 +359,7 @@ func TestDatapathIntegration_Unauthenticated(t *testing.T) {
 	proxyServer := httptest.NewServer(proxyHandler)
 	defer proxyServer.Close()
 
-	url := fmt.Sprintf("%s/sam/%s/mcp/%s/api/v1/test", proxyServer.URL, nodeA.Host.ID().String(), serviceName)
+	url := fmt.Sprintf("%s/mesh/%s/mcp/%s/api/v1/test", proxyServer.URL, nodeA.Host.ID().String(), serviceName)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -512,8 +512,8 @@ func TestStdioDatapathIntegration(t *testing.T) {
 	defer proxyServer.Close()
 
 	// Construct URLs
-	// http://localhost:<port>/sam/{peer_id}/{service_type}/{service_name}/{upstream_path}
-	postURL := fmt.Sprintf("%s/sam/%s/mcp/%s/", proxyServer.URL, nodeA.Host.ID().String(), serviceName)
+	// http://localhost:<port>/mesh/{peer_id}/{service_type}/{service_name}/{upstream_path}
+	postURL := fmt.Sprintf("%s/mesh/%s/mcp/%s/", proxyServer.URL, nodeA.Host.ID().String(), serviceName)
 
 	client := &http.Client{}
 
@@ -706,17 +706,17 @@ func TestDatapathHeadersAndRoutingTable(t *testing.T) {
 			name:       "Authorization passes through untouched to the destination",
 			pathSuffix: "/api/v1/test",
 			requestHeaders: map[string]string{
-				"Authorization":             "Bearer upstream-token",
-				api.HeaderSamAuthentication: "Bearer local-token",
-				"X-Test-Request":            "yes",
+				"Authorization":              "Bearer upstream-token",
+				api.HeaderMeshAuthentication: "Bearer local-token",
+				"X-Test-Request":             "yes",
 			},
 			wantReceivedHeaders: map[string]string{
-				"Authorization":              "Bearer upstream-token",
-				api.HeaderSamAuthentication:  "",                       // Must be stripped, local-only
-				api.HeaderSamBiscuit:         "",                       // Must be stripped
-				api.HeaderSamNoTrailingSlash: "",                       // Must be stripped
-				api.HeaderPeerID:             nodeB.Host.ID().String(), // Verified caller stamped by ingress
-				"X-Test-Request":             "yes",
+				"Authorization":               "Bearer upstream-token",
+				api.HeaderMeshAuthentication:  "",                       // Must be stripped, local-only
+				api.HeaderMeshBiscuit:         "",                       // Must be stripped
+				api.HeaderMeshNoTrailingSlash: "",                       // Must be stripped
+				api.HeaderPeerID:              nodeB.Host.ID().String(), // Verified caller stamped by ingress
+				"X-Test-Request":              "yes",
 			},
 			wantReceivedPathSuffix: "/api/v1/test",
 		},
@@ -724,8 +724,8 @@ func TestDatapathHeadersAndRoutingTable(t *testing.T) {
 			name:       "Inbound X-Peer-Id is overwritten with the verified caller",
 			pathSuffix: "/api/v1/test",
 			requestHeaders: map[string]string{
-				api.HeaderSamAuthentication: "Bearer local-token",
-				api.HeaderPeerID:            "spoofed-peer-id",
+				api.HeaderMeshAuthentication: "Bearer local-token",
+				api.HeaderPeerID:             "spoofed-peer-id",
 			},
 			wantReceivedHeaders: map[string]string{
 				api.HeaderPeerID: nodeB.Host.ID().String(),
@@ -736,15 +736,15 @@ func TestDatapathHeadersAndRoutingTable(t *testing.T) {
 			name:       "Local gate header stripped, no Authorization to pass through",
 			pathSuffix: "/api/v1/test",
 			requestHeaders: map[string]string{
-				api.HeaderSamAuthentication: "Bearer local-token",
-				"X-Test-Request":            "yes",
+				api.HeaderMeshAuthentication: "Bearer local-token",
+				"X-Test-Request":             "yes",
 			},
 			wantReceivedHeaders: map[string]string{
-				"Authorization":              "", // Nothing to pass through
-				api.HeaderSamAuthentication:  "", // Must be stripped to avoid leaking local sidecar token
-				api.HeaderSamBiscuit:         "",
-				api.HeaderSamNoTrailingSlash: "",
-				"X-Test-Request":             "yes",
+				"Authorization":               "", // Nothing to pass through
+				api.HeaderMeshAuthentication:  "", // Must be stripped to avoid leaking local sidecar token
+				api.HeaderMeshBiscuit:         "",
+				api.HeaderMeshNoTrailingSlash: "",
+				"X-Test-Request":              "yes",
 			},
 			wantReceivedPathSuffix: "/api/v1/test",
 		},
@@ -752,10 +752,10 @@ func TestDatapathHeadersAndRoutingTable(t *testing.T) {
 			name:       "Trailing slash handling with empty path",
 			pathSuffix: "", // Requesting the root of the service: .../dummy-tool
 			requestHeaders: map[string]string{
-				api.HeaderSamAuthentication: "Bearer local-token",
+				api.HeaderMeshAuthentication: "Bearer local-token",
 			},
 			wantReceivedHeaders: map[string]string{
-				api.HeaderSamNoTrailingSlash: "", // Must be stripped
+				api.HeaderMeshNoTrailingSlash: "", // Must be stripped
 			},
 			wantReceivedPathSuffix: "/", // Should be mapped to "/" without trailing slash issues
 		},
@@ -763,7 +763,7 @@ func TestDatapathHeadersAndRoutingTable(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			url := fmt.Sprintf("%s/sam/%s/mcp/%s%s", proxyServer.URL, nodeA.Host.ID().String(), serviceName, tt.pathSuffix)
+			url := fmt.Sprintf("%s/mesh/%s/mcp/%s%s", proxyServer.URL, nodeA.Host.ID().String(), serviceName, tt.pathSuffix)
 			req, err := http.NewRequest("GET", url, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -810,7 +810,7 @@ func TestDatapathHeadersAndRoutingTable(t *testing.T) {
 }
 
 // The operator's egress floor holds at the /sam/ chokepoint itself, so an agent
-// that skips the facade and dials /sam/<peer>/... raw is still gated: the
+// that skips the facade and dials /mesh/<peer>/... raw is still gated: the
 // provider's biscuit must attest every pair of the floor before anything is
 // forwarded, whatever the caller did or did not ask for (see #385).
 func TestEgressProxyEnforcesFloor(t *testing.T) {
@@ -865,8 +865,8 @@ func TestEgressProxyEnforcesFloor(t *testing.T) {
 
 	proxyServer := httptest.NewServer(createEgressProxy(nodeB))
 	defer proxyServer.Close()
-	// The caller stays silent: no X-Sam-Required-Labels anywhere.
-	rawURL := fmt.Sprintf("%s/sam/%s/mcp/dummy-tool/api/v1/test", proxyServer.URL, nodeA.Host.ID())
+	// The caller stays silent: no X-Mesh-Required-Labels anywhere.
+	rawURL := fmt.Sprintf("%s/mesh/%s/mcp/dummy-tool/api/v1/test", proxyServer.URL, nodeA.Host.ID())
 
 	get := func() *http.Response {
 		t.Helper()
@@ -899,7 +899,7 @@ func TestEgressProxyEnforcesFloor(t *testing.T) {
 
 	// A non-canonical spelling of the same peer (CID form) is canonicalized at
 	// the gate boundary, so the verdict and the dial name the same peer.
-	cidURL := fmt.Sprintf("%s/sam/%s/mcp/dummy-tool/api/v1/test", proxyServer.URL, peer.ToCid(nodeA.Host.ID()))
+	cidURL := fmt.Sprintf("%s/mesh/%s/mcp/dummy-tool/api/v1/test", proxyServer.URL, peer.ToCid(nodeA.Host.ID()))
 	resp, err = http.Get(cidURL)
 	if err != nil {
 		t.Fatal(err)

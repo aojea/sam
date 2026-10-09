@@ -1,6 +1,6 @@
 # Secondary Cloud Run replica (v2-cloudrun) for a2a://support.acme.
 # Enrolled with env=prod and replica=v2-cloudrun so callers can either rely on
-# the input node's env=prod floor or pass X-Sam-Required-Labels: replica=v2-cloudrun
+# the input node's env=prod floor or pass X-Mesh-Required-Labels: replica=v2-cloudrun
 # to target this specific replica.
 version: "v1alpha1"
 labels:

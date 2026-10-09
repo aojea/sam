@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""A provider in one process: a py-libp2p host that serves /sam/mcp/1.0.0 the
+"""A provider in one process: a py-libp2p host that serves /mesh/mcp/1.0.0 the
 way sam-node does (AuthFrame in, AuthResponse out, then MCP over the stream)
 with the official MCP server behind it. The real sam-node is exercised by
 tests/integration/sdk_mesh_test.go."""
@@ -31,7 +31,7 @@ from libp2p.utils.varint import encode_varint_prefixed, read_varint_prefixed_byt
 from mcp.server.mcpserver import MCPServer
 from mcp.shared.message import SessionMessage
 
-from agent_mesh._proto import sam_pb2 as pb
+from agent_mesh._proto import agentmesh_pb2 as pb
 from agent_mesh.auth import MCP_PROTOCOL, AuthRejectedError
 from agent_mesh.biscuit import ROLE_ROUTER, VerifiedBiscuit, verify_peer_biscuit
 from agent_mesh.controlplane import ROLE_NODE
@@ -232,7 +232,7 @@ def test_tools_over_the_mesh_stream():
                 # Only a node is a provider, as sam-node's checkPeerLabels requires: a router attesting the floor is not.
                 router, router_addr, _ = await start_provider(nursery, labels={"region": "eu"}, role=ROLE_ROUTER)
                 await caller.connect(info_from_p2p_addr(router_addr))
-                with pytest.raises(AuthRejectedError, match="lacks expected role 'sam:role:node'"):
+                with pytest.raises(AuthRejectedError, match="lacks expected role 'mesh:role:node'"):
                     async with open_mcp_session(caller, router.get_id(), frame(caller_biscuit, "mcp://calc"), [CP_KEY], egress_require_labels={"region": "eu"}):
                         pass
             nursery.cancel_scope.cancel()

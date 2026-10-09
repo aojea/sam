@@ -54,9 +54,9 @@ from .test_session import CP, CP_KEY, libp2p_host
 # What the control plane renders for a policy granting the node role every
 # A2A service on any target, and nothing else.
 POLICY_RULES = [
-    'granted_service_all("a2a") <- role("sam:role:node")',
-    'granted_service_all("sam:system") <- role("sam:role:node")',
-    'target_unrestricted(true) <- role("sam:role:node")',
+    'granted_service_all("a2a") <- role("mesh:role:node")',
+    'granted_service_all("mesh:system") <- role("mesh:role:node")',
+    'target_unrestricted(true) <- role("mesh:role:node")',
 ]
 
 
@@ -96,7 +96,7 @@ class FakeA2AServer(BaseHTTPRequestHandler):
                 "path": self.path,
                 "peer": self.headers.get("x-peer-id"),
                 "body": body.decode(),
-                "biscuit": self.headers.get("x-sam-biscuit"),
+                "biscuit": self.headers.get("x-mesh-biscuit"),
                 "encoding": self.headers.get("accept-encoding"),
             }
         )
@@ -198,13 +198,13 @@ def test_the_agent_is_reachable_by_authorized_callers(backend_url):
             caller_identity = Identity.generate()
             caller = libp2p_host(caller_identity)
             caller_biscuit = mint(caller_identity.peer_id, ROLE_NODE)
-            guest_biscuit = mint(caller_identity.peer_id, "sam:role:guest")
+            guest_biscuit = mint(caller_identity.peer_id, "mesh:role:guest")
             async with caller.run(listen_addrs=[]):
                 await caller.connect(info_from_p2p_addr(addr))
                 pid = agent.get_id()
 
                 # The agent is forwarded the request with the caller's identity and without its biscuit.
-                res = await http_request_over_stream(caller, pid, caller_biscuit, "a2a://agent", "/card?x=1", headers={"x-sam-biscuit": "spoof"})
+                res = await http_request_over_stream(caller, pid, caller_biscuit, "a2a://agent", "/card?x=1", headers={"x-mesh-biscuit": "spoof"})
                 assert res.status == 200
                 assert res.headers.get("x-backend") == "fake"
                 assert res.json() == {"path": "/card?x=1", "echo": ""}
@@ -228,9 +228,9 @@ def test_the_agent_is_reachable_by_authorized_callers(backend_url):
                 # An httpx client on the mesh transport, as the A2A SDK's client is.
                 session = FakeSession(caller, caller_biscuit)
                 url = MeshSession.mesh_url(str(pid), "a2a://agent")
-                assert url == f"http://mesh/sam/{pid}/a2a/agent"
+                assert url == f"http://mesh/mesh/{pid}/a2a/agent"
                 async with httpx.AsyncClient(transport=MeshTransport(session)) as client:  # type: ignore[arg-type]
-                    answer = await client.post(url, json={"method": "message/send"}, headers={"x-sam-biscuit": "spoof"})
+                    answer = await client.post(url, json={"method": "message/send"}, headers={"x-mesh-biscuit": "spoof"})
                     assert answer.status_code == 200 and answer.json()["echo"] == '{"method":"message/send"}'
                     assert FakeA2AServer.seen[-1]["peer"] == caller_identity.peer_id
                     assert FakeA2AServer.seen[-1]["biscuit"] is None
@@ -336,9 +336,9 @@ def test_an_in_process_handler_sees_the_verified_caller():
 
 def test_mesh_urls_name_a_peer_and_a_service():
     peer = "12D3KooWJ2Yhy3CKwVPDw7AnkxN5HbZbb65xDoRif54hdXXUzh1U"
-    assert split_mesh_url(httpx.URL(f"http://mesh/sam/{peer}/a2a/agent")) == (peer, "/a2a/agent")
-    assert split_mesh_url(httpx.URL(f"http://anything:1/sam/{peer}/inference/llm/v1/models?x=1")) == (peer, "/inference/llm/v1/models?x=1")
-    for bad in ("http://mesh/a2a/agent", f"http://mesh/sam/{peer}", f"http://mesh/sam/{peer}/a2a", f"http://mesh/sam//a2a/agent"):
+    assert split_mesh_url(httpx.URL(f"http://mesh/mesh/{peer}/a2a/agent")) == (peer, "/a2a/agent")
+    assert split_mesh_url(httpx.URL(f"http://anything:1/mesh/{peer}/inference/llm/v1/models?x=1")) == (peer, "/inference/llm/v1/models?x=1")
+    for bad in ("http://mesh/a2a/agent", f"http://mesh/mesh/{peer}", f"http://mesh/mesh/{peer}/a2a", f"http://mesh/mesh//a2a/agent"):
         with pytest.raises(httpx.UnsupportedProtocol):
             split_mesh_url(httpx.URL(bad))
     assert mesh_http_target("a2a://agent") == "/a2a/agent"

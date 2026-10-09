@@ -21,7 +21,7 @@ sam-control-plane admin unban --peer <id>     lift a ban
 |---|---|---|
 | `--issuer` | | OIDC issuer URL(s), comma-separated. At least one of `--issuer` or `--workload-issuer` is required. The first issuer is advertised to enrolling nodes on `/info`. |
 | `--workload-issuer` | | Workload OIDC issuer(s), comma-separated (`<issuer>` or `<issuer>=<email-suffix>`, such as `https://accounts.google.com=.gserviceaccount.com`). Automatically added to `--issuer`. Workload tokens can enroll, refresh, and exchange credentials (`/register`, `/refresh`, `/token/exchange`), and are refused at `/user/*` and `/oauth/authorize`. |
-| `--allowed-audiences` | `sam-mesh-audience` | Audiences accepted in OIDC tokens, comma-separated. |
+| `--allowed-audiences` | `agentmesh-audience` | Audiences accepted in OIDC tokens, comma-separated. |
 | `--oidc-client-id` | first audience | OAuth client ID advertised on `/info`, for providers where it differs from the audience. |
 | `--insecure-skip-tls-verify` | `false` | Skip TLS verification when fetching issuer metadata and keys. For a cluster issuer served with the cluster CA, or a local development issuer. |
 | `--bind-address` | `0.0.0.0:8080` | HTTP listen address. |
@@ -42,7 +42,7 @@ sam-control-plane admin unban --peer <id>     lift a ban
 
 ## HTTP API
 
-Every request and response is a message in `api/sam.proto`, in one of two
+Every request and response is a message in `api/agentmesh.proto`, in one of two
 encodings. Routes that mesh components call use binary protobuf
 (`application/x-protobuf`). Routes for operators and the console use
 protojson of the same messages, with proto field names; unknown fields are
@@ -77,12 +77,12 @@ names. Every instant in a response (`expire_time` and the like) is a
 |---|---|---|
 | `POST /register` | `EnrollRequest` (OIDC token, public key, requested role, labels) | OIDC enrollment. Returns `EnrollResponse`: the credential, the control plane public key, router addresses and expiry. |
 | `POST /enroll` | `BootstrapEnrollRequest` (bootstrap token, public key, requested role, labels) | Bootstrap enrollment. Returns `BootstrapEnrollResponse` with status `APPROVED` and the credential, or with status `PENDING`. For a peer that is already approved, a new credential is minted directly. |
-| `GET /enroll/status?peer_id=` | headers `X-Sam-Challenge-Ts`, `X-Sam-Challenge-Sig` | Poll a pending enrollment. Any authentication failure answers `401`, so the credential is released only to the enrollee. |
+| `GET /enroll/status?peer_id=` | headers `X-Mesh-Challenge-Ts`, `X-Mesh-Challenge-Sig` | Poll a pending enrollment. Any authentication failure answers `401`, so the credential is released only to the enrollee. |
 | `POST /refresh` | `TokenRefreshRequest` (optional `jwt`), current credential as `Authorization: Bearer <base64>` | Exchange a credential for a new one. When `jwt` is present and its `iss|sub` matches the enrolled node record, re-attests the node in place, updates stored claims and extends the session. Refuses a replayed (superseded) credential, a banned node, an expired session without a matching `jwt`, and a credential signed by a retired key unless the node has `autonomous_recovery`. |
 | `POST /token/exchange` | `TokenExchangeRequest` (`subject_token`, optional `task_rule` and `seal`, challenge signature), node credential as bearer | Stateless JWT-to-Biscuit exchange. Mints a Delegated Session Biscuit bound to the calling node (`actor_node`, `client_peer_id`) with zero database writes. |
 | `POST /sts/token` | `STSTokenRequest` (`biscuit`, `destination`, optional `audience`, challenge signature), node credential as bearer | Stateless Biscuit-to-JWT minting. Verifies the Biscuit and `tar_block` chain against `egress://<destination>` and mints a short-lived ES256 border JWT (`sub`, `act.sub`, `aud`, `sam_roles`, `sam_task`). |
 | `GET /revocations` | credential as `Authorization: Bearer <base64>` | `RevocationsResponse`: revoked root Biscuit revocation IDs (`revocation_ids`) and banned peer IDs (`banned_peer_ids`). |
-| `POST /routers/lease` | `RouterLeaseRequest` (credential, addresses, telemetry) | Register or renew a router lease. Requires `role("sam:role:router")`. Announced addresses must end in the router's own peer ID. |
+| `POST /routers/lease` | `RouterLeaseRequest` (credential, addresses, telemetry) | Register or renew a router lease. Requires `role("mesh:role:router")`. Announced addresses must end in the router's own peer ID. |
 | `GET /policies` | credential as `Authorization: Bearer <base64>` | The mesh policy as `PolicyConfigGetResponse`: the Datalog rules a member adds to its authorizer, one per entry. Operators read the document at `GET /admin/policy`. |
 | `GET /egress` | credential as `Authorization: Bearer <base64>` | `EgressAssignmentsResponse`: the [egress destinations](../policy/#egress-destinations) whose `served_by` selects the calling node, by its roles or labels. A node registers and serves what it receives here. |
 | `POST /nodes/catalog` | `NodeCatalogReport`, credential as bearer | A node's report of the services it publishes, for the console. Display only. Never used for authorization. |
@@ -117,7 +117,7 @@ with `403`). The console uses these routes.
 | Route | Purpose |
 |---|---|
 | `GET /user/status` | `UserStatusResponse`: the caller, their enrolled nodes and tokens. For an administrator it also carries the routers and the policy. |
-| `POST /user/bootstrap-tokens` | Mint a token owned by the caller; body and response as on the admin route. `role` defaults to `sam:role:node`. Banning the owner disables the tokens they minted. |
+| `POST /user/bootstrap-tokens` | Mint a token owned by the caller; body and response as on the admin route. `role` defaults to `mesh:role:node`. Banning the owner disables the tokens they minted. |
 | `POST /user/revoke` | Ban one of the caller's own nodes. |
 
 ## Notes

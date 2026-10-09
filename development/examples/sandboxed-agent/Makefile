@@ -48,7 +48,7 @@ tokens:
 	  --role agent --max-usages 1 --description "agent in the dev sandbox" 2>/dev/null \
 	  | awk '/^Token:/ {print $$2}' > "$(DEMO_DIR)/agent-token"
 	@test -s "$(DEMO_DIR)/pep-token" -a -s "$(DEMO_DIR)/agent-token" || { echo "token create failed"; exit 1; }
-	@echo "tokens in $(DEMO_DIR)/pep-token (role sam:role:node) and $(DEMO_DIR)/agent-token (role agent)"
+	@echo "tokens in $(DEMO_DIR)/pep-token (role mesh:role:node) and $(DEMO_DIR)/agent-token (role agent)"
 
 secrets:
 	@test -s "$(GITHUB_TOKEN_FILE)" || { echo "GITHUB_TOKEN_FILE=$(GITHUB_TOKEN_FILE) is missing: a read-only fine-grained token for google/sam"; exit 1; }

@@ -40,7 +40,7 @@ flowchart LR
   Mesh(["SAM Mesh & Cloud Egress"])
 
   Harness -- "Plain HTTP to sam-node:8080/mcp & /v1" --> OSProxy
-  OSProxy -- "Injects X-Sam-Authentication:<br/>Bearer <Sealed-Task-Biscuit>" --> SamNode
+  OSProxy -- "Injects X-Mesh-Authentication:<br/>Bearer <Sealed-Task-Biscuit>" --> SamNode
   SamNode -- "Verified Task Biscuit" --> Mesh
 ```
 
@@ -52,7 +52,7 @@ flowchart LR
    TASK_TOKEN=$(curl -sS --unix-socket ~/.config/sam-mesh/sam.sock \
      http://localhost/oauth/token \
      -d 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
-     -d 'subject_token_type=urn:sam-mesh:params:oauth:token-type:biscuit' \
+     -d 'subject_token_type=urn:agentmesh:params:oauth:token-type:biscuit' \
      -d "subject_token=$(jq -r .biscuit ~/.config/sam-mesh/credential.json 2>/dev/null || true)" \
      -d 'seal=true' \
      --data-urlencode 'options={"name":"tasks/pr-review-42","rules":[{"allowed_services":["mcp://github","inference://*"],"operation":{"allowed_tools":["get_pull_request","list_PullRequest_files"]}}]}' \
@@ -60,7 +60,7 @@ flowchart LR
    ```
 2. **Register the sealed token in OpenShell's proxy:**
    Configure OpenShell's secret injector to attach
-   `X-Sam-Authentication: Bearer $TASK_TOKEN` on requests to `sam-node:8080`.
+   `X-Mesh-Authentication: Bearer $TASK_TOKEN` on requests to `sam-node:8080`.
    The sandboxed process has no credential in its environment variables or
    filesystem.
 
@@ -70,7 +70,7 @@ In `docker sbx` (local microVM) and Kubernetes `agent-sandbox`
 (`RuntimeClass: gvisor` or `kata`) without an external header-injecting proxy,
 the sandbox container authenticates to `sam-node` using a task token passed as
 `OPENAI_API_KEY` / `Authorization: Bearer <token>` (for `/mcp` and `/v1/*`) or
-`X-Sam-Authentication: Bearer <token>` (for `/sam/*` and `/egress/*`).
+`X-Mesh-Authentication: Bearer <token>` (for `/sam/*` and `/egress/*`).
 
 ### How SAM bounds the token held by the sandbox
 
@@ -152,7 +152,7 @@ offline in memory using the TypeScript or Python SDK (or `POST /oauth/token` on
 ```python
 from datetime import datetime, timedelta, timezone
 from google.protobuf.timestamp_pb2 import Timestamp
-from agent_mesh import AgentMesh, sam_pb2
+from agent_mesh import AgentMesh, agentmesh_pb2
 
 # Hop 1: Orchestrator narrows its session to read-only BigQuery sales_2026
 # and two MCP tools for 15 minutes.
@@ -160,13 +160,13 @@ exp1 = Timestamp()
 exp1.FromDatetime(datetime.now(timezone.utc) + timedelta(minutes=15))
 
 hop1_session = session.attenuate(
-    sam_pb2.TaskAuthorizationRule(
+    agentmesh_pb2.TaskAuthorizationRule(
         name="tasks/session-bq-read-sales",
         expire_time=exp1,
         rules=[
-            sam_pb2.TaskRule(
+            agentmesh_pb2.TaskRule(
                 allowed_services=["egress://bigquery.googleapis.com"],
-                operation=sam_pb2.TaskOperation(
+                operation=agentmesh_pb2.TaskOperation(
                     allowed_methods=["GET", "POST"],
                     allowed_paths=["/bigquery/v2/projects/my-proj/datasets/sales_2026/*"],
                     allowed_permissions=[
@@ -179,9 +179,9 @@ hop1_session = session.attenuate(
                     "//bigquery.googleapis.com/projects/my-proj/datasets/sales_2026/*",
                 ],
             ),
-            sam_pb2.TaskRule(
+            agentmesh_pb2.TaskRule(
                 allowed_services=["mcp://bigquery"],
-                operation=sam_pb2.TaskOperation(allowed_tools=["list_tables", "query_sales"]),
+                operation=agentmesh_pb2.TaskOperation(allowed_tools=["list_tables", "query_sales"]),
             ),
         ],
     )
@@ -190,12 +190,12 @@ hop1_session = session.attenuate(
 # Hop 2: Analytics agent spawns a leaf sub-agent restricted to table q1 only,
 # and seals the credential so the sub-agent cannot append further blocks.
 hop2_session = hop1_session.attenuate(
-    sam_pb2.TaskAuthorizationRule(
+    agentmesh_pb2.TaskAuthorizationRule(
         name="tasks/subagent-q1-only",
         rules=[
-            sam_pb2.TaskRule(
+            agentmesh_pb2.TaskRule(
                 allowed_services=["egress://bigquery.googleapis.com"],
-                operation=sam_pb2.TaskOperation(
+                operation=agentmesh_pb2.TaskOperation(
                     allowed_methods=["GET"],
                     allowed_paths=["/bigquery/v2/projects/my-proj/datasets/sales_2026/tables/q1/*"],
                     allowed_permissions=["bigquery.googleapis.com/tables.getData"],
@@ -214,7 +214,7 @@ hop2_session = hop1_session.attenuate(
 ```typescript
 import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
-import { TaskAuthorizationRuleSchema } from "@sam-mesh/sdk/gen/sam_pb.ts";
+import { TaskAuthorizationRuleSchema } from "@sam-mesh/sdk/gen/agentmesh_pb.ts";
 
 const hop1 = session.attenuate(
   create(TaskAuthorizationRuleSchema, {

@@ -19,7 +19,7 @@ in the repository has the details.
 | Path | Contents |
 |---|---|
 | `cmd/` | One directory per binary: `sam-node`, `sam-control-plane`, `sam-router`, `sam-one`, `sam-console`, `mcp-client`, `sam-bench`, and smaller tools. |
-| `api/` | The wire contract: `sam.proto` and its generated code, plus the Go types for the JSON admin API and the validation and Datalog helpers both sides share. |
+| `api/` | The wire contract: `agentmesh.proto` and its generated code, plus the Go types for the JSON admin API and the validation and Datalog helpers both sides share. |
 | `internal/` | Implementation, one package per component (`node`, `controlplane`, `router`, `standalone`, `console`, `identity`, `storage`, ...). |
 | `charts/` | The `sam-mesh` and `sam-node` Helm charts. |
 | `tests/integration/` | Go tests that start several components in one process. |
@@ -28,7 +28,7 @@ in the repository has the details.
 | `site/` | This documentation, a Hugo site. |
 
 Two rules from `AGENTS.md` shape most changes. Components talk to each other
-only through `api/sam.proto` (protobuf for anything a mesh component speaks,
+only through `api/agentmesh.proto` (protobuf for anything a mesh component speaks,
 protojson of the same messages for the operator API). And no new module may be
 added to `go.mod` without discussion.
 For the security model, token invariants, and scope boundaries of the mesh, see
@@ -43,7 +43,7 @@ linter, and `bats-core` for the end-to-end tests.
 git clone https://github.com/google/sam.git && cd sam
 make build        # binaries in ./bin
 make docker-build # container images tagged :local
-make proto        # regenerate api/sam.pb.go after editing sam.proto
+make proto        # regenerate api/agentmesh.pb.go after editing agentmesh.proto
 ```
 
 The repository has a dev container (`.devcontainer/devcontainer.json`) with

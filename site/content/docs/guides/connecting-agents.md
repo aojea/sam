@@ -24,7 +24,7 @@ Three values, all printed by `sam-node run --daemonize`:
 - **The endpoint**: `http://127.0.0.1:8080/mcp` (Streamable HTTP).
 - **The token**: the contents of `~/.config/sam-mesh/api-token`, or the
   `SAM_API_TOKEN` you started the node with. It goes in the header
-  `X-Sam-Authentication: Bearer <token>`.
+  `X-Mesh-Authentication: Bearer <token>`.
 - **The socket**: `~/.config/sam-mesh/sam.sock`. Anything the agent runs in a
   shell can use the socket without a token. This is the easier way to reach
   the node's `/v1` inference endpoint from scripts.
@@ -87,7 +87,7 @@ afterwards so that it loads both the skill and the tools.
 
 ```bash
 claude mcp add --transport http sam-mesh http://127.0.0.1:8080/mcp \
-  --header "X-Sam-Authentication: Bearer <token>"
+  --header "X-Mesh-Authentication: Bearer <token>"
 ```
 
 The default scope is the current project. `--scope user` makes the server
@@ -100,7 +100,7 @@ The equivalent file entry, where `type` is required:
     "sam-mesh": {
       "type": "http",
       "url": "http://127.0.0.1:8080/mcp",
-      "headers": { "X-Sam-Authentication": "Bearer <token>" }
+      "headers": { "X-Mesh-Authentication": "Bearer <token>" }
     }
   }
 }
@@ -119,7 +119,7 @@ Add to `~/.gemini/config/mcp_config.json`:
   "mcpServers": {
     "sam-mesh": {
       "serverUrl": "http://127.0.0.1:8080/mcp",
-      "headers": { "X-Sam-Authentication": "Bearer <token>" }
+      "headers": { "X-Mesh-Authentication": "Bearer <token>" }
     }
   }
 }
@@ -144,7 +144,7 @@ and keeps it in its secret store, so the file is safe to commit:
     "sam-mesh": {
       "type": "http",
       "url": "http://127.0.0.1:8080/mcp",
-      "headers": { "X-Sam-Authentication": "Bearer ${input:sam-api-token}" }
+      "headers": { "X-Mesh-Authentication": "Bearer ${input:sam-api-token}" }
     }
   }
 }
@@ -175,7 +175,7 @@ macOS, `%APPDATA%\Claude\` on Windows):
       "command": "npx",
       "args": [
         "mcp-remote", "http://127.0.0.1:8080/mcp", "--allow-http",
-        "--header", "X-Sam-Authentication: Bearer <token>"
+        "--header", "X-Mesh-Authentication: Bearer <token>"
       ]
     }
   }
@@ -192,7 +192,7 @@ connectors" cannot reach a node on your machine, so use the bridge.
 ```bash
 openclaw mcp set sam-mesh '{
   "url": "http://127.0.0.1:8080/mcp",
-  "headers": { "X-Sam-Authentication": "Bearer <token>" }
+  "headers": { "X-Mesh-Authentication": "Bearer <token>" }
 }'
 openclaw mcp list
 ```
@@ -208,7 +208,7 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-http = httpx.AsyncClient(headers={"X-Sam-Authentication": "Bearer <token>"})
+http = httpx.AsyncClient(headers={"X-Mesh-Authentication": "Bearer <token>"})
 async with streamable_http_client("http://127.0.0.1:8080/mcp", http_client=http) as (read, write):
     async with ClientSession(read, write) as session:
         await session.initialize()

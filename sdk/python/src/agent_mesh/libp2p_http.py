@@ -45,17 +45,17 @@ logger = logging.getLogger("agent_mesh")
 HTTP_PROTOCOL = TProtocol("/libp2p-http")
 
 # Headers of the mesh HTTP datapath (api/network.go).
-HEADER_SAM_BISCUIT = "x-sam-biscuit"
+HEADER_MESH_BISCUIT = "x-mesh-biscuit"
 HEADER_PEER_ID = "x-peer-id"
-HEADER_SAM_NO_TRAILING_SLASH = "x-sam-no-trailing-slash"
+HEADER_MESH_NO_TRAILING_SLASH = "x-mesh-no-trailing-slash"
 
 # The service name an agent answers under unless it picks another.
 DEFAULT_A2A_NAME = "agent"
 
-# The path prefix of a mesh URL, http://mesh/sam/<peer-id>/<type>/<name>/<path>:
+# The path prefix of a mesh URL, http://mesh/mesh/<peer-id>/<type>/<name>/<path>:
 # the shape of sam-node's egress proxy and of an agent card rewritten for the
 # mesh, by sam-node or by this SDK. The peer ID is in the path, not the host.
-MESH_PATH_PREFIX = "/sam/"
+MESH_PATH_PREFIX = "/mesh/"
 
 # The well-known agent card location (A2A spec / RFC 8615).
 AGENT_CARD_PATH = ".well-known/agent-card.json"
@@ -182,7 +182,7 @@ async def _write_http_response(stream: INetStream, conn: h11.Connection, status:
 
 def http_ingress_handler(endpoint: A2AEndpoint, options: ProviderOptions):  # type: ignore[no-untyped-def]
     """Server side of /libp2p-http, as sam-node's StartIngressServer: the path
-    is /<type>/<name>[/<upstream>], the caller's biscuit is X-Sam-Biscuit, and
+    is /<type>/<name>[/<upstream>], the caller's biscuit is X-Mesh-Biscuit, and
     the request is authorized for <type>://<name> before anything is forwarded.
     Only the agent's own endpoint is answered; anything else is 404 after
     authorization, so an unauthorized caller learns nothing about it."""
@@ -237,15 +237,15 @@ async def _handle_ingress(
     upstream_path = "/".join(rest)
 
     headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in request.headers}
-    biscuit_b64 = headers.get(HEADER_SAM_BISCUIT, "")
+    biscuit_b64 = headers.get(HEADER_MESH_BISCUIT, "")
     if not biscuit_b64:
-        return plain(401, "Missing X-Sam-Biscuit header")
+        return plain(401, "Missing X-Mesh-Biscuit header")
     try:
         biscuit = base64.b64decode(biscuit_b64, validate=True)
         if not biscuit:
             raise ValueError("empty")
     except (ValueError, TypeError):
-        return plain(400, "Invalid X-Sam-Biscuit encoding")
+        return plain(400, "Invalid X-Mesh-Biscuit encoding")
 
     target_service = f"{service_type}://{service_name}"
     if options.is_banned is not None and options.is_banned(peer_id):
@@ -280,11 +280,11 @@ async def _handle_ingress(
     forwarded = {
         k: v
         for k, v in headers.items()
-        if k not in (HEADER_SAM_BISCUIT, HEADER_SAM_NO_TRAILING_SLASH, HEADER_PEER_ID, "host", "connection", "transfer-encoding", "content-length")
+        if k not in (HEADER_MESH_BISCUIT, HEADER_MESH_NO_TRAILING_SLASH, HEADER_PEER_ID, "host", "connection", "transfer-encoding", "content-length")
     }
     forwarded[HEADER_PEER_ID] = peer_id
     if upstream_path == "" and not rest:
-        forwarded[HEADER_SAM_NO_TRAILING_SLASH] = "true"
+        forwarded[HEADER_MESH_NO_TRAILING_SLASH] = "true"
     method = request.method.decode()
     path = "/" + upstream_path + (f"?{query}" if query else "")
 
@@ -328,7 +328,7 @@ def mesh_http_target(target_service: str, path: str = "") -> str:
 
 def mesh_url(peer_id: str, target_service: str, path: str = "") -> str:
     """The URL an httpx client on MeshTransport uses for a service on a peer:
-    http://mesh/sam/<peer-id>/<type>/<name>/<path>."""
+    http://mesh/mesh/<peer-id>/<type>/<name>/<path>."""
     return "http://mesh" + MESH_PATH_PREFIX + peer_id + mesh_http_target(target_service, path)
 
 
@@ -415,7 +415,7 @@ async def open_http_request(
 ) -> StreamedResponse:
     """Client side of /libp2p-http, as go-libp2p-http's RoundTripper: one
     stream per request, plain HTTP/1.1 with Host set to the peer ID and the
-    biscuit in X-Sam-Biscuit. Returns once the response headers are in; the
+    biscuit in X-Mesh-Biscuit. Returns once the response headers are in; the
     body streams after. The timeout bounds the headers, not the body. An
     agent card is served rewritten for the mesh (rewrite_agent_card), as
     sam-node's egress proxy serves one."""
@@ -469,9 +469,9 @@ async def _open_http_request(
     body: bytes,
     timeout: float,
 ) -> StreamedResponse:
-    out = [(k.lower(), v) for k, v in (headers or {}).items() if k.lower() not in ("host", "content-length", HEADER_SAM_BISCUIT, HEADER_PEER_ID)]
+    out = [(k.lower(), v) for k, v in (headers or {}).items() if k.lower() not in ("host", "content-length", HEADER_MESH_BISCUIT, HEADER_PEER_ID)]
     out.append(("host", str(peer_id)))
-    out.append((HEADER_SAM_BISCUIT, base64.b64encode(biscuit).decode()))
+    out.append((HEADER_MESH_BISCUIT, base64.b64encode(biscuit).decode()))
     out.append(("content-length", str(len(body))))
 
     conn = h11.Connection(h11.CLIENT)

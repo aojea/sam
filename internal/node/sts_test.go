@@ -445,23 +445,23 @@ func TestExtAuthzHTTPAndGRPC(t *testing.T) {
 	// 1. HTTP ext_authz allow: mcp://github + tool get_pr
 	reqAllow := httptest.NewRequest(http.MethodPost, "/ext_authz/mcp/github", nil)
 	reqAllow.Header.Set("Authorization", "Bearer "+narrowedB64)
-	reqAllow.Header.Set(HeaderSamMCPTool, "get_pr")
+	reqAllow.Header.Set(HeaderMeshMCPTool, "get_pr")
 	recAllow := httptest.NewRecorder()
 	handleExtAuthzHTTP(h.node, recAllow, reqAllow)
 	if recAllow.Code != http.StatusOK {
 		t.Fatalf("expected HTTP ext_authz 200 OK, got %d: %s", recAllow.Code, recAllow.Body.String())
 	}
-	if recAllow.Header().Get(api.HeaderSamPrincipal) != "alice@example.com" {
-		t.Fatalf("unexpected X-Sam-Principal: %q", recAllow.Header().Get(api.HeaderSamPrincipal))
+	if recAllow.Header().Get(api.HeaderMeshPrincipal) != "alice@example.com" {
+		t.Fatalf("unexpected X-Mesh-Principal: %q", recAllow.Header().Get(api.HeaderMeshPrincipal))
 	}
-	if !strings.Contains(recAllow.Header().Get(api.HeaderSamTask), "pr-review-task") {
-		t.Fatalf("expected X-Sam-Task to contain pr-review-task, got %q", recAllow.Header().Get(api.HeaderSamTask))
+	if !strings.Contains(recAllow.Header().Get(api.HeaderMeshTask), "pr-review-task") {
+		t.Fatalf("expected X-Mesh-Task to contain pr-review-task, got %q", recAllow.Header().Get(api.HeaderMeshTask))
 	}
 
 	// 2. HTTP ext_authz deny: mcp://github + tool merge_pr
 	reqDeny := httptest.NewRequest(http.MethodPost, "/ext_authz/mcp/github", nil)
 	reqDeny.Header.Set("Authorization", "Bearer "+narrowedB64)
-	reqDeny.Header.Set(HeaderSamMCPTool, "merge_pr")
+	reqDeny.Header.Set(HeaderMeshMCPTool, "merge_pr")
 	recDeny := httptest.NewRecorder()
 	handleExtAuthzHTTP(h.node, recDeny, reqDeny)
 	if recDeny.Code != http.StatusForbidden {
@@ -477,14 +477,14 @@ func TestExtAuthzHTTPAndGRPC(t *testing.T) {
 		t.Fatalf("expected HTTP ext_authz 403 Forbidden when target cannot be resolved, got %d: %s", recNoTarget.Code, recNoTarget.Body.String())
 	}
 
-	// 2c. HTTP ext_authz deny when X-Sam-Target-Service is malformed.
+	// 2c. HTTP ext_authz deny when X-Mesh-Target-Service is malformed.
 	reqBadTarget := httptest.NewRequest(http.MethodPost, "/ext_authz", nil)
 	reqBadTarget.Header.Set("Authorization", "Bearer "+narrowedB64)
-	reqBadTarget.Header.Set(api.HeaderSamTargetService, "not-a-valid-scheme")
+	reqBadTarget.Header.Set(api.HeaderMeshTargetService, "not-a-valid-scheme")
 	recBadTarget := httptest.NewRecorder()
 	handleExtAuthzHTTP(h.node, recBadTarget, reqBadTarget)
 	if recBadTarget.Code != http.StatusForbidden {
-		t.Fatalf("expected HTTP ext_authz 403 Forbidden for malformed X-Sam-Target-Service, got %d: %s", recBadTarget.Code, recBadTarget.Body.String())
+		t.Fatalf("expected HTTP ext_authz 403 Forbidden for malformed X-Mesh-Target-Service, got %d: %s", recBadTarget.Code, recBadTarget.Body.String())
 	}
 
 	// 3. gRPC ext_authz Check (/envoy.service.auth.v3.Authorization/Check)
@@ -495,8 +495,8 @@ func TestExtAuthzHTTPAndGRPC(t *testing.T) {
 					Method: "POST",
 					Path:   "/mcp/github",
 					Headers: map[string]string{
-						"authorization":                   "Bearer " + narrowedB64,
-						strings.ToLower(HeaderSamMCPTool): "get_pr",
+						"authorization":                    "Bearer " + narrowedB64,
+						strings.ToLower(HeaderMeshMCPTool): "get_pr",
 					},
 				},
 			},
@@ -572,14 +572,14 @@ func TestCrossNodeBiscuitAndBannedPeerRejection(t *testing.T) {
 		t.Fatal("expected /oauth/token to reject foreign node Biscuit")
 	}
 
-	// 2. Foreign node's Biscuit must be rejected on ext_authz even if X-Sam-Peer-Id is spoofed.
-	authzReq := httptest.NewRequest(http.MethodGet, "/ext_authz/sam/mcp/github", nil)
+	// 2. Foreign node's Biscuit must be rejected on ext_authz even if X-Mesh-Peer-Id is spoofed.
+	authzReq := httptest.NewRequest(http.MethodGet, "/ext_authz/mesh/mcp/github", nil)
 	authzReq.Header.Set("Authorization", "Bearer "+foreignB64)
-	authzReq.Header.Set("X-Sam-Peer-Id", otherPID.String())
+	authzReq.Header.Set("X-Mesh-Peer-Id", otherPID.String())
 	authzRec := httptest.NewRecorder()
 	handleExtAuthzHTTP(h.node, authzRec, authzReq)
 	if authzRec.Code != http.StatusForbidden {
-		t.Fatalf("expected ext_authz to reject foreign Biscuit with spoofed X-Sam-Peer-Id, got %d", authzRec.Code)
+		t.Fatalf("expected ext_authz to reject foreign Biscuit with spoofed X-Mesh-Peer-Id, got %d", authzRec.Code)
 	}
 
 	// 3. Banning the local peer in revokedPeers causes VerifyLocalBiscuit and ext_authz to reject.
@@ -589,7 +589,7 @@ func TestCrossNodeBiscuitAndBannedPeerRejection(t *testing.T) {
 	if _, err := h.node.VerifyLocalBiscuit(h.nodeBiscuit); err == nil {
 		t.Fatal("expected VerifyLocalBiscuit to reject banned peer")
 	}
-	localAuthzReq := httptest.NewRequest(http.MethodGet, "/ext_authz/sam/mcp/github", nil)
+	localAuthzReq := httptest.NewRequest(http.MethodGet, "/ext_authz/mesh/mcp/github", nil)
 	localAuthzReq.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString(h.nodeBiscuit))
 	localAuthzRec := httptest.NewRecorder()
 	handleExtAuthzHTTP(h.node, localAuthzRec, localAuthzReq)
@@ -613,9 +613,9 @@ func TestExtAuthzMCPBodyInspection(t *testing.T) {
 	}
 	b64Biscuit := base64.StdEncoding.EncodeToString(taskBiscuit)
 
-	// 1. HTTP ext_authz with tools/call for disallowed tool "merge_pr" in JSON-RPC body (without X-Sam-Mcp-Tool header) -> 403.
+	// 1. HTTP ext_authz with tools/call for disallowed tool "merge_pr" in JSON-RPC body (without X-Mesh-Mcp-Tool header) -> 403.
 	disallowedBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"merge_pr"}}`
-	httpReq := httptest.NewRequest(http.MethodPost, "/ext_authz/sam/mcp/github", strings.NewReader(disallowedBody))
+	httpReq := httptest.NewRequest(http.MethodPost, "/ext_authz/mesh/mcp/github", strings.NewReader(disallowedBody))
 	httpReq.Header.Set("Authorization", "Bearer "+b64Biscuit)
 	httpRec := httptest.NewRecorder()
 	handleExtAuthzHTTP(h.node, httpRec, httpReq)
@@ -625,7 +625,7 @@ func TestExtAuthzMCPBodyInspection(t *testing.T) {
 
 	// 2. HTTP ext_authz with tools/call for allowed tool "get_pr" in JSON-RPC body -> 200.
 	allowedBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pr"}}`
-	httpReqOK := httptest.NewRequest(http.MethodPost, "/ext_authz/sam/mcp/github", strings.NewReader(allowedBody))
+	httpReqOK := httptest.NewRequest(http.MethodPost, "/ext_authz/mesh/mcp/github", strings.NewReader(allowedBody))
 	httpReqOK.Header.Set("Authorization", "Bearer "+b64Biscuit)
 	httpRecOK := httptest.NewRecorder()
 	handleExtAuthzHTTP(h.node, httpRecOK, httpReqOK)

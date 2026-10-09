@@ -7,8 +7,8 @@
       "peer_id": "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB",
       "libp2p_private_key": "08011240000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
       "libp2p_public_key": "0801122003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
-      "challenge": "sam:enroll:12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB:1700000000000",
-      "signature": "575045472111763965a2fb46f642af2dc5665caf03138039fbb42bb62f8c2671de3717e5a83b6c50096ad9846b9139a19bc816375669549a9ddc23a8dc416c09"
+      "challenge": "mesh:enroll:12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB:1700000000000",
+      "signature": "0da188cf9f7f60cab6b2aa3492632eca85d20647123ca9861a5a3631612eb7209816cb10a6df1bd9b5f3eb84bbfdfc8843d51fdf0c40d304de64cabd37cde508"
     },
     {
       "seed": "42434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f6061",
@@ -16,8 +16,8 @@
       "peer_id": "12D3KooWP8iKhDf3iCMo2H3butNVfdTUtYwYWYQ75jTGnynXPFMp",
       "libp2p_private_key": "0801124042434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f6061c5db2c53c2bcf3dd886f05e60ac9828ed244e61a4fdc09277d58bdf4af1ba29f",
       "libp2p_public_key": "08011220c5db2c53c2bcf3dd886f05e60ac9828ed244e61a4fdc09277d58bdf4af1ba29f",
-      "challenge": "sam:enroll:12D3KooWP8iKhDf3iCMo2H3butNVfdTUtYwYWYQ75jTGnynXPFMp:1700000000000",
-      "signature": "f529ba43012e38e023407ffa01f62ace64795d72c57dbaac81d7018b12577f3384f3b8ee570c7da580066f0358525fb040878180cd253a17dec9a7a8eaaaa200"
+      "challenge": "mesh:enroll:12D3KooWP8iKhDf3iCMo2H3butNVfdTUtYwYWYQ75jTGnynXPFMp:1700000000000",
+      "signature": "cb9a3fee7721aafe7acc8d05a8033425111ad7d2e893e38a8802f95b61f8bf1a879601c283ce8d8ba59a189ae0039d257c65985e847a199f1391fe3ea4400406"
     }
   ]
 }

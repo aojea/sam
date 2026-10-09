@@ -216,7 +216,7 @@ func TestNativeSDKExamples(t *testing.T) {
 				t.Fatalf("the destination saw Authorization %q, want the node's credential", got)
 			}
 			for name := range reached.Header {
-				if strings.HasPrefix(name, "X-Sam-") || strings.HasPrefix(name, "X-Forwarded-") || name == api.HeaderPeerID {
+				if strings.HasPrefix(name, "X-Mesh-") || strings.HasPrefix(name, "X-Forwarded-") || name == api.HeaderPeerID {
 					t.Fatalf("the destination saw %s", name)
 				}
 			}
@@ -245,7 +245,7 @@ func TestNativeSDKExamples(t *testing.T) {
 			waitForPeerOnRouter(t, mesh.cpPort, mesh.adminToken, caller, 10*time.Second)
 			// The node's A2A egress path reaches the agent by peer ID, as the
 			// testnet's node probe does.
-			status, body := egressGet(t, importedAPI, "imported-token", "/sam/"+target.peerID+"/a2a/agent/card")
+			status, body := egressGet(t, importedAPI, "imported-token", "/mesh/"+target.peerID+"/a2a/agent/card")
 			if status != 200 || !strings.Contains(body, `"caller"`) || !strings.Contains(body, caller) {
 				t.Fatalf("a2a card through the node: %d %s", status, body)
 			}

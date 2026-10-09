@@ -30,7 +30,7 @@ import {
   KeysResponseSchema,
   TokenRefreshRequestSchema,
   TokenRefreshResponseSchema,
-} from "./gen/sam_pb.ts";
+} from "./gen/agentmesh_pb.ts";
 import { Identity } from "./identity.ts";
 import { AgentMesh, CredentialRetiredError } from "./mesh.ts";
 

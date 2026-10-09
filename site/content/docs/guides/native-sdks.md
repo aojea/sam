@@ -47,7 +47,7 @@ The banner it prints has the URL, and the token is written to
 
 ```text
 API URL:      http://0.0.0.0:33775
-Join Token:   sam_tok_…
+Join Token:   mesh_tok_…
 ```
 
 On first boot `sam-one` seeds an open development policy, so any enrolled
@@ -464,7 +464,7 @@ an agent card, `message/send`, tasks, streaming. It joins the mesh the same
 way, and needs to know two things: the URL it has on the mesh, and how to
 plug the mesh in as its transport.
 
-- An agent on the mesh has the URL `http://mesh/sam/<peer-id>/a2a/agent`
+- An agent on the mesh has the URL `http://mesh/mesh/<peer-id>/a2a/agent`
   (`MeshSession.meshURL(peerId, "a2a://agent")`,
   `MeshSession.mesh_url(peer_id, "a2a://agent")`). That is what goes in its
   agent card, and what an A2A client on the mesh is given. The peer ID is in
@@ -536,7 +536,7 @@ const mesh = await AgentMesh.enroll({
 const session = await mesh.join();
 
 // The card names the agent as the mesh reaches it: the URL an A2A client on
-// the mesh gives its fetch, http://mesh/sam/<peer-id>/a2a/agent.
+// the mesh gives its fetch, http://mesh/mesh/<peer-id>/a2a/agent.
 const url = MeshSession.meshURL(session.peerId, "a2a://agent");
 const card: AgentCard = {
   name: "Echo agent",
@@ -656,7 +656,7 @@ class EchoExecutor(AgentExecutor):
 
 def a2a_app(agent_url: str) -> Starlette:
     """The A2A SDK's server, as its samples build it. The card names the agent
-    as the mesh reaches it: http://mesh/sam/<peer-id>/a2a/agent."""
+    as the mesh reaches it: http://mesh/mesh/<peer-id>/a2a/agent."""
     card = AgentCard(
         name="Echo agent",
         description="Answers every message with what it said and who sent it.",
@@ -703,7 +703,7 @@ python a2a_agent.py
 
 ```text
 accepting a2a://agent as 12D3KooWQmB5…
-agent card at http://mesh/sam/12D3KooWQmB5…/a2a/agent/.well-known/agent-card.json
+agent card at http://mesh/mesh/12D3KooWQmB5…/a2a/agent/.well-known/agent-card.json
 ```
 
 The caller, with the A2A SDK's client: it fetches the card, sends one
@@ -893,7 +893,7 @@ through every router that admitted the caller, and the router opens a
 circuit because it admitted the agent too. Either way the SDK verifies the
 peer's credential before sending anything, and `requiredLabels`
 (`required_labels` in Python) refuses a peer whose control-plane-attested
-labels do not carry every pair you ask for, as `X-Sam-Required-Labels` does
+labels do not carry every pair you ask for, as `X-Mesh-Required-Labels` does
 on a `sam-node`. A floor uses the same rule for the whole session:
 `join({ egressRequireLabels })` (`join(egress_require_labels=)`) names
 labels every peer the session calls must attest, as `egress.require_labels`

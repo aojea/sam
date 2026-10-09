@@ -82,10 +82,10 @@ func TestIdentityEvidenceOperatorFlow(t *testing.T) {
 	waitForIdentityEvidenceSocket(t, client)
 
 	var local api.IdentityEvidenceResponse
-	getIdentityEvidenceJSON(t, client, "/sam/identity", &local)
+	getIdentityEvidenceJSON(t, client, "/mesh/identity", &local)
 
 	var remote api.PeerEvidenceResponse
-	getIdentityEvidenceJSON(t, client, "/sam/peer/"+url.PathEscape(providerPeerID.String())+"/evidence", &remote)
+	getIdentityEvidenceJSON(t, client, "/mesh/peer/"+url.PathEscape(providerPeerID.String())+"/evidence", &remote)
 
 	verifyIdentityEvidence(t, controlPlaneURL, pinnedControlPlaneKey, providerPeerID, &local, &remote)
 }

@@ -118,13 +118,13 @@ func TestA2AServiceProbe(t *testing.T) {
 
 func TestA2AEgressHookNonA2APassthrough(t *testing.T) {
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/sam/12D3KooWpeer/mcp/svc/foo", nil)
-	req.Header.Set(api.HeaderSamRequiredLabels, "region=eu")
+	req := httptest.NewRequest("GET", "/mesh/12D3KooWpeer/mcp/svc/foo", nil)
+	req.Header.Set(api.HeaderMeshRequiredLabels, "region=eu")
 	_, ok := applyEgressMiddleware(nil, rec, req)
 	if !ok {
 		t.Fatal("non-a2a path must pass through")
 	}
-	if req.Header.Get(api.HeaderSamRequiredLabels) == "" {
+	if req.Header.Get(api.HeaderMeshRequiredLabels) == "" {
 		t.Fatal("labels header on non-a2a path must be left untouched")
 	}
 }
@@ -133,8 +133,8 @@ func TestA2AEgressHookMalformedLabels(t *testing.T) {
 	// ",," is the fail-open shape: it must not parse to "no requirement".
 	for _, header := range []string{"not-a-label", ",,"} {
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest("POST", "/sam/12D3KooWpeer/a2a/agent/", nil)
-		req.Header.Set(api.HeaderSamRequiredLabels, header)
+		req := httptest.NewRequest("POST", "/mesh/12D3KooWpeer/a2a/agent/", nil)
+		req.Header.Set(api.HeaderMeshRequiredLabels, header)
 		_, ok := applyEgressMiddleware(nil, rec, req)
 		if ok {
 			t.Fatalf("labels header %q must be refused", header)
@@ -180,9 +180,9 @@ func TestA2AServeAgentCardRegenerates(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/sam/12D3KooWpeer/a2a/agent/.well-known/agent-card.json", nil)
+	req := httptest.NewRequest("GET", "/mesh/12D3KooWpeer/a2a/agent/.well-known/agent-card.json", nil)
 	req.Host = "127.0.0.1:8080"
-	req.Header.Set(api.HeaderSamBiscuit, "b64-biscuit")
+	req.Header.Set(api.HeaderMeshBiscuit, "b64-biscuit")
 	req.Header.Set("Accept-Encoding", "gzip")
 	if !serveEgressLocally(nil, rt, rec, req) {
 		t.Fatal("agent-card GET must be handled locally")
@@ -192,7 +192,7 @@ func TestA2AServeAgentCardRegenerates(t *testing.T) {
 	if got := outbound.URL.String(); got != wantURL {
 		t.Errorf("outbound fetch URL = %q, want %q", got, wantURL)
 	}
-	if outbound.Header.Get(api.HeaderSamBiscuit) != "b64-biscuit" {
+	if outbound.Header.Get(api.HeaderMeshBiscuit) != "b64-biscuit" {
 		t.Error("egress headers must be carried on the card fetch")
 	}
 	if outbound.Header.Get("Accept-Encoding") != "" {
@@ -206,7 +206,7 @@ func TestA2AServeAgentCardRegenerates(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &card); err != nil {
 		t.Fatalf("regenerated card is not a valid AgentCard: %v", err)
 	}
-	base := "http://127.0.0.1:8080/sam/12D3KooWpeer/a2a/agent"
+	base := "http://127.0.0.1:8080/mesh/12D3KooWpeer/a2a/agent"
 	if len(card.SupportedInterfaces) != 1 {
 		t.Fatalf("want 1 HTTP interface after dropping gRPC, got %v", card.SupportedInterfaces)
 	}
@@ -237,7 +237,7 @@ func TestA2AServeAgentCardMinimalCardStaysParseable(t *testing.T) {
 			`"capabilities":{}}`), nil
 	})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/sam/12D3KooWpeer/a2a/agent/.well-known/agent-card.json", nil)
+	req := httptest.NewRequest("GET", "/mesh/12D3KooWpeer/a2a/agent/.well-known/agent-card.json", nil)
 	if !serveEgressLocally(nil, rt, rec, req) {
 		t.Fatal("card GET must be handled locally")
 	}
@@ -265,7 +265,7 @@ func TestA2AServeAgentCardAtServiceRoot(t *testing.T) {
 		return cardResponse(http.StatusOK,
 			`{"name":"T","supportedInterfaces":[{"url":"http://localhost:7777","protocolBinding":"JSONRPC"}]}`), nil
 	})
-	for _, path := range []string{"/sam/12D3KooWpeer/a2a/agent", "/sam/12D3KooWpeer/a2a/agent/"} {
+	for _, path := range []string{"/mesh/12D3KooWpeer/a2a/agent", "/mesh/12D3KooWpeer/a2a/agent/"} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", path, nil)
 		req.Host = "127.0.0.1:8080"
@@ -282,7 +282,7 @@ func TestA2AServeAgentCardAtServiceRoot(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &card); err != nil {
 			t.Fatalf("GET %s: invalid card: %v", path, err)
 		}
-		if len(card.SupportedInterfaces) != 1 || card.SupportedInterfaces[0].URL != "http://127.0.0.1:8080/sam/12D3KooWpeer/a2a/agent" {
+		if len(card.SupportedInterfaces) != 1 || card.SupportedInterfaces[0].URL != "http://127.0.0.1:8080/mesh/12D3KooWpeer/a2a/agent" {
 			t.Errorf("GET %s: interfaces = %+v", path, card.SupportedInterfaces)
 		}
 	}
@@ -294,10 +294,10 @@ func TestA2AServeAgentCardIgnoresNonCardRequests(t *testing.T) {
 		return nil, nil
 	})
 	for _, tc := range []struct{ method, path string }{
-		{"POST", "/sam/12D3KooWpeer/a2a/agent/.well-known/agent-card.json"},
-		{"POST", "/sam/12D3KooWpeer/a2a/agent"},
-		{"GET", "/sam/12D3KooWpeer/a2a/agent/tasks/1"},
-		{"GET", "/sam/12D3KooWpeer/mcp/svc/.well-known/agent-card.json"},
+		{"POST", "/mesh/12D3KooWpeer/a2a/agent/.well-known/agent-card.json"},
+		{"POST", "/mesh/12D3KooWpeer/a2a/agent"},
+		{"GET", "/mesh/12D3KooWpeer/a2a/agent/tasks/1"},
+		{"GET", "/mesh/12D3KooWpeer/mcp/svc/.well-known/agent-card.json"},
 	} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(tc.method, tc.path, nil)
@@ -309,8 +309,8 @@ func TestA2AServeAgentCardIgnoresNonCardRequests(t *testing.T) {
 
 func TestA2AEgressHookInvalidPeerID(t *testing.T) {
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/sam/not-a-peer/a2a/agent/", nil)
-	req.Header.Set(api.HeaderSamRequiredLabels, "region=eu")
+	req := httptest.NewRequest("GET", "/mesh/not-a-peer/a2a/agent/", nil)
+	req.Header.Set(api.HeaderMeshRequiredLabels, "region=eu")
 	_, ok := applyEgressMiddleware(nil, rec, req)
 	if ok {
 		t.Fatal("invalid peer ID must be refused")
@@ -326,7 +326,7 @@ func TestA2AServeAgentCardNoHTTPBindingFailsClosed(t *testing.T) {
 			`{"name":"T","supportedInterfaces":[{"url":"localhost:50051","protocolBinding":"GRPC"}]}`), nil
 	})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/sam/12D3KooWpeer/a2a/agent/.well-known/agent-card.json", nil)
+	req := httptest.NewRequest("GET", "/mesh/12D3KooWpeer/a2a/agent/.well-known/agent-card.json", nil)
 	if !serveEgressLocally(nil, rt, rec, req) {
 		t.Fatal("card GET must be handled locally")
 	}
@@ -348,7 +348,7 @@ func TestA2AServeAgentCardPre10CardFailsClosed(t *testing.T) {
 			`"additionalInterfaces":[{"url":"http://localhost:9999","transport":"JSONRPC"}]}`), nil
 	})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/sam/12D3KooWpeer/a2a/agent/.well-known/agent-card.json", nil)
+	req := httptest.NewRequest("GET", "/mesh/12D3KooWpeer/a2a/agent/.well-known/agent-card.json", nil)
 	if !serveEgressLocally(nil, rt, rec, req) {
 		t.Fatal("card GET must be handled locally")
 	}
@@ -367,7 +367,7 @@ func TestA2AServeAgentCardRelaysUpstreamError(t *testing.T) {
 		return resp, nil
 	})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/sam/12D3KooWpeer/a2a/agent/.well-known/agent-card.json", nil)
+	req := httptest.NewRequest("GET", "/mesh/12D3KooWpeer/a2a/agent/.well-known/agent-card.json", nil)
 	if !serveEgressLocally(nil, rt, rec, req) {
 		t.Fatal("card GET must be handled locally")
 	}
@@ -384,7 +384,7 @@ func TestA2AServeAgentCardFetchErrorIs502(t *testing.T) {
 		return nil, errors.New("peer unreachable")
 	})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/sam/12D3KooWpeer/a2a/agent/.well-known/agent-card.json", nil)
+	req := httptest.NewRequest("GET", "/mesh/12D3KooWpeer/a2a/agent/.well-known/agent-card.json", nil)
 	if !serveEgressLocally(nil, rt, rec, req) {
 		t.Fatal("card GET must be handled locally")
 	}
@@ -395,8 +395,8 @@ func TestA2AServeAgentCardFetchErrorIs502(t *testing.T) {
 
 func TestA2AEgressHookUppercaseTypeIsGated(t *testing.T) {
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/sam/not-a-peer/A2A/agent/", nil)
-	req.Header.Set(api.HeaderSamRequiredLabels, "region=eu")
+	req := httptest.NewRequest("POST", "/mesh/not-a-peer/A2A/agent/", nil)
+	req.Header.Set(api.HeaderMeshRequiredLabels, "region=eu")
 	_, ok := applyEgressMiddleware(nil, rec, req)
 	if ok {
 		t.Fatal("uppercase A2A path must not bypass the labels gate")
@@ -404,7 +404,7 @@ func TestA2AEgressHookUppercaseTypeIsGated(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (invalid peer reached after gate engaged)", rec.Code)
 	}
-	if req.Header.Get(api.HeaderSamRequiredLabels) != "" {
+	if req.Header.Get(api.HeaderMeshRequiredLabels) != "" {
 		t.Fatal("labels header must be stripped on a2a paths regardless of case")
 	}
 }

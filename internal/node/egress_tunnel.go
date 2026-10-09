@@ -39,7 +39,7 @@ import (
 const (
 	// HeaderSamEgressPort carries the requested TCP destination port when a
 	// CONNECT tunnel is forwarded across /libp2p-http.
-	HeaderSamEgressPort = "X-Sam-Egress-Port"
+	HeaderSamEgressPort = "X-Mesh-Egress-Port"
 	// HeaderSamTunnelUpgrade marks an HTTP/1.1 request over /libp2p-http as a
 	// raw TCP CONNECT tunnel.
 	HeaderSamTunnelUpgrade = "sam-tcp-tunnel"
@@ -311,8 +311,8 @@ func withConnectTunnel(node *SamNode, token string, next http.Handler) http.Hand
 			next.ServeHTTP(w, r)
 			return
 		}
-		if proxyAuth := r.Header.Get("Proxy-Authorization"); proxyAuth != "" && r.Header.Get(api.HeaderSamAuthentication) == "" {
-			r.Header.Set(api.HeaderSamAuthentication, proxyAuth)
+		if proxyAuth := r.Header.Get("Proxy-Authorization"); proxyAuth != "" && r.Header.Get(api.HeaderMeshAuthentication) == "" {
+			r.Header.Set(api.HeaderMeshAuthentication, proxyAuth)
 		}
 		r.Header.Del("Proxy-Authorization")
 		authedConnect.ServeHTTP(w, r)
@@ -345,12 +345,12 @@ func handleConnectTunnel(node *SamNode, w http.ResponseWriter, r *http.Request) 
 		refuse(w, http.StatusBadRequest, err.Error(), proxyStatusDenied)
 		return
 	}
-	requiredLabels, err := parseRequiredLabels(r.Header.Get(api.HeaderSamRequiredLabels))
+	requiredLabels, err := parseRequiredLabels(r.Header.Get(api.HeaderMeshRequiredLabels))
 	if err != nil {
-		refuse(w, http.StatusBadRequest, fmt.Sprintf("Invalid %s header: %v", api.HeaderSamRequiredLabels, err), proxyStatusDenied)
+		refuse(w, http.StatusBadRequest, fmt.Sprintf("Invalid %s header: %v", api.HeaderMeshRequiredLabels, err), proxyStatusDenied)
 		return
 	}
-	r.Header.Del(api.HeaderSamRequiredLabels)
+	r.Header.Del(api.HeaderMeshRequiredLabels)
 
 	if node == nil {
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
@@ -452,7 +452,7 @@ func forwardConnectTunnelToPeer(node *SamNode, w http.ResponseWriter, r *http.Re
 		HeaderSamTunnelUpgrade,
 		HeaderSamEgressPort,
 		port,
-		api.HeaderSamBiscuit,
+		api.HeaderMeshBiscuit,
 		base64.StdEncoding.EncodeToString(biscuitBytes),
 	)
 	if _, err := io.WriteString(meshConn, reqLine); err != nil {

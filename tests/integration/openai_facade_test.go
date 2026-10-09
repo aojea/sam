@@ -47,7 +47,7 @@ func TestOpenAIFacadeCUJ(t *testing.T) {
 		if strings.Contains(r.Header.Get("Authorization"), apiToken) {
 			sawSidecarToken.Store(true)
 		}
-		if r.Header.Get(api.HeaderSamAuthentication) != "" {
+		if r.Header.Get(api.HeaderMeshAuthentication) != "" {
 			sawSamAuthHeader.Store(true)
 		}
 		switch r.URL.Path {
@@ -137,7 +137,7 @@ func TestOpenAIFacadeCUJ(t *testing.T) {
 		req, _ = http.NewRequest("POST", "http://"+apiAddrB+"/v1/chat/completions", strings.NewReader(reqBody))
 		req.Header.Set("Authorization", "Bearer "+apiToken)
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set(api.HeaderSamRequiredLabels, "region=eu")
+		req.Header.Set(api.HeaderMeshRequiredLabels, "region=eu")
 		respEU, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("label-constrained completion request failed: %v", err)
@@ -156,7 +156,7 @@ func TestOpenAIFacadeCUJ(t *testing.T) {
 	// A requirement that mismatches the provider's declared label fails closed.
 	req, _ = http.NewRequest("POST", "http://"+apiAddrB+"/v1/chat/completions", strings.NewReader(reqBody))
 	req.Header.Set("Authorization", "Bearer "+apiToken)
-	req.Header.Set(api.HeaderSamRequiredLabels, "region=us-east-1")
+	req.Header.Set(api.HeaderMeshRequiredLabels, "region=us-east-1")
 	respDE, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("mismatched-label completion request failed: %v", err)
@@ -186,7 +186,7 @@ func TestOpenAIFacadeCUJ(t *testing.T) {
 		t.Error("sidecar token leaked to the inference backend")
 	}
 	if sawSamAuthHeader.Load() {
-		t.Errorf("%s header leaked to the inference backend", api.HeaderSamAuthentication)
+		t.Errorf("%s header leaked to the inference backend", api.HeaderMeshAuthentication)
 	}
 
 	t.Log("OpenAI facade CUJ test passed.")

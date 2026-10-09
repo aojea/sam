@@ -105,7 +105,7 @@ deploy_chart() {
     --set controlPlane.insecureSkipTlsVerify=true \
     --set 'bootstrap.nodeServices={*}' \
     --set 'bootstrap.nodeLabels={*}' \
-    --set 'bootstrap.nodeMembers={sam:system:authenticated}' \
+    --set 'bootstrap.nodeMembers={mesh:system:authenticated}' \
     --set gateway.enabled=true \
     --set gateway.className=cloud-provider-kind \
     --set gateway.adminRoute=true \
@@ -201,7 +201,7 @@ CONTROL_PLANE_ISSUERS="${ISSUER}"
 
 # The first audience is what the control plane reports as the OIDC client id, so it has to
 # match Dex's static client.
-ALLOWED_AUDIENCES="sam-console,sam-mesh-audience,sam-control-plane-audience"
+ALLOWED_AUDIENCES="sam-console,agentmesh-audience,sam-control-plane-audience"
 
 # 00-namespace-rbac.yaml's envsubst reads this from the environment.
 export NAMESPACE

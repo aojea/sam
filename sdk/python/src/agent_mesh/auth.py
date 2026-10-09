@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The /sam/auth/1.0.0 handshake, both sides. Frames are varint-length-prefixed
+"""The /mesh/auth/1.0.0 handshake, both sides. Frames are varint-length-prefixed
 protobufs, go-msgio style."""
 
 from __future__ import annotations
@@ -31,14 +31,14 @@ from libp2p.utils.varint import (
     read_varint_prefixed_bytes_limited,
 )
 
-from ._proto import sam_pb2 as pb
+from ._proto import agentmesh_pb2 as pb
 from .biscuit import BiscuitVerificationError, VerifiedBiscuit, verify_peer_biscuit
 from .host import open_stream
 
 logger = logging.getLogger("agent_mesh")
 
-AUTH_PROTOCOL = TProtocol("/sam/auth/1.0.0")
-MCP_PROTOCOL = TProtocol("/sam/mcp/1.0.0")
+AUTH_PROTOCOL = TProtocol("/mesh/auth/1.0.0")
+MCP_PROTOCOL = TProtocol("/mesh/mcp/1.0.0")
 
 # The first frame on a stream is capped, as msgio.NewVarintReaderSize(s, 64 KiB).
 MAX_AUTH_FRAME_BYTES = 64 * 1024
@@ -67,7 +67,7 @@ async def _read_frame(stream: INetStream) -> bytes:
 
 
 async def authenticate_with_peer(host: IHost, peer_id: ID, frame: bytes, trusted_keys: Sequence[bytes]) -> VerifiedBiscuit:
-    """Client side: presents `frame` on a new /sam/auth/1.0.0 stream to a
+    """Client side: presents `frame` on a new /mesh/auth/1.0.0 stream to a
     connected peer and returns the peer's verified credential."""
     stream = await open_stream(host, peer_id, AUTH_PROTOCOL, AUTH_HANDSHAKE_TIMEOUT)
     try:
@@ -92,7 +92,7 @@ def auth_stream_handler(
     on_authenticated: Optional[Callable[[str, VerifiedBiscuit], None]] = None,
     is_banned: Optional[Callable[[str], bool]] = None,
 ) -> Callable[[INetStream], "trio.lowlevel.Awaitable[None]"]:
-    """Server side of /sam/auth/1.0.0, mirroring sam-node's HandleAuthHandshake:
+    """Server side of /mesh/auth/1.0.0, mirroring sam-node's HandleAuthHandshake:
     verify the caller's biscuit against the control plane keys and its
     connection peer ID, then answer with our own. A failed verification, or a
     peer the control plane banned, gets no answer, only a closed stream, as on

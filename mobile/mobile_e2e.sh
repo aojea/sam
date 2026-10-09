@@ -91,7 +91,7 @@ docker run --name sam-control-plane \
   --db-driver sqlite \
   --db-dsn /data/control-plane.db \
   --issuer http://mock-oidc:18080 \
-  --allowed-audiences sam-mesh-audience,sam-control-plane-audience \
+  --allowed-audiences agentmesh-audience,sam-control-plane-audience \
   --insecure-skip-tls-verify \
   --log-level debug
 
@@ -126,13 +126,13 @@ curl -s -X POST \
   -d '{
     "roles": [
       {"name": "admin", "allowed_services": ["*"], "allowed_targets": ["*"]},
-      {"name": "sam:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]},
-      {"name": "sam:role:node", "allowed_services": ["*"], "allowed_targets": ["*"]}
+      {"name": "mesh:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]},
+      {"name": "mesh:role:node", "allowed_services": ["*"], "allowed_targets": ["*"]}
     ],
     "bindings": [
-      {"role": "admin", "members": ["sam:system:authenticated"]},
-      {"role": "sam:role:node", "members": ["sam:system:authenticated"]},
-      {"role": "sam:role:router", "members": ["group:routers"]}
+      {"role": "admin", "members": ["mesh:system:authenticated"]},
+      {"role": "mesh:role:node", "members": ["mesh:system:authenticated"]},
+      {"role": "mesh:role:router", "members": ["group:routers"]}
     ]
   }' \
   http://127.0.0.1:37001/policies

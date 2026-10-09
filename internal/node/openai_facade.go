@@ -66,7 +66,7 @@ type modelProvider struct {
 // mesh provider, preferring local. Function fields are seams so unit tests
 // can fake discovery and probing.
 type openAIFacade struct {
-	forward       http.Handler // egress proxy handling /sam/<peer>/<type>/<name>/...
+	forward       http.Handler // egress proxy handling /mesh/<peer>/<type>/<name>/...
 	localPeerID   func() string
 	localServices func() []Service
 	discover      func(ctx context.Context) ([]*api.DiscoveredProvider, error)
@@ -199,7 +199,7 @@ func fetchRemoteModels(ctx context.Context, node *SamNode, client *http.Client, 
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set(api.HeaderSamBiscuit, base64.StdEncoding.EncodeToString(identity))
+	req.Header.Set(api.HeaderMeshBiscuit, base64.StdEncoding.EncodeToString(identity))
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -380,7 +380,7 @@ func (f *openAIFacade) handleCompletions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	requiredLabels, err := parseRequiredLabels(r.Header.Get(api.HeaderSamRequiredLabels))
+	requiredLabels, err := parseRequiredLabels(r.Header.Get(api.HeaderMeshRequiredLabels))
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -403,11 +403,11 @@ func (f *openAIFacade) handleCompletions(w http.ResponseWriter, r *http.Request)
 
 	// The gate already stripped the credential it consumed; a surviving
 	// Authorization header is the destination backend's own credential and
-	// passes through, mirroring the egress path. X-Sam-Authentication is
+	// passes through, mirroring the egress path. X-Mesh-Authentication is
 	// local-only, and the label requirement is an instruction to this
 	// sidecar, not to the provider.
-	r.Header.Del(api.HeaderSamAuthentication)
-	r.Header.Del(api.HeaderSamRequiredLabels)
+	r.Header.Del(api.HeaderMeshAuthentication)
+	r.Header.Del(api.HeaderMeshRequiredLabels)
 
 	maxAttempts := min(3, len(ranked))
 	for i := range maxAttempts {
@@ -449,7 +449,7 @@ func (f *openAIFacade) handleCompletions(w http.ResponseWriter, r *http.Request)
 					p.peerID, p.service, requiredLabels, f.floor(), err)
 				continue
 			}
-			attempt.URL.Path = fmt.Sprintf("/sam/%s/%s/%s%s", p.peerID, api.ServiceTypeStringInference, p.service, r.URL.Path)
+			attempt.URL.Path = fmt.Sprintf("/mesh/%s/%s/%s%s", p.peerID, api.ServiceTypeStringInference, p.service, r.URL.Path)
 			attempt.URL.RawPath = ""
 			f.forward.ServeHTTP(aw, attempt)
 		}

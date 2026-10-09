@@ -33,7 +33,7 @@ ADMIN_TOKEN="$(kubectl --context "${KCTX}" -n "${NAMESPACE}" get secret sam-mesh
 TOKEN_RESPONSE="$(curl -s -X POST "${CONTROL_PLANE_URL}/admin/bootstrap-tokens" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" \
   -H "Content-Type: application/json" \
-  -d '{"role":"sam:role:node","ttl_hours":1,"max_usages":1,"description":"local sam-node"}' || true)"
+  -d '{"role":"mesh:role:node","ttl_hours":1,"max_usages":1,"description":"local sam-node"}' || true)"
 BOOTSTRAP_TOKEN="$(printf '%s' "${TOKEN_RESPONSE}" | jq -r '.token // empty' 2>/dev/null || true)"
 [[ -n "${BOOTSTRAP_TOKEN}" ]] || {
   echo "could not mint a bootstrap token at ${CONTROL_PLANE_URL}/admin/bootstrap-tokens: ${TOKEN_RESPONSE}" >&2

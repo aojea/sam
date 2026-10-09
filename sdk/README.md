@@ -41,17 +41,17 @@ Milestones 1 to 5 are implemented and tested in both languages:
 | Persisted state (identity and credential, owner-only files; IndexedDB in a browser) | yes | yes |
 | Biscuit verification of a peer's credential (signature, expiry, peer binding, roles, labels) | yes | yes |
 | libp2p host as `sam-node` configures it (TCP and WebSocket, TLS first and Noise, yamux) | yes | yes |
-| `/sam/auth/1.0.0`, both sides; join = handshake with a router and check its role | yes | yes |
+| `/mesh/auth/1.0.0`, both sides; join = handshake with a router and check its role | yes | yes |
 | Circuit relay v2 reservation on the router; dial and accept through it | yes | yes |
-| Service discovery in the mesh DHT (`/sam/kad/1.0.0`) | yes | yes |
-| `/sam/mcp/1.0.0` client: list and call a provider's tools, or its catalog | yes | yes |
+| Service discovery in the mesh DHT (`/mesh/kad/1.0.0`) | yes | yes |
+| `/mesh/mcp/1.0.0` client: list and call a provider's tools, or its catalog | yes | yes |
 | Caller-side label requirements on the provider's credential | yes | yes |
 | `/libp2p-http` client: call inference and A2A services on the mesh; response bodies stream | yes | yes |
 | The mesh as a transport for HTTP clients: `session.fetch()` for fetch-based clients, `MeshTransport` for httpx, so the official A2A SDK's client works unchanged | `fetch` | httpx |
 | Provider authorizer: the baseline Datalog and the mesh policy (`GET /policies`), evaluated as `sam-node` does | yes | yes |
 | A2A ingress for the agent: `/libp2p-http` for `a2a://<name>`, forwarded to an A2A server beside the process or answered in it; not announced anywhere | yes | yes |
 | Control plane pull before join and on `sam-node`'s interval: `/keys` verified against the trusted set, credential refresh after a rotation, `/info` bans and router addresses | yes | yes |
-| Gossip events from the control plane (`/sam/mesh/events/v1`, StrictSign): ban enforced at once, key rotation adopted, policy update pulls | yes | yes |
+| Gossip events from the control plane (`/mesh/events/v1`, StrictSign): ban enforced at once, key rotation adopted, policy update pulls | yes | yes |
 | Banned peers refused: connections dropped and denied, handshakes and requests refused, dials refused | yes | yes |
 | Runs in a browser page: WebSocket and Noise to the router, state in IndexedDB, the agent answered by a fetch handler; `sdk/js/examples/browser` against `sam-one`, tested in Chromium | yes | — |
 | Published to a registry from the release workflow | npm `@sam-mesh/sdk` | PyPI `sam-mesh` |
@@ -127,7 +127,7 @@ pinned by a test:
 - py-libp2p's Kademlia client takes a protocol prefix but its provider
   lookups still speak `/ipfs/kad/1.0.0`, so it cannot reach the mesh DHT.
   The Python SDK does a bounded GET_PROVIDERS walk itself on
-  `/sam/kad/1.0.0`, seeded by the routers (`agent_mesh/discovery.py`).
+  `/mesh/kad/1.0.0`, seeded by the routers (`agent_mesh/discovery.py`).
   js-libp2p's `@libp2p/kad-dht` takes the protocol and works as is.
 - go-libp2p-kad-dht keys provider records by the multihash, not the CID.
   `sdk/testdata/service_keys.json` pins the keys both SDKs derive against
@@ -140,7 +140,7 @@ pinned by a test:
 - URL parsers lowercase the host (WHATWG `URL`, httpx), and a base58 peer
   ID is case-sensitive. The URL an HTTP client uses for a peer's service
   therefore carries the peer ID in the path,
-  `http://mesh/sam/<peer-id>/<type>/<name>/<path>`, the shape of `sam-node`'s
+  `http://mesh/mesh/<peer-id>/<type>/<name>/<path>`, the shape of `sam-node`'s
   egress proxy and of an agent card rewritten for the mesh; the host is ignored.
 - A member that publishes nothing has announced no address, so nothing in
   the DHT or a router's peerstore names one. `sam-node` dials
@@ -214,20 +214,20 @@ both cases against real routers and a real control plane.
 ### Control plane (protobuf over HTTP)
 
 All requests and responses are `application/x-protobuf` bodies of the
-messages in `api/sam.proto`. Bodies are capped at 1 MiB on both sides.
+messages in `api/agentmesh.proto`. Bodies are capped at 1 MiB on both sides.
 
 | Endpoint | Request | Response | Proof of possession |
 | --- | --- | --- | --- |
 | `GET /info` | — | `ControlPlaneInfoResponse` | none |
-| `POST /enroll` | `BootstrapEnrollRequest` | `BootstrapEnrollResponse` | sign `sam:enroll:<peer_id>:<ts>` |
-| `GET /enroll/status?peer_id=` | headers `X-Sam-Challenge-Ts`, `X-Sam-Challenge-Sig` (base64url, unpadded) | `BootstrapEnrollResponse` | sign `sam:enroll-status:<peer_id>:<ts>` |
-| `POST /register` | `EnrollRequest` | `EnrollResponse` | sign `sam:register:<peer_id>:<ts>` |
-| `POST /refresh` | `TokenRefreshRequest`, header `Authorization: Bearer <base64 biscuit>` | `TokenRefreshResponse` | sign `sam:refresh:<peer_id>:<ts>` |
+| `POST /enroll` | `BootstrapEnrollRequest` | `BootstrapEnrollResponse` | sign `mesh:enroll:<peer_id>:<ts>` |
+| `GET /enroll/status?peer_id=` | headers `X-Mesh-Challenge-Ts`, `X-Mesh-Challenge-Sig` (base64url, unpadded) | `BootstrapEnrollResponse` | sign `mesh:enroll-status:<peer_id>:<ts>` |
+| `POST /register` | `EnrollRequest` | `EnrollResponse` | sign `mesh:register:<peer_id>:<ts>` |
+| `POST /refresh` | `TokenRefreshRequest`, header `Authorization: Bearer <base64 biscuit>` | `TokenRefreshResponse` | sign `mesh:refresh:<peer_id>:<ts>` |
 | `GET /keys` | — | `KeysResponse` | none; see below |
-| `GET /policies` | headers `Authorization: Bearer <base64 biscuit>`, `X-Sam-Challenge-Ts`, `X-Sam-Challenge-Sig` | `PolicyConfigGetResponse{datalog_rules}` | sign `sam:policies:<peer_id>:<ts>` |
-| `GET /egress` | headers `Authorization: Bearer <base64 biscuit>`, `X-Sam-Challenge-Ts`, `X-Sam-Challenge-Sig` | `EgressAssignmentsResponse` | sign `sam:egress:<peer_id>:<ts>` (`sam-node` only) |
-| `GET /revocations` | headers `Authorization: Bearer <base64 biscuit>`, `X-Sam-Challenge-Ts`, `X-Sam-Challenge-Sig` | `RevocationsResponse` | sign `sam:revocations:<peer_id>:<ts>` (`sam-node` only) |
-| `POST /nodes/catalog` | `NodeCatalogReport`, headers `Authorization: Bearer <base64 biscuit>`, `X-Sam-Challenge-Ts`, `X-Sam-Challenge-Sig` | `204` | sign `sam:nodes-catalog:<peer_id>:<ts>`; `sam-node` reports what it publishes, while an SDK member publishes nothing and does not call it |
+| `GET /policies` | headers `Authorization: Bearer <base64 biscuit>`, `X-Mesh-Challenge-Ts`, `X-Mesh-Challenge-Sig` | `PolicyConfigGetResponse{datalog_rules}` | sign `mesh:policies:<peer_id>:<ts>` |
+| `GET /egress` | headers `Authorization: Bearer <base64 biscuit>`, `X-Mesh-Challenge-Ts`, `X-Mesh-Challenge-Sig` | `EgressAssignmentsResponse` | sign `mesh:egress:<peer_id>:<ts>` (`sam-node` only) |
+| `GET /revocations` | headers `Authorization: Bearer <base64 biscuit>`, `X-Mesh-Challenge-Ts`, `X-Mesh-Challenge-Sig` | `RevocationsResponse` | sign `mesh:revocations:<peer_id>:<ts>` (`sam-node` only) |
+| `POST /nodes/catalog` | `NodeCatalogReport`, headers `Authorization: Bearer <base64 biscuit>`, `X-Mesh-Challenge-Ts`, `X-Mesh-Challenge-Sig` | `204` | sign `mesh:nodes-catalog:<peer_id>:<ts>`; `sam-node` reports what it publishes, while an SDK member publishes nothing and does not call it |
 
 - `<ts>` is the request's `challenge_unix_ms`, unix milliseconds, and must
   be within 5 minutes of the control plane's clock (`challengeMaxAge`). When
@@ -290,7 +290,7 @@ Three protocols. The first two start with a length-prefixed protobuf frame;
 framing is the go-msgio varint style (unsigned varint byte length, then the
 bytes), with a 64 KiB cap on the first frame.
 
-- `/sam/auth/1.0.0` (`HandleAuthHandshake`, and the router's equivalent).
+- `/mesh/auth/1.0.0` (`HandleAuthHandshake`, and the router's equivalent).
   Client sends `AuthFrame{biscuit}`; server verifies the biscuit against the
   control plane keys, checks it is bound to the connection's peer ID and not
   revoked, and answers `AuthResponse{success, biscuit}` with its own
@@ -299,7 +299,7 @@ bytes), with a 64 KiB cap on the first frame.
   router, run this handshake, and the router admits it to the relay and
   gossip. Both SDKs answer it too, so a `sam-node` can verify them before
   calling.
-- `/sam/mcp/1.0.0` (`WithBiscuitAuth` then `HandleMCPStream`). Client sends
+- `/mesh/mcp/1.0.0` (`WithBiscuitAuth` then `HandleMCPStream`). Client sends
   `AuthFrame{biscuit, target_service: "mcp://<service>", agent}`; server
   authorizes the request with the Biscuit authorizer described below and
   answers `AuthResponse`. The stream then carries MCP JSON-RPC messages, each
@@ -308,8 +308,8 @@ bytes), with a 64 KiB cap on the first frame.
   are clients of this protocol only; they serve no MCP.
 - `/libp2p-http` (go-libp2p-http; `StartIngressServer` and the egress proxy
   in `internal/node`). Plain HTTP/1.1 on a stream, one request per stream,
-  `Host` set to the peer ID, the caller's biscuit in `X-Sam-Biscuit` and the
-  agent it speaks for in `X-Sam-Agent`. The path is
+  `Host` set to the peer ID, the caller's biscuit in `X-Mesh-Biscuit` and the
+  agent it speaks for in `X-Mesh-Agent`. The path is
   `/<type>/<name>/<upstream>`; the server authorizes `<type>://<name>` with
   the same authorizer, then forwards `<upstream>` to the service with those
   two headers stripped and `X-Peer-Id` set to the verified caller. The SDKs
@@ -325,10 +325,10 @@ bytes), with a 64 KiB cap on the first frame.
 ### Discovery (`internal/node/service.go`)
 
 A provider announces a service as a DHT provider record for
-`cidv1(raw, sha256("sam:service:<type>[:<name>]"))`, once for the type and
+`cidv1(raw, sha256("mesh:service:<type>[:<name>]"))`, once for the type and
 once for the name (`<type>` is `mcp`, `inference`, `a2a` or `egress`). A consumer
-looks up providers for the same CID, dials one and opens `/sam/mcp/1.0.0`.
-Gossip topics under `/sam/discovery/v1/...` carry `ServiceAnnounce` for
+looks up providers for the same CID, dials one and opens `/mesh/mcp/1.0.0`.
+Gossip topics under `/mesh/discovery/v1/...` carry `ServiceAnnounce` for
 interest-scoped updates; the DHT is the source of truth. The SDKs look
 records up and announce none.
 
@@ -367,7 +367,7 @@ of it is derived in the SDK:
   terms; biscuit-rust, and so biscuit-python and biscuit-wasm, do not.
 - An unconditional rule is written `head <- true`, which every parser
   accepts as a rule (`role("dev") <- true` for a
-  `sam:system:authenticated` binding).
+  `mesh:system:authenticated` binding).
 
 ## Agents, not services
 
@@ -398,11 +398,11 @@ service, no DHT record, no catalog entry. The reasons:
   state in IndexedDB and answers its agent with a fetch handler.
 
 What an SDK agent is on the wire: a peer with a relay reservation on a
-router, answering `/sam/auth/1.0.0` and `/libp2p-http` for `a2a://<name>`,
+router, answering `/mesh/auth/1.0.0` and `/libp2p-http` for `a2a://<name>`,
 with no DHT record and no catalog entry. To a `sam-node` it is a peer whose
 address nobody announced, reached through the router that admitted both,
 and whose credential it verifies before forwarding
-`/sam/<peer>/a2a/<name>/...`. Routers, the control plane and the Datalog
+`/mesh/<peer>/a2a/<name>/...`. Routers, the control plane and the Datalog
 need no special case.
 
 Two agents that both wrote nothing down still meet: A learns B's peer ID
@@ -446,7 +446,7 @@ holds against the control plane's records.
   `sdk/testdata/biscuit_vectors.json` holds tokens minted by
   `internal/identity` (valid, other peer, expired, untrusted key, appended
   block, garbage) and both verifiers agree with the Go one on all of them.
-- `/sam/auth/1.0.0` on both sides. Join connects to the routers in the
+- `/mesh/auth/1.0.0` on both sides. Join connects to the routers in the
   credential, runs the handshake, requires the router role under the key
   that verified the token, and reserves a relay slot; the router grants one
   only to an authenticated peer. Inbound handshakes are answered the way
@@ -473,14 +473,14 @@ holds against the control plane's records.
 - Discovery: `session.discover("mcp://calc")`, or `(type, name)`, or a type
   alone, looks the mesh DHT up for the service key
   `internal/node/service.go` derives. JS: `@libp2p/kad-dht` in client mode
-  on `/sam/kad/1.0.0`; Python: the SDK's own bounded GET_PROVIDERS walk on
+  on `/mesh/kad/1.0.0`; Python: the SDK's own bounded GET_PROVIDERS walk on
   the same protocol (see the facts above).
 - Naming a peer: every call takes a `Peer`, which is a provider `discover`
   returned, a peer id, or a multiaddr. For the first two the SDK dials the
   advertised addresses and `<router>/p2p-circuit/p2p/<peer>` through every
   admitted router, as `preparePeerAddrs` in `internal/node/mcp.go` does; a
   multiaddr is dialed as given.
-- `/sam/mcp/1.0.0` client: `session.openMCP(peer, "mcp://<name>")` sends
+- `/mesh/mcp/1.0.0` client: `session.openMCP(peer, "mcp://<name>")` sends
   the `AuthFrame` naming the service, verifies the provider's credential
   and the caller's required labels (`checkPeerLabels`: every pair must be
   attested, as `api.LabelCheck` joins them with `,`), then runs the
@@ -497,7 +497,7 @@ holds against the control plane's records.
   for the session; a call cannot waive or widen it. The three
   implementations agree on it, as they do on the caller's requirement. The
   HTTP path (`request`, `fetch`, `MeshTransport`) verifies the provider with
-  or without a floor, through the mutual `/sam/auth/1.0.0` handshake, as
+  or without a floor, through the mutual `/mesh/auth/1.0.0` handshake, as
   `sam-node`'s `VerifyPeerLabels` does before its egress proxy sends
   anything; a positive verdict is kept per peer for five minutes
   (`labelGateTTL`); a refusal is not kept. An unmet floor is a
@@ -505,7 +505,7 @@ holds against the control plane's records.
 - `session.listTools(peer, service)` and `session.callTool(peer, service,
   tool, args)` on top of that.
 - Tests. Unit: each SDK calls a tool on an in-process provider that serves
-  `/sam/mcp/1.0.0` as `sam-node` does with the official MCP server behind
+  `/mesh/mcp/1.0.0` as `sam-node` does with the official MCP server behind
   it, reads its catalog, and is refused for missing labels, an untrusted
   provider, a forged caller credential and an unknown service. Integration:
   the mesh of `sdk_mesh_test.go` has an MCP backend behind the `sam-node`
@@ -524,7 +524,7 @@ holds against the control plane's records.
   from the artifact and `datalog_rules`, evaluated on every inbound
   `/libp2p-http` request in the order `internal/node/middleware.go` uses.
 - `/libp2p-http` server for the agent: the path is
-  `/<type>/<name>/<upstream>`, the biscuit is `X-Sam-Biscuit`; after
+  `/<type>/<name>/<upstream>`, the biscuit is `X-Mesh-Biscuit`; after
   authorization for `<type>://<name>`, a request for the agent's own
   `a2a://<name>` goes to an A2A server beside the process or a handler in
   it, with the biscuit and agent headers stripped and `X-Peer-Id` set to the
@@ -567,7 +567,7 @@ holds against the control plane's records.
   member accepts `a2a://agent`; the `sam-node` reaches it by peer ID
   through its egress proxy, the other SDK member does the same with no
   lookup, a lookup for `a2a://agent` finds nothing, the member refuses a
-  `/sam/mcp/1.0.0` stream, and a Go peer whose role the policy grants
+  `/mesh/mcp/1.0.0` stream, and a Go peer whose role the policy grants
   nothing gets 403 and is answered once it presents a node-role token.
   About 9 seconds for the whole mesh. `TestNativeSDKA2A` runs the A2A SDK
   agents and calls each from the other language with the A2A SDK's client;
@@ -587,7 +587,7 @@ holds against the control plane's records.
   callers. Runs
   once shortly after join, then on `sam-node`'s interval with the same
   jitter, and whenever an event triggers it.
-- Gossip events on `/sam/mesh/events/v1`: the topic validator rejects
+- Gossip events on `/mesh/events/v1`: the topic validator rejects
   anything not signed by a trusted control plane key and ignores stale
   events; `BANNED` evicts the peer at once, `KEY_ROTATION` adopts the key
   and triggers a pull, `POLICY_UPDATE` triggers a pull. Bans are not
@@ -671,7 +671,7 @@ same commit as the Go components they talk to.
 
 ```bash
 # Regenerate protobuf bindings and the Datalog artifact after editing
-# api/sam.proto or api/datalog.go
+# api/agentmesh.proto or api/datalog.go
 ./hack/gen-sdk-proto.sh
 
 # JavaScript
@@ -736,11 +736,11 @@ one follows is named so a change on one side can be carried to the others.
 | `mesh.ts` | `mesh.py` | `AgentMesh`: enroll (resumes a credential in the state directory before spending a token, while the control plane still serves a key it trusts), load, refresh, `syncControlPlane` as `SyncControlPlane` in `internal/node/controlplane_sync.go`; state directory (`identity.key`, `credential.json`, the same layout in both languages) |
 | `biscuit.ts` | `biscuit.py` | verification of a peer's credential, as `internal/identity.verifyBiscuit` |
 | `host.ts` | `host.py` | the libp2p host as `internal/node/node.go` configures it, plus gossipsub and the connection gater |
-| `auth.ts` | `auth.py` | `/sam/auth/1.0.0` on both sides, as `HandleAuthHandshake` |
+| `auth.ts` | `auth.py` | `/mesh/auth/1.0.0` on both sides, as `HandleAuthHandshake` |
 | — | `relay.py` | circuit relay v2 client (py-libp2p's cannot talk to go-libp2p) |
 | `session.ts` | `session.py` | `MeshSession`: join, relay reservation, refresh loop, control plane sync loop, gossip events, `acceptA2A()` / `accept_a2a()`, `fetch()` |
 | `discovery.ts` | `discovery.py` | service keys and DHT lookups as `internal/node/service.go`; lookups only, no records |
-| `mcp.ts` | `mcp_client.py` | MCP over `/sam/mcp/1.0.0`, the client side of `internal/node/gate.go` |
+| `mcp.ts` | `mcp_client.py` | MCP over `/mesh/mcp/1.0.0`, the client side of `internal/node/gate.go` |
 | `authorizer.ts` | `authorizer.py` | the provider authorizer, as `internal/node.(*SamNode).Authorize`, over the generated baseline and `datalog_rules` |
 | `libp2p-http.ts` | `libp2p_http.py` | `/libp2p-http` client (streaming) and the A2A ingress for the agent, as go-libp2p-http and `StartIngressServer`; mesh URLs |
 | `http1.ts` | — | HTTP/1.1 heads and bodies on a libp2p stream, for `libp2p-http.ts` (Python uses `h11` in `libp2p_http.py`) |
@@ -750,7 +750,7 @@ one follows is named so a change on one side can be carried to the others.
 | `sync.ts` | `sync.py` | ban set and mesh event verification, as `reconcileBannedPeers` and `verifyEvent` |
 | `conformance.ts`, `conformance-join.ts` | `conformance.py`, `conformance_join.py` | the runners the integration tests drive |
 | `../examples/` | `../../examples/` | the programs the docs embed and `TestNativeSDKExamples` runs; `../examples/browser/` is the page `tests/ui/browser-sdk.spec.js` drives |
-| `gen/` | `_proto/`, `_gen/` | generated by `hack/gen-sdk-proto.sh` from `api/sam.proto`, `sdk/python/proto/circuit.proto` and `api/datalog.go` |
+| `gen/` | `_proto/`, `_gen/` | generated by `hack/gen-sdk-proto.sh` from `api/agentmesh.proto`, `sdk/python/proto/circuit.proto` and `api/datalog.go` |
 
 Unit tests sit beside the code (`*.test.ts`, `tests/test_*.py`) and build a
 fake control plane and router in the process; the real ones are exercised

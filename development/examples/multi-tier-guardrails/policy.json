@@ -1,9 +1,9 @@
 {
   "roles": [
     {
-      "name": "sam:role:node",
+      "name": "mesh:role:node",
       "allowed_services": [
-        "system://sam.catalog",
+        "system://mesh.catalog",
         "a2a://support.acme",
         "inference://office-llm",
         "mcp://orders-db",

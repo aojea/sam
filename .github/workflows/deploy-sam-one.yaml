@@ -94,7 +94,7 @@ jobs:
         run: |
           # Fresh tokens every deploy; Cloud Run has no disk so they must be
           # pinned via env vars or each instance restart regenerates them.
-          JOIN_TOKEN="sam_tok_$(openssl rand -hex 16)"
+          JOIN_TOKEN="mesh_tok_$(openssl rand -hex 16)"
           ADMIN_TOKEN="sam_adm_$(openssl rand -hex 16)"
           echo "::add-mask::${JOIN_TOKEN}"
           echo "::add-mask::${ADMIN_TOKEN}"

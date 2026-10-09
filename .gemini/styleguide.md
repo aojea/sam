@@ -32,7 +32,7 @@ The repository has a naming convention that makes this reviewable:
 - **`PeerID`** (Go spelling) is an internal field or variable that is expected
   to already hold the canonical form.
 - Other raw sources: URL query parameters (`r.URL.Query().Get("peer_id")`,
-  `Get("id")`), path segments (`/sam/{peer}/...`), HTTP headers, MCP tool
+  `Get("id")`), path segments (`/mesh/{peer}/...`), HTTP headers, MCP tool
   parameters.
 
 ### Rules
@@ -101,7 +101,7 @@ Ask for tests if they are missing.
 Time values cross the wire as bare `int64`. The proto already mixes units:
 
 - **Unix milliseconds:** `MeshEvent.timestamp`, the enrollment and refresh
-  challenge `timestamp` fields, the `X-Sam-Challenge-Ts` header.
+  challenge `timestamp` fields, the `X-Mesh-Challenge-Ts` header.
 - **Unix seconds:** `ServiceAnnounce.timestamp`, every `expires_at`,
   `checked_at`, `credential_expires_at`, `biscuit_expires_at`.
 - **Explicit-unit names:** `latency_ewma_ms`, `poll_interval_seconds`.
@@ -112,7 +112,7 @@ both sides.
 
 ### Rules
 
-1. **Every new `int64` time field in `api/sam.proto` must state its unit**,
+1. **Every new `int64` time field in `api/agentmesh.proto` must state its unit**,
    either in the field name (`_ms`, `_seconds`) or in a comment on the field.
    Prefer milliseconds for new instant fields; prefer the `_ms` suffix.
 2. **Encoder and decoder must agree.** `time.Now().UnixMilli()` on the
@@ -146,7 +146,7 @@ per execution. Coverage belongs at the lowest layer that can express it.
 1. **Every behavior change ships with a test at the lowest adequate layer.**
    - Pure logic, parsing, canonicalization, unit conversion, policy
      evaluation: unit test in the same package (`*_test.go`).
-   - Interaction between two components over the API in `api/sam.proto`
+   - Interaction between two components over the API in `api/agentmesh.proto`
      (node ↔ control plane, router ↔ control plane): `tests/integration/`.
    - A full user journey across built binaries: `tests/e2e/*.bats`, and only
      if it is a documented CUJ.
@@ -185,7 +185,7 @@ any new root dependency that lacks this justification.
 
 SAM has two API surfaces with different encodings (`AGENTS.md` §1, "Two API
 surfaces"): the mesh protocol between components is protobuf from
-`api/sam.proto`; the operator plane (`/admin/*`, `/users/*`) is JSON whose
+`api/agentmesh.proto`; the operator plane (`/admin/*`, `/users/*`) is JSON whose
 shapes are Go structs in `api/`. Shapes defined ad hoc inside a handler, or
 borrowed from `internal/storage`, have no single owner: the console, the CLI
 and the tests each re-spell the field names, and a rename breaks one of them

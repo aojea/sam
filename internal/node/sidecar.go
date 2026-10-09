@@ -69,18 +69,18 @@ func StartSidecarServer(node *SamNode, addr, socketPath, token, certFile, keyFil
 	// startup; there is deliberately no runtime registration surface, so no
 	// credential held by an agent can point the mesh at a new backend or
 	// withdraw a sibling service.
-	mux.Handle("/sam/service/discover", withCallerOrTokenAuth(node, token, true, withMeshConnection(node, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/mesh/service/discover", withCallerOrTokenAuth(node, token, true, withMeshConnection(node, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleDiscoverService(node, w, r)
 	}))))
 
 	// Identity evidence is local owner/control-plane material, not an agent tool.
 	// Require a channel that authenticates the sidecar back to the caller: the
 	// filesystem-protected Unix socket, or verified mTLS when TCP is unavoidable.
-	mux.Handle("/sam/identity", withAuth(token, true, requireIdentityEvidenceTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/mesh/identity", withAuth(token, true, requireIdentityEvidenceTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleIdentityEvidence(node, w, r)
 	}))))
-	mux.Handle("/sam/identity/", withAuth(token, true, requireIdentityEvidenceTransport(http.HandlerFunc(handleIdentityEvidenceNotFound))))
-	mux.Handle("/sam/peer/", withAuth(token, true, requireIdentityEvidenceTransport(withMeshConnection(node, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/mesh/identity/", withAuth(token, true, requireIdentityEvidenceTransport(http.HandlerFunc(handleIdentityEvidenceNotFound))))
+	mux.Handle("/mesh/peer/", withAuth(token, true, requireIdentityEvidenceTransport(withMeshConnection(node, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handlePeerEvidence(node, w, r)
 	})))))
 
@@ -92,7 +92,7 @@ func StartSidecarServer(node *SamNode, addr, socketPath, token, certFile, keyFil
 	// handler forwards Authorization to the destination service, so it must never
 	// also accept it as the local gate credential (would leak the sidecar token off-node).
 	egress := createEgressProxy(node)
-	mux.Handle("/sam/", withCallerOrTokenAuth(node, token, false, withMeshConnection(node, egress)))
+	mux.Handle("/mesh/", withCallerOrTokenAuth(node, token, false, withMeshConnection(node, egress)))
 
 	// OpenAI-compatible facade: point any OpenAI SDK at the sidecar.
 	// allowAuthorizationFallback=true lets SDKs send the sidecar token as their
@@ -411,7 +411,7 @@ func withAuth(token string, allowAuthorizationFallback bool, next http.Handler) 
 		if fromLocalSocket(r) {
 			// Reaching the socket at all already proves the caller is the user
 			// who owns it, which is the same bar as reading the token file.
-			r.Header.Del(api.HeaderSamAuthentication)
+			r.Header.Del(api.HeaderMeshAuthentication)
 			stripSidecarTokenFromAuthorization(r, token)
 			next.ServeHTTP(w, r)
 			return
@@ -423,19 +423,19 @@ func withAuth(token string, allowAuthorizationFallback bool, next http.Handler) 
 			return
 		}
 
-		headerName := api.HeaderSamAuthentication
+		headerName := api.HeaderMeshAuthentication
 		authHeader := r.Header.Get(headerName)
 		if authHeader == "" && allowAuthorizationFallback {
 			headerName = "Authorization"
 			authHeader = r.Header.Get(headerName)
 		}
 		if authHeader == "" {
-			accepted := fmt.Sprintf("%q", api.HeaderSamAuthentication)
+			accepted := fmt.Sprintf("%q", api.HeaderMeshAuthentication)
 			if allowAuthorizationFallback {
 				accepted += ` or "Authorization"`
 			}
 			logger.Warnf("[SidecarAuth] Request %s %s rejected: missing %s header", r.Method, r.URL.Path, accepted)
-			http.Error(w, fmt.Sprintf("Unauthorized: missing %s header, e.g. %q: \"Bearer <api-token>\"", accepted, api.HeaderSamAuthentication), http.StatusUnauthorized)
+			http.Error(w, fmt.Sprintf("Unauthorized: missing %s header, e.g. %q: \"Bearer <api-token>\"", accepted, api.HeaderMeshAuthentication), http.StatusUnauthorized)
 			return
 		}
 
@@ -452,7 +452,7 @@ func withAuth(token string, allowAuthorizationFallback bool, next http.Handler) 
 
 		// The gate credential is local-only: strip exactly the header it came in
 		// on so it can never flow past the gate. Anything left (e.g. Authorization
-		// when the gate was passed via X-Sam-Authentication) is the destination
+		// when the gate was passed via X-Mesh-Authentication) is the destination
 		// service's own credential and passes through untouched, unless it is
 		// this same token sent twice, which an SDK configured with the sidecar
 		// token as api_key plus a default header will do.
@@ -636,7 +636,7 @@ type egressMiddleware struct {
 	serveLocal func(node *SamNode, rt http.RoundTripper, w http.ResponseWriter, r *http.Request, route egressRoute) bool
 }
 
-// egressRoute is the parsed /sam/{peer}/{type}/{svc}/{upstream} egress path,
+// egressRoute is the parsed /mesh/{peer}/{type}/{svc}/{upstream} egress path,
 // with the service type lowercased to match how the remote ingress parses it.
 type egressRoute struct {
 	peerID       string
@@ -652,7 +652,7 @@ func registerEgressMiddleware(serviceType string, mw egressMiddleware) {
 	egressMiddlewares[strings.ToLower(serviceType)] = mw
 }
 
-// parseEgressRoute parses a /sam/{peer}/{type}/{svc}/{upstream} egress path.
+// parseEgressRoute parses a /mesh/{peer}/{type}/{svc}/{upstream} egress path.
 func parseEgressRoute(path string) (egressRoute, bool) {
 	parts := strings.SplitN(path, "/", 6)
 	if len(parts) < 5 {
@@ -773,12 +773,12 @@ func createEgressProxy(node *SamNode) http.Handler {
 		}
 
 		var requiredLabels map[string]string
-		if labelsHeader := r.Header.Get(api.HeaderSamRequiredLabels); labelsHeader != "" {
-			r.Header.Del(api.HeaderSamRequiredLabels)
+		if labelsHeader := r.Header.Get(api.HeaderMeshRequiredLabels); labelsHeader != "" {
+			r.Header.Del(api.HeaderMeshRequiredLabels)
 			var err error
 			requiredLabels, err = parseRequiredLabels(labelsHeader)
 			if err != nil {
-				http.Error(w, fmt.Sprintf("Invalid %s header: %v", api.HeaderSamRequiredLabels, err), http.StatusBadRequest)
+				http.Error(w, fmt.Sprintf("Invalid %s header: %v", api.HeaderMeshRequiredLabels, err), http.StatusBadRequest)
 				return
 			}
 		}
@@ -819,11 +819,11 @@ func createEgressProxy(node *SamNode) http.Handler {
 			return
 		}
 
-		r.Header.Set(api.HeaderSamBiscuit, base64.StdEncoding.EncodeToString(biscuitBytes))
+		r.Header.Set(api.HeaderMeshBiscuit, base64.StdEncoding.EncodeToString(biscuitBytes))
 
 		// Strip the local sidecar gate header and caller cookies before forwarding off-node; a caller-supplied
 		// "Authorization" header passes straight through untouched as the destination's own credential.
-		r.Header.Del(api.HeaderSamAuthentication)
+		r.Header.Del(api.HeaderMeshAuthentication)
 		r.Header.Del("Cookie")
 
 		if serveEgressLocally(node, transport, w, r) {

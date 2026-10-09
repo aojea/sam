@@ -21,7 +21,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, Mapping, Optional
 
-from ._proto import sam_pb2 as pb
+from ._proto import agentmesh_pb2 as pb
 from .controlplane import ROLE_NODE, ControlPlaneClient, Enrollment, KeysNotTrustedError, Transport
 from .credential import MeshCredential, encode_auth_frame
 from .identity import Identity

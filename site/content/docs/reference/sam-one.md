@@ -43,7 +43,7 @@ downloaded tunnel connector.
 | `--issuer` | | External OIDC issuer(s), comma-separated. Optional. Without an issuer, enrollment works by token only. |
 | `--workload-issuer` | | Workload OIDC issuer(s), comma-separated (`<issuer>` or `<issuer>=<email-suffix>`). Automatically added to `--issuer` and refused at `/user/*` and `/oauth/authorize`. |
 | `--oidc-client-id` | first audience | Client ID advertised on `/info`. |
-| `--allowed-audiences` | `sam-mesh-audience` | Accepted OIDC audiences. |
+| `--allowed-audiences` | `agentmesh-audience` | Accepted OIDC audiences. |
 | `--enroll-qr` | when stdout is a terminal | Print a device-enrollment QR code at startup. Only for `https` URLs. |
 | `--enroll-qr-max-usages` | `1` | How many devices the startup QR admits. |
 | `--log-level` | `info` | `debug`, `info`, `warn`, `error`. `LOG_FORMAT=json` selects JSON output. |
@@ -83,7 +83,7 @@ where the operator learns them.
 
 With no `--policy-file` and an empty database, first boot seeds three roles,
 each with `allowed_services: ["*"]` and `allowed_targets: ["*"]`:
-`sam-admin`, `sam:role:router`, and `sam:role:node`, the last one also with
+`sam-admin`, `mesh:role:router`, and `mesh:role:node`, the last one also with
 `allowed_labels: ["*"]`. Any enrolled node can then call any service and
 declare any label. Replace this policy before sharing the mesh with anyone.
 
@@ -99,10 +99,10 @@ The subcommands talk to a running instance over its HTTP API. Shared flags:
 
 | Command | Flags | Effect |
 |---|---|---|
-| `token create` | `--role` (`sam:role:node`), `--ttl-hours` (24), `--max-usages` (1), `--description`, `--autonomous-recovery` | Mint a token. Prints it once on stdout. |
+| `token create` | `--role` (`mesh:role:node`), `--ttl-hours` (24), `--max-usages` (1), `--description`, `--autonomous-recovery` | Mint a token. Prints it once on stdout. |
 | `token list` | | Tokens with usage count, status (`active`, `exhausted`, `expired`, `revoked`) and expiry. |
 | `token revoke <id>` | | Revoke by ID or unambiguous ID prefix. Enrolled devices keep their identity. |
-| `token qr` | `--enroll-url`, `--ttl-hours`, `--max-usages`, `--description`, `--autonomous-recovery` | Mint a node token and print `sam://enroll?server=<url>&token=<token>` as a terminal QR code. The URL must be `https`. |
+| `token qr` | `--enroll-url`, `--ttl-hours`, `--max-usages`, `--description`, `--autonomous-recovery` | Mint a node token and print `mesh://enroll?server=<url>&token=<token>` as a terminal QR code. The URL must be `https`. |
 | `admin ban <peer-id>` | | Ban a node. |
 
 ## Platforms

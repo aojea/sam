@@ -14,7 +14,7 @@ async def main():
     token = os.environ.get("SAM_API_TOKEN", "")
     print(f"Connecting to SAM Node at {url}")
 
-    headers = {"X-Sam-Authentication": f"Bearer {token}"} if token else {}
+    headers = {"X-Mesh-Authentication": f"Bearer {token}"} if token else {}
     try:
         async with httpx.AsyncClient(headers=headers) as http:
             async with streamable_http_client(url, http_client=http) as (read, write):

@@ -169,7 +169,7 @@ func handlePeerEvidence(n *SamNode, w http.ResponseWriter, r *http.Request) {
 		writeEvidenceError(w, http.StatusServiceUnavailable, "Node is unavailable")
 		return
 	}
-	const prefix = "/sam/peer/"
+	const prefix = "/mesh/peer/"
 	remainder := strings.TrimPrefix(r.URL.Path, prefix)
 	parts := strings.Split(remainder, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] != "evidence" {

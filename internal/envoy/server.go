@@ -39,9 +39,9 @@ import (
 )
 
 const (
-	// HeaderSamMCPTool lets an external proxy (or ext_proc filter) pass the
+	// HeaderMeshMCPTool lets an external proxy (or ext_proc filter) pass the
 	// extracted MCP tool name during an ext_authz check.
-	HeaderSamMCPTool = "X-Sam-Mcp-Tool"
+	HeaderMeshMCPTool = "X-Mesh-Mcp-Tool"
 
 	// ExtProcMethodPath is the gRPC HTTP/2 path for Envoy ExternalProcessor.Process.
 	ExtProcMethodPath = "/envoy.service.ext_proc.v3.ExternalProcessor/Process"
@@ -165,11 +165,11 @@ func (s *GatewayServer) HandleExtAuthzHTTP(w http.ResponseWriter, r *http.Reques
 		}
 		bodyBytes = b
 	}
-	allowInit := headers[strings.ToLower(HeaderSamMCPTool)] == ""
-	if len(bodyBytes) > 0 && headers[strings.ToLower(HeaderSamMCPTool)] == "" {
+	allowInit := headers[strings.ToLower(HeaderMeshMCPTool)] == ""
+	if len(bodyBytes) > 0 && headers[strings.ToLower(HeaderMeshMCPTool)] == "" {
 		tool, isInit := InspectJSONRPCMCPBody(bodyBytes)
 		if tool != "" {
-			headers[strings.ToLower(HeaderSamMCPTool)] = tool
+			headers[strings.ToLower(HeaderMeshMCPTool)] = tool
 		}
 		allowInit = isInit
 	}
@@ -210,11 +210,11 @@ func (s *GatewayServer) Check(ctx context.Context, req *authv3.CheckRequest) (*a
 		body = []byte(httpReq.GetBody())
 	}
 
-	allowInit := headers[strings.ToLower(HeaderSamMCPTool)] == ""
-	if len(body) > 0 && headers[strings.ToLower(HeaderSamMCPTool)] == "" {
+	allowInit := headers[strings.ToLower(HeaderMeshMCPTool)] == ""
+	if len(body) > 0 && headers[strings.ToLower(HeaderMeshMCPTool)] == "" {
 		tool, isInit := InspectJSONRPCMCPBody(body)
 		if tool != "" {
-			headers[strings.ToLower(HeaderSamMCPTool)] = tool
+			headers[strings.ToLower(HeaderMeshMCPTool)] = tool
 		}
 		allowInit = isInit
 	}
@@ -304,13 +304,13 @@ func (s *GatewayServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 				capturedHost = capturedHeaders["host"]
 			}
 
-			targetHdr := strings.ToLower(capturedHeaders[strings.ToLower(api.HeaderSamTargetService)])
+			targetHdr := strings.ToLower(capturedHeaders[strings.ToLower(api.HeaderMeshTargetService)])
 			isMCPRoute := strings.HasPrefix(capturedPath, "/mcp") ||
 				strings.Contains(capturedPath, "/mcp/") ||
 				strings.HasPrefix(targetHdr, api.ServiceTypeStringMCP+"://")
 			if !phase.RequestHeaders.GetEndOfStream() &&
 				strings.EqualFold(capturedMethod, http.MethodPost) &&
-				capturedHeaders[strings.ToLower(HeaderSamMCPTool)] == "" &&
+				capturedHeaders[strings.ToLower(HeaderMeshMCPTool)] == "" &&
 				isMCPRoute {
 				preResp := s.evaluateExtProcDecision(stream.Context(), capturedMethod, capturedPath, capturedHost, capturedHeaders, false, true)
 				if preResp.GetImmediateResponse() != nil {
@@ -339,7 +339,7 @@ func (s *GatewayServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			if len(phase.RequestBody.GetBody()) > 0 && capturedHeaders != nil {
 				tool, allowInit := InspectJSONRPCMCPBody(phase.RequestBody.GetBody())
 				if tool != "" {
-					capturedHeaders[strings.ToLower(HeaderSamMCPTool)] = tool
+					capturedHeaders[strings.ToLower(HeaderMeshMCPTool)] = tool
 				}
 				allowStreamInit = allowInit
 			}
@@ -438,7 +438,7 @@ func (s *GatewayServer) evaluateExtProcDecision(ctx context.Context, method, pat
 				ImmediateResponse: &extprocv3.ImmediateResponse{
 					Status:  &typev3.HttpStatus{Code: status},
 					Body:    []byte(res.Message),
-					Details: "sam_ext_proc_denied",
+					Details: "mesh_ext_proc_denied",
 				},
 			},
 		}

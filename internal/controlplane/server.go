@@ -82,7 +82,7 @@ const (
 	// adminNodeActionAutonomousRecovery is the action segment of
 	// POST /admin/nodes/{peer_id}/autonomous-recovery, the per-node toggle
 	// for storage.EnrolledNode.AutonomousRecovery. Admin-console only: the
-	// node-facing side of #367 is TokenRefreshRequest.peer_id in sam.proto.
+	// node-facing side of #367 is TokenRefreshRequest.peer_id in agentmesh.proto.
 	adminNodeActionAutonomousRecovery = "autonomous-recovery"
 
 	// adminNodeActionUnban is the action segment of
@@ -797,17 +797,17 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	resolvedMap := make(map[string]bool)
 	for _, r := range resolvedRoles {
 		resolvedMap[r] = true
-		if !strings.HasPrefix(r, "sam:role:") && r != req.RequestedRole {
+		if !strings.HasPrefix(r, "mesh:role:") && r != req.RequestedRole {
 			customAccessRoles = append(customAccessRoles, r)
 		}
 	}
 
 	// Enrollment is a policy decision like any other: the requested role must
 	// resolve from an explicit binding. There is deliberately no fallback for
-	// sam:role:node — a mesh that wants open enrollment says so by binding it
-	// to sam:system:authenticated, instead of getting it by omission.
+	// mesh:role:node — a mesh that wants open enrollment says so by binding it
+	// to mesh:system:authenticated, instead of getting it by omission.
 	if !resolvedMap[req.RequestedRole] {
-		http.Error(w, fmt.Sprintf("requested role %q is not bound to this identity; bind it in mesh policy (to sam:system:authenticated to open enrollment to every authenticated identity)", req.RequestedRole), http.StatusForbidden)
+		http.Error(w, fmt.Sprintf("requested role %q is not bound to this identity; bind it in mesh policy (to mesh:system:authenticated to open enrollment to every authenticated identity)", req.RequestedRole), http.StatusForbidden)
 		return
 	}
 
@@ -1186,7 +1186,7 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		resolvedMap := make(map[string]bool)
 		for _, r := range resolvedRoles {
 			resolvedMap[r] = true
-			if !strings.HasPrefix(r, "sam:role:") && r != nodeRecord.Role {
+			if !strings.HasPrefix(r, "mesh:role:") && r != nodeRecord.Role {
 				customAccessRoles = append(customAccessRoles, r)
 			}
 		}
@@ -1715,7 +1715,7 @@ func nodeRoles(nodeRecord *storage.EnrolledNode, bindings []*api.PolicyBinding) 
 		}
 	}
 	for _, r := range resolveRoles(nodeRecord.PeerID, claims, bindings) {
-		if !strings.HasPrefix(r, "sam:role:") && r != nodeRecord.Role {
+		if !strings.HasPrefix(r, "mesh:role:") && r != nodeRecord.Role {
 			roles = append(roles, r)
 		}
 	}
@@ -2439,7 +2439,7 @@ func (s *Server) HandleAdminBootstrapTokens(w http.ResponseWriter, r *http.Reque
 	if req.GetRole() == "" {
 		// No silent default: the old one was router, the most privileged
 		// role a token can carry.
-		http.Error(w, "role is required (e.g. \"sam:role:node\")", http.StatusBadRequest)
+		http.Error(w, "role is required (e.g. \"mesh:role:node\")", http.StatusBadRequest)
 		return
 	}
 	if req.GetTtlHours() <= 0 {

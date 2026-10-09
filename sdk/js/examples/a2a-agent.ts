@@ -31,7 +31,7 @@ const mesh = await AgentMesh.enroll({
 const session = await mesh.join();
 
 // The card names the agent as the mesh reaches it: the URL an A2A client on
-// the mesh gives its fetch, http://mesh/sam/<peer-id>/a2a/agent.
+// the mesh gives its fetch, http://mesh/mesh/<peer-id>/a2a/agent.
 const url = MeshSession.meshURL(session.peerId, "a2a://agent");
 const card: AgentCard = {
   name: "Echo agent",

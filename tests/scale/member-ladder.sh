@@ -165,7 +165,7 @@ summarize() {
 # One token for the whole ladder.
 uses=$(( TOTAL + TOTAL / 10 + 20 ))
 admin_api POST /admin/bootstrap-tokens -H 'Content-Type: application/json' \
-  -d "{\"role\":\"sam:role:node\",\"max_usages\":${uses},\"ttl_hours\":48,\"description\":\"member-ladder ${TOTAL} from ${#ALL_MINIONS[@]} minions\"}" > "$OUT/token.json" || fail "minting the bootstrap token failed"
+  -d "{\"role\":\"mesh:role:node\",\"max_usages\":${uses},\"ttl_hours\":48,\"description\":\"member-ladder ${TOTAL} from ${#ALL_MINIONS[@]} minions\"}" > "$OUT/token.json" || fail "minting the bootstrap token failed"
 python3 -c 'import json,sys; t=json.load(open(sys.argv[1])); open(sys.argv[2],"w").write(t["token"])' "$OUT/token.json" "$OUT/bootstrap-token"
 TOKEN_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$OUT/token.json")
 rm -f "$OUT/token.json"; chmod 600 "$OUT/bootstrap-token"

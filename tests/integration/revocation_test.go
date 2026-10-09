@@ -49,7 +49,7 @@ func TestNodeRevocationIntegration(t *testing.T) {
   - members: ["user:mock-user"]
     role: admin
   - members: ["user:mock-user"]
-    role: sam:role:node
+    role: mesh:role:node
 roles:
   - name: admin
     allowed_services: ["*"]

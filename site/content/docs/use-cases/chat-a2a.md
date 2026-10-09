@@ -15,7 +15,7 @@ Source: [`development/examples/chat-a2a/`](https://github.com/google/sam/tree/ma
 
 A2A is how agents talk to each other on the mesh. An agent process that
 speaks A2A over HTTP is declared on its node as a `type: a2a` service, and
-remote peers reach it through the proxy path `/sam/{peer}/a2a/{service}/...`
+remote peers reach it through the proxy path `/mesh/{peer}/a2a/{service}/...`
 (see [A2A agents](../../guides/exposing-services/#a2a-agents)).
 
 The problem with proxying A2A directly is the agent card. A2A clients start
@@ -116,12 +116,12 @@ retry for a few seconds after startup if the list comes back empty.
 Fetch the agent card through the mesh with `curl`:
 
 ```bash
-curl -s -H 'X-Sam-Authentication: Bearer devtoken' \
+curl -s -H 'X-Mesh-Authentication: Bearer devtoken' \
   "http://127.0.0.1:9099/sam/$PEER/a2a/chat/.well-known/agent-card.json" | jq
 ```
 
 The interface URLs in the response point back at this
-`/sam/{peer}/a2a/chat` path, and not at the agent's own `127.0.0.1:7777`.
+`/mesh/{peer}/a2a/chat` path, and not at the agent's own `127.0.0.1:7777`.
 `capabilities.streaming` is `false`. That regenerated card is what makes the
 example work.
 
@@ -145,7 +145,7 @@ stock client. Its reply prints the `contextId` the server created; pass it
 back as `--context-id` and the agent continues the same conversation:
 
 ```bash
-export A2ACLI_SVC_PARAM='X-Sam-Authentication=Bearer devtoken'
+export A2ACLI_SVC_PARAM='X-Mesh-Authentication=Bearer devtoken'
 CARD="http://127.0.0.1:9099/sam/$PEER/a2a/chat/.well-known/agent-card.json"
 a2a send -a "$CARD" "hello, I am Ada"
 a2a send -a "$CARD" --context-id <contextId from the first reply> "what is my name?"

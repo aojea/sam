@@ -385,7 +385,7 @@ func newSTSEnv(ctx context.Context) (*stsBenchEnv, error) {
 		DriverName:            "sqlite",
 		DataSourceName:        dbPath,
 		OIDCIssuer:            issuer,
-		AllowedAudiences:      []string{"sam-mesh-audience"},
+		AllowedAudiences:      []string{"agentmesh-audience"},
 		LeaseDuration:         time.Minute,
 		KeyRotationInterval:   12 * time.Hour,
 		KeyGracePeriod:        10 * time.Minute,
@@ -531,7 +531,7 @@ func (e *stsBenchEnv) mintSubjectJWT(sub string, epoch int) (string, error) {
 		"iss":   e.oidcSrv.URL,
 		"sub":   sub,
 		"email": sub + "@example.com",
-		"aud":   "sam-mesh-audience",
+		"aud":   "agentmesh-audience",
 		"exp":   time.Now().Add(time.Hour).Unix(),
 		"jti":   fmt.Sprintf("%s-%d", sub, epoch),
 	}

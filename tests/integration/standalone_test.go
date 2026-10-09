@@ -119,8 +119,8 @@ func TestStandaloneNodeJoin(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to mint device token: %v", err)
 		}
-		if devTok == srv.JoinToken() || !strings.HasPrefix(devTok, "sam_dev_") {
-			t.Fatalf("device token %q must be distinct from the join token and prefixed sam_dev_", devTok)
+		if devTok == srv.JoinToken() || !strings.HasPrefix(devTok, "mesh_dev_") {
+			t.Fatalf("device token %q must be distinct from the join token and prefixed mesh_dev_", devTok)
 		}
 		server, token, err := api.ParseEnrollURI(api.EnrollURI(srv.PublicURL(), devTok))
 		if err != nil {
@@ -170,7 +170,7 @@ func TestStandaloneNoJoinToken(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if _, err := standalone.New(standalone.Options{BindAddress: "127.0.0.1:0", DataDir: t.TempDir(), DisableJoinToken: true, JoinToken: "sam_tok_x"}); err == nil {
+	if _, err := standalone.New(standalone.Options{BindAddress: "127.0.0.1:0", DataDir: t.TempDir(), DisableJoinToken: true, JoinToken: "mesh_tok_x"}); err == nil {
 		t.Fatal("DisableJoinToken together with an explicit JoinToken must be rejected")
 	}
 
@@ -227,7 +227,7 @@ func TestStandalonePolicyFileSeedsEgress(t *testing.T) {
 	policyFile := filepath.Join(t.TempDir(), "policy.json")
 	seed := `{
   "roles": [
-    {"name": "sam:role:node", "allowed_targets": ["*"], "allowed_labels": ["site=office"]},
+    {"name": "mesh:role:node", "allowed_targets": ["*"], "allowed_labels": ["site=office"]},
     {"name": "agent", "allowed_services": ["egress://api.github.com"], "allowed_targets": ["*"],
      "http": [{"service": "egress://api.github.com", "methods": ["GET"], "paths": ["/repos/acme/*"]}]}
   ],

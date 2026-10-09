@@ -39,17 +39,17 @@ The runnable example in [`development/examples/multi-tier-guardrails/`](https://
 
 ## Understanding Labels in the Demo: The 3 Control Points
 
-When watching Alice configure `labels:` in `node-v1.yaml` or a caller send `X-Sam-Required-Labels`, a natural question arises: *"Can a developer or agent just set arbitrary labels to influence security policy?"*
+When watching Alice configure `labels:` in `node-v1.yaml` or a caller send `X-Mesh-Required-Labels`, a natural question arises: *"Can a developer or agent just set arbitrary labels to influence security policy?"*
 
 No. In SAM, labels operate at **three distinct points** with clear separation of authority:
 
 1. **Mesh Enforcement (Control Plane `policy.json` $\rightarrow$ `allowed_labels`):**
    A node's YAML file (`labels:`) is only a **request** at enrollment time. The Control Plane validates every requested label against the role's `allowed_labels` in `policy.json` before cryptographically signing `label("k", "v")` facts into the node's authority Biscuit. If Alice tries to self-assert `env: prod` before passing the Quality Gate, enrollment is rejected (`Label not permitted: label "env=prod" is not permitted by this role's allowed_labels`).
 2. **Node Enforcement (Input Node `egress.require_labels` & Egress Node `attenuation.checks`):**
-   - **Input Node (`node-caller.yaml`):** The Platform Admin sets `egress.require_labels: { env: prod }` on the caller's node. Even if the calling application sends **no** `X-Sam-Required-Labels` header, the Input Node blocks calls to staging providers (`403 Forbidden`).
+   - **Input Node (`node-caller.yaml`):** The Platform Admin sets `egress.require_labels: { env: prod }` on the caller's node. Even if the calling application sends **no** `X-Mesh-Required-Labels` header, the Input Node blocks calls to staging providers (`403 Forbidden`).
    - **Egress / Provider Node (`node-v1.yaml`):** The Support Department Lead configures a positive inbound Datalog check (`check if label("team", "support");`). Any caller whose Biscuit lacks a Control-Plane-signed `label("team", "support")` fact—whether `team=contractor` or carrying no labels at all—is rejected locally by `node-v1`.
-3. **End-User / Agent Intent (`X-Sam-Required-Labels` HTTP Header):**
-   Within the mandatory boundaries enforced by the Mesh and the Nodes, the calling application or agent can pass `X-Sam-Required-Labels` (for example `replica=v1-laptop` or `replica=v2-cloudrun`) to express **intent** about which specific replica or capability it wants from the mesh. The Input Node **ANDs** the caller's intent with its own `egress.require_labels` floor (`env=prod AND replica=v2-cloudrun`), so the application can narrow selection without ever weakening admin policy.
+3. **End-User / Agent Intent (`X-Mesh-Required-Labels` HTTP Header):**
+   Within the mandatory boundaries enforced by the Mesh and the Nodes, the calling application or agent can pass `X-Mesh-Required-Labels` (for example `replica=v1-laptop` or `replica=v2-cloudrun`) to express **intent** about which specific replica or capability it wants from the mesh. The Input Node **ANDs** the caller's intent with its own `egress.require_labels` floor (`env=prod AND replica=v2-cloudrun`), so the application can narrow selection without ever weakening admin policy.
 
 ---
 
@@ -88,11 +88,11 @@ Next, the automated Quality Gate fetches Alice's Agent Card in `env=staging`, ve
 ### Act 2: Persistent Logical Naming, Zero-Downtime Replica Swap & Agent Intent
 *(Persona: Platform / Networking)*
 
-Callers address the agent by its logical mesh name (`a2a://support.acme`), never by an ephemeral IP or Cloud Run URL. On top of the Input Node's mandatory `env=prod` floor, the calling application uses `X-Sam-Required-Labels` (**End-User / Agent Intent**) to select replicas:
+Callers address the agent by its logical mesh name (`a2a://support.acme`), never by an ephemeral IP or Cloud Run URL. On top of the Input Node's mandatory `env=prod` floor, the calling application uses `X-Mesh-Required-Labels` (**End-User / Agent Intent**) to select replicas:
 
-1. **Turn 1 (`contextId=ctx-acme-1042`, `X-Sam-Required-Labels: replica=v1-laptop`):** The caller uses `a2a_client.py` (official `a2a-sdk`) to ask about Order `#1042`, and `gemma3:1b` on Alice's laptop replica (`[v1-laptop · gemma3:1b]`) replies that Alice's Mechanical Keyboard Pro (`$129.00`) has `SHIPPED`.
+1. **Turn 1 (`contextId=ctx-acme-1042`, `X-Mesh-Required-Labels: replica=v1-laptop`):** The caller uses `a2a_client.py` (official `a2a-sdk`) to ask about Order `#1042`, and `gemma3:1b` on Alice's laptop replica (`[v1-laptop · gemma3:1b]`) replies that Alice's Mechanical Keyboard Pro (`$129.00`) has `SHIPPED`.
 2. **Replica Scale-Up:** A second node (`node-v2.yaml`, representing a Cloud Run deployment) joins the mesh advertising `a2a://support.acme` with `env=prod, replica=v2-cloudrun`.
-3. **Turn 2 (`contextId=ctx-acme-1042`, `X-Sam-Required-Labels: replica=v2-cloudrun`):** The caller sends the follow-up question with the same `contextId` to the Cloud Run replica (`[v2-cloudrun · gemma3:1b]`), which loads the conversation history from SQLite and answers seamlessly without dropping context.
+3. **Turn 2 (`contextId=ctx-acme-1042`, `X-Mesh-Required-Labels: replica=v2-cloudrun`):** The caller sends the follow-up question with the same `contextId` to the Cloud Run replica (`[v2-cloudrun · gemma3:1b]`), which loads the conversation history from SQLite and answers seamlessly without dropping context.
 
 ---
 
@@ -114,7 +114,7 @@ In `policy.json`, Central Security assigns `egress://api.github.com` (`https://a
 * `POST /repos/google/sam/pulls` $\rightarrow$ **`403 Forbidden`** (blocked by the Block 0 HTTP rule before GitHub ever receives the request).
 
 #### Layer 2 — Department Lead (Egress-Node Positive Label Enforcement)
-Central Security's org-wide policy allows `sam:role:node` to reach `mcp://orders-db`. However, the Support Department Lead adds a local positive label check in `node-v1.yaml`:
+Central Security's org-wide policy allows `mesh:role:node` to reach `mcp://orders-db`. However, the Support Department Lead adds a local positive label check in `node-v1.yaml`:
 
 ```yaml
 attenuation:
@@ -156,12 +156,12 @@ Using that narrowed Task Biscuit:
 Every `ALLOW` and `DENY` across all three layers is emitted as a structured JSON log event on the hosting node (`audit.py` formats each decision into a single line showing verdict, role, caller PeerID, HTTP method/path or MCP protocol, and target service):
 
 ```text
-ALLOW sam:role:node 12D3KooW… GET /.well-known/agent-card.json   a2a://support.acme
-ALLOW sam:role:node 12D3KooW… POST /                             a2a://support.acme
-ALLOW sam:role:node 12D3KooW… GET /repos/google/sam/pulls        egress://api.github.com
+ALLOW mesh:role:node 12D3KooW… GET /.well-known/agent-card.json   a2a://support.acme
+ALLOW mesh:role:node 12D3KooW… POST /                             a2a://support.acme
+ALLOW mesh:role:node 12D3KooW… GET /repos/google/sam/pulls        egress://api.github.com
 DENY  -             12D3KooW… POST /repos/google/sam/pulls       egress://api.github.com
-DENY  -             12D3KooW… /sam/mcp/1.0.0                     mcp://orders-db
-ALLOW sam:role:node 12D3KooW… /sam/mcp/1.0.0                     mcp://orders-db
+DENY  -             12D3KooW… /mesh/mcp/1.0.0                     mcp://orders-db
+ALLOW mesh:role:node 12D3KooW… /mesh/mcp/1.0.0                     mcp://orders-db
 ```
 
 Finally, if Day-2 Operations detects repeated policy violations from the contractor peer, a single command revokes that peer's identity across the entire mesh:

@@ -93,12 +93,12 @@ func TestVerifyJWT(t *testing.T) {
 		t.Fatalf("failed to discover mock provider: %v", err)
 	}
 	providers := map[string]*oidc.Provider{issuer: provider}
-	allowedAudiences := []string{"sam-mesh-audience"}
+	allowedAudiences := []string{"agentmesh-audience"}
 
 	validClaims := func() jwt.MapClaims {
 		return jwt.MapClaims{
 			"iss": issuer,
-			"aud": "sam-mesh-audience",
+			"aud": "agentmesh-audience",
 			"sub": "user-1",
 			"exp": time.Now().Add(time.Hour).Unix(),
 		}
@@ -127,7 +127,7 @@ func TestVerifyJWT(t *testing.T) {
 
 	t.Run("alg=none downgrade is rejected", func(t *testing.T) {
 		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
-		payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + issuer + `","aud":"sam-mesh-audience"}`))
+		payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + issuer + `","aud":"agentmesh-audience"}`))
 		tokenStr := header + "." + payload + "."
 
 		_, _, err := VerifyJWT(ctx, tokenStr, allowedAudiences, providers)
@@ -160,7 +160,7 @@ func TestVerifyJWT(t *testing.T) {
 
 	t.Run("allowed audience in any array position succeeds", func(t *testing.T) {
 		claims := validClaims()
-		claims["aud"] = []string{"some-other-audience", "sam-mesh-audience"}
+		claims["aud"] = []string{"some-other-audience", "agentmesh-audience"}
 		tokenStr := signToken(t, key, testKID, claims)
 
 		_, _, err := VerifyJWT(ctx, tokenStr, allowedAudiences, providers)

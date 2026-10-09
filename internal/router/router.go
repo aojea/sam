@@ -245,7 +245,7 @@ type Router struct {
 	EventTopic         *pubsub.Topic
 	authenticatedPeers sync.Map
 	bannedPeers        sync.Map
-	// handshakeLimiter bounds /sam/auth attempts per peer; any internet peer
+	// handshakeLimiter bounds /mesh/auth attempts per peer; any internet peer
 	// can open those streams.
 	handshakeLimiter *ratelimit.PeerRateLimiter
 
@@ -475,7 +475,7 @@ func (r *Router) Start() (retErr error) {
 	// Setup DHT
 	dhtOpts := []dht.Option{
 		dht.Mode(dht.ModeServer),
-		dht.ProtocolPrefix("/sam"),
+		dht.ProtocolPrefix("/mesh"),
 	}
 	providerTTL := r.config.DHTProviderAddrTTL
 	if providerTTL <= 0 {
@@ -1337,7 +1337,7 @@ func recoverStreamHandler(name string, next network.StreamHandler) network.Strea
 }
 
 // authHandshakeTimeout bounds how long an unauthenticated peer may hold a
-// /sam/auth stream: it has to send its frame and read the reply within it.
+// /mesh/auth stream: it has to send its frame and read the reply within it.
 // A var so tests can shorten it.
 var authHandshakeTimeout = 10 * time.Second
 

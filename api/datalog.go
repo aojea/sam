@@ -81,7 +81,7 @@ const (
 
 	// FactActorNode names the origin sam-node PeerID that exchanged a delegated
 	// subject credential at POST /token/exchange, for audit logs, for act.sub in
-	// border JWTs, and for ext_proc attributes["sam"].actor_node. It grants
+	// border JWTs, and for ext_proc attributes["mesh"].actor_node. It grants
 	// nothing: no baseline rule and no policy binding reads it.
 	FactActorNode = "actor_node"
 
@@ -95,7 +95,7 @@ const (
 	// Example Datalog: allow if role("mesh-member")
 	//
 	// Only the control plane mints it, from mesh policy bindings. It must
-	// never be derived from an OIDC claim: role("sam:role:router") is what
+	// never be derived from an OIDC claim: role("mesh:role:router") is what
 	// makes a router, and an issuer's "roles" claim is the issuer's word, not
 	// the mesh operator's. See FactIdpRole.
 	FactRole = "role"
@@ -119,8 +119,8 @@ const (
 	RightServiceInvoke = "service:invoke"
 
 	// Standard role values
-	RoleRouter = "sam:role:router"
-	RoleNode   = "sam:role:node"
+	RoleRouter = "mesh:role:router"
+	RoleNode   = "mesh:role:node"
 
 	// FactUser defines the subject (username/userID) claim extracted from the OIDC token.
 	// Contains: biscuit.String(username)
@@ -672,7 +672,7 @@ func LabelFacts(labels map[string]string) []biscuit.Fact {
 // token carries *every* pair: `check if label("jurisdiction", "eu"),
 // label("compliance", "gdpr")`.
 //
-// The same rule serves a caller's requirement (X-Sam-Required-Labels, an
+// The same rule serves a caller's requirement (X-Mesh-Required-Labels, an
 // SDK's required labels) and an operator's egress floor (Egress.RequireLabels).
 // A map gives one value per key, so neither can spell an alternative, and
 // listing several pairs narrows the set of acceptable peers, as it does in

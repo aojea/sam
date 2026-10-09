@@ -54,7 +54,7 @@ function source(text: string | Uint8Array, pieceSize = 1): ByteSource {
 }
 
 test("a request head parses however the bytes are split", async () => {
-  const wire = "POST /a2a/agent/tasks?x=1 HTTP/1.1\r\nHost: 12D3KooW\r\nX-Sam-Biscuit: abc=\r\nContent-Length: 2\r\n\r\n{}";
+  const wire = "POST /a2a/agent/tasks?x=1 HTTP/1.1\r\nHost: 12D3KooW\r\nX-Mesh-Biscuit: abc=\r\nContent-Length: 2\r\n\r\n{}";
   for (const size of [1, 3, 7, 1000]) {
     const reader = new ByteReader(source(wire, size));
     const head = await readRequestHead(reader);
@@ -62,7 +62,7 @@ test("a request head parses however the bytes are split", async () => {
     assert.equal(head.method, "POST");
     assert.equal(head.target, "/a2a/agent/tasks?x=1");
     assert.equal(head.headers.get("host"), "12D3KooW");
-    assert.equal(head.headers.get("x-sam-biscuit"), "abc=");
+    assert.equal(head.headers.get("x-mesh-biscuit"), "abc=");
     assert.deepEqual(requestBodyFraming(head), { kind: "length", length: 2 });
     assert.equal(dec.decode(await readBody(reader, requestBodyFraming(head), 1024)), "{}");
   }
@@ -159,8 +159,8 @@ test("bodies past the limit are refused, up front when the length says so", asyn
 });
 
 test("heads and chunks are written as the other side reads them", async () => {
-  const headers = new Headers({ Host: "peer", "X-Sam-Biscuit": "abc=", "Content-Length": "0" });
-  assert.equal(dec.decode(encodeRequestHead("GET", "/a2a/agent/card", headers)), "GET /a2a/agent/card HTTP/1.1\r\ncontent-length: 0\r\nhost: peer\r\nx-sam-biscuit: abc=\r\n\r\n");
+  const headers = new Headers({ Host: "peer", "X-Mesh-Biscuit": "abc=", "Content-Length": "0" });
+  assert.equal(dec.decode(encodeRequestHead("GET", "/a2a/agent/card", headers)), "GET /a2a/agent/card HTTP/1.1\r\ncontent-length: 0\r\nhost: peer\r\nx-mesh-biscuit: abc=\r\n\r\n");
   assert.equal(dec.decode(encodeResponseHead(404, "Not Found", new Headers({ "Content-Type": "text/plain" }))), "HTTP/1.1 404 Not Found\r\ncontent-type: text/plain\r\n\r\n");
   assert.equal(dec.decode(encodeResponseHead(200, "", new Headers())), "HTTP/1.1 200 \r\n\r\n");
   // Headers itself refuses a line break in a value; a stray one in the reason phrase is flattened.

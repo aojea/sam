@@ -48,8 +48,8 @@ approve it before running anything.
    device endpoint. Enrollment is a one-time step per machine.
 4. Read the node API token from the file named in step 2, then register the MCP
    endpoint `http://127.0.0.1:8080/mcp` with the header
-   `X-Sam-Authentication: Bearer <token>`. Claude Code:
-   `claude mcp add --transport http sam-mesh http://127.0.0.1:8080/mcp --header "X-Sam-Authentication: Bearer <token>"`.
+   `X-Mesh-Authentication: Bearer <token>`. Claude Code:
+   `claude mcp add --transport http sam-mesh http://127.0.0.1:8080/mcp --header "X-Mesh-Authentication: Bearer <token>"`.
    Antigravity: add the same URL as `serverUrl` with the same header to
    `~/.gemini/config/mcp_config.json`.
 5. Tell the user to restart the agent session, since MCP tools load at startup.
@@ -97,7 +97,7 @@ transcript. A daemonized node writes its token to
 never appears in an argument, the shell history, or your output:
 
 ```bash
-curl http://127.0.0.1:8080/v1/models -H @<(printf 'X-Sam-Authentication: Bearer %s' "$(cat ~/.config/sam-mesh/api-token)")
+curl http://127.0.0.1:8080/v1/models -H @<(printf 'X-Mesh-Authentication: Bearer %s' "$(cat ~/.config/sam-mesh/api-token)")
 ```
 
 `<(...)` needs bash or zsh; in a plain `sh`, write the header line to a file
@@ -220,7 +220,7 @@ The node exposes them through an OpenAI-compatible facade on its own address:
 - `GET /v1/models` lists the models reachable across the mesh.
 - `POST /v1/chat/completions` routes to a provider of the requested `model`,
   preferring a local one, and fails over between providers.
-- Add `X-Sam-Required-Labels: key=value` (comma-separated; every pair must
+- Add `X-Mesh-Required-Labels: key=value` (comma-separated; every pair must
   be attested) to accept only providers whose labels the control plane
   attested, for example `region=eu`. Enforcement is fail-closed: unattested
   providers are rejected before any request data leaves the node.
@@ -271,13 +271,13 @@ let the user approve each command.
    value stays out of the process arguments and the shell history:
 
 ```bash
-A2ACLI_SVC_PARAM="X-Sam-Authentication=Bearer $(cat ~/.config/sam-mesh/api-token)" \
+A2ACLI_SVC_PARAM="X-Mesh-Authentication=Bearer $(cat ~/.config/sam-mesh/api-token)" \
   a2a card get <local_proxy_url>/.well-known/agent-card.json
 ```
 
 Every other `a2a` command takes the same card URL through `-a` and the same
 environment. To accept only a provider whose labels the control plane
-attested, append `,X-Sam-Required-Labels=region=eu` to that variable: the
+attested, append `,X-Mesh-Required-Labels=region=eu` to that variable: the
 node then refuses fail-closed with `403` before any data leaves it. That
 refusal is the feature: report it, never retry with weaker labels on your
 own. A `--svc-param` flag replaces the whole variable, and the variable is

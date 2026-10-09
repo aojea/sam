@@ -377,9 +377,9 @@ func withCallerOrTokenAuth(node *SamNode, token string, allowAuthorizationFallba
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.Debugf("[SidecarAuth] Incoming request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 
-		// Extract optional X-Sam-Authentication, X-Sam-Biscuit (injected by an
+		// Extract optional X-Mesh-Authentication, X-Mesh-Biscuit (injected by an
 		// upstream Envoy ext_authz / ext_proc filter), or Authorization bearer value.
-		headerName := api.HeaderSamAuthentication
+		headerName := api.HeaderMeshAuthentication
 		authHeader := r.Header.Get(headerName)
 		var bearer string
 		var hasBearer bool
@@ -389,8 +389,8 @@ func withCallerOrTokenAuth(node *SamNode, token string, allowAuthorizationFallba
 				bearer = strings.TrimSpace(parts[1])
 				hasBearer = true
 			}
-		} else if b64 := strings.TrimSpace(r.Header.Get(api.HeaderSamBiscuit)); b64 != "" {
-			headerName = api.HeaderSamBiscuit
+		} else if b64 := strings.TrimSpace(r.Header.Get(api.HeaderMeshBiscuit)); b64 != "" {
+			headerName = api.HeaderMeshBiscuit
 			authHeader = b64
 			bearer = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(b64, "Bearer "), "bearer "))
 			hasBearer = bearer != ""
@@ -410,7 +410,7 @@ func withCallerOrTokenAuth(node *SamNode, token string, allowAuthorizationFallba
 		// the local process, but if the caller also supplied a Task Biscuit or JWT,
 		// bind it to the request context (and fail closed if that Biscuit/JWT is invalid/revoked).
 		if fromLocalSocket(r) || token == "" {
-			if hasBearer && (token == "" || headerName == api.HeaderSamBiscuit || !constantTimeEqual(bearer, token)) {
+			if hasBearer && (token == "" || headerName == api.HeaderMeshBiscuit || !constantTimeEqual(bearer, token)) {
 				biscuitBytes, isMeshCred, err := node.resolveCallerCredential(r.Context(), bearer)
 				if isMeshCred {
 					if err != nil {
@@ -419,25 +419,25 @@ func withCallerOrTokenAuth(node *SamNode, token string, allowAuthorizationFallba
 					}
 					r = r.WithContext(WithCallerBiscuit(r.Context(), biscuitBytes))
 					r.Header.Del(headerName)
-				} else if headerName == api.HeaderSamAuthentication || headerName == api.HeaderSamBiscuit {
+				} else if headerName == api.HeaderMeshAuthentication || headerName == api.HeaderMeshBiscuit {
 					http.Error(w, "Forbidden", http.StatusForbidden)
 					return
 				}
 			}
-			r.Header.Del(api.HeaderSamAuthentication)
-			r.Header.Del(api.HeaderSamBiscuit)
+			r.Header.Del(api.HeaderMeshAuthentication)
+			r.Header.Del(api.HeaderMeshBiscuit)
 			stripSidecarTokenFromAuthorization(r, token)
 			next.ServeHTTP(w, r)
 			return
 		}
 
 		if authHeader == "" {
-			accepted := fmt.Sprintf("%q", api.HeaderSamAuthentication)
+			accepted := fmt.Sprintf("%q", api.HeaderMeshAuthentication)
 			if allowAuthorizationFallback {
 				accepted += ` or "Authorization"`
 			}
 			logger.Warnf("[SidecarAuth] Request %s %s rejected: missing %s header", r.Method, r.URL.Path, accepted)
-			http.Error(w, fmt.Sprintf("Unauthorized: missing %s header, e.g. %q: \"Bearer <api-token>\"", accepted, api.HeaderSamAuthentication), http.StatusUnauthorized)
+			http.Error(w, fmt.Sprintf("Unauthorized: missing %s header, e.g. %q: \"Bearer <api-token>\"", accepted, api.HeaderMeshAuthentication), http.StatusUnauthorized)
 			return
 		}
 		if !hasBearer {
@@ -445,7 +445,7 @@ func withCallerOrTokenAuth(node *SamNode, token string, allowAuthorizationFallba
 			return
 		}
 
-		if headerName != api.HeaderSamBiscuit && constantTimeEqual(bearer, token) {
+		if headerName != api.HeaderMeshBiscuit && constantTimeEqual(bearer, token) {
 			r.Header.Del(headerName)
 			stripSidecarTokenFromAuthorization(r, token)
 			next.ServeHTTP(w, r)
@@ -626,7 +626,7 @@ func handleNodeOAuthToken(node *SamNode, sidecarToken string, w http.ResponseWri
 }
 
 func authenticateSidecarCaller(node *SamNode, sidecarToken string, r *http.Request) ([]byte, bool) {
-	for _, hdr := range []string{api.HeaderSamAuthentication, "Authorization"} {
+	for _, hdr := range []string{api.HeaderMeshAuthentication, "Authorization"} {
 		val := r.Header.Get(hdr)
 		if val == "" {
 			continue

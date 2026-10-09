@@ -24,16 +24,16 @@ func TestClassifyRouteIsAClosedVocabulary(t *testing.T) {
 	// A route label must not vary with anything an off-node caller chooses,
 	// or a peer could grow this node's metric space by inventing names.
 	cases := map[string]string{
-		"/healthz":                       "health",
-		"/metrics":                       "health",
-		"/sam/service/discover":          "service-registry",
-		"/sam/service/register":          "service-registry",
-		"/sam/12D3KooWpeer/mcp/calc/run": "egress",
-		"/v1/models":                     "models",
-		"/v1/chat/completions":           "completions",
-		"/v1/completions":                "completions",
-		"/":                              "mcp",
-		"/mcp":                           "mcp",
+		"/healthz":                        "health",
+		"/metrics":                        "health",
+		"/mesh/service/discover":          "service-registry",
+		"/mesh/service/register":          "service-registry",
+		"/mesh/12D3KooWpeer/mcp/calc/run": "egress",
+		"/v1/models":                      "models",
+		"/v1/chat/completions":            "completions",
+		"/v1/completions":                 "completions",
+		"/":                               "mcp",
+		"/mcp":                            "mcp",
 	}
 	for path, want := range cases {
 		if got := classifyRoute(path); got != want {

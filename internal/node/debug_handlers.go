@@ -111,7 +111,7 @@ func writeDebugJSON(w http.ResponseWriter, v any) {
 
 // The types below are the /debug payloads. They are unexported on purpose:
 // these endpoints are unversioned operator diagnostics, not part of the
-// api/sam.proto mesh contract.
+// api/agentmesh.proto mesh contract.
 
 type meshInfoResponse struct {
 	PeerID         string   `json:"peer_id"`

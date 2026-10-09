@@ -26,7 +26,7 @@ import urllib.parse
 import pytest
 
 from agent_mesh import challenges
-from agent_mesh._proto import sam_pb2 as pb
+from agent_mesh._proto import agentmesh_pb2 as pb
 from agent_mesh.controlplane import (
     HEADER_CHALLENGE_SIGNATURE,
     HEADER_CHALLENGE_TIMESTAMP,
@@ -180,12 +180,12 @@ def test_register_carries_jwt_and_register_bound_challenge():
         r = pb.EnrollRequest.FromString(body)
         assert r.jwt == "eyJ.fake.jwt"
         assert r.peer_id == identity.peer_id
-        assert r.requested_role == "sam:role:custom"
+        assert r.requested_role == "mesh:role:custom"
         assert verify_ed25519(identity.public_key_raw, challenges.register_challenge(r.peer_id, r.challenge_unix_ms), r.challenge_signature)
         return 200, pb.EnrollResponse(biscuit_token=BISCUIT, control_plane_public_key=CP_KEY.public_key_raw, expire_time=_ts_s(7)).SerializeToString()
 
     e = ControlPlaneClient("http://127.0.0.1:1", transport=fake_transport({"POST /register": register})).register(
-        identity, "eyJ.fake.jwt", role="sam:role:custom"
+        identity, "eyJ.fake.jwt", role="mesh:role:custom"
     )
     assert e.biscuit == BISCUIT
     assert e.expiration == 7
@@ -218,7 +218,7 @@ def test_refresh_presents_bearer_biscuit_and_signs_refresh_challenge():
 
 def test_policy_rules_presents_biscuit_and_signs_policies_challenge():
     identity = Identity.generate()
-    rules = ['granted_service("mcp", "echo") <- role("sam:role:node")']
+    rules = ['granted_service("mcp", "echo") <- role("mesh:role:node")']
 
     def policies(parts, headers, body):
         assert headers["Authorization"] == "Bearer " + base64.b64encode(BISCUIT).decode()
@@ -230,10 +230,10 @@ def test_policy_rules_presents_biscuit_and_signs_policies_challenge():
     client = ControlPlaneClient("http://127.0.0.1:1", transport=fake_transport({"GET /policies": policies}))
     assert client.policy_rules(identity, BISCUIT) == rules
 
-    assert challenges.policies_challenge("peer1", 42) == b"sam:policies:peer1:42"
-    assert challenges.egress_challenge("peer1", 42) == b"sam:egress:peer1:42"
-    assert challenges.revocations_challenge("peer1", 42) == b"sam:revocations:peer1:42"
-    assert challenges.nodes_catalog_challenge("peer1", 42) == b"sam:nodes-catalog:peer1:42"
+    assert challenges.policies_challenge("peer1", 42) == b"mesh:policies:peer1:42"
+    assert challenges.egress_challenge("peer1", 42) == b"mesh:egress:peer1:42"
+    assert challenges.revocations_challenge("peer1", 42) == b"mesh:revocations:peer1:42"
+    assert challenges.nodes_catalog_challenge("peer1", 42) == b"mesh:nodes-catalog:peer1:42"
 
 
 def test_clock_skew_retries_once_using_response_date_header_and_does_not_retry_other_401s():

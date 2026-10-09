@@ -24,7 +24,7 @@ import { evaluateTaskRules, isSafeRequestHTTPPath } from "./tar.ts";
 
 /** What a caller asks for, as sam-node's RequestContext. */
 export interface AuthorizeRequest {
-  /** The caller's biscuit, as it arrived in the AuthFrame or X-Sam-Biscuit. */
+  /** The caller's biscuit, as it arrived in the AuthFrame or X-Mesh-Biscuit. */
   biscuit: Uint8Array;
   /** The peer at the other end of the authenticated connection. */
   peerId: string;
@@ -182,7 +182,7 @@ export async function authorizeCaller(req: AuthorizeRequest, options: ProviderAu
           method: req.method ?? "",
           path: req.path ?? "",
           mcpTool,
-          allowMCPStreamInit: req.method === undefined && mcpTool === "" && req.protocol === "/sam/mcp/1.0.0",
+          allowMCPStreamInit: req.method === undefined && mcpTool === "" && req.protocol === "/mesh/mcp/1.0.0",
         },
         now,
       );

@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from agent_mesh._proto import sam_pb2 as pb
+from agent_mesh._proto import agentmesh_pb2 as pb
 from agent_mesh.credential import decode_auth_response
 from agent_mesh.identity import Identity
 from agent_mesh.mesh import AgentMesh, CredentialRetiredError

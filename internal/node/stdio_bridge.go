@@ -29,7 +29,7 @@ import (
 
 // StdioBridge backs the POST HTTP ingress route for a command-backed service
 // (registered via baseService.Init), which is what a mesh caller's
-// /sam/{peer}/mcp/{service} request lands on. Probes and tool listings go
+// /mesh/{peer}/mcp/{service} request lands on. Probes and tool listings go
 // through MCPService.backendTransport and a subprocess of their own instead.
 //
 // One backend process serves every authorized caller, so the bridge owns the

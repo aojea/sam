@@ -129,7 +129,7 @@ spec:
         - "--bind-address=0.0.0.0:8080"
         - "--db-driver=postgres"
         - "--issuer=https://auth.sam-mesh.dev,https://container.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/${CLUSTER_REGION}/clusters/${CLUSTER_NAME}"
-        - "--allowed-audiences=sam-mesh-audience,sam-control-plane-audience"
+        - "--allowed-audiences=agentmesh-audience,sam-control-plane-audience"
         - "--auto-approve-enrollment"
         - "--key-grace-period=48h"
         resources:

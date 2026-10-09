@@ -94,8 +94,8 @@ func main() {
 		// Construct URL
 		baseURL := strings.TrimSuffix(*serverURL, "/mcp")
 		baseURL = strings.TrimSuffix(baseURL, "/")
-		if !strings.Contains(baseURL, "/sam/service/discover") {
-			baseURL = baseURL + "/sam/service/discover"
+		if !strings.Contains(baseURL, "/mesh/service/discover") {
+			baseURL = baseURL + "/mesh/service/discover"
 		}
 
 		discoveryURL := fmt.Sprintf("%s?type=%s&stream=true", baseURL, serviceType)
@@ -112,7 +112,7 @@ func main() {
 		}
 
 		if resolvedToken != "" {
-			req.Header.Set(api.HeaderSamAuthentication, "Bearer "+resolvedToken)
+			req.Header.Set(api.HeaderMeshAuthentication, "Bearer "+resolvedToken)
 		}
 
 		resp, err := http.DefaultClient.Do(req)
@@ -242,6 +242,6 @@ type authTransport struct {
 func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Clone request to avoid mutating original request if shared/retried
 	reqCopy := req.Clone(req.Context())
-	reqCopy.Header.Set(api.HeaderSamAuthentication, "Bearer "+t.token)
+	reqCopy.Header.Set(api.HeaderMeshAuthentication, "Bearer "+t.token)
 	return t.underlying.RoundTrip(reqCopy)
 }

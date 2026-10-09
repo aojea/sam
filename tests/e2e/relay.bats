@@ -138,8 +138,8 @@ EOF
     run docker run --rm --network "${MESH_NETWORK_2}" python:3.12 python3 -c "
 import urllib.request
 req = urllib.request.Request(
-    \"http://${MESH_PREFIX}-node-2:8080/sam/${node1_peer_id}/mcp/http-tool/\",
-    headers={\"X-Sam-Authentication\": \"Bearer secret-token\"}
+    \"http://${MESH_PREFIX}-node-2:8080/mesh/${node1_peer_id}/mcp/http-tool/\",
+    headers={\"X-Mesh-Authentication\": \"Bearer secret-token\"}
 )
 with urllib.request.urlopen(req) as response:
     print(response.read().decode(\"utf-8\"))

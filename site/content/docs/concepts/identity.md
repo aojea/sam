@@ -72,8 +72,8 @@ mints a credential:
    is registering.
 2. Neither the peer ID nor the identity behind it is banned.
 3. The identity resolves, through the bindings in the mesh policy, to the
-   role being requested. `sam-node` requests `sam:role:node` and `sam-router`
-   requests `sam:role:router`. If the policy binds nobody to `sam:role:node`,
+   role being requested. `sam-node` requests `mesh:role:node` and `sam-router`
+   requests `mesh:role:router`. If the policy binds nobody to `mesh:role:node`,
    no node can enroll.
 4. Every label the node declared is permitted by the `allowed_labels` of a
    role it holds. A role without `allowed_labels` permits no labels.
@@ -89,7 +89,7 @@ that issued it.
 Inside the mesh, every credential is a [Biscuit](https://www.biscuitsec.org/),
 a signed authorization token. Its authority block (Block 0) holds facts
 written in Datalog, a small logic language in which a fact looks like
-`role("sam:role:node")`. The authority block is signed by the control plane's
+`role("mesh:role:node")`. The authority block is signed by the control plane's
 Ed25519 key. Any node with the public key can verify it without contacting
 anyone.
 
@@ -104,7 +104,7 @@ contains:
 |---|---|
 | `node("12D3KooW...")`, `client_peer_id("12D3KooW...")` | The peer ID the token belongs to. Every verifier checks that the connection it arrived on was authenticated as this peer. |
 | `expiration(<time>)` | When the token stops being valid. |
-| `role("sam:role:node")`, `role("developer")` | The roles the identity resolved to, one fact each. |
+| `role("mesh:role:node")`, `role("developer")` | The roles the identity resolved to, one fact each. |
 | `user("...")`, `email("...")`, `group("...")`, `idp_role("...")` | Claims copied from the OIDC token: subject, verified email, each group, each entry of the issuer's `roles` claim. Absent for bootstrap enrollments. |
 | `label("region", "eu")` | One fact per declared and permitted label. |
 | `granted_service_*`, `granted_target_*` | What the roles allow, compiled from `allowed_services` and `allowed_targets`. [Authorization](../authorization/) describes them. |

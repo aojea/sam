@@ -8,7 +8,7 @@ aliases:
 
 The mesh policy is one document held by the control plane: a list of roles,
 a list of bindings and a list of egress destinations. It is posted as JSON
-(protojson of `PolicyConfig` in `api/sam.proto`) to `POST /policies`, read
+(protojson of `PolicyConfig` in `api/agentmesh.proto`) to `POST /policies`, read
 back from `GET /admin/policy`, edited in the console, or given to
 `sam-one --policy-file` for first boot.
 
@@ -16,8 +16,8 @@ back from `GET /admin/policy`, edited in the console, or given to
 {
   "roles": [
     {
-      "name": "sam:role:node",
-      "allowed_services": ["system://sam.catalog"],
+      "name": "mesh:role:node",
+      "allowed_services": ["system://mesh.catalog"],
       "allowed_labels": ["region=*", "team=platform"]
     },
     {
@@ -36,7 +36,7 @@ back from `GET /admin/policy`, edited in the console, or given to
     }
   ],
   "bindings": [
-    { "role": "sam:role:node", "members": ["group:engineering", "user:system:serviceaccount:sam-nodes:calc-mcp-sam-node"] },
+    { "role": "mesh:role:node", "members": ["group:engineering", "user:system:serviceaccount:sam-nodes:calc-mcp-sam-node"] },
     { "role": "developer",     "members": ["group:engineering"] },
     { "role": "analyst",       "members": ["group:analytics"] }
   ],
@@ -64,7 +64,7 @@ notice.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `name` | string, required, unique | The role name. `sam:role:node` and `sam:role:router` are the roles that the two binaries request at enrollment. Any other name is an ordinary role. |
+| `name` | string, required, unique | The role name. `mesh:role:node` and `mesh:role:router` are the roles that the two binaries request at enrollment. Any other name is an ordinary role. |
 | `allowed_services` | list of service patterns | Services that holders may call. |
 | `allowed_targets` | list of target patterns | Nodes that holders may call. If absent, any node may be called. |
 | `allowed_labels` | list of label patterns | Labels that a node holding this role may declare at enrollment. If absent, no labels may be declared. |
@@ -92,7 +92,7 @@ A fact whose only meaning is that a grant exists carries the single term
 `true`, because the Biscuit grammar requires at least one term per predicate.
 The same holds for `target_unrestricted(true)` below.
 
-`system://sam.catalog` is the built-in discovery service that every node
+`system://mesh.catalog` is the built-in discovery service that every node
 runs. A role that should be able to list the tools of a node needs it.
 
 ### Target patterns
@@ -186,7 +186,7 @@ A member is one of:
 | `group:<name>` | an entry of the `groups` claim |
 | `idp_role:<name>` | an entry of the issuer's `roles` claim |
 | `node:<peer-id>` | one node, by key (exact peer ID only; wildcards are not permitted on `node:`) |
-| `sam:system:authenticated` | every identity that the identity provider authenticates |
+| `mesh:system:authenticated` | every identity that the identity provider authenticates |
 
 Each claim-backed member (`user:`, `email:`, `group:`, `idp_role:`) may carry
 a single trailing `*` (prefix match, compiled to `$v.starts_with("<prefix>")`)
@@ -198,7 +198,7 @@ for example:
 - `email:*@my-project.iam.gserviceaccount.com`
 
 Bare `<prefix>:*` (such as `user:*` or `email:*`) and interior wildcards
-(`a*b`) are rejected; use `sam:system:authenticated` when any authenticated
+(`a*b`) are rejected; use `mesh:system:authenticated` when any authenticated
 identity is intended. Role names and binding member values may contain spaces
 and UTF-8 (for example `group:Engineering Team`), and may not contain `"`,
 `\`, or control characters.
@@ -227,7 +227,7 @@ own, and `type: egress` in `sam-node.yaml` is refused.
 | `mode` | `EGRESS_MODE_HTTP` (default) or `EGRESS_MODE_TCP` (named `CONNECT` tunnel). |
 | `ports` | Allowed TCP destination ports when `mode` is `EGRESS_MODE_TCP` (for example, `[5432]`). Empty denies every tunnel. |
 | `preserve_host` | Keep the destination hostname (`name`) in the `Host` header when `target_url` points at an operator inspection chain. |
-| `forward_context` | Forward `X-Sam-Principal`, `X-Sam-Roles` and `X-Sam-Task` to `target_url` when `target_url` is an operator inspection chain. |
+| `forward_context` | Forward `X-Mesh-Principal`, `X-Mesh-Roles` and `X-Mesh-Task` to `target_url` when `target_url` is an operator inspection chain. |
 
 ### Credential brokers
 

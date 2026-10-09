@@ -61,7 +61,7 @@ func (n *SamNode) handleListLocalServices(ctx context.Context, req *mcp.CallTool
 // service's local_proxy_url directly over HTTP. Inference services are plain
 // OpenAI-compatible endpoints, never invoked via call_remote_tool.
 const inferenceInvocationHint = `To call an inference service, send a normal HTTP request (e.g. POST <local_proxy_url>/chat/completions) directly to its "local_proxy_url" — do NOT use call_remote_tool. Required headers:
-  - "X-Sam-Authentication: Bearer <your local node API token>" authenticates you to this node; it is never forwarded off-node.
+  - "X-Mesh-Authentication: Bearer <your local node API token>" authenticates you to this node; it is never forwarded off-node.
   - "Authorization: Bearer <upstream-credential>" is OPTIONAL and only needed if the destination service itself requires its own credential (e.g. a provider API key); it passes straight through untouched and plays no part in authenticating to this node.`
 
 // DiscoverRemoteServicesParams defines the parameters for the discover_remote_services tool.

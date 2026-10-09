@@ -431,6 +431,6 @@ func printDaemonSummary(pid int, probe probeTarget, tokenPath, logPath string) {
 		fmt.Printf("\nCall it over the socket without a token, e.g.\n  curl --unix-socket %s http://localhost/healthz\n", probe.socketPath)
 	}
 	if probe.addr != "" {
-		fmt.Printf("\nOver TCP, authenticate with the header \"X-Sam-Authentication: Bearer <token>\".\n")
+		fmt.Printf("\nOver TCP, authenticate with the header \"X-Mesh-Authentication: Bearer <token>\".\n")
 	}
 }

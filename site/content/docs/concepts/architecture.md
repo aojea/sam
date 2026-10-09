@@ -97,7 +97,7 @@ Towards the agent, a node exposes a local API on `127.0.0.1:8080` by default
 and on a Unix socket. The API includes an MCP server whose tools discover and
 call services across the mesh, an OpenAI-compatible `/v1` endpoint that
 routes model requests to inference providers on the mesh, and a proxy path
-`/sam/<peer-id>/<type>/<name>/` that reaches a specific service directly.
+`/mesh/<peer-id>/<type>/<name>/` that reaches a specific service directly.
 [Networking](../networking/) describes the API and how traffic moves.
 
 ## Names instead of addresses

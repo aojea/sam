@@ -46,7 +46,7 @@ func startTokenTestControlPlane(t *testing.T) (string, func(claims map[string]in
 		ListenAddr:       "127.0.0.1:0",
 		AdminToken:       "test-admin-token",
 		OIDCIssuer:       oidcURL,
-		AllowedAudiences: []string{"sam-mesh-audience"},
+		AllowedAudiences: []string{"agentmesh-audience"},
 	}
 	srv, err := controlplane.NewServer(opts, store)
 	if err != nil {

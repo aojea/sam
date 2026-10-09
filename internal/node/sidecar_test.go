@@ -95,7 +95,7 @@ func TestSidecarSocketAuthorizesWithoutToken(t *testing.T) {
 
 	// 503 means the request cleared the auth gate and was only stopped by the
 	// node not being connected to a mesh.
-	resp, err := client.Get("http://localhost/sam/service/discover?type=mcp&name=test")
+	resp, err := client.Get("http://localhost/mesh/service/discover?type=mcp&name=test")
 	if err != nil {
 		t.Fatalf("socket request failed: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestSidecarSocketAuthorizesWithoutToken(t *testing.T) {
 	}
 
 	tcpClient := &http.Client{Timeout: 2 * time.Second}
-	tcpResp, err := tcpClient.Get("http://" + node.BoundHTTPAddr + "/sam/service/discover?type=mcp&name=test")
+	tcpResp, err := tcpClient.Get("http://" + node.BoundHTTPAddr + "/mesh/service/discover?type=mcp&name=test")
 	if err != nil {
 		t.Fatalf("tcp request failed: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestWithAuth(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "/any", nil)
 			if tt.authHeader != "" {
-				req.Header.Set(api.HeaderSamAuthentication, tt.authHeader)
+				req.Header.Set(api.HeaderMeshAuthentication, tt.authHeader)
 			}
 			rr := httptest.NewRecorder()
 			handler.ServeHTTP(rr, req)
@@ -295,19 +295,19 @@ func TestWithAuth(t *testing.T) {
 	t.Run("Consumed gate header is stripped, other headers survive", func(t *testing.T) {
 		var gotSamAuth, gotAuth string
 		inspect := withAuth(token, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			gotSamAuth = r.Header.Get(api.HeaderSamAuthentication)
+			gotSamAuth = r.Header.Get(api.HeaderMeshAuthentication)
 			gotAuth = r.Header.Get("Authorization")
 			w.WriteHeader(http.StatusOK)
 		}))
 
 		req := httptest.NewRequest("GET", "/any", nil)
-		req.Header.Set(api.HeaderSamAuthentication, "Bearer "+token)
+		req.Header.Set(api.HeaderMeshAuthentication, "Bearer "+token)
 		req.Header.Set("Authorization", "Bearer backend-credential")
 		rr := httptest.NewRecorder()
 		inspect.ServeHTTP(rr, req)
 
 		if gotSamAuth != "" {
-			t.Errorf("consumed %s header must be stripped, got %q", api.HeaderSamAuthentication, gotSamAuth)
+			t.Errorf("consumed %s header must be stripped, got %q", api.HeaderMeshAuthentication, gotSamAuth)
 		}
 		if gotAuth != "Bearer backend-credential" {
 			t.Errorf("Authorization must survive when not consumed, got %q", gotAuth)
@@ -350,7 +350,7 @@ func TestWithAuth(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		}))
 		req := httptest.NewRequest("GET", "/any", nil)
-		req.Header.Set(api.HeaderSamAuthentication, "Bearer anything")
+		req.Header.Set(api.HeaderMeshAuthentication, "Bearer anything")
 		rr := httptest.NewRecorder()
 		handlerEmpty.ServeHTTP(rr, req)
 
@@ -407,17 +407,17 @@ func TestSidecarServerAuthEnforcement(t *testing.T) {
 		// Services are declared in configuration only: the former runtime
 		// mutation endpoints are gone, so these paths are plain egress-proxy
 		// paths (503: not connected) with no special handling.
-		{"register does not exist", "POST", "/sam/service/register", http.StatusServiceUnavailable, true},
-		{"unregister does not exist", "POST", "/sam/service/unregister", http.StatusServiceUnavailable, true},
-		{"discover is protected", "GET", "/sam/service/discover?type=mcp&name=test", http.StatusUnauthorized, false},
-		{"egress proxy is protected", "GET", "/sam/", http.StatusUnauthorized, false},
+		{"register does not exist", "POST", "/mesh/service/register", http.StatusServiceUnavailable, true},
+		{"unregister does not exist", "POST", "/mesh/service/unregister", http.StatusServiceUnavailable, true},
+		{"discover is protected", "GET", "/mesh/service/discover?type=mcp&name=test", http.StatusUnauthorized, false},
+		{"egress proxy is protected", "GET", "/mesh/", http.StatusUnauthorized, false},
 		{"mcp root is protected", "GET", "/mcp", http.StatusUnauthorized, false},
 
 		{"metrics with token", "GET", "/metrics", http.StatusOK, true},
-		// /sam/service/discover without mesh connection will return 503 instead of 400 since node is not connected,
+		// /mesh/service/discover without mesh connection will return 503 instead of 400 since node is not connected,
 		// but as long as it gets past auth, that's what we want to verify.
-		{"discover with token", "GET", "/sam/service/discover?type=mcp&name=test", http.StatusServiceUnavailable, true},
-		{"egress proxy with token", "GET", "/sam/", http.StatusServiceUnavailable, true},
+		{"discover with token", "GET", "/mesh/service/discover?type=mcp&name=test", http.StatusServiceUnavailable, true},
+		{"egress proxy with token", "GET", "/mesh/", http.StatusServiceUnavailable, true},
 		{"mcp root with token", "GET", "/mcp", http.StatusServiceUnavailable, true},
 	}
 
@@ -428,7 +428,7 @@ func TestSidecarServerAuthEnforcement(t *testing.T) {
 				t.Fatalf("Failed to create request: %v", err)
 			}
 			if tt.needsToken {
-				req.Header.Set(api.HeaderSamAuthentication, "Bearer "+token)
+				req.Header.Set(api.HeaderMeshAuthentication, "Bearer "+token)
 			}
 
 			resp, err := client.Do(req)
@@ -487,9 +487,9 @@ func TestSidecarAuthorizationFallbackScope(t *testing.T) {
 		path           string
 		expectedStatus int // status once past the auth gate (may still be a downstream error)
 	}{
-		{"discover accepts Authorization fallback", "GET", "/sam/service/discover?type=mcp&name=test", http.StatusServiceUnavailable},
+		{"discover accepts Authorization fallback", "GET", "/mesh/service/discover?type=mcp&name=test", http.StatusServiceUnavailable},
 		{"mcp root accepts Authorization fallback", "GET", "/mcp", http.StatusServiceUnavailable},
-		{"egress proxy rejects Authorization fallback", "GET", "/sam/", http.StatusUnauthorized},
+		{"egress proxy rejects Authorization fallback", "GET", "/mesh/", http.StatusUnauthorized},
 	}
 
 	for _, tt := range tests {
@@ -519,7 +519,7 @@ func TestRegisterService(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = h.Close() }()
-	d, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	d, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mesh"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -531,7 +531,7 @@ func TestRegisterService(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = h2.Close() }()
-	d2, err := dht.New(h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	d2, err := dht.New(h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mesh"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +594,7 @@ func TestHandleDiscoverService(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = h.Close() }()
-	d, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	d, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mesh"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -613,7 +613,7 @@ func TestHandleDiscoverService(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = h2.Close() }()
-	d2, err := dht.New(h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	d2, err := dht.New(h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mesh"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -637,7 +637,7 @@ func TestHandleDiscoverService(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond) // Wait for DHT
 
-	req := httptest.NewRequest("GET", "/sam/service/discover?type=mcp&name=remote-service", nil)
+	req := httptest.NewRequest("GET", "/mesh/service/discover?type=mcp&name=remote-service", nil)
 	rr := httptest.NewRecorder()
 
 	handleDiscoverService(node, rr, req)
@@ -850,7 +850,7 @@ func TestDiscoverService_Pagination(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = h.Close() }()
-	d, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	d, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mesh"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -888,7 +888,7 @@ func TestDiscoverService_Pagination(t *testing.T) {
 		}
 		hosts = append(hosts, h2)
 
-		d2, err := dht.New(h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+		d2, err := dht.New(h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mesh"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -905,7 +905,7 @@ func TestDiscoverService_Pagination(t *testing.T) {
 	time.Sleep(200 * time.Millisecond) // Wait for DHT propagation
 
 	// 1. Query page 1 (limit=2, offset=0)
-	req := httptest.NewRequest("GET", "/sam/service/discover?type=mcp&name=paginated-service&limit=2&offset=0", nil)
+	req := httptest.NewRequest("GET", "/mesh/service/discover?type=mcp&name=paginated-service&limit=2&offset=0", nil)
 	rr := httptest.NewRecorder()
 	handleDiscoverService(node, rr, req)
 	if rr.Code != http.StatusOK {
@@ -920,7 +920,7 @@ func TestDiscoverService_Pagination(t *testing.T) {
 	}
 
 	// 2. Query page 2 (limit=2, offset=2)
-	req2 := httptest.NewRequest("GET", "/sam/service/discover?type=mcp&name=paginated-service&limit=2&offset=2", nil)
+	req2 := httptest.NewRequest("GET", "/mesh/service/discover?type=mcp&name=paginated-service&limit=2&offset=2", nil)
 	rr2 := httptest.NewRecorder()
 	handleDiscoverService(node, rr2, req2)
 	if rr2.Code != http.StatusOK {
@@ -935,7 +935,7 @@ func TestDiscoverService_Pagination(t *testing.T) {
 	}
 
 	// 3. Query page 3 (limit=2, offset=4)
-	req3 := httptest.NewRequest("GET", "/sam/service/discover?type=mcp&name=paginated-service&limit=2&offset=4", nil)
+	req3 := httptest.NewRequest("GET", "/mesh/service/discover?type=mcp&name=paginated-service&limit=2&offset=4", nil)
 	rr3 := httptest.NewRecorder()
 	handleDiscoverService(node, rr3, req3)
 	if rr3.Code != http.StatusOK {

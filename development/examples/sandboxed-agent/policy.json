@@ -1,8 +1,8 @@
 {
   "roles": [
     {
-      "name": "sam:role:node",
-      "allowed_services": ["system://sam.catalog"],
+      "name": "mesh:role:node",
+      "allowed_services": ["system://mesh.catalog"],
       "allowed_targets": ["*"],
       "allowed_labels": ["site=office"]
     },

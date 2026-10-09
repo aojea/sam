@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """Client for the control plane's mesh-protocol surface: protobuf over HTTP
-(api/sam.proto). The operator plane (/admin/*, JSON) is out of scope."""
+(api/agentmesh.proto). The operator plane (/admin/*, JSON) is out of scope."""
 
 from __future__ import annotations
 
@@ -32,16 +32,16 @@ from google.protobuf.timestamp_pb2 import Timestamp
 from google.protobuf.unknown_fields import UnknownFieldSet
 
 from . import challenges
-from ._proto import sam_pb2 as pb
+from ._proto import agentmesh_pb2 as pb
 from .identity import PUBLIC_KEY_SIZE, Identity, verify_ed25519
 
 PROTOBUF_CONTENT_TYPE = "application/x-protobuf"
-HEADER_CHALLENGE_TIMESTAMP = "X-Sam-Challenge-Ts"
-HEADER_CHALLENGE_SIGNATURE = "X-Sam-Challenge-Sig"
+HEADER_CHALLENGE_TIMESTAMP = "X-Mesh-Challenge-Ts"
+HEADER_CHALLENGE_SIGNATURE = "X-Mesh-Challenge-Sig"
 STALE_CHALLENGE_TIMESTAMP_MESSAGE = "stale or invalid challenge timestamp"
 
 # The role a plain mesh member enrolls with (api.RoleNode).
-ROLE_NODE = "sam:role:node"
+ROLE_NODE = "mesh:role:node"
 
 # How far a signed /keys response's timestamp may drift from our clock.
 KEYS_RESPONSE_FRESHNESS_MS = 5 * 60 * 1000

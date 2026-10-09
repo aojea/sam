@@ -199,7 +199,7 @@ func TestLocalEgressRoute(t *testing.T) {
 	}
 	for _, r := range seen {
 		for name := range r.Header {
-			if strings.HasPrefix(name, "X-Sam-") || strings.HasPrefix(name, "X-Forwarded-") || name == api.HeaderPeerID {
+			if strings.HasPrefix(name, "X-Mesh-") || strings.HasPrefix(name, "X-Forwarded-") || name == api.HeaderPeerID {
 				t.Errorf("upstream saw %s", name)
 			}
 		}

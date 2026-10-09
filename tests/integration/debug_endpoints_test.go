@@ -40,7 +40,7 @@ func connectPeerWithToken(t *testing.T, apiAddr, token, peerAddr string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set(api.HeaderSamAuthentication, "Bearer "+token)
+	req.Header.Set(api.HeaderMeshAuthentication, "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -65,7 +65,7 @@ func debugGet(t *testing.T, apiAddr, path string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set(api.HeaderSamAuthentication, "Bearer test-token")
+	req.Header.Set(api.HeaderMeshAuthentication, "Bearer test-token")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET %s failed: %v", path, err)
@@ -87,7 +87,7 @@ func TestDebugEndpoints(t *testing.T) {
 	policyFile := filepath.Join(tmpDir, "policies.yaml")
 	policyContent := `bindings:
   - members: ["user:mock-user"]
-    role: sam:role:node
+    role: mesh:role:node
 roles: []
 `
 	if err := os.WriteFile(policyFile, []byte(policyContent), 0644); err != nil {

@@ -116,7 +116,7 @@ func TestNewReverseProxyHandler_RewritesRequests(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tc.requestURL, nil)
 			req.RemoteAddr = "192.0.2.1:12345"
 			if tc.noTrailingSlash {
-				req.Header.Set(api.HeaderSamNoTrailingSlash, "true")
+				req.Header.Set(api.HeaderMeshNoTrailingSlash, "true")
 			}
 			req.Header.Set("Forwarded", "for=spoofed;host=spoofed;proto=spoofed")
 			req.Header.Set("X-Forwarded-For", "spoofed")
@@ -139,11 +139,11 @@ func TestNewReverseProxyHandler_RewritesRequests(t *testing.T) {
 				t.Errorf("upstream Host = %q, want %q", forwarded.Host, "backend.example")
 			}
 			for name, want := range map[string]string{
-				api.HeaderSamNoTrailingSlash: "",
-				"Forwarded":                  "",
-				"X-Forwarded-For":            "192.0.2.1",
-				"X-Forwarded-Host":           req.Host,
-				"X-Forwarded-Proto":          tc.wantProto,
+				api.HeaderMeshNoTrailingSlash: "",
+				"Forwarded":                   "",
+				"X-Forwarded-For":             "192.0.2.1",
+				"X-Forwarded-Host":            req.Host,
+				"X-Forwarded-Proto":           tc.wantProto,
 			} {
 				if got := forwarded.Header.Get(name); got != want {
 					t.Errorf("upstream %s = %q, want %q", name, got, want)

@@ -26,7 +26,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// Outcomes of an inbound /sam/auth handshake.
+// Outcomes of an inbound /mesh/auth handshake.
 const (
 	handshakeOK           = "ok"
 	handshakeBanned       = "banned"

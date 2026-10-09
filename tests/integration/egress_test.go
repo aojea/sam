@@ -83,7 +83,7 @@ bindings:
     members: ["user:pep-user"]
   - role: contractor
     members: ["user:contractor-user"]
-  - role: sam:role:node
+  - role: mesh:role:node
     members: ["user:pep-user", "user:contractor-user"]
 egress:
   - name: api.github.com
@@ -165,7 +165,7 @@ egress:
 		if err != nil {
 			t.Fatal(err)
 		}
-		req.Header.Set(api.HeaderSamAuthentication, "Bearer "+token)
+		req.Header.Set(api.HeaderMeshAuthentication, "Bearer "+token)
 		for k, v := range headers {
 			req.Header.Set(k, v)
 		}
@@ -213,7 +213,7 @@ egress:
 	})
 
 	t.Run("a mesh member, through the PEP node", func(t *testing.T) {
-		base := fmt.Sprintf("http://%s/sam/%s/egress/api.github.com", callerAPI, pepPeer)
+		base := fmt.Sprintf("http://%s/mesh/%s/egress/api.github.com", callerAPI, pepPeer)
 		for _, tc := range []struct {
 			name   string
 			method string
@@ -257,7 +257,7 @@ egress:
 	}
 	for _, r := range append(append([]*http.Request{}, seen...), seenInternal...) {
 		for name := range r.Header {
-			if strings.HasPrefix(name, "X-Sam-") || strings.HasPrefix(name, "X-Forwarded-") || name == api.HeaderPeerID {
+			if strings.HasPrefix(name, "X-Mesh-") || strings.HasPrefix(name, "X-Forwarded-") || name == api.HeaderPeerID {
 				t.Errorf("a destination saw %s", name)
 			}
 		}

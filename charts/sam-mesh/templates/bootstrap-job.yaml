@@ -105,11 +105,11 @@ spec:
           {{- if not $bindings -}}
             {{- $defaultRouterSA := printf "user:system:serviceaccount:%s:%s-router-sa" .Release.Namespace (include "sam-mesh.fullname" .) -}}
             {{- $bindings = list
-              (dict "role" "sam:role:router" "members" (list "group:routers" $defaultRouterSA))
-              (dict "role" "sam:role:sambox" "members" (list (printf "user:system:serviceaccount:%s:sam-box-sa" .Release.Namespace)))
+              (dict "role" "mesh:role:router" "members" (list "group:routers" $defaultRouterSA))
+              (dict "role" "mesh:role:sambox" "members" (list (printf "user:system:serviceaccount:%s:sam-box-sa" .Release.Namespace)))
             -}}
             {{- if .Values.bootstrap.nodeMembers -}}
-              {{- $bindings = append $bindings (dict "role" "sam:role:node" "members" .Values.bootstrap.nodeMembers) -}}
+              {{- $bindings = append $bindings (dict "role" "mesh:role:node" "members" .Values.bootstrap.nodeMembers) -}}
             {{- end -}}
           {{- end }}
           curl -sf -X POST \
@@ -118,9 +118,9 @@ spec:
             -d '{
               "roles": [
                 {"name": "sam-admin", "allowed_services": ["*"], "allowed_targets": ["*"]},
-                {"name": "sam:role:sambox", "allowed_services": ["*"], "allowed_targets": ["*"]},
-                {"name": "sam:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]},
-                {"name": "sam:role:node", "allowed_services": {{ toJson .Values.bootstrap.nodeServices }}, "allowed_targets": ["*"], "allowed_labels": {{ toJson .Values.bootstrap.nodeLabels }}}
+                {"name": "mesh:role:sambox", "allowed_services": ["*"], "allowed_targets": ["*"]},
+                {"name": "mesh:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]},
+                {"name": "mesh:role:node", "allowed_services": {{ toJson .Values.bootstrap.nodeServices }}, "allowed_targets": ["*"], "allowed_labels": {{ toJson .Values.bootstrap.nodeLabels }}}
               ],
               "bindings": {{ toJson $bindings }}
             }' \
@@ -133,7 +133,7 @@ spec:
           TOKEN_RESP=$(curl -sf -X POST \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-            -d '{"role": "sam:role:router", "max_usages": {{ .Values.router.replicaCount | int }}}' \
+            -d '{"role": "mesh:role:router", "max_usages": {{ .Values.router.replicaCount | int }}}' \
             "${CP_URL}/admin/bootstrap-tokens")
 
           ROUTER_TOKEN=$(echo "${TOKEN_RESP}" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')

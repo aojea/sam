@@ -21,7 +21,7 @@ from typing import Optional
 from google.protobuf import json_format
 from google.protobuf.timestamp_pb2 import Timestamp
 
-from ._proto import sam_pb2 as pb
+from ._proto import agentmesh_pb2 as pb
 from .biscuit import attenuate_biscuit, seal_biscuit
 
 
@@ -126,7 +126,7 @@ class MeshCredential:
 
 
 def encode_auth_frame(biscuit: bytes, target_service: str = "") -> bytes:
-    """The first frame on every mesh stream (/sam/auth/1.0.0, /sam/mcp/1.0.0):
+    """The first frame on every mesh stream (/mesh/auth/1.0.0, /mesh/mcp/1.0.0):
     the caller's biscuit and the service it wants.
     Framing (varint length prefix) is the transport's job."""
     return pb.AuthFrame(biscuit=biscuit, target_service=target_service).SerializeToString()

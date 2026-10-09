@@ -12,7 +12,7 @@ from a2a.types import Message, Part, Role, SendMessageRequest
 
 async def main(url: str) -> None:
     token = os.environ.get("SAM_API_TOKEN", "devtoken")
-    async with httpx.AsyncClient(timeout=120, headers={"X-Sam-Authentication": f"Bearer {token}"}) as http:
+    async with httpx.AsyncClient(timeout=120, headers={"X-Mesh-Authentication": f"Bearer {token}"}) as http:
         card = await A2ACardResolver(http, url).get_agent_card()
         print(f"{card.name}: {card.description}")
         for iface in card.supported_interfaces:
@@ -40,5 +40,5 @@ async def main(url: str) -> None:
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        sys.exit("usage: chat.py http://127.0.0.1:9099/sam/<peer-id>/a2a/chat")
+        sys.exit("usage: chat.py http://127.0.0.1:9099/mesh/<peer-id>/a2a/chat")
     asyncio.run(main(sys.argv[1]))

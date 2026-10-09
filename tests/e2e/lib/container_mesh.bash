@@ -206,7 +206,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
         mesh_container_log "${name}"
         return 1
       fi
-      if docker run --rm --network "${MESH_NETWORK}" python:3.12 curl -s -X POST -H "Content-Type: application/json" -H "X-Sam-Authentication: Bearer secret-token" -d '{"jsonrpc":"2.0","method":"ping","id":1}' --max-time 5 -D - http://${name}:8080/mcp | grep -q "200 OK"; then
+      if docker run --rm --network "${MESH_NETWORK}" python:3.12 curl -s -X POST -H "Content-Type: application/json" -H "X-Mesh-Authentication: Bearer secret-token" -d '{"jsonrpc":"2.0","method":"ping","id":1}' --max-time 5 -D - http://${name}:8080/mcp | grep -q "200 OK"; then
         return 0
       fi
       sleep 1
@@ -257,7 +257,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     docker run --rm --network "${MESH_NETWORK}" python:3.12 \
       curl -sf -X POST --max-time 30 \
       -H "Content-Type: application/json" \
-      -H "X-Sam-Authentication: Bearer secret-token" \
+      -H "X-Mesh-Authentication: Bearer secret-token" \
       -d "{\"peer_addr\":\"${peer_addr}\"}" \
       "http://${MESH_PREFIX}-node-${idx}:8080/debug/connect-peer"
   }
@@ -443,7 +443,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --set fullnameOverride="sam"
       --set global.imageTag="local"
       --set controlPlane.oidcIssuer="${ISSUERS//,/\\,}"
-      --set controlPlane.allowedAudiences="sam-mesh-audience\,sam-control-plane-audience"
+      --set controlPlane.allowedAudiences="agentmesh-audience\,sam-control-plane-audience"
       --set controlPlane.insecureSkipTlsVerify=true
       --set controlPlane.adminToken="super-secret-admin-token"
       --set controlPlane.replicaCount=2
@@ -452,7 +452,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --set router.hostPort=4501
       --set console.enabled=false
       --set 'router.externalAddrs={/dns4/sam-router/tcp/4501}'
-      --set 'bootstrap.nodeServices={mcp://calculator,mcp://db-agent,mcp://http-tool,mcp://stdio-tool,a2a://echo,system://sam.catalog}'
+      --set 'bootstrap.nodeServices={mcp://calculator,mcp://db-agent,mcp://http-tool,mcp://stdio-tool,a2a://echo,system://mesh.catalog}'
       --set 'bootstrap.nodeMembers={user:test-user}'
       --set 'bootstrap.nodeLabels={region=*}')
     if ! "${helm_bin}" "${helm_args[@]}"; then
@@ -549,7 +549,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --discovery-interval 2s \
       --control-plane "http://sam-control-plane:8080" \
       --insecure-control-plane \
-      --client-id "sam-mesh-audience" \
+      --client-id "agentmesh-audience" \
       --oidc-issuer "http://mock-oidc:18080" \
       --listen "/ip4/0.0.0.0/udp/5001/quic-v1" \
       --listen "/ip4/0.0.0.0/tcp/5002" \

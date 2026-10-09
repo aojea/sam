@@ -48,12 +48,12 @@ func TestRouterFederationAndRelay(t *testing.T) {
   - members: ["user:mock-user"]
     role: admin
   - members: ["user:mock-user"]
-    role: sam:role:node
+    role: mesh:role:node
 roles:
   - name: admin
     allowed_services:
       - "mcp://*"
-      - "system://sam.catalog"
+      - "system://mesh.catalog"
     allowed_targets: ["*"]
 `
 	writePolicyWithRouter(t, policyFile, policyContent)
@@ -312,10 +312,10 @@ roles:
 	}
 	peerIDA_node := matches[1]
 
-	// The proxy path on Node B is /sam/<peerID>/mcp/raw-pipe
-	proxyURL := fmt.Sprintf("http://127.0.0.1:%d/sam/%s/mcp/raw-pipe", apiPortB, peerIDA_node)
+	// The proxy path on Node B is /mesh/<peerID>/mcp/raw-pipe
+	proxyURL := fmt.Sprintf("http://127.0.0.1:%d/mesh/%s/mcp/raw-pipe", apiPortB, peerIDA_node)
 	req, _ := http.NewRequest("POST", proxyURL, bytes.NewBuffer([]byte(`{"jsonrpc": "2.0", "id": 1, "method": "test"}`)))
-	req.Header.Set(api.HeaderSamAuthentication, "Bearer tokenB")
+	req.Header.Set(api.HeaderMeshAuthentication, "Bearer tokenB")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

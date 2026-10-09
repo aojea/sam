@@ -87,7 +87,7 @@ func TestGatewayServer_ExtAuthzHTTPAndGRPC(t *testing.T) {
 				Message:    "missing or invalid token",
 			}
 		}
-		if in.Headers[strings.ToLower(HeaderSamMCPTool)] == "merge_pr" {
+		if in.Headers[strings.ToLower(HeaderMeshMCPTool)] == "merge_pr" {
 			return CheckResult{
 				Allowed:    false,
 				HTTPStatus: http.StatusForbidden,
@@ -98,8 +98,8 @@ func TestGatewayServer_ExtAuthzHTTPAndGRPC(t *testing.T) {
 			Allowed:    true,
 			HTTPStatus: http.StatusOK,
 			ResponseHeaders: map[string]string{
-				api.HeaderSamPrincipal: "alice@example.com",
-				"X-Sam-Task-Id":        "task-123",
+				api.HeaderMeshPrincipal: "alice@example.com",
+				"X-Mesh-Task-Id":        "task-123",
 			},
 		}
 	})
@@ -114,8 +114,8 @@ func TestGatewayServer_ExtAuthzHTTPAndGRPC(t *testing.T) {
 	if recAllow.Code != http.StatusOK {
 		t.Fatalf("HTTP ext_authz status = %d, want 200", recAllow.Code)
 	}
-	if recAllow.Header().Get(api.HeaderSamPrincipal) != "alice@example.com" {
-		t.Fatalf("X-Sam-Principal = %q, want alice@example.com", recAllow.Header().Get(api.HeaderSamPrincipal))
+	if recAllow.Header().Get(api.HeaderMeshPrincipal) != "alice@example.com" {
+		t.Fatalf("X-Mesh-Principal = %q, want alice@example.com", recAllow.Header().Get(api.HeaderMeshPrincipal))
 	}
 
 	reqDeny := httptest.NewRequest(http.MethodPost, "/ext_authz/mcp/github", strings.NewReader(`{"jsonrpc":"2.0","method":"tools/call","params":{"name":"merge_pr"}}`))
@@ -205,7 +205,7 @@ func TestGatewayServer_ExtAuthzHTTPAndGRPC(t *testing.T) {
 
 func TestGatewayServer_ExtProcProcess(t *testing.T) {
 	gw := NewGatewayServer(func(_ context.Context, in CheckInput) CheckResult {
-		if in.Headers[strings.ToLower(HeaderSamMCPTool)] == "merge_pr" {
+		if in.Headers[strings.ToLower(HeaderMeshMCPTool)] == "merge_pr" {
 			return CheckResult{
 				Allowed:    false,
 				HTTPStatus: http.StatusForbidden,
@@ -216,7 +216,7 @@ func TestGatewayServer_ExtProcProcess(t *testing.T) {
 			Allowed:    true,
 			HTTPStatus: http.StatusOK,
 			ResponseHeaders: map[string]string{
-				"X-Sam-Task-Id": "task-extproc",
+				"X-Mesh-Task-Id": "task-extproc",
 			},
 		}
 	})
@@ -229,7 +229,7 @@ func TestGatewayServer_ExtProcProcess(t *testing.T) {
 	defer func() { _ = conn.Close() }()
 	procClient := extprocv3.NewExternalProcessorClient(conn)
 
-	// 1. Allowed MCP tools/call buffers body and injects X-Sam-Task-Id
+	// 1. Allowed MCP tools/call buffers body and injects X-Mesh-Task-Id
 	stream, err := procClient.Process(context.Background())
 	if err != nil {
 		t.Fatalf("Process: %v", err)
@@ -241,7 +241,7 @@ func TestGatewayServer_ExtProcProcess(t *testing.T) {
 				Headers: &corev3.HeaderMap{
 					Headers: []*corev3.HeaderValue{
 						{Key: ":method", Value: "POST"},
-						{Key: ":path", Value: "/sam/mcp/github"},
+						{Key: ":path", Value: "/mesh/mcp/github"},
 						{Key: "authorization", Value: "Bearer tok"},
 					},
 				},
@@ -345,7 +345,7 @@ func (s *referenceCalloutServer) Process(stream extprocv3.ExternalProcessor_Proc
 			return err
 		}
 
-		if samAttrs := req.GetAttributes()["sam"]; samAttrs != nil {
+		if samAttrs := req.GetAttributes()["mesh"]; samAttrs != nil {
 			s.mu.Lock()
 			s.lastSamAttrs = samAttrs.GetFields()
 			s.mu.Unlock()
@@ -492,7 +492,7 @@ func TestCalloutClient_UnixSocketAndMTLS(t *testing.T) {
 			"destination": "vertex.googleapis.com",
 			"principal":   "user:alice@example.com",
 		})
-		attrs := map[string]*structpb.Struct{"sam": samStruct}
+		attrs := map[string]*structpb.Struct{"mesh": samStruct}
 
 		req := httptest.NewRequest(http.MethodPost, "https://vertex.googleapis.com/v1/models/gemini:generateContent", nil)
 		session, imm, newReqBody, err := client.RunRequestPhase(req, cfg, "vertex.googleapis.com", []byte("prompt with PII_SSN inside"), attrs)

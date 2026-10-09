@@ -21,11 +21,11 @@ from __future__ import annotations
 import time
 from typing import Optional, Sequence
 
-from ._proto import sam_pb2 as pb
+from ._proto import agentmesh_pb2 as pb
 from .identity import canonical_peer_id, verify_ed25519
 
 # The GossipSub topic the control plane publishes mesh events on (api.GossipEvents).
-GOSSIP_EVENTS_TOPIC = "/sam/mesh/events/v1"
+GOSSIP_EVENTS_TOPIC = "/mesh/events/v1"
 
 # How far an event's timestamp may be from now; older or later ones are ignored.
 EVENT_FRESHNESS_MS = 5 * 60 * 1000

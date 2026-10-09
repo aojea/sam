@@ -23,7 +23,7 @@
 #   2. Node Enforcement (node-caller.yaml egress.require_labels & node-v1.yaml
 #      attenuation.checks): Input and Egress node admins enforce mandatory
 #      outbound and inbound label constraints.
-#   3. End-User / Agent Intent (X-Sam-Required-Labels): Calling agents/users
+#   3. End-User / Agent Intent (X-Mesh-Required-Labels): Calling agents/users
 #      express which replica or capability they want within admin constraints.
 
 set -euo pipefail
@@ -193,8 +193,8 @@ echo $! > "${WORK_DIR}/node-v1.pid"
 
 V1_PEER=""
 for _ in $(seq 1 40); do
-  DISC="$(curl -sf -H "X-Sam-Authentication: Bearer caller-secret" \
-    "http://127.0.0.1:19002/sam/service/discover?type=a2a&name=support.acme" 2>/dev/null || true)"
+  DISC="$(curl -sf -H "X-Mesh-Authentication: Bearer caller-secret" \
+    "http://127.0.0.1:19002/mesh/service/discover?type=a2a&name=support.acme" 2>/dev/null || true)"
   V1_PEER="$(echo "${DISC}" | jq -r '.[0].peer_id // empty' 2>/dev/null || true)"
   if [[ -n "${V1_PEER}" ]]; then
     break
@@ -218,9 +218,9 @@ echo "      Self-asserting env=prod before Quality Gate -> $(echo "${SPOOF_OUT}"
 
 echo "    [Label Point 2a — Input Node Enforcement (node-caller.yaml egress.require_labels: {env: prod})]:"
 HTTP_CODE="$(curl -s -o "${WORK_DIR}/act1-prod-check.out" -w '%{http_code}' \
-  -H "X-Sam-Authentication: Bearer caller-secret" \
-  "http://127.0.0.1:19002/sam/${V1_PEER}/a2a/support.acme/.well-known/agent-card.json")"
-echo "      Plain app call (even with NO X-Sam-Required-Labels header) -> HTTP ${HTTP_CODE} — $(cat "${WORK_DIR}/act1-prod-check.out")"
+  -H "X-Mesh-Authentication: Bearer caller-secret" \
+  "http://127.0.0.1:19002/mesh/${V1_PEER}/a2a/support.acme/.well-known/agent-card.json")"
+echo "      Plain app call (even with NO X-Mesh-Required-Labels header) -> HTTP ${HTTP_CODE} — $(cat "${WORK_DIR}/act1-prod-check.out")"
 step_pause
 
 echo ""
@@ -256,8 +256,8 @@ echo $! > "${WORK_DIR}/node-v1.pid"
 V1_STAGING_PEER="${V1_PEER}"
 V1_PROD_PEER=""
 for _ in $(seq 1 40); do
-  DISC="$(curl -sf -H "X-Sam-Authentication: Bearer caller-secret" \
-    "http://127.0.0.1:19002/sam/service/discover?type=a2a&name=support.acme" 2>/dev/null || true)"
+  DISC="$(curl -sf -H "X-Mesh-Authentication: Bearer caller-secret" \
+    "http://127.0.0.1:19002/mesh/service/discover?type=a2a&name=support.acme" 2>/dev/null || true)"
   for p in $(echo "${DISC}" | jq -r '.[].peer_id // empty' 2>/dev/null || true); do
     if [[ "${p}" != "${V1_STAGING_PEER}" ]]; then
       V1_PROD_PEER="${p}"
@@ -273,8 +273,8 @@ echo ""
 echo "--> Retrying the exact same production call now that Quality Gate promoted Alice's node to env=prod..."
 for _ in $(seq 1 20); do
   HTTP_CODE_AFTER="$(curl -s -o "${WORK_DIR}/act1-prod-after.out" -w '%{http_code}' \
-    -H "X-Sam-Authentication: Bearer caller-secret" \
-    "http://127.0.0.1:19002/sam/${V1_PEER}/a2a/support.acme/.well-known/agent-card.json")"
+    -H "X-Mesh-Authentication: Bearer caller-secret" \
+    "http://127.0.0.1:19002/mesh/${V1_PEER}/a2a/support.acme/.well-known/agent-card.json")"
   [[ "${HTTP_CODE_AFTER}" == "200" ]] && break
   sleep 0.5
 done
@@ -288,11 +288,11 @@ echo "  ACT 2: Cross-Network A2A Routing & Zero-Downtime Replica Swap (Laptop v1
 echo "  (Persona: Platform / Networking + Label Point 3: End-User/Agent Intent)"
 echo "================================================================================"
 echo ""
-echo "--> [Label Point 3 — End-User/Agent Intent (X-Sam-Required-Labels)]:"
+echo "--> [Label Point 3 — End-User/Agent Intent (X-Mesh-Required-Labels)]:"
 echo "    Within the Input Node's mandatory env=prod floor, the calling agent passes"
-echo "    'X-Sam-Required-Labels: replica=v1-laptop' on Turn 1 to express replica intent:"
+echo "    'X-Mesh-Required-Labels: replica=v1-laptop' on Turn 1 to express replica intent:"
 TURN1_REPLY="$(SAM_API_TOKEN=caller-secret "${PYTHON}" "${SCRIPT_DIR}/a2a_client.py" \
-  "http://127.0.0.1:19002/sam/${V1_PEER}/a2a/support.acme" \
+  "http://127.0.0.1:19002/mesh/${V1_PEER}/a2a/support.acme" \
   "ctx-acme-1042" \
   "Check order #1042 for alice@acme.com and tell me the item and status." \
   "replica=v1-laptop")"
@@ -316,8 +316,8 @@ echo $! > "${WORK_DIR}/node-v2.pid"
 
 V2_PEER=""
 for _ in $(seq 1 40); do
-  DISC="$(curl -sf -H "X-Sam-Authentication: Bearer caller-secret" \
-    "http://127.0.0.1:19002/sam/service/discover?type=a2a&name=support.acme" 2>/dev/null || true)"
+  DISC="$(curl -sf -H "X-Mesh-Authentication: Bearer caller-secret" \
+    "http://127.0.0.1:19002/mesh/service/discover?type=a2a&name=support.acme" 2>/dev/null || true)"
   for p in $(echo "${DISC}" | jq -r '.[].peer_id // empty' 2>/dev/null || true); do
     if [[ "${p}" != "${V1_PEER}" && "${p}" != "${V1_STAGING_PEER}" ]]; then
       V2_PEER="${p}"
@@ -329,9 +329,9 @@ done
 echo "    Discovered Cloud Run v2 PeerID: ${V2_PEER}"
 
 echo ""
-echo "--> Sending Turn 2 (preserving contextId=ctx-acme-1042) with 'X-Sam-Required-Labels: replica=v2-cloudrun'..."
+echo "--> Sending Turn 2 (preserving contextId=ctx-acme-1042) with 'X-Mesh-Required-Labels: replica=v2-cloudrun'..."
 TURN2_REPLY="$(SAM_API_TOKEN=caller-secret "${PYTHON}" "${SCRIPT_DIR}/a2a_client.py" \
-  "http://127.0.0.1:19002/sam/${V2_PEER}/a2a/support.acme" \
+  "http://127.0.0.1:19002/mesh/${V2_PEER}/a2a/support.acme" \
   "ctx-acme-1042" \
   "Based on our previous turn, what item did Alice order and has it shipped?" \
   "replica=v2-cloudrun")"
@@ -345,19 +345,19 @@ echo "  (Personas: Central Security, Department Lead, and Individual End-User)"
 echo "================================================================================"
 echo ""
 echo "--> [Layer 1: Central Security Org Policy + Secret Broker] Calling real egress://api.github.com..."
-GH_ALLOW="$(curl -sf -H "X-Sam-Authentication: Bearer caller-secret" \
+GH_ALLOW="$(curl -sf -H "X-Mesh-Authentication: Bearer caller-secret" \
   -H "Accept: application/vnd.github+json" \
   -H "User-Agent: sam-multi-tier-demo" \
-  "http://127.0.0.1:19002/sam/${V1_PEER}/egress/api.github.com/repos/google/sam/pulls?state=open&per_page=1")"
+  "http://127.0.0.1:19002/mesh/${V1_PEER}/egress/api.github.com/repos/google/sam/pulls?state=open&per_page=1")"
 PR_SUMMARY="$(echo "${GH_ALLOW}" | jq -r 'if type=="array" and length>0 then "#\(.[0].number) \(.[0].title)" else "200 OK (open PRs queried)" end')"
 echo "    Allowed Path (GET /repos/google/sam/pulls): HTTP 200 OK — ${PR_SUMMARY} (node injected secrets/github-ro)"
 
 GH_DENY_CODE="$(curl -s -o "${WORK_DIR}/gh-deny.out" -w '%{http_code}' \
   -X POST \
-  -H "X-Sam-Authentication: Bearer caller-secret" \
+  -H "X-Mesh-Authentication: Bearer caller-secret" \
   -H "Accept: application/vnd.github+json" \
   -H "User-Agent: sam-multi-tier-demo" \
-  "http://127.0.0.1:19002/sam/${V1_PEER}/egress/api.github.com/repos/google/sam/pulls" \
+  "http://127.0.0.1:19002/mesh/${V1_PEER}/egress/api.github.com/repos/google/sam/pulls" \
   -d '{}')"
 echo "    Forbidden Path (POST /repos/google/sam/pulls): HTTP ${GH_DENY_CODE} — blocked by Block 0 Org HTTP Policy before GitHub hears of it!"
 

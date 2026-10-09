@@ -35,7 +35,7 @@ func newStateCmd() *cobra.Command {
 		Long: "Export or import this node's identity and credential as a state directory.\n\n" +
 			"A state directory is how the native SDKs keep a member: identity.key (the\n" +
 			"libp2p private key) and credential.json (the MemberCredential message of\n" +
-			"api/sam.proto as JSON). Exporting hands this node's identity to a program\n" +
+			"api/agentmesh.proto as JSON). Exporting hands this node's identity to a program\n" +
 			"written with an SDK; importing runs an SDK-enrolled identity as a sam-node.\n" +
 			"Stop the node first; a running node holds its data directory.",
 	}

@@ -138,7 +138,7 @@ app.post("/mcp", async (req, res) => {
 app.listen(PORT, "0.0.0.0", async () => {
   console.log(`pool-manager MCP server on :${PORT}/mcp (pooling '${POOL_SERVICE}')`);
   const transport = new StreamableHTTPClientTransport(new URL(NODE_URL), {
-    requestInit: { headers: { "X-Sam-Authentication": `Bearer ${API_TOKEN}` } },
+    requestInit: { headers: { "X-Mesh-Authentication": `Bearer ${API_TOKEN}` } },
   });
   await node.connect(transport);
   await discover();

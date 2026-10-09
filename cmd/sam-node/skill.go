@@ -173,10 +173,10 @@ Next steps:
      If it reports the node is not enrolled, run the join command it prints
      first, then re-run it.
   2. Point your agent at http://127.0.0.1:8080/mcp, authenticated with the
-     header "X-Sam-Authentication: Bearer <token>". For example:
+     header "X-Mesh-Authentication: Bearer <token>". For example:
        Claude Code   claude mcp add --transport http sam-mesh \
                        http://127.0.0.1:8080/mcp \
-                       --header "X-Sam-Authentication: Bearer <token>"
+                       --header "X-Mesh-Authentication: Bearer <token>"
        Antigravity   add that URL as "serverUrl", with the same header, to
                        ~/.gemini/config/mcp_config.json
      Other agents: https://sam-mesh.dev/docs/guides/connecting-agents/

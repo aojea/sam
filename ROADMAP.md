@@ -31,7 +31,7 @@ The Beta phase iterates on functional completeness based on real-world deploymen
   * Full implementation of local Datalog attenuation (the "Autonomous Local Veto").
   * Uncooperative sandbox confinement for agent execution (`network=none`).
   * Bring-Your-Own (BYO) OIDC Identity Provider federation (e.g., Keycloak, Dex).
-  * Fail-closed jurisdictional label routing (e.g., `X-Sam-Required-Labels: jurisdiction=eu`).
+  * Fail-closed jurisdictional label routing (e.g., `X-Mesh-Required-Labels: jurisdiction=eu`).
 
 * **Exit Criteria:**
 

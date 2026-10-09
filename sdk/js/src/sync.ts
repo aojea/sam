@@ -19,10 +19,10 @@
 import { fromBinary, toBinary } from "@bufbuild/protobuf";
 import { timestampMs, type Timestamp } from "@bufbuild/protobuf/wkt";
 import { canonicalPeerId, verifyEd25519 } from "./identity.ts";
-import { MeshEvent_Type, MeshEventSchema, type MeshEvent } from "./gen/sam_pb.ts";
+import { MeshEvent_Type, MeshEventSchema, type MeshEvent } from "./gen/agentmesh_pb.ts";
 
 /** The GossipSub topic the control plane publishes mesh events on (api.GossipEvents). */
-export const GOSSIP_EVENTS_TOPIC = "/sam/mesh/events/v1";
+export const GOSSIP_EVENTS_TOPIC = "/mesh/events/v1";
 
 /** How far an event's timestamp may be from now; older or later ones are ignored. */
 export const EVENT_FRESHNESS_MS = 5 * 60 * 1000;

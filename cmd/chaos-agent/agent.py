@@ -80,7 +80,7 @@ async def main():
 
     headers = {}
     if args.auth:
-        headers["X-Sam-Authentication"] = args.auth
+        headers["X-Mesh-Authentication"] = args.auth
         headers["Authorization"] = args.auth
 
     print(f"Connecting to MCP at {args.mcp_url}...")

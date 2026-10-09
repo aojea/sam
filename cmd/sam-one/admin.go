@@ -332,7 +332,7 @@ func newTokenQRCommand(clientFactory func() (*adminClient, error), server *strin
 		Use:   "qr",
 		Short: "Mint a device enrollment token and print it as a QR code",
 		Long: "Mints a bootstrap token for the node role and renders " +
-			"sam://enroll?server=<url>&token=<token> as a QR code for the SAM mobile app. " +
+			"mesh://enroll?server=<url>&token=<token> as a QR code for the SAM mobile app. " +
 			"Single use by default; --max-usages lets one code, projected in a room, enroll " +
 			"many devices until it is exhausted, expires or is revoked. " +
 			"The embedded URL defaults to --server; pass --enroll-url when devices reach " +

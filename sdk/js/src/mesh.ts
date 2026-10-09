@@ -26,7 +26,7 @@ import {
   withCredentialMethods,
   type MeshCredential,
 } from "./credential.ts";
-import type { TaskAuthorizationRuleSchema } from "./gen/sam_pb.ts";
+import type { TaskAuthorizationRuleSchema } from "./gen/agentmesh_pb.ts";
 import { Identity } from "./identity.ts";
 import { openState, readTextFile } from "./platform/state.ts";
 import type { StateStore } from "./platform/types.ts";

@@ -18,7 +18,7 @@
 
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import { BASELINE_DATALOG } from "./gen/datalog.ts";
-import { TaskAuthorizationRuleSchema, type TaskAuthorizationRule } from "./gen/sam_pb.ts";
+import { TaskAuthorizationRuleSchema, type TaskAuthorizationRule } from "./gen/agentmesh_pb.ts";
 import { loadBiscuitWasm, type BiscuitWasm } from "./platform/wasm.ts";
 import { effectiveTARExpiration, encodeTARBlockFact, parseTARBlockSource } from "./tar.ts";
 
@@ -60,7 +60,7 @@ function isTimeout(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as { RunLimit?: unknown }).RunLimit === "Timeout";
 }
 
-export const ROLE_ROUTER = "sam:role:router";
+export const ROLE_ROUTER = "mesh:role:router";
 
 export class BiscuitVerificationError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -147,7 +147,7 @@ function extractTARChain(token: ReturnType<BiscuitWasm["Biscuit"]["fromBytes"]>)
  * connection. Every trusted key is tried, so a token minted under a
  * retiring key still verifies during rotation.
  *
- * By default (peer handshakes on /sam/auth/1.0.0), the authority block must
+ * By default (peer handshakes on /mesh/auth/1.0.0), the authority block must
  * carry node(expectedPeerId). When allowDelegated is true (request tokens in
  * authorizeCaller), the authority block may alternatively carry both
  * actor_node(expectedPeerId) and client_peer_id(expectedPeerId) without node().

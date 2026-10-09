@@ -29,9 +29,9 @@ import (
 )
 
 const (
-	// HeaderSamMCPTool lets an external proxy (or ext_proc filter) pass the
+	// HeaderMeshMCPTool lets an external proxy (or ext_proc filter) pass the
 	// extracted MCP tool name during an ext_authz check.
-	HeaderSamMCPTool = envoy.HeaderSamMCPTool
+	HeaderMeshMCPTool = envoy.HeaderMeshMCPTool
 
 	// ExtProcMethodPath is the gRPC HTTP/2 path for Envoy ExternalProcessor.Process.
 	ExtProcMethodPath = envoy.ExtProcMethodPath
@@ -92,7 +92,7 @@ func evaluateExtAuthz(ctx context.Context, node *SamNode, in extAuthzCheckInput)
 		}
 	}
 
-	// Never trust an inbound X-Sam-Peer-Id header. Unattenuated standing node
+	// Never trust an inbound X-Mesh-Peer-Id header. Unattenuated standing node
 	// Biscuits (len(claims.TaskRules) == 0) must be bound to this local node's
 	// peer ID; task-attenuated Biscuits (len(claims.TaskRules) > 0) presented
 	// through an HTTP gateway PEP use the verified Block 0 client_peer_id.
@@ -129,7 +129,7 @@ func evaluateExtAuthz(ctx context.Context, node *SamNode, in extAuthzCheckInput)
 		PeerID:             callerPeer,
 		Protocol:           "ext_authz",
 		Target:             target,
-		MCPTool:            in.Headers[strings.ToLower(HeaderSamMCPTool)],
+		MCPTool:            in.Headers[strings.ToLower(HeaderMeshMCPTool)],
 		AllowMCPStreamInit: in.AllowMCPStreamInit,
 		HTTP:               &HTTPRequestFacts{Method: method, Path: reqPath},
 		Local:              isLocal,
@@ -153,17 +153,17 @@ func evaluateExtAuthz(ctx context.Context, node *SamNode, in extAuthzCheckInput)
 	}
 
 	respHeaders := map[string]string{
-		api.HeaderSamBiscuit:   base64.StdEncoding.EncodeToString(rawBiscuit),
-		api.HeaderSamPrincipal: claims.Principal(),
-		api.HeaderSamRoles:     strings.Join(claims.Roles, ","),
+		api.HeaderMeshBiscuit:   base64.StdEncoding.EncodeToString(rawBiscuit),
+		api.HeaderMeshPrincipal: claims.Principal(),
+		api.HeaderMeshRoles:     strings.Join(claims.Roles, ","),
 	}
 	if len(claims.TaskRules) > 0 {
 		lastRule := claims.TaskRules[len(claims.TaskRules)-1]
 		if taskJSON, mErr := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(lastRule); mErr == nil {
-			respHeaders[api.HeaderSamTask] = string(taskJSON)
+			respHeaders[api.HeaderMeshTask] = string(taskJSON)
 		}
 		if lastRule.GetName() != "" {
-			respHeaders["X-Sam-Task-Id"] = lastRule.GetName()
+			respHeaders["X-Mesh-Task-Id"] = lastRule.GetName()
 		}
 	}
 	if after, ok := strings.CutPrefix(target, api.EgressServicePrefix); ok && node.services != nil {
@@ -192,16 +192,16 @@ func evaluateExtAuthz(ctx context.Context, node *SamNode, in extAuthzCheckInput)
 }
 
 func extractAndVerifyExtAuthzBiscuit(ctx context.Context, node *SamNode, headers map[string]string) ([]byte, int, error) {
-	if rawB64 := strings.TrimSpace(headers[strings.ToLower(api.HeaderSamBiscuit)]); rawB64 != "" {
+	if rawB64 := strings.TrimSpace(headers[strings.ToLower(api.HeaderMeshBiscuit)]); rawB64 != "" {
 		raw, err := decodeBiscuitToken(rawB64)
 		if err != nil {
-			return nil, http.StatusForbidden, fmt.Errorf("invalid %s header: %w", api.HeaderSamBiscuit, err)
+			return nil, http.StatusForbidden, fmt.Errorf("invalid %s header: %w", api.HeaderMeshBiscuit, err)
 		}
 		return raw, http.StatusOK, nil
 	}
 
 	var bearer string
-	for _, h := range []string{strings.ToLower(api.HeaderSamAuthentication), "authorization"} {
+	for _, h := range []string{strings.ToLower(api.HeaderMeshAuthentication), "authorization"} {
 		val := strings.TrimSpace(headers[h])
 		if val == "" {
 			continue
@@ -213,7 +213,7 @@ func extractAndVerifyExtAuthzBiscuit(ctx context.Context, node *SamNode, headers
 		}
 	}
 	if bearer == "" {
-		return nil, http.StatusUnauthorized, errors.New("unauthorized: missing Bearer token or X-Sam-Biscuit header")
+		return nil, http.StatusUnauthorized, errors.New("unauthorized: missing Bearer token or X-Mesh-Biscuit header")
 	}
 
 	if raw, err := decodeBiscuitToken(bearer); err == nil {
@@ -243,7 +243,7 @@ func resolveExtAuthzTarget(node *SamNode, in extAuthzCheckInput) (target, reqPat
 	if idx := strings.IndexByte(path, '?'); idx >= 0 {
 		path = path[:idx]
 	}
-	if explicit := strings.TrimSpace(in.Headers[strings.ToLower(api.HeaderSamTargetService)]); explicit != "" {
+	if explicit := strings.TrimSpace(in.Headers[strings.ToLower(api.HeaderMeshTargetService)]); explicit != "" {
 		scheme, name := api.ParseServiceTarget(explicit)
 		scheme = strings.ToLower(scheme)
 		if isExtAuthzServiceScheme(scheme) && name != "" {
@@ -256,7 +256,7 @@ func resolveExtAuthzTarget(node *SamNode, in extAuthzCheckInput) (target, reqPat
 		}
 		return "", path
 	}
-	trimmed := strings.TrimPrefix(path, "/sam/")
+	trimmed := strings.TrimPrefix(path, "/mesh/")
 	trimmed = strings.TrimPrefix(trimmed, "/")
 	parts := strings.SplitN(trimmed, "/", 3)
 	if len(parts) >= 2 {
@@ -275,7 +275,7 @@ func resolveExtAuthzTarget(node *SamNode, in extAuthzCheckInput) (target, reqPat
 			}
 		}
 	}
-	if strings.HasPrefix(path, "/sam/") {
+	if strings.HasPrefix(path, "/mesh/") {
 		if route, ok := parseEgressRoute(path); ok && isExtAuthzServiceScheme(route.serviceType) {
 			up := "/" + route.upstreamPath
 			return route.serviceType + "://" + route.serviceName, up

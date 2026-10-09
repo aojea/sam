@@ -12,7 +12,7 @@ class MainActivity : FlutterActivity() {
     private val ENROLL_LINK_CHANNEL = "dev.sammesh.connect/enroll_link"
     private var enrollLinkChannel: MethodChannel? = null
 
-    // A sam://enroll link that arrived before Dart asked for it (cold start).
+    // A mesh://enroll link that arrived before Dart asked for it (cold start).
     private var pendingEnrollLink: String? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -137,7 +137,7 @@ class MainActivity : FlutterActivity() {
 
     private fun enrollLinkOf(intent: Intent?): String? {
         val data = intent?.data ?: return null
-        if (intent.action != Intent.ACTION_VIEW || data.scheme != "sam") return null
+        if (intent.action != Intent.ACTION_VIEW || data.scheme != "mesh") return null
         return data.toString()
     }
 }

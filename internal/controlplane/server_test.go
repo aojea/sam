@@ -91,7 +91,7 @@ func startCustomMockOIDC(t *testing.T) (string, func(claims map[string]interface
 	mintToken := func(customClaims map[string]interface{}) string {
 		claims := jwt.MapClaims{
 			"iss": issuer,
-			"aud": "sam-mesh-audience",
+			"aud": "agentmesh-audience",
 			"exp": time.Now().Add(time.Hour).Unix(),
 		}
 		for k, v := range customClaims {
@@ -131,7 +131,7 @@ func setupTestServer(t *testing.T, oidcIssuer string, overrides ...func(*Options
 		DriverName:            "sqlite",
 		DataSourceName:        dbPath,
 		OIDCIssuer:            oidcIssuer,
-		AllowedAudiences:      []string{"sam-mesh-audience"},
+		AllowedAudiences:      []string{"agentmesh-audience"},
 		LeaseDuration:         10 * time.Second,
 		KeyRotationInterval:   12 * time.Hour,
 		KeyGracePeriod:        10 * time.Minute,
@@ -205,7 +205,7 @@ func TestControlPlaneBasic(t *testing.T) {
 	if err := proto.Unmarshal(body, &info); err != nil {
 		t.Fatalf("failed to unmarshal ControlPlaneInfoResponse: %v", err)
 	}
-	if info.OidcIssuer != issuer || info.ClientId != "sam-mesh-audience" {
+	if info.OidcIssuer != issuer || info.ClientId != "agentmesh-audience" {
 		t.Errorf("unexpected info response claims: %+v", &info)
 	}
 	if len(info.RouterAddresses) != 0 {
@@ -227,7 +227,7 @@ func TestControlPlaneBasic(t *testing.T) {
 			DataSourceName:   dbPath,
 			OIDCIssuer:       issuer,
 			OIDCClientID:     "sam-cli-app",
-			AllowedAudiences: []string{"sam-mesh-audience"},
+			AllowedAudiences: []string{"agentmesh-audience"},
 		}, st)
 		if err != nil {
 			t.Fatalf("failed to create server: %v", err)
@@ -242,7 +242,7 @@ func TestControlPlaneBasic(t *testing.T) {
 		if err := proto.Unmarshal(rec.Body.Bytes(), &info2); err != nil {
 			t.Fatalf("failed to unmarshal ControlPlaneInfoResponse: %v", err)
 		}
-		if info2.ClientId != "sam-cli-app" || info2.Audience != "sam-mesh-audience" {
+		if info2.ClientId != "sam-cli-app" || info2.Audience != "agentmesh-audience" {
 			t.Errorf("unexpected client id/audience: %+v", &info2)
 		}
 	})
@@ -914,7 +914,7 @@ func TestEnrollmentWorkflow(t *testing.T) {
 	srv.config.AutoApproveEnrollment = false
 
 	adminReqBody := []byte(`{
-		"role": "sam:role:router",
+		"role": "mesh:role:router",
 		"ttl_hours": 2,
 		"max_usages": 2,
 		"description": "Test Mode B"
@@ -1317,7 +1317,7 @@ func TestBootstrapEnrollmentRequiresProofOfPossession(t *testing.T) {
 
 	client := &http.Client{Timeout: 5 * time.Second}
 
-	adminReqBody := []byte(`{"role": "sam:role:router", "ttl_hours": 2, "max_usages": 2, "description": "PoP test"}`)
+	adminReqBody := []byte(`{"role": "mesh:role:router", "ttl_hours": 2, "max_usages": 2, "description": "PoP test"}`)
 	req, _ := http.NewRequest("POST", baseURL+"/admin/bootstrap-tokens", bytes.NewBuffer(adminReqBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer super-secret-admin-token")
@@ -2431,14 +2431,14 @@ func TestUserStatusAndTenancy(t *testing.T) {
 		PeerID:    peerA.String(),
 		PublicKey: []byte("pubkey-a"),
 		Biscuit:   []byte("dummy-biscuit-a"),
-		Role:      "sam:role:node",
+		Role:      "mesh:role:node",
 		OwnerID:   userA.ID,
 	}
 	nodeB := &storage.EnrolledNode{
 		PeerID:    peerB.String(),
 		PublicKey: []byte("pubkey-b"),
 		Biscuit:   []byte("dummy-biscuit-b"),
-		Role:      "sam:role:node",
+		Role:      "mesh:role:node",
 		OwnerID:   userB.ID,
 	}
 	errNodeA := store.EnrollNode(context.Background(), nodeA)
@@ -2454,7 +2454,7 @@ func TestUserStatusAndTenancy(t *testing.T) {
 		"iss":   issuer,
 		"sub":   userA.ID,
 		"email": userA.Email,
-		"aud":   "sam-mesh-audience",
+		"aud":   "agentmesh-audience",
 	})
 
 	req, _ := http.NewRequest("GET", baseURL+"/user/status", nil)
@@ -2522,7 +2522,7 @@ func TestResolveRolesAndRoleImpersonationProtection(t *testing.T) {
 		},
 		{
 			// A binding on the mesh role fact itself: must never resolve from a
-			// claim, or an issuer emitting roles: ["sam:role:router"] gets in.
+			// claim, or an issuer emitting roles: ["mesh:role:router"] gets in.
 			Role:    "legacy-role-prefix",
 			Members: []string{"role:oidc-router-role"},
 		},
@@ -2762,7 +2762,7 @@ func TestAuthDenialPaths(t *testing.T) {
 	})
 
 	t.Run("node enrollment is closed until a binding grants it", func(t *testing.T) {
-		// No sam:role:node binding exists yet; the removed fallback used to
+		// No mesh:role:node binding exists yet; the removed fallback used to
 		// enroll any authenticated identity here (GHSA-cgmg-9xf6-rrgw).
 		anybodyJWT := mintToken(map[string]interface{}{
 			"sub": "node-anybody",
@@ -2773,7 +2773,7 @@ func TestAuthDenialPaths(t *testing.T) {
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusForbidden {
-			t.Errorf("expected 403 for unbound sam:role:node enrollment, got %d", resp.StatusCode)
+			t.Errorf("expected 403 for unbound mesh:role:node enrollment, got %d", resp.StatusCode)
 		}
 	})
 
@@ -3050,7 +3050,7 @@ func TestUndecodablePeerIDRejectedAtBoundary(t *testing.T) {
 		"iss":   issuer,
 		"sub":   user.ID,
 		"email": user.Email,
-		"aud":   "sam-mesh-audience",
+		"aud":   "agentmesh-audience",
 	})
 	userReq, _ := http.NewRequest(http.MethodPost, baseURL+"/user/revoke?id=not-a-peer-id", nil)
 	userReq.Header.Set("Authorization", "Bearer "+userToken)
@@ -3156,7 +3156,7 @@ func TestInitRegisterRoutesEmbedded(t *testing.T) {
 	srv, err := NewServer(Options{
 		DriverName:       "sqlite",
 		DataSourceName:   dbPath,
-		AllowedAudiences: []string{"sam-mesh-audience"},
+		AllowedAudiences: []string{"agentmesh-audience"},
 	}, store)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
@@ -3222,7 +3222,7 @@ func TestMeshSurfaceCORS(t *testing.T) {
 		t.Fatalf("failed to create store: %v", err)
 	}
 	defer func() { _ = store.Close() }()
-	srv, err := NewServer(Options{DriverName: "sqlite", DataSourceName: dbPath, AllowedAudiences: []string{"sam-mesh-audience"}, AdminToken: "admin-token"}, store)
+	srv, err := NewServer(Options{DriverName: "sqlite", DataSourceName: dbPath, AllowedAudiences: []string{"agentmesh-audience"}, AdminToken: "admin-token"}, store)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -3298,7 +3298,7 @@ func TestAdminBootstrapTokensList(t *testing.T) {
 		DriverName:       "sqlite",
 		DataSourceName:   dbPath,
 		AdminToken:       "test-admin-token",
-		AllowedAudiences: []string{"sam-mesh-audience"},
+		AllowedAudiences: []string{"agentmesh-audience"},
 	}, store)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
@@ -3312,7 +3312,7 @@ func TestAdminBootstrapTokensList(t *testing.T) {
 
 	// Create one token through the existing POST surface.
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/admin/bootstrap-tokens",
-		strings.NewReader(`{"role":"sam:role:node","ttl_hours":1,"max_usages":3,"description":"cli test"}`))
+		strings.NewReader(`{"role":"mesh:role:node","ttl_hours":1,"max_usages":3,"description":"cli test"}`))
 	if err != nil {
 		t.Fatalf("failed to build request: %v", err)
 	}
@@ -3352,7 +3352,7 @@ func TestAdminBootstrapTokensList(t *testing.T) {
 	if len(list.GetTokens()) != 1 {
 		t.Fatalf("token list length = %d, want 1", len(list.GetTokens()))
 	}
-	if tok := list.GetTokens()[0]; tok.GetRole() != "sam:role:node" || tok.GetMaxUsages() != 3 || tok.GetDescription() != "cli test" {
+	if tok := list.GetTokens()[0]; tok.GetRole() != "mesh:role:node" || tok.GetMaxUsages() != 3 || tok.GetDescription() != "cli test" {
 		t.Errorf("unexpected token record: %+v", tok)
 	}
 
@@ -3381,7 +3381,7 @@ func TestAdminBootstrapTokenRoleRequiredAndNoStore(t *testing.T) {
 		DriverName:       "sqlite",
 		DataSourceName:   dbPath,
 		AdminToken:       "test-admin-token",
-		AllowedAudiences: []string{"sam-mesh-audience"},
+		AllowedAudiences: []string{"agentmesh-audience"},
 	}, store)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
@@ -3406,7 +3406,7 @@ func TestAdminBootstrapTokenRoleRequiredAndNoStore(t *testing.T) {
 	if resp := post(`{"max_usages":1}`); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("missing role: status = %s, want 400", resp.Status)
 	}
-	resp := post(`{"role":"sam:role:node","max_usages":1}`)
+	resp := post(`{"role":"mesh:role:node","max_usages":1}`)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("with role: status = %s, want 201", resp.Status)
 	}
@@ -4243,7 +4243,7 @@ func TestWorkloadIssuerContainment(t *testing.T) {
 		ListenAddr:         "127.0.0.1:0",
 		OIDCIssuer:         sharedIss,
 		WorkloadIssuer:     workloadIss + "," + sharedIss + "=.gserviceaccount.com",
-		AllowedAudiences:   []string{"sam-mesh-audience"},
+		AllowedAudiences:   []string{"agentmesh-audience"},
 		OIDCSessionTTL:     humanTTL,
 		WorkloadSessionTTL: workloadTTL,
 		AdminToken:         "admin-secret",
@@ -4324,19 +4324,19 @@ func TestWorkloadIssuerContainment(t *testing.T) {
 	k8sJWT := mintWorkload(map[string]any{
 		"iss": workloadIss,
 		"sub": "system:serviceaccount:payments:worker-1",
-		"aud": "sam-mesh-audience",
+		"aud": "agentmesh-audience",
 	})
 	gcpSAJWT := mintShared(map[string]any{
 		"iss":   sharedIss,
 		"sub":   "10987654321",
 		"email": "runner@proj-1.iam.gserviceaccount.com",
-		"aud":   "sam-mesh-audience",
+		"aud":   "agentmesh-audience",
 	})
 	humanJWT := mintShared(map[string]any{
 		"iss":   sharedIss,
 		"sub":   "human-alice-1",
 		"email": "alice@example.com",
-		"aud":   "sam-mesh-audience",
+		"aud":   "agentmesh-audience",
 	})
 
 	// 1. Both workload tokens enroll via wildcard bindings and receive WorkloadSessionTTL.
@@ -4375,7 +4375,7 @@ func TestWorkloadIssuerContainment(t *testing.T) {
 		}
 
 		// Refused at /user/bootstrap-tokens
-		reqBT, _ := http.NewRequest(http.MethodPost, baseURL+"/user/bootstrap-tokens", strings.NewReader(`{"role":"sam:role:node"}`))
+		reqBT, _ := http.NewRequest(http.MethodPost, baseURL+"/user/bootstrap-tokens", strings.NewReader(`{"role":"mesh:role:node"}`))
 		reqBT.Header.Set("Authorization", "Bearer "+tok)
 		reqBT.Header.Set("Content-Type", "application/json")
 		respBT, err := client.Do(reqBT)

@@ -134,7 +134,7 @@ func startSDKMesh(t *testing.T) *sdkMesh {
 		ListenAddr:            "127.0.0.1:0",
 		AdminToken:            sdkMeshAdminToken,
 		OIDCIssuer:            oidcURL,
-		AllowedAudiences:      []string{"sam-mesh-audience"},
+		AllowedAudiences:      []string{"agentmesh-audience"},
 		AutoApproveEnrollment: true,
 	}, store)
 	if err != nil {
@@ -369,11 +369,11 @@ var sdkMemberLaunchers = []sdkRunner{
 // router and gets a relay reservation, which the router grants only to
 // admitted peers. Each SDK member reaches the sam-node directly and the
 // other SDK member both directly and through the router, and on every path
-// both ends verify each other's credential with the /sam/auth/1.0.0
+// both ends verify each other's credential with the /mesh/auth/1.0.0
 // handshake. The sam-node reaches each SDK member through the router. A Go
 // peer that is itself admitted does the same and also checks that a forged
 // credential gets no answer. Then each SDK member discovers the sam-node's
-// service in the DHT, lists and calls its tools over /sam/mcp/1.0.0 through
+// service in the DHT, lists and calls its tools over /mesh/mcp/1.0.0 through
 // the router, reads the node's own catalog, and is refused a service the
 // node does not have. Every member and the sam-node attest the same labels,
 // and the caller-side label requirement is run as one matrix from each SDK
@@ -381,9 +381,9 @@ var sdkMemberLaunchers = []sdkRunner{
 // implementations agree on what a requirement of several pairs means. Then
 // each SDK member accepts A2A requests for its
 // agent: the sam-node reaches it by peer ID through its egress proxy
-// (/sam/<peer>/a2a/agent/...), the other SDK member does the same over the
+// (/mesh/<peer>/a2a/agent/...), the other SDK member does the same over the
 // mesh, the agent is in no discovery table, the member speaks no
-// /sam/mcp/1.0.0, and a Go peer holding a role the policy grants nothing is
+// /mesh/mcp/1.0.0, and a Go peer holding a role the policy grants nothing is
 // refused with 403. Any SDK whose toolchain is missing is skipped, and the
 // matrix shrinks to the members present.
 func TestNativeSDKsMesh(t *testing.T) {
@@ -535,7 +535,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 			if res.Status != 200 || json.Unmarshal([]byte(res.Body), &card) != nil {
 				t.Fatalf("%s fetching the node's agent card: %+v", m.name, res)
 			}
-			meshBase := "http://mesh/sam/" + samNode.peerID.String() + "/a2a/" + sdkMeshAgentName
+			meshBase := "http://mesh/mesh/" + samNode.peerID.String() + "/a2a/" + sdkMeshAgentName
 			if len(card.SupportedInterfaces) != 1 || card.SupportedInterfaces[0].URL != meshBase || card.SupportedInterfaces[0].ProtocolBinding != "JSONRPC" {
 				t.Errorf("%s got interfaces %+v, want one JSONRPC interface at %s", m.name, card.SupportedInterfaces, meshBase)
 			}
@@ -555,8 +555,8 @@ func TestNativeSDKsMesh(t *testing.T) {
 	// one of them is attested, and a value is matched whole. The node and
 	// every SDK member attest the same labels, so the matrix below runs each
 	// requirement from each caller against a credential each provider minted:
-	// SDK -> node over /sam/mcp/1.0.0, and node -> SDK through the egress
-	// proxy's X-Sam-Required-Labels, which runs checkPeerLabels.
+	// SDK -> node over /mesh/mcp/1.0.0, and node -> SDK through the egress
+	// proxy's X-Mesh-Required-Labels, which runs checkPeerLabels.
 	t.Run("required-labels", func(t *testing.T) {
 		for _, m := range members {
 			if got := m.auth(t, samNode.p2pAddr).Labels; got["region"] != sdkMeshLabels["region"] || got["team"] != sdkMeshLabels["team"] {
@@ -581,7 +581,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 
 	// A member whose egress floor nobody attests is refused before anything is
 	// sent, MCP and HTTP alike; the members above carry a floor the mesh does
-	// satisfy (launchSDKMember). MCP to an SDK member fails before the floor: no /sam/mcp.
+	// satisfy (launchSDKMember). MCP to an SDK member fails before the floor: no /mesh/mcp.
 	t.Run("egress-floor", func(t *testing.T) {
 		for _, m := range members {
 			m := m
@@ -658,7 +658,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 			// sam-node -> SDK agent, through the egress proxy: the node
 			// verifies the member's credential, then the member authorizes
 			// the node's and answers with who called.
-			status, body := egressGet(t, nodeAPI, "node-token", "/sam/"+m.report.PeerID+"/a2a/agent/card")
+			status, body := egressGet(t, nodeAPI, "node-token", "/mesh/"+m.report.PeerID+"/a2a/agent/card")
 			if status != 200 {
 				t.Fatalf("sam-node egress to %s agent: status %d, body %s", m.name, status, body)
 			}
@@ -678,7 +678,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 				if tc.allowed {
 					want = http.StatusOK
 				}
-				status, body := egressGetRequiring(t, nodeAPI, "node-token", "/sam/"+m.report.PeerID+"/a2a/agent/card", tc.required)
+				status, body := egressGetRequiring(t, nodeAPI, "node-token", "/mesh/"+m.report.PeerID+"/a2a/agent/card", tc.required)
 				if status != want {
 					t.Errorf("sam-node requiring %v of %s (%s): status %d %s, want %d", tc.required, m.name, tc.name, status, strings.TrimSpace(body), want)
 				}
@@ -708,7 +708,7 @@ func TestNativeSDKsMesh(t *testing.T) {
 			// An SDK member serves no MCP: the stream is refused at the
 			// protocol negotiation, before any frame is read.
 			if err := tryMCPStream(ctx, guest, sdkPeer, multiaddr.StringCast(m.report.RelayAddresses[0])); err == nil {
-				t.Fatalf("%s accepted a /sam/mcp/1.0.0 stream; an SDK member serves no MCP", m.name)
+				t.Fatalf("%s accepted a /mesh/mcp/1.0.0 stream; an SDK member serves no MCP", m.name)
 			}
 
 			// A peer the control plane vouches for, but whose role the policy
@@ -1552,7 +1552,7 @@ func goHostBiscuit(t *testing.T, cpPriv ed25519.PrivateKey, id peer.ID) []byte {
 // policy does not know, so it grants nothing anywhere.
 func guestHostBiscuit(t *testing.T, cpPriv ed25519.PrivateKey, id peer.ID) []byte {
 	t.Helper()
-	b, err := identity.MintBootstrapBiscuitToken(cpPriv, id, "sam:role:guest", time.Now().Add(time.Hour), nil, nil)
+	b, err := identity.MintBootstrapBiscuitToken(cpPriv, id, "mesh:role:guest", time.Now().Add(time.Hour), nil, nil)
 	if err != nil {
 		t.Fatalf("failed to mint guest biscuit for %s: %v", id, err)
 	}
@@ -1566,7 +1566,7 @@ func newGuestGoPeer(t *testing.T, ctx context.Context, cpPriv ed25519.PrivateKey
 	return newAdmittedGoPeer(t, ctx, cpPriv, routerAddrs)
 }
 
-// tryMCPStream opens /sam/mcp/1.0.0 to target through addr and reports
+// tryMCPStream opens /mesh/mcp/1.0.0 to target through addr and reports
 // whether the peer speaks it at all.
 func tryMCPStream(ctx context.Context, h host.Host, target peer.ID, addr multiaddr.Multiaddr) error {
 	ctx, cancel := context.WithTimeout(network.WithAllowLimitedConn(ctx, "mcp"), 10*time.Second)
@@ -1583,7 +1583,7 @@ func tryMCPStream(ctx context.Context, h host.Host, target peer.ID, addr multiad
 }
 
 // libp2pHTTPGet is one GET over /libp2p-http with the biscuit in
-// X-Sam-Biscuit, the way sam-node's egress proxy sends it.
+// X-Mesh-Biscuit, the way sam-node's egress proxy sends it.
 func libp2pHTTPGet(t *testing.T, ctx context.Context, h host.Host, target peer.ID, biscuit []byte, path string) (int, string) {
 	t.Helper()
 	client := &http.Client{Transport: libp2phttp.NewTransport(h), Timeout: 15 * time.Second}
@@ -1591,7 +1591,7 @@ func libp2pHTTPGet(t *testing.T, ctx context.Context, h host.Host, target peer.I
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set(api.HeaderSamBiscuit, base64.StdEncoding.EncodeToString(biscuit))
+	req.Header.Set(api.HeaderMeshBiscuit, base64.StdEncoding.EncodeToString(biscuit))
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("GET %s on %s: %v", path, target, err)
@@ -1608,16 +1608,16 @@ func egressGet(t *testing.T, apiAddr, token, path string) (int, string) {
 }
 
 // egressGetRequiring is egressGet with a caller-side label requirement on the
-// destination, as X-Sam-Required-Labels carries it.
+// destination, as X-Mesh-Required-Labels carries it.
 func egressGetRequiring(t *testing.T, apiAddr, token, path string, required map[string]string) (int, string) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, "http://"+apiAddr+path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set(api.HeaderSamAuthentication, "Bearer "+token)
+	req.Header.Set(api.HeaderMeshAuthentication, "Bearer "+token)
 	if required != nil {
-		req.Header.Set(api.HeaderSamRequiredLabels, labelsEnv(required))
+		req.Header.Set(api.HeaderMeshRequiredLabels, labelsEnv(required))
 	}
 	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {
@@ -1629,7 +1629,7 @@ func egressGetRequiring(t *testing.T, apiAddr, token, path string, required map[
 }
 
 // labelsEnv renders labels as "k=v,k2=v2", the form the runners' SAM_SDK_LABELS
-// and sam-node's X-Sam-Required-Labels both take, keys sorted.
+// and sam-node's X-Mesh-Required-Labels both take, keys sorted.
 func labelsEnv(labels map[string]string) string {
 	keys := make([]string, 0, len(labels))
 	for k := range labels {
@@ -1643,7 +1643,7 @@ func labelsEnv(labels map[string]string) string {
 	return strings.Join(pairs, ",")
 }
 
-// authHandshake runs the client side of /sam/auth/1.0.0 against target and
+// authHandshake runs the client side of /mesh/auth/1.0.0 against target and
 // returns the credential target answers with.
 func authHandshake(t *testing.T, ctx context.Context, h host.Host, target peer.ID, biscuit []byte) []byte {
 	t.Helper()
@@ -1674,7 +1674,7 @@ func authHandshake(t *testing.T, ctx context.Context, h host.Host, target peer.I
 }
 
 // tryAuthHandshake reconnects to target through addr if needed and runs the
-// client side of /sam/auth/1.0.0, returning the error a refusal produces: a
+// client side of /mesh/auth/1.0.0, returning the error a refusal produces: a
 // connection the gate denies, or a stream closed without an answer.
 func tryAuthHandshake(ctx context.Context, h host.Host, target peer.ID, addr multiaddr.Multiaddr, biscuit []byte) error {
 	dialCtx, cancel := context.WithTimeout(network.WithAllowLimitedConn(ctx, "auth"), 10*time.Second)

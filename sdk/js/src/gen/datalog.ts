@@ -63,7 +63,7 @@ export const BASELINE_DATALOG = {
   "max_tar_description_length": 256,
   "max_tar_resource_length": 256,
   "marker_term": "true",
-  "system_namespace": "sam:system",
+  "system_namespace": "mesh:system",
   "binding_member_prefixes": [
     "email",
     "group",
@@ -71,5 +71,5 @@ export const BASELINE_DATALOG = {
     "node",
     "user"
   ],
-  "system_authenticated_member": "sam:system:authenticated"
+  "system_authenticated_member": "mesh:system:authenticated"
 } as const;

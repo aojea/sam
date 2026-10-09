@@ -192,8 +192,8 @@ func TestServiceDiscoveryStreaming(t *testing.T) {
 
 	// Call streaming endpoint with invalid timeout first to verify validation
 	t.Log("Testing invalid timeout query parameter...")
-	badReq, _ := http.NewRequest("GET", "http://"+actualApiAddrB+"/sam/service/discover?type=mcp&name="+serviceName+"&stream=true&timeout=invalid", nil)
-	badReq.Header.Set(api.HeaderSamAuthentication, "Bearer "+apiToken)
+	badReq, _ := http.NewRequest("GET", "http://"+actualApiAddrB+"/mesh/service/discover?type=mcp&name="+serviceName+"&stream=true&timeout=invalid", nil)
+	badReq.Header.Set(api.HeaderMeshAuthentication, "Bearer "+apiToken)
 	badResp, err := http.DefaultClient.Do(badReq)
 	if err != nil {
 		t.Fatal(err)
@@ -205,8 +205,8 @@ func TestServiceDiscoveryStreaming(t *testing.T) {
 
 	// Agent B queries the streaming endpoint via HTTP Sidecar
 	t.Log("Agent B discovering service via SSE stream...")
-	req, _ := http.NewRequest("GET", "http://"+actualApiAddrB+"/sam/service/discover?type=mcp&name="+serviceName+"&stream=true&timeout=5s", nil)
-	req.Header.Set(api.HeaderSamAuthentication, "Bearer "+apiToken)
+	req, _ := http.NewRequest("GET", "http://"+actualApiAddrB+"/mesh/service/discover?type=mcp&name="+serviceName+"&stream=true&timeout=5s", nil)
+	req.Header.Set(api.HeaderMeshAuthentication, "Bearer "+apiToken)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -262,8 +262,8 @@ func TestServiceDiscoveryStreaming(t *testing.T) {
 
 func discoverService(t *testing.T, apiAddr, token, serviceName string) []peer.AddrInfo {
 	t.Helper()
-	req, _ := http.NewRequest("GET", "http://"+apiAddr+"/sam/service/discover?type=mcp&name="+serviceName, nil)
-	req.Header.Set(api.HeaderSamAuthentication, "Bearer "+token)
+	req, _ := http.NewRequest("GET", "http://"+apiAddr+"/mesh/service/discover?type=mcp&name="+serviceName, nil)
+	req.Header.Set(api.HeaderMeshAuthentication, "Bearer "+token)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

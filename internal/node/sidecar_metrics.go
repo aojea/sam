@@ -67,11 +67,11 @@ func classifyRoute(path string) string {
 	switch {
 	case path == "/healthz", path == "/readyz", path == "/metrics":
 		return "health"
-	case path == "/sam/identity", strings.HasPrefix(path, "/sam/identity/"), strings.HasPrefix(path, "/sam/peer/"):
+	case path == "/mesh/identity", strings.HasPrefix(path, "/mesh/identity/"), strings.HasPrefix(path, "/mesh/peer/"):
 		return "identity-evidence"
-	case strings.HasPrefix(path, "/sam/service/"):
+	case strings.HasPrefix(path, "/mesh/service/"):
 		return "service-registry"
-	case strings.HasPrefix(path, "/sam/"):
+	case strings.HasPrefix(path, "/mesh/"):
 		return "egress"
 	case path == "/v1/models":
 		return "models"

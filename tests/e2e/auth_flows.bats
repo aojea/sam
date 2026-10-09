@@ -24,7 +24,7 @@ assert_enrolled() {
     return 1
   fi
   [[ "$(jq -r '.enrollment_type' <<<"${record}")" == "${enrollment_type}" ]]
-  [[ "$(jq -r '.role' <<<"${record}")" == "sam:role:node" ]]
+  [[ "$(jq -r '.role' <<<"${record}")" == "mesh:role:node" ]]
   echo "${record}"
 }
 
@@ -109,7 +109,7 @@ assert_enrolled() {
   echo "enrollment: ${record}"
   [[ "$(jq -r '.claims_json | fromjson | .sub' <<<"${record}")" == "test-user" ]]
 
-  # The labels join declared must come back attested. /sam/identity hands back
+  # The labels join declared must come back attested. /mesh/identity hands back
   # the raw biscuit rather than decoded claims, so read the signed
   # label("region", "eu") fact out of its symbol table. The Unix socket is the
   # only transport that endpoint accepts besides mTLS.
@@ -117,7 +117,7 @@ assert_enrolled() {
   local evidence="" biscuit=""
   while ((SECONDS < deadline)); do
     evidence=$(docker run --rm -v "${data_vol}:/data" python:3.12 \
-      curl -s --unix-socket /data/sam.sock http://localhost/sam/identity 2>&1)
+      curl -s --unix-socket /data/sam.sock http://localhost/mesh/identity 2>&1)
     biscuit=$(echo "${evidence}" | jq -r '.biscuit // empty' 2>/dev/null)
     if [[ -n "${biscuit}" ]] && python3 -c "
 import base64, sys
@@ -144,7 +144,7 @@ sys.exit(0 if b'\x05label' in raw and b'\x06region' in raw and b'\x02eu' in raw 
   # mint one: a real grant, not an empty POST.
   local token
   token=$(docker run --rm --network "${MESH_NETWORK}" $(mesh_get_add_hosts) "${MESH_RUNTIME_IMAGE}" \
-    curl -sf --max-time 10 -X POST -d 'grant_type=client_credentials&client_id=sam-mesh-audience' \
+    curl -sf --max-time 10 -X POST -d 'grant_type=client_credentials&client_id=agentmesh-audience' \
     http://mock-oidc:18080/token | jq -r '.access_token // empty')
 
   [[ -n "${token}" ]]
@@ -199,7 +199,7 @@ sys.exit(0 if b'\x05label' in raw and b'\x06region' in raw and b'\x02eu' in raw 
     curl -s -X POST \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer super-secret-admin-token" \
-      -d '{"role": "sam:role:node", "max_usages": 1}' \
+      -d '{"role": "mesh:role:node", "max_usages": 1}' \
       http://sam-control-plane:8080/admin/bootstrap-tokens
 
   if ! kubectl --context="${KUBECONTEXT}" wait --for=jsonpath='{.status.phase}'=Succeeded pod/curl-token-gen-node --timeout=15s; then

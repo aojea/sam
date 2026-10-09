@@ -90,7 +90,7 @@ Rules by type:
   Streamable HTTP MCP endpoint.
 - **`inference`**: `target_url` only. It must be the root URL of the backend
   without `/v1`. The node adds the prefix. Callers reach the service through
-  the node's `/v1` endpoint or at `/sam/<peer>/inference/<name>/v1/...`.
+  the node's `/v1` endpoint or at `/mesh/<peer>/inference/<name>/v1/...`.
 - **`a2a`**: `target_url` only. The agent card is fetched from
   `/.well-known/agent-card.json` on the backend and served again with mesh
   URLs. The card must use the A2A 1.0 format.
@@ -145,7 +145,7 @@ syntax and the same errors.
 |---|---|
 | `require_labels` | A map of `key: value`. Every remote provider that this node sends a request to must have all of these labels attested in its credential, whether or not the caller asked for labels. Same syntax rules as `labels`. |
 
-This is the operator's floor. A caller's `X-Sam-Required-Labels` header is
+This is the operator's floor. A caller's `X-Mesh-Required-Labels` header is
 checked separately, with the same rule: every pair it names must be attested.
 It can add requirements but cannot remove or relax the floor. A floor that
 names a label which no provider carries makes the node unable to reach any

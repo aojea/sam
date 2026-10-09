@@ -25,7 +25,7 @@ import biscuit_auth as ba
 import pytest
 from google.protobuf.timestamp_pb2 import Timestamp
 
-from agent_mesh._proto import sam_pb2
+from agent_mesh._proto import agentmesh_pb2
 from agent_mesh.authorizer import BASELINE_DATALOG, AuthorizationError, AuthorizeRequest, ProviderAuthorizerOptions, authorize_caller
 from agent_mesh.biscuit import attenuate_biscuit
 
@@ -38,8 +38,8 @@ CALLER = "12D3KooWCaller0000000000000000000000000000000000000"
 # The role grants the service through the mesh policy rules, exactly as the
 # control plane renders them; the token itself carries only the role.
 NODE_ROLE_GRANTS = [
-    'granted_service_set("mcp", ["calc"]) <- role("sam:role:node")',
-    'target_unrestricted(true) <- role("sam:role:node")',
+    'granted_service_set("mcp", ["calc"]) <- role("mesh:role:node")',
+    'target_unrestricted(true) <- role("mesh:role:node")',
 ]
 
 
@@ -49,7 +49,7 @@ def mint(facts: list[str], key: ba.KeyPair = CP, expiration: str = "2035-01-01T0
 
 def node_token(peer_id: str, extra: list[str] | None = None, key: ba.KeyPair = CP) -> bytes:
     """A token as the control plane mints it for a node bound to peer_id."""
-    return mint([f'node("{peer_id}")', f'client_peer_id("{peer_id}")', 'role("sam:role:node")', *(extra or [])], key)
+    return mint([f'node("{peer_id}")', f'client_peer_id("{peer_id}")', 'role("mesh:role:node")', *(extra or [])], key)
 
 
 def options(policy_rules: list[str], own_biscuit: bytes | None = None) -> ProviderAuthorizerOptions:
@@ -58,13 +58,13 @@ def options(policy_rules: list[str], own_biscuit: bytes | None = None) -> Provid
 
 
 def request(biscuit: bytes, target_service: str = "mcp://calc") -> AuthorizeRequest:
-    return AuthorizeRequest(biscuit=biscuit, peer_id=CALLER, target_service=target_service, protocol="/sam/mcp/1.0.0")
+    return AuthorizeRequest(biscuit=biscuit, peer_id=CALLER, target_service=target_service, protocol="/mesh/mcp/1.0.0")
 
 
 def test_role_granted_by_mesh_policy_is_allowed():
     verified = authorize_caller(request(node_token(CALLER)), options(NODE_ROLE_GRANTS))
     assert verified.peer_id == CALLER
-    assert verified.roles == ["sam:role:node"]
+    assert verified.roles == ["mesh:role:node"]
 
 
 def test_grants_minted_into_the_token_are_enough():
@@ -73,7 +73,7 @@ def test_grants_minted_into_the_token_are_enough():
 
 
 def test_empty_target_is_the_protocol_in_the_system_namespace():
-    token = node_token(CALLER, ['granted_service_all("sam:system")', "target_unrestricted(true)"])
+    token = node_token(CALLER, ['granted_service_all("mesh:system")', "target_unrestricted(true)"])
     authorize_caller(request(token, ""), options([]))
     with pytest.raises(AuthorizationError):
         authorize_caller(request(token, "mcp://calc"), options([]))
@@ -85,7 +85,7 @@ def test_ungranted_service_is_denied():
 
 
 def test_role_with_no_grants_is_denied():
-    guest = mint([f'node("{CALLER}")', f'client_peer_id("{CALLER}")', 'role("sam:role:guest")'])
+    guest = mint([f'node("{CALLER}")', f'client_peer_id("{CALLER}")', 'role("mesh:role:guest")'])
     with pytest.raises(AuthorizationError):
         authorize_caller(request(guest), options(NODE_ROLE_GRANTS))
 
@@ -126,7 +126,7 @@ def test_untrusted_key_is_denied():
 
 def test_target_grants_match_the_providers_own_identity():
     provider = node_token(PROVIDER, ['group("backend")'])
-    rules = ['granted_service_all_types(true) <- role("sam:role:node")', 'target_restricted(true) <- role("sam:role:node")']
+    rules = ['granted_service_all_types(true) <- role("mesh:role:node")', 'target_restricted(true) <- role("mesh:role:node")']
     authorize_caller(request(node_token(CALLER, ['granted_target_set("group", ["backend"])'])), options(rules, provider))
     with pytest.raises(AuthorizationError):
         authorize_caller(request(node_token(CALLER, ['granted_target_set("group", ["frontend"])'])), options(rules, provider))
@@ -139,10 +139,10 @@ def test_narrowed_grant_follows_the_requests_method_and_path():
     # http: [{service: "mcp://calc", methods: ["GET"], paths: ["/v1/*"]}]:
     # the plain grant is withheld, the narrowed facts take its place.
     rules = [
-        'http_granted_service_exact("mcp", "calc") <- role("sam:role:node")',
-        'granted_method("mcp", "calc", ["GET"]) <- role("sam:role:node")',
-        'granted_path_prefix("mcp", "calc", "/v1/") <- role("sam:role:node")',
-        'target_unrestricted(true) <- role("sam:role:node")',
+        'http_granted_service_exact("mcp", "calc") <- role("mesh:role:node")',
+        'granted_method("mcp", "calc", ["GET"]) <- role("mesh:role:node")',
+        'granted_path_prefix("mcp", "calc", "/v1/") <- role("mesh:role:node")',
+        'target_unrestricted(true) <- role("mesh:role:node")',
     ]
 
     def http(method: str, path: str) -> AuthorizeRequest:
@@ -213,13 +213,13 @@ def test_attenuate_biscuit_narrows_authority_across_hops():
     ts1.FromDatetime(hop1_exp)
     att1 = attenuate_biscuit(
         root,
-        sam_pb2.TaskAuthorizationRule(
+        agentmesh_pb2.TaskAuthorizationRule(
             name="hop-1",
             expire_time=ts1,
             rules=[
-                sam_pb2.TaskRule(
+                agentmesh_pb2.TaskRule(
                     allowed_services=["mcp://calc"],
-                    operation=sam_pb2.TaskOperation(allowed_tools=["add", "multiply"]),
+                    operation=agentmesh_pb2.TaskOperation(allowed_tools=["add", "multiply"]),
                 )
             ],
         ),
@@ -230,13 +230,13 @@ def test_attenuate_biscuit_narrows_authority_across_hops():
     ts2.FromDatetime(hop2_exp)
     att2 = attenuate_biscuit(
         att1,
-        sam_pb2.TaskAuthorizationRule(
+        agentmesh_pb2.TaskAuthorizationRule(
             name="hop-2",
             expire_time=ts2,
             rules=[
-                sam_pb2.TaskRule(
+                agentmesh_pb2.TaskRule(
                     allowed_services=["mcp://calc"],
-                    operation=sam_pb2.TaskOperation(allowed_tools=["add"]),
+                    operation=agentmesh_pb2.TaskOperation(allowed_tools=["add"]),
                 )
             ],
         ),
@@ -247,7 +247,7 @@ def test_attenuate_biscuit_narrows_authority_across_hops():
 
     sealed = seal_biscuit(att2, [CP_KEY])
     verified = authorize_caller(
-        AuthorizeRequest(biscuit=sealed, peer_id=CALLER, target_service="mcp://calc", protocol="/sam/mcp/1.0.0", mcp_tool="add"),
+        AuthorizeRequest(biscuit=sealed, peer_id=CALLER, target_service="mcp://calc", protocol="/mesh/mcp/1.0.0", mcp_tool="add"),
         options([]),
     )
     assert verified.expiration == hop2_exp
@@ -255,14 +255,14 @@ def test_attenuate_biscuit_narrows_authority_across_hops():
 
     with pytest.raises(AuthorizationError):
         authorize_caller(
-            AuthorizeRequest(biscuit=sealed, peer_id=CALLER, target_service="mcp://calc", protocol="/sam/mcp/1.0.0", mcp_tool="multiply"),
+            AuthorizeRequest(biscuit=sealed, peer_id=CALLER, target_service="mcp://calc", protocol="/mesh/mcp/1.0.0", mcp_tool="multiply"),
             options([]),
         )
 
     with pytest.raises(BiscuitVerificationError):
         attenuate_biscuit(
             sealed,
-            sam_pb2.TaskAuthorizationRule(name="hop-3", rules=[sam_pb2.TaskRule(allowed_services=["mcp://calc"])]),
+            agentmesh_pb2.TaskAuthorizationRule(name="hop-3", rules=[agentmesh_pb2.TaskRule(allowed_services=["mcp://calc"])]),
             [CP_KEY],
         )
 
@@ -274,7 +274,7 @@ def test_appended_blocks_carrying_anything_but_one_tar_block_fact_are_refused():
     from agent_mesh.tar import encode_tar_block_fact
 
     root = node_token(CALLER, ["granted_service_all_types(true)", "target_unrestricted(true)"])
-    tar_fact = encode_tar_block_fact(sam_pb2.TaskAuthorizationRule(name="hop", rules=[sam_pb2.TaskRule(allowed_services=["mcp://calc"])]))
+    tar_fact = encode_tar_block_fact(agentmesh_pb2.TaskAuthorizationRule(name="hop", rules=[agentmesh_pb2.TaskRule(allowed_services=["mcp://calc"])]))
 
     def append(build) -> bytes:
         token = ba.Biscuit.from_bytes(root, CP.public_key)
@@ -283,7 +283,7 @@ def test_appended_blocks_carrying_anything_but_one_tar_block_fact_are_refused():
         return token.append(bb).to_bytes()
 
     def rule_only(bb):
-        bb.add_rule(ba.Rule('role("sam:role:router") <- role("sam:role:node")'))
+        bb.add_rule(ba.Rule('role("mesh:role:router") <- role("mesh:role:node")'))
 
     def check_only(bb):
         bb.add_check(ba.Check("check if true"))
@@ -294,7 +294,7 @@ def test_appended_blocks_carrying_anything_but_one_tar_block_fact_are_refused():
 
     def rule_beside_tar_block(bb):
         bb.add_fact(ba.Fact(tar_fact))
-        bb.add_rule(ba.Rule('granted_service_all_types(true) <- role("sam:role:node")'))
+        bb.add_rule(ba.Rule('granted_service_all_types(true) <- role("mesh:role:node")'))
 
     for build in (rule_only, check_only, extra_fact, rule_beside_tar_block):
         with pytest.raises(AuthorizationError, match="tar_block"):

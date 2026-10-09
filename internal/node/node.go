@@ -190,7 +190,7 @@ type SamNode struct {
 	pendingEgress   []*api.EgressDestination
 	pendingEgressMu sync.Mutex
 	rateLimiter     *ratelimit.PeerRateLimiter
-	// handshakeLimiter bounds /sam/auth attempts per peer separately from
+	// handshakeLimiter bounds /mesh/auth attempts per peer separately from
 	// rateLimiter, so a peer's authenticated traffic cannot starve its own
 	// re-authentication and vice versa.
 	handshakeLimiter *ratelimit.PeerRateLimiter
@@ -667,7 +667,7 @@ func (n *SamNode) Start(ctx context.Context) error {
 	// Initialize Rendezvous (DHT Client)
 	dhtOpts := []dht.Option{
 		dht.Mode(dht.ModeAuto),
-		dht.ProtocolPrefix("/sam"),
+		dht.ProtocolPrefix("/mesh"),
 	}
 	providerTTL := n.config.DHTProviderAddrTTL
 	if providerTTL <= 0 {
@@ -1930,13 +1930,13 @@ func (n *SamNode) getTrustedPublicKeys() []ed25519.PublicKey {
 }
 
 // authHandshakeTimeout bounds how long an unauthenticated peer may hold a
-// /sam/auth stream open: it has to send its frame and read the reply within
+// /mesh/auth stream open: it has to send its frame and read the reply within
 // it. Any internet peer can open these streams, so without a deadline each
 // one is a goroutine held for as long as the peer likes. A var so tests can
 // shorten it.
 var authHandshakeTimeout = 10 * time.Second
 
-// HandleAuthHandshake is the core libp2p stream handler for /sam/auth/1.0.0.
+// HandleAuthHandshake is the core libp2p stream handler for /mesh/auth/1.0.0.
 // This is the "Admission Office" of the mesh node.
 func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 	defer func() {
@@ -2120,7 +2120,7 @@ func (n *SamNode) localProxyURL(peerID peer.ID, typeStr, serviceName string) str
 		// Socket-only node: any host works once the caller dials the socket.
 		host = "localhost"
 	}
-	return fmt.Sprintf("http://%s/sam/%s/%s/%s",
+	return fmt.Sprintf("http://%s/mesh/%s/%s/%s",
 		host, peerID.String(), typeStr, serviceName)
 }
 
@@ -2418,15 +2418,15 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 				return
 			}
 
-			// Extract biscuit from X-Sam-Biscuit header
-			biscuitB64 := r.Header.Get(api.HeaderSamBiscuit)
+			// Extract biscuit from X-Mesh-Biscuit header
+			biscuitB64 := r.Header.Get(api.HeaderMeshBiscuit)
 			if biscuitB64 == "" {
-				http.Error(w, "Missing X-Sam-Biscuit header", http.StatusUnauthorized)
+				http.Error(w, "Missing X-Mesh-Biscuit header", http.StatusUnauthorized)
 				return
 			}
 			biscuitBytes, err := base64.StdEncoding.DecodeString(biscuitB64)
 			if err != nil {
-				http.Error(w, "Invalid X-Sam-Biscuit encoding", http.StatusBadRequest)
+				http.Error(w, "Invalid X-Mesh-Biscuit encoding", http.StatusBadRequest)
 				return
 			}
 
@@ -2492,21 +2492,21 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 				recordEgressDecision(serviceName, egressOutcomeAllow)
 			}
 
-			// Strip the biscuit header and any caller-supplied X-Sam-* headers so
+			// Strip the biscuit header and any caller-supplied X-Mesh-* headers so
 			// only transport-verified identity attributes reach the backend service.
 			for name := range r.Header {
 				lower := strings.ToLower(name)
-				if lower == "cookie" || strings.HasPrefix(lower, "x-sam-") {
+				if lower == "cookie" || strings.HasPrefix(lower, "x-mesh-") {
 					delete(r.Header, name)
 				}
 			}
 			r.Header.Set(api.HeaderPeerID, remotePeer.String())
 			if claims, cErr := n.VerifyLocalBiscuit(biscuitBytes); cErr == nil && claims != nil {
 				if p := claims.Principal(); p != "" {
-					r.Header.Set(api.HeaderSamPrincipal, p)
+					r.Header.Set(api.HeaderMeshPrincipal, p)
 				}
 				if len(claims.Roles) > 0 {
-					r.Header.Set(api.HeaderSamRoles, strings.Join(claims.Roles, ","))
+					r.Header.Set(api.HeaderMeshRoles, strings.Join(claims.Roles, ","))
 				}
 			}
 
@@ -2528,7 +2528,7 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 			if upstreamPath == "" {
 				r.URL.Path = "/"
 				if len(parts) == 2 {
-					r.Header.Set(api.HeaderSamNoTrailingSlash, "true")
+					r.Header.Set(api.HeaderMeshNoTrailingSlash, "true")
 				}
 			} else {
 				r.URL.Path = "/" + upstreamPath

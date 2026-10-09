@@ -82,7 +82,7 @@ func startCustomMockOIDC(t *testing.T) (string, func(claims map[string]interface
 	mintToken := func(customClaims map[string]interface{}) string {
 		claims := jwt.MapClaims{
 			"iss": issuer,
-			"aud": "sam-mesh-audience",
+			"aud": "agentmesh-audience",
 			"exp": time.Now().Add(time.Hour).Unix(),
 		}
 		for k, v := range customClaims {

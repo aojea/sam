@@ -3,7 +3,7 @@
 /// A control plane (sam-one's terminal QR code, or any operator holding a
 /// bootstrap token) hands a device everything it needs in one string:
 ///
-///     sam://enroll?server=<control-plane-url>&token=<bootstrap-token>
+///     mesh://enroll?server=<control-plane-url>&token=<bootstrap-token>
 ///
 /// This mirrors `api.EnrollURI` / `api.ParseEnrollURI` in the Go tree and
 /// must stay in lockstep with it: same scheme, same host, same two query
@@ -39,7 +39,7 @@ class EnrollLink {
   }
 }
 
-/// Parses a `sam://enroll` link; returns null for anything else, including
+/// Parses a `mesh://enroll` link; returns null for anything else, including
 /// a bare token, so callers can fall back to token-only entry.
 EnrollLink? parseEnrollLink(String raw) {
   final Uri uri;
@@ -48,7 +48,7 @@ EnrollLink? parseEnrollLink(String raw) {
   } on FormatException {
     return null;
   }
-  if (uri.scheme != 'sam' || uri.host != 'enroll') return null;
+  if (uri.scheme != 'mesh' || uri.host != 'enroll') return null;
   final server = uri.queryParameters['server'] ?? '';
   final token = uri.queryParameters['token'] ?? '';
   if (token.isEmpty) return null;

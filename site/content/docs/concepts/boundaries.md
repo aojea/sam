@@ -58,7 +58,7 @@ a boundary:
   `attenuation.checks` rejects any caller whose credential lacks that fact,
   regardless of what the mesh policy granted.
 - **A caller refuses providers outside the boundary.** With
-  `X-Sam-Required-Labels` on a request, the calling node verifies the
+  `X-Mesh-Required-Labels` on a request, the calling node verifies the
   provider's credential before it sends anything. A provider that cannot
   show every label named is skipped.
 - **An operator sets a floor for a whole node.** `egress.require_labels` in
@@ -83,9 +83,9 @@ Two endpoints on the node's local API expose what the node knows, for audit
 or automation. They are reachable only over the node's Unix socket or over
 mTLS.
 
-- `GET /sam/identity` returns the node's own credential, the control plane
+- `GET /mesh/identity` returns the node's own credential, the control plane
   public key it was verified against, and its roles, labels and expiry.
-- `GET /sam/peer/{peer-id}/evidence` returns the same information for a peer
+- `GET /mesh/peer/{peer-id}/evidence` returns the same information for a peer
   that the node has authenticated.
 
 Both results can be verified offline with the control plane's public key.

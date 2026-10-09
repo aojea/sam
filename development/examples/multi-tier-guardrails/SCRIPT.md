@@ -23,8 +23,8 @@ make node-v1-staging 2>&1 | python3 audit.py
 
 # caller (Label Point 2a — Input Node Enforcement)
 cat node-caller.yaml
-curl -i -s -H 'X-Sam-Authentication: Bearer caller-secret' \
-  http://127.0.0.1:19102/sam/$V1_PEER/a2a/support.acme/.well-known/agent-card.json | head -n 5
+curl -i -s -H 'X-Mesh-Authentication: Bearer caller-secret' \
+  http://127.0.0.1:19102/mesh/$V1_PEER/a2a/support.acme/.well-known/agent-card.json | head -n 5
 
 # admin (Quality Gate Promotion)
 jq '.roles[0].allowed_labels += ["env=prod"]' policy.json | \
@@ -34,8 +34,8 @@ jq '.roles[0].allowed_labels += ["env=prod"]' policy.json | \
 make node-v1-prod 2>&1 | python3 audit.py
 
 # caller
-curl -s -H 'X-Sam-Authentication: Bearer caller-secret' \
-  http://127.0.0.1:19102/sam/$V1_PEER/a2a/support.acme/.well-known/agent-card.json | \
+curl -s -H 'X-Mesh-Authentication: Bearer caller-secret' \
+  http://127.0.0.1:19102/mesh/$V1_PEER/a2a/support.acme/.well-known/agent-card.json | \
   jq '{name, url: .supportedInterfaces[0].url}'
 ```
 
@@ -44,12 +44,12 @@ curl -s -H 'X-Sam-Authentication: Bearer caller-secret' \
 
 ```bash
 # caller
-python3 a2a_client.py http://127.0.0.1:19102/sam/$V1_PEER/a2a/support.acme \
+python3 a2a_client.py http://127.0.0.1:19102/mesh/$V1_PEER/a2a/support.acme \
   ctx-acme-1042 'Check order #1042 for alice@acme.com' replica=v1-laptop
 
 cat node-v2.yaml
 
-python3 a2a_client.py http://127.0.0.1:19102/sam/$V2_PEER/a2a/support.acme \
+python3 a2a_client.py http://127.0.0.1:19102/mesh/$V2_PEER/a2a/support.acme \
   ctx-acme-1042 'What item did Alice order and has it shipped?' replica=v2-cloudrun
 ```
 
@@ -59,11 +59,11 @@ python3 a2a_client.py http://127.0.0.1:19102/sam/$V2_PEER/a2a/support.acme \
 ```bash
 # Layer 1 — Central Security (Org HTTP Policy + Secret Brokering)
 jq -c '.roles[0].http[0], .egress[0]' policy.json
-curl -s -H 'X-Sam-Authentication: Bearer caller-secret' \
-  "http://127.0.0.1:19102/sam/$V1_PEER/egress/api.github.com/repos/google/sam/pulls?state=open&per_page=1" | \
+curl -s -H 'X-Mesh-Authentication: Bearer caller-secret' \
+  "http://127.0.0.1:19102/mesh/$V1_PEER/egress/api.github.com/repos/google/sam/pulls?state=open&per_page=1" | \
   jq -c '.[0] | {number, title}'
-curl -i -s -X POST -H 'X-Sam-Authentication: Bearer caller-secret' \
-  http://127.0.0.1:19102/sam/$V1_PEER/egress/api.github.com/repos/google/sam/pulls -d '{}' | head -n 5
+curl -i -s -X POST -H 'X-Mesh-Authentication: Bearer caller-secret' \
+  http://127.0.0.1:19102/mesh/$V1_PEER/egress/api.github.com/repos/google/sam/pulls -d '{}' | head -n 5
 
 # Layer 2 — Department Lead (Label Point 2b — Egress Node Positive Check)
 cat node-contractor.yaml

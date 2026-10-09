@@ -212,11 +212,11 @@ spec:
               REACH_START=$(date +%s)
               while [ -z "$PEER" ]; do
                 if curl -sf --unix-socket "$SOCK" -o /tmp/providers.json \
-                  "http://localhost/sam/service/discover?type=mcp&name=${PROBE_SERVICE}&timeout=20s"; then
+                  "http://localhost/mesh/service/discover?type=mcp&name=${PROBE_SERVICE}&timeout=20s"; then
                   for p in $(grep -oE '"peer_id":"[^"]+"' /tmp/providers.json | cut -d'"' -f4); do
                     TRIED=$((TRIED + 1))
                     set -- $(curl -s --unix-socket "$SOCK" -o /tmp/init.out -w '%{http_code} %{time_total}' \
-                      -X POST "http://localhost/sam/${p}/mcp/${PROBE_SERVICE}" \
+                      -X POST "http://localhost/mesh/${p}/mcp/${PROBE_SERVICE}" \
                       -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
                       -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"sam-probe","version":"0"}}}')
                     # curl prints "000 0" when it cannot connect; the defaults
@@ -256,7 +256,7 @@ spec:
                 LAST_ERR=""
                 CALL_START=$(date +%s)
                 while :; do
-                  CODE=$(curl -s --unix-socket "$SOCK" -o /tmp/sdk-card.out -w '%{http_code}' "http://localhost/sam/${AGENT_PEER}/a2a/agent/.well-known/agent-card.json")
+                  CODE=$(curl -s --unix-socket "$SOCK" -o /tmp/sdk-card.out -w '%{http_code}' "http://localhost/mesh/${AGENT_PEER}/a2a/agent/.well-known/agent-card.json")
                   if [ "$CODE" = "200" ] && grep -q 'Echo agent' /tmp/sdk-card.out && grep -q "/sam/${AGENT_PEER}/a2a/agent" /tmp/sdk-card.out; then
                     break
                   fi

@@ -48,9 +48,9 @@ func ValidateRoleName(name string) error {
 }
 
 // ValidateBindingMember checks a single PolicyBinding.members entry.
-// It permits sam:system:authenticated, exact "<prefix>:<value>" members, and
+// It permits mesh:system:authenticated, exact "<prefix>:<value>" members, and
 // a single leading "*<suffix>" or trailing "<prefix>*" wildcard on non-node
-// prefixes. Bare "<prefix>:*" is rejected as a disguised sam:system:authenticated,
+// prefixes. Bare "<prefix>:*" is rejected as a disguised mesh:system:authenticated,
 // and values containing '"', '\', or control characters are rejected to
 // prevent Datalog rule injection.
 func ValidateBindingMember(member string, role string) error {

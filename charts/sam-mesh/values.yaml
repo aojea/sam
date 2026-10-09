@@ -49,7 +49,7 @@ controlPlane:
   # Optional: session TTL for workload OIDC enrollments (e.g. "48h"); empty uses
   # the control plane default (48h).
   workloadSessionTtl: ""
-  allowedAudiences: "sam-mesh-audience,sam-control-plane-audience"
+  allowedAudiences: "agentmesh-audience,sam-control-plane-audience"
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -214,18 +214,18 @@ console:
 
 bootstrap:
   bindings: []
-  # Identities that may enroll as sam:role:node ("user:<sub>", "group:<name>",
-  # "email:<addr>", or "sam:system:authenticated" for an intentionally open
+  # Identities that may enroll as mesh:role:node ("user:<sub>", "group:<name>",
+  # "email:<addr>", or "mesh:system:authenticated" for an intentionally open
   # mesh). Empty means no node can enroll until an operator grants it (fail
   # closed). Ignored when bindings is set: then you own the whole list.
   nodeMembers: []
-  # Services sam:role:node may call, as "type://name" entries (e.g.
-  # "mcp://calculator"). Any authenticated identity can claim sam:role:node,
+  # Services mesh:role:node may call, as "type://name" entries (e.g.
+  # "mcp://calculator"). Any authenticated identity can claim mesh:role:node,
   # so this list is effectively mesh-wide. Empty means nodes can call nothing
   # until a policy grants it (fail closed); never use ["*"] outside an
   # intentionally public mesh.
   nodeServices: []
-  # Label patterns ("key=value" or "key=*") sam:role:node may attest with the
+  # Label patterns ("key=value" or "key=*") mesh:role:node may attest with the
   # labels in its sam-node.yaml. Empty means nodes cannot enroll with any label
   # (fail closed).
   nodeLabels: []

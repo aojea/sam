@@ -15,10 +15,10 @@ from a2a.types import Message, Part, Role, SendMessageRequest
 
 async def main(url: str, text: str) -> None:
     token = os.environ.get("SAM_API_TOKEN", "secret-token")
-    headers = {"X-Sam-Authentication": f"Bearer {token}"}
+    headers = {"X-Mesh-Authentication": f"Bearer {token}"}
     labels = os.environ.get("SAM_REQUIRED_LABELS")
     if labels:
-        headers["X-Sam-Required-Labels"] = labels
+        headers["X-Mesh-Required-Labels"] = labels
     async with httpx.AsyncClient(timeout=60, headers=headers) as http:
         card = await A2ACardResolver(http, url).get_agent_card()
         bindings = [i.protocol_binding for i in card.supported_interfaces]

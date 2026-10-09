@@ -634,7 +634,7 @@ func TestBootstrapTokensAndEnrollmentRequestsOps(t *testing.T) {
 	tok := &BootstrapToken{
 		ID:          "token-id-1",
 		TokenHash:   "hash-1",
-		Role:        "sam:role:router",
+		Role:        "mesh:role:router",
 		MaxUsages:   5,
 		UsagesCount: 0,
 		Description: "Router join token",
@@ -733,7 +733,7 @@ func TestConsumeBootstrapTokenUsageIsAtomicAndGated(t *testing.T) {
 	save := func(id string, max int, expiresAt time.Time) {
 		t.Helper()
 		if err := store.SaveBootstrapToken(ctx, &BootstrapToken{
-			ID: id, TokenHash: "h-" + id, Role: "sam:role:node", MaxUsages: max,
+			ID: id, TokenHash: "h-" + id, Role: "mesh:role:node", MaxUsages: max,
 			CreatedAt: now, ExpiresAt: expiresAt,
 		}); err != nil {
 			t.Fatal(err)
@@ -803,7 +803,7 @@ func TestResolveEnrollmentRequestOnlyWhilePending(t *testing.T) {
 	ctx := context.Background()
 
 	if err := store.SaveBootstrapToken(ctx, &BootstrapToken{
-		ID: "tok", TokenHash: "h", Role: "sam:role:node", MaxUsages: 1,
+		ID: "tok", TokenHash: "h", Role: "mesh:role:node", MaxUsages: 1,
 		CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)

@@ -23,7 +23,7 @@ import {
   TaskAuthorizationRuleSchema,
   type AuthResponse,
   type OIDCSession,
-} from "./gen/sam_pb.ts";
+} from "./gen/agentmesh_pb.ts";
 
 /** What a member holds after enrolling: its biscuit and what it trusts. */
 export interface MeshCredential {
@@ -111,7 +111,7 @@ export function credentialTimeToLiveSeconds(c: MeshCredential, nowMs = Date.now(
 }
 
 /**
- * The first frame on every mesh stream (/sam/auth/1.0.0, /sam/mcp/1.0.0):
+ * The first frame on every mesh stream (/mesh/auth/1.0.0, /mesh/mcp/1.0.0):
  * the caller's biscuit and the service it wants.
  * Framing (varint length prefix) is the transport's job.
  */

@@ -109,8 +109,8 @@ EOF
     run docker run --rm --network "${MESH_NETWORK}" python:3.12 python3 -c "
 import urllib.request
 req = urllib.request.Request(
-    \"http://${node2_name}:8080/sam/${node1_peer_id}/mcp/http-tool/\",
-    headers={\"X-Sam-Authentication\": \"Bearer secret-token\"}
+    \"http://${node2_name}:8080/mesh/${node1_peer_id}/mcp/http-tool/\",
+    headers={\"X-Mesh-Authentication\": \"Bearer secret-token\"}
 )
 with urllib.request.urlopen(req) as response:
     print(response.read().decode(\"utf-8\"))
@@ -136,8 +136,8 @@ with urllib.request.urlopen(req) as response:
   run docker run --rm --network "${MESH_NETWORK}" python:3.12 python3 -c "
 import urllib.request, urllib.error
 req = urllib.request.Request(
-    \"http://${node1_name}:8080/sam/${node2_peer_id}/mcp/stdio-tool/\",
-    headers={\"X-Sam-Authentication\": \"Bearer secret-token\"}
+    \"http://${node1_name}:8080/mesh/${node2_peer_id}/mcp/stdio-tool/\",
+    headers={\"X-Mesh-Authentication\": \"Bearer secret-token\"}
 )
 try:
     with urllib.request.urlopen(req) as response:
@@ -154,11 +154,11 @@ except urllib.error.HTTPError as e:
   local reply_a reply_b
   run docker run --rm --network "${MESH_NETWORK}" python:3.12 python3 -c "
 import json, urllib.request, concurrent.futures
-url = \"http://${node1_name}:8080/sam/${node2_peer_id}/mcp/stdio-tool/\"
+url = \"http://${node1_name}:8080/mesh/${node2_peer_id}/mcp/stdio-tool/\"
 def call(method):
     body = json.dumps({\"jsonrpc\": \"2.0\", \"method\": method, \"id\": 1}).encode()
     req = urllib.request.Request(url, data=body, headers={
-        \"X-Sam-Authentication\": \"Bearer secret-token\",
+        \"X-Mesh-Authentication\": \"Bearer secret-token\",
         \"Content-Type\": \"application/json\"})
     with urllib.request.urlopen(req, timeout=20) as r:
         return r.status, json.loads(r.read())

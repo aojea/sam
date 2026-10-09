@@ -84,7 +84,7 @@ func TestBiscuitExpiryIsEnforcedOnEveryPath(t *testing.T) {
 	// The grants mirror the shape this test always ran with (the no-policy
 	// mint fallback): unrestricted, because the subject here is expiry.
 	policyFile := filepath.Join(tmpDir, "policies.yaml")
-	policyYAML := "roles:\n  - name: sam:role:node\n    allowed_services: [\"*\"]\n    allowed_targets: []\n    custom_datalog: [\"target_unrestricted(true);\"]\nbindings:\n  - role: sam:role:node\n    members: [\"user:expiry-user\"]\n"
+	policyYAML := "roles:\n  - name: mesh:role:node\n    allowed_services: [\"*\"]\n    allowed_targets: []\n    custom_datalog: [\"target_unrestricted(true);\"]\nbindings:\n  - role: mesh:role:node\n    members: [\"user:expiry-user\"]\n"
 	if err := os.WriteFile(policyFile, []byte(policyYAML), 0644); err != nil {
 		t.Fatal(err)
 	}

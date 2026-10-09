@@ -46,7 +46,7 @@ func startMockRouter(t *testing.T) (peer.ID, string) {
 		t.Fatalf("failed to create mock libp2p host: %v", err)
 	}
 
-	kdht, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	kdht, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mesh"))
 	if err != nil {
 		t.Fatalf("failed to create DHT on mock router: %v", err)
 	}

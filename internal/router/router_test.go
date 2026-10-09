@@ -89,7 +89,7 @@ func startCustomMockOIDC(t *testing.T) (string, func(claims map[string]interface
 	mintToken := func(customClaims map[string]interface{}) string {
 		claims := jwt.MapClaims{
 			"iss": issuer,
-			"aud": "sam-mesh-audience",
+			"aud": "agentmesh-audience",
 			"exp": time.Now().Add(time.Hour).Unix(),
 		}
 		for k, v := range customClaims {
@@ -122,7 +122,7 @@ func setupControlPlane(t *testing.T, oidcIssuer string) (*controlplane.Server, s
 		DriverName:            "sqlite",
 		DataSourceName:        dbPath,
 		OIDCIssuer:            oidcIssuer,
-		AllowedAudiences:      []string{"sam-mesh-audience"},
+		AllowedAudiences:      []string{"agentmesh-audience"},
 		LeaseDuration:         5 * time.Second,
 		KeyRotationInterval:   12 * time.Hour,
 		KeyGracePeriod:        10 * time.Minute,
@@ -1015,7 +1015,7 @@ func TestPerformMutualAuth(t *testing.T) {
 	}
 }
 
-// The router's /sam/auth handler is reachable by any internet peer. An idle
+// The router's /mesh/auth handler is reachable by any internet peer. An idle
 // stream must be closed on the router's schedule, and a peer handshaking in a
 // tight loop must be cut off before every frame is verified.
 func TestHandleAuthHandshakeBoundsUnauthenticatedPeers(t *testing.T) {

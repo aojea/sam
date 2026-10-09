@@ -13,7 +13,7 @@
 // limitations under the License.
 
 syntax = "proto3";
-package sam.v1;
+package agentmesh.v1;
 option go_package = "github.com/google/agentmesh/api";
 
 import "google/protobuf/duration.proto";
@@ -62,7 +62,7 @@ message EnrollRequest {
   map<string, string> labels = 5;
   // Proof of possession of public_key's private half: challenge_unix_ms is
   // the caller's clock in unix milliseconds and challenge_signature signs
-  // the UTF-8 bytes of "sam:register:<peer_id>:<challenge_unix_ms>". It is
+  // the UTF-8 bytes of "mesh:register:<peer_id>:<challenge_unix_ms>". It is
   // an int64 because it is the number in the signed text, not an instant
   // for display. Required, and peer_id must be derived from public_key.
   // The JWT proves who is asking; this proves they hold the key they are
@@ -97,7 +97,7 @@ message BootstrapEnrollRequest {
   map<string, string> labels = 5;
   // Proof of possession of public_key's private half: challenge_unix_ms is
   // the caller's clock in unix milliseconds and challenge_signature signs
-  // the UTF-8 bytes of "sam:enroll:<peer_id>:<challenge_unix_ms>". Required,
+  // the UTF-8 bytes of "mesh:enroll:<peer_id>:<challenge_unix_ms>". Required,
   // and peer_id must be derived from public_key: this is what entitles a
   // repeated POST /enroll to re-fetch an existing enrollment's biscuit, so
   // a bootstrap token alone must never satisfy it.
@@ -108,9 +108,9 @@ message BootstrapEnrollRequest {
 // BootstrapEnrollResponse answers POST /enroll and GET /enroll/status.
 // Polling GET /enroll/status requires proof of possession of the key
 // submitted at /enroll: alongside the `peer_id` query parameter, the caller
-// sends the X-Sam-Challenge-Ts header (unix milliseconds) and the
-// X-Sam-Challenge-Sig header (unpadded base64url signature over the UTF-8
-// bytes of "sam:enroll-status:<peer_id>:<ts>").
+// sends the X-Mesh-Challenge-Ts header (unix milliseconds) and the
+// X-Mesh-Challenge-Sig header (unpadded base64url signature over the UTF-8
+// bytes of "mesh:enroll-status:<peer_id>:<ts>").
 message BootstrapEnrollResponse {
   EnrollmentStatus status = 1;
   bytes biscuit_token = 2;         // Populated only if APPROVED
@@ -203,7 +203,7 @@ message RouterLeaseRequest {
   int32 dht_size = 5;
   // Proof of possession of the router's enrolled key: challenge_unix_ms is
   // the caller's clock in unix milliseconds and challenge_signature signs
-  // the UTF-8 bytes of "sam:routers-lease:<peer_id>:<challenge_unix_ms>"
+  // the UTF-8 bytes of "mesh:routers-lease:<peer_id>:<challenge_unix_ms>"
   // with the key the router enrolled with. Required. The biscuit alone is
   // not proof: routers hand theirs to every peer they authenticate.
   int64 challenge_unix_ms = 6;
@@ -286,7 +286,7 @@ message EgressDestination {
   // Keep the destination hostname in Host when target_url is an operator
   // inspection chain that forwards to the real host.
   bool preserve_host = 9;
-  // Forward X-Sam-Principal, X-Sam-Roles and X-Sam-Task to target_url.
+  // Forward X-Mesh-Principal, X-Mesh-Roles and X-Mesh-Task to target_url.
   // Only for an operator chain; the node strips them for a real destination.
   bool forward_context = 10;
 }
@@ -465,7 +465,7 @@ message KeysResponse {
 
 message TokenRefreshRequest {
   // Signature with the node key over the UTF-8 bytes of
-  // "sam:refresh:<peer_id>:<challenge_unix_ms>", where peer_id is the one
+  // "mesh:refresh:<peer_id>:<challenge_unix_ms>", where peer_id is the one
   // bound in the presented biscuit. Peer- and endpoint-bound so a captured
   // signature verifies nowhere else.
   bytes challenge_signature = 1;
@@ -523,8 +523,8 @@ message TokenRevokeResponse {
 // BootstrapTokenCreateRequest is the body of POST /admin/bootstrap-tokens
 // (admin bearer) and POST /user/bootstrap-tokens (mesh user).
 message BootstrapTokenCreateRequest {
-  // Role the token enrolls into, e.g. "sam:role:node". Required on the admin
-  // endpoint; the user endpoint defaults it to "sam:role:node".
+  // Role the token enrolls into, e.g. "mesh:role:node". Required on the admin
+  // endpoint; the user endpoint defaults it to "mesh:role:node".
   string role = 1;
   // User the token is issued on behalf of. Honored by the user endpoint
   // only, and only for admins; defaults to the caller.
@@ -669,7 +669,7 @@ message UserStatusResponse {
 // ============================================================================
 //
 // Read-only owner/control-plane material served by the node sidecar on
-// GET /sam/identity and GET /sam/peer/{peer_id}/evidence. Only reachable
+// GET /mesh/identity and GET /mesh/peer/{peer_id}/evidence. Only reachable
 // over the filesystem-protected Unix socket or verified mTLS. A 200 asserts
 // the node verified the biscuit, its PeerID binding, and revocation state at
 // check_time; independent verifiers recompute from the raw biscuit and keys.
@@ -702,8 +702,8 @@ message PeerEvidenceResponse {
 // every implementation persists. The private key is the libp2p crypto.proto
 // PrivateKey encoding. The SDKs keep both in a state directory as
 // `identity.key` and `credential.json` (protojson of MemberCredential with
-// proto field names, unknown fields rejected); sam-node keeps both in its
-// database. `sam-node state export` and `sam-node state import` move a
+// proto field names, unknown fields rejected); agentmesh-node keeps both in its
+// database. `agentmesh-node state export` and `agentmesh-node state import` move a
 // member between the two, so an identity enrolled by one implementation
 // runs under another.
 
@@ -800,7 +800,7 @@ message TaskOperation {
 // ============================================================================
 
 // TokenExchangeRequest is the body of POST /token/exchange on the control
-// plane: an enrolled sam-node (authenticated via its own Biscuit in
+// plane: an enrolled agentmesh-node (authenticated via its own Biscuit in
 // Authorization: Bearer and proof of possession below) exchanges a caller's
 // platform JWT (OIDC ID token, K8s projected SA JWT, or SPIFFE JWT-SVID) into
 // a short-lived Delegated Session Biscuit bound to the calling node's
@@ -818,7 +818,7 @@ message TokenExchangeRequest {
   // Proof of possession of the calling node's enrolled key:
   // challenge_unix_ms is the caller's clock in unix milliseconds and
   // challenge_signature signs the UTF-8 bytes of
-  // "sam:token-exchange:<peer_id>:<challenge_unix_ms>".
+  // "mesh:token-exchange:<peer_id>:<challenge_unix_ms>".
   int64 challenge_unix_ms = 4;
   bytes challenge_signature = 5;
 }
@@ -831,7 +831,7 @@ message TokenExchangeResponse {
 }
 
 // STSTokenRequest is the body of POST /sts/token on the control plane: an
-// enrolled egress sam-node asks the control plane (acting as OIDC issuer) to
+// enrolled egress agentmesh-node asks the control plane (acting as OIDC issuer) to
 // verify a caller's Biscuit and TaskAuthorizationRule chain for an egress
 // destination and mint a short-lived ES256 border JWT for cloud STS federation.
 message STSTokenRequest {
@@ -845,7 +845,7 @@ message STSTokenRequest {
   // Proof of possession of the calling egress node's enrolled key:
   // challenge_unix_ms is the caller's clock in unix milliseconds and
   // challenge_signature signs the UTF-8 bytes of
-  // "sam:sts-token:<peer_id>:<challenge_unix_ms>".
+  // "mesh:sts-token:<peer_id>:<challenge_unix_ms>".
   int64 challenge_unix_ms = 4;
   bytes challenge_signature = 5;
 }

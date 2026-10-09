@@ -17,9 +17,9 @@ package api
 import "testing"
 
 func TestEnrollURIRoundTrip(t *testing.T) {
-	const server, token = "https://abc-def-123.trycloudflare.com", "sam_dev_0123456789abcdef"
+	const server, token = "https://abc-def-123.trycloudflare.com", "mesh_dev_0123456789abcdef"
 	uri := EnrollURI(server, token)
-	if want := "sam://enroll?server=https%3A%2F%2Fabc-def-123.trycloudflare.com&token=sam_dev_0123456789abcdef"; uri != want {
+	if want := "mesh://enroll?server=https%3A%2F%2Fabc-def-123.trycloudflare.com&token=mesh_dev_0123456789abcdef"; uri != want {
 		t.Fatalf("EnrollURI = %q, want %q", uri, want)
 	}
 	gotServer, gotToken, err := ParseEnrollURI(" " + uri + "\n")
@@ -33,7 +33,7 @@ func TestEnrollURIRoundTrip(t *testing.T) {
 
 func TestParseEnrollURIAcceptsLoopbackHTTP(t *testing.T) {
 	// Emulators reach the host over adb reverse, i.e. loopback.
-	server, _, err := ParseEnrollURI("sam://enroll?server=http%3A%2F%2F127.0.0.1%3A18432&token=t")
+	server, _, err := ParseEnrollURI("mesh://enroll?server=http%3A%2F%2F127.0.0.1%3A18432&token=t")
 	if err != nil || server != "http://127.0.0.1:18432" {
 		t.Fatalf("ParseEnrollURI loopback http = (%q, %v)", server, err)
 	}
@@ -42,14 +42,14 @@ func TestParseEnrollURIAcceptsLoopbackHTTP(t *testing.T) {
 func TestParseEnrollURIRejects(t *testing.T) {
 	for name, raw := range map[string]string{
 		"wrong scheme":      "samone://enroll?server=https%3A%2F%2Fx&token=t",
-		"wrong host":        "sam://join?server=https%3A%2F%2Fx&token=t",
-		"missing token":     "sam://enroll?server=https%3A%2F%2Fx",
-		"missing server":    "sam://enroll?token=t",
-		"non-http server":   "sam://enroll?server=ftp%3A%2F%2Fx&token=t",
-		"relative server":   "sam://enroll?server=x.example.com&token=t",
-		"plaintext to LAN":  "sam://enroll?server=http%3A%2F%2F192.168.1.50%3A18432&token=t",
-		"plaintext to host": "sam://enroll?server=http%3A%2F%2Fmesh.example.com&token=t",
-		"plain token only":  "sam_dev_0123",
+		"wrong host":        "mesh://join?server=https%3A%2F%2Fx&token=t",
+		"missing token":     "mesh://enroll?server=https%3A%2F%2Fx",
+		"missing server":    "mesh://enroll?token=t",
+		"non-http server":   "mesh://enroll?server=ftp%3A%2F%2Fx&token=t",
+		"relative server":   "mesh://enroll?server=x.example.com&token=t",
+		"plaintext to LAN":  "mesh://enroll?server=http%3A%2F%2F192.168.1.50%3A18432&token=t",
+		"plaintext to host": "mesh://enroll?server=http%3A%2F%2Fmesh.example.com&token=t",
+		"plain token only":  "mesh_dev_0123",
 	} {
 		if _, _, err := ParseEnrollURI(raw); err == nil {
 			t.Errorf("%s: ParseEnrollURI(%q) accepted", name, raw)

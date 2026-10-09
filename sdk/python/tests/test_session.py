@@ -39,7 +39,7 @@ from libp2p.stream_muxer.yamux.yamux import Yamux
 from libp2p.utils.varint import encode_varint_prefixed, read_varint_prefixed_bytes
 
 from agent_mesh._proto import circuit_pb2 as circuit
-from agent_mesh._proto import sam_pb2 as pb
+from agent_mesh._proto import agentmesh_pb2 as pb
 from agent_mesh.auth import AUTH_PROTOCOL, auth_stream_handler, authenticate_with_peer
 from agent_mesh.authorizer import ProviderAuthorizerOptions
 from agent_mesh.biscuit import ROLE_ROUTER, BiscuitVerificationError
@@ -86,9 +86,9 @@ def mint(peer_id: str, role: str, expiration: str = "2035-01-01T00:00:00Z", labe
 # What the control plane renders for a policy granting the node role every
 # A2A service on any target, and nothing else.
 POLICY_RULES = [
-    'granted_service_all("a2a") <- role("sam:role:node")',
-    'granted_service_all("sam:system") <- role("sam:role:node")',
-    'target_unrestricted(true) <- role("sam:role:node")',
+    'granted_service_all("a2a") <- role("mesh:role:node")',
+    'granted_service_all("mesh:system") <- role("mesh:role:node")',
+    'target_unrestricted(true) <- role("mesh:role:node")',
 ]
 
 
@@ -181,7 +181,7 @@ async def start_router(nursery, role=ROLE_ROUTER, trusted=(CP_KEY,), grants=True
 
 
 async def start_provider(nursery, biscuit_for, handshakes: list[str]):
-    """A provider answering /sam/auth and /libp2p-http as a member does, with
+    """A provider answering /mesh/auth and /libp2p-http as a member does, with
     whatever credential biscuit_for gives it; the handshakes it answers are
     recorded in handshakes."""
     identity = Identity.generate()
@@ -302,7 +302,7 @@ def test_join_fails_closed_when_the_router_is_not_a_router():
         async with trio.open_nursery() as nursery:
             _, addr = await start_router(nursery, role=ROLE_NODE)
             mesh = AgentMesh.enroll("http://127.0.0.1:1", bootstrap_token="sbt", transport=fake_control_plane([addr]))
-            with pytest.raises(RuntimeError, match="lacks expected role 'sam:role:router'"):
+            with pytest.raises(RuntimeError, match="lacks expected role 'mesh:role:router'"):
                 async with mesh.join():
                     pass
             nursery.cancel_scope.cancel()
@@ -803,7 +803,7 @@ def test_an_egress_floor_stated_at_join_is_held_on_the_http_path():
                 with pytest.raises(PermissionError, match="banned"):
                     await plain.request(provider_addr, "a2a://agent", "/card")
                 # Only nodes host services, as sam-node's checkPeerLabels requires.
-                with pytest.raises(BiscuitVerificationError, match="lacks expected role 'sam:role:node'"):
+                with pytest.raises(BiscuitVerificationError, match="lacks expected role 'mesh:role:node'"):
                     await held.request(not_a_node_addr, "a2a://agent", "/card")
             nursery.cancel_scope.cancel()
 

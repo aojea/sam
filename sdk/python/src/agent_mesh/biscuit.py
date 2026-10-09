@@ -26,10 +26,10 @@ from typing import Optional, Sequence
 import biscuit_auth as ba
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from ._proto import sam_pb2
+from ._proto import agentmesh_pb2
 from .tar import _DATALOG, effective_tar_expiration, encode_tar_block_fact, parse_tar_block_source
 
-ROLE_ROUTER = "sam:role:router"
+ROLE_ROUTER = "mesh:role:router"
 
 # Datalog evaluation budget, as in internal/identity.AuthorizerOptions.
 AUTHORIZER_MAX_FACTS = 1000
@@ -55,7 +55,7 @@ class VerifiedBiscuit:
     verifying_key: bytes
     roles: list[str] = field(default_factory=list)
     labels: dict[str, str] = field(default_factory=dict)
-    task_rules: list[sam_pb2.TaskAuthorizationRule] = field(default_factory=list)
+    task_rules: list[agentmesh_pb2.TaskAuthorizationRule] = field(default_factory=list)
     actor_node: Optional[str] = None
 
 
@@ -85,12 +85,12 @@ def _parse_with_trusted_keys(biscuit: bytes, trusted_keys: Sequence[bytes]) -> t
     return token, verifying_key
 
 
-def _extract_tar_chain(token: ba.Biscuit) -> list[sam_pb2.TaskAuthorizationRule]:
+def _extract_tar_chain(token: ba.Biscuit) -> list[agentmesh_pb2.TaskAuthorizationRule]:
     appended_count = token.block_count() - 1
     max_blocks = _DATALOG["max_attenuation_blocks"]
     if appended_count > max_blocks:
         raise BiscuitVerificationError(f"biscuit carries {appended_count} appended blocks; maximum is {max_blocks}")
-    task_rules: list[sam_pb2.TaskAuthorizationRule] = []
+    task_rules: list[agentmesh_pb2.TaskAuthorizationRule] = []
     for i in range(1, appended_count + 1):
         try:
             task_rules.append(parse_tar_block_source(token.block_source(i)))
@@ -162,7 +162,7 @@ def verify_peer_biscuit(
 
 def attenuate_biscuit(
     biscuit: bytes,
-    rule: sam_pb2.TaskAuthorizationRule,
+    rule: agentmesh_pb2.TaskAuthorizationRule,
     trusted_keys: Sequence[bytes],
 ) -> bytes:
     """Appends a non-authority block carrying a single tar_block("<base64url-proto>")

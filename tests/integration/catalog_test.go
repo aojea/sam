@@ -140,7 +140,7 @@ type authRoundTripper struct {
 
 func (a *authRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone := req.Clone(req.Context())
-	clone.Header.Set(api.HeaderSamAuthentication, "Bearer "+a.token)
+	clone.Header.Set(api.HeaderMeshAuthentication, "Bearer "+a.token)
 	return a.rt.RoundTrip(clone)
 }
 

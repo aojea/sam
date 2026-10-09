@@ -45,7 +45,7 @@ class AuthorizationError(Exception):
 class AuthorizeRequest:
     """What a caller asks for, as sam-node's RequestContext."""
 
-    # The caller's biscuit, as it arrived in the AuthFrame or X-Sam-Biscuit.
+    # The caller's biscuit, as it arrived in the AuthFrame or X-Mesh-Biscuit.
     biscuit: bytes
     # The peer at the other end of the authenticated connection.
     peer_id: str
@@ -153,7 +153,7 @@ def authorize_caller(req: AuthorizeRequest, options: ProviderAuthorizerOptions) 
                     method=req.method or "",
                     path=req.path,
                     mcp_tool=req.mcp_tool,
-                    allow_mcp_stream_init=req.method is None and not req.mcp_tool and req.protocol == "/sam/mcp/1.0.0",
+                    allow_mcp_stream_init=req.method is None and not req.mcp_tool and req.protocol == "/mesh/mcp/1.0.0",
                 ),
                 now,
             )

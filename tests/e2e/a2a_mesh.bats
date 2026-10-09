@@ -63,7 +63,7 @@ teardown() {
   [[ "$status" -eq 0 ]]
   mesh_wait_for_peer_connection 1 "${node2_peer_id}" 20
 
-  local mesh_base="http://${MESH_PREFIX}-node-1:8080/sam/${node2_peer_id}/a2a/echo"
+  local mesh_base="http://${MESH_PREFIX}-node-1:8080/mesh/${node2_peer_id}/a2a/echo"
 
   # Stock python client: resolves the card through the mesh (client.py asserts
   # the regenerated URLs, the gRPC drop and streaming-off) and gets an echo.
@@ -103,8 +103,8 @@ teardown() {
   echo "[$(date +%T)] Labelled send (region=us-east-1) must fail closed"
   run docker run --rm --network "${MESH_NETWORK}" python:3.12 curl -s -o /dev/null -w '%{http_code}' \
     -X POST "${mesh_base}/" \
-    -H "X-Sam-Authentication: Bearer secret-token" \
-    -H "X-Sam-Required-Labels: region=us-east-1" \
+    -H "X-Mesh-Authentication: Bearer secret-token" \
+    -H "X-Mesh-Required-Labels: region=us-east-1" \
     -H "Content-Type: application/json" \
     --max-time 30 \
     -d "${send_body}"

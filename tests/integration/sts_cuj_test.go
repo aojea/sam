@@ -142,7 +142,7 @@ func TestSTSTaskScopedSecurityCUJ(t *testing.T) {
 		upstreamInspectedHeader.Store(r.Header.Get("X-Ext-Proc-Inspected"))
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintf(w, `{"path":%q,"auth":%q,"roles":%q}`, r.URL.Path, r.Header.Get("Authorization"), r.Header.Get(api.HeaderSamRoles))
+		_, _ = fmt.Fprintf(w, `{"path":%q,"auth":%q,"roles":%q}`, r.URL.Path, r.Header.Get("Authorization"), r.Header.Get(api.HeaderMeshRoles))
 	}))
 	defer upstream.Close()
 
@@ -174,7 +174,7 @@ bindings:
     members: ["user:dev-user"]
   - role: contractor
     members: ["user:contractor-user"]
-  - role: sam:role:node
+  - role: mesh:role:node
     members: ["user:pep-user", "user:dev-user"]
 egress:
   - name: api.github.com
@@ -222,9 +222,9 @@ egress:
 		default:
 			mcpBackendCalls.Add(1)
 			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"PR #42 from %s peer=%s biscuit=%s"}]}}`,
-				r.Header.Get(api.HeaderSamPrincipal),
+				r.Header.Get(api.HeaderMeshPrincipal),
 				r.Header.Get(api.HeaderPeerID),
-				r.Header.Get(api.HeaderSamBiscuit))
+				r.Header.Get(api.HeaderMeshBiscuit))
 		}
 	}))
 	defer mcpBackend.Close()
@@ -371,14 +371,14 @@ egress:
 			}
 
 			// Forward the authorized request into caller node's mesh dataplane using the
-			// X-Sam-Biscuit injected by ext_authz.
-			meshURL := fmt.Sprintf("http://%s/sam/%s/egress/api.github.com%s", callerAPI, pepPeer, r.URL.Path)
+			// X-Mesh-Biscuit injected by ext_authz.
+			meshURL := fmt.Sprintf("http://%s/mesh/%s/egress/api.github.com%s", callerAPI, pepPeer, r.URL.Path)
 			fwdReq, err := http.NewRequestWithContext(r.Context(), r.Method, meshURL, r.Body)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			for _, h := range []string{api.HeaderSamBiscuit, api.HeaderSamPrincipal, api.HeaderSamRoles, api.HeaderSamTask} {
+			for _, h := range []string{api.HeaderMeshBiscuit, api.HeaderMeshPrincipal, api.HeaderMeshRoles, api.HeaderMeshTask} {
 				if v := checkResp.Header.Get(h); v != "" {
 					fwdReq.Header.Set(h, v)
 				}
@@ -394,7 +394,7 @@ egress:
 					w.Header().Add(k, v)
 				}
 			}
-			w.Header().Set(api.HeaderSamRoles, checkResp.Header.Get(api.HeaderSamRoles))
+			w.Header().Set(api.HeaderMeshRoles, checkResp.Header.Get(api.HeaderMeshRoles))
 			w.WriteHeader(fwdResp.StatusCode)
 			_, _ = io.Copy(w, fwdResp.Body)
 		}))
@@ -412,8 +412,8 @@ egress:
 		if respAllow.StatusCode != http.StatusOK {
 			t.Fatalf("ext_authz datapath allow status = %d, want 200: %s", respAllow.StatusCode, string(allowBody))
 		}
-		if got := respAllow.Header.Get(api.HeaderSamRoles); got != "contractor" {
-			t.Fatalf("ext_authz X-Sam-Roles = %q, want \"contractor\" (no node role leakage)", got)
+		if got := respAllow.Header.Get(api.HeaderMeshRoles); got != "contractor" {
+			t.Fatalf("ext_authz X-Mesh-Roles = %q, want \"contractor\" (no node role leakage)", got)
 		}
 		if !strings.Contains(string(allowBody), `"path":"/repos/acme/public/readme"`) || !strings.Contains(string(allowBody), `"auth":"Bearer ghp_upstream_secret"`) {
 			t.Fatalf("unexpected upstream datapath payload: %s", string(allowBody))
@@ -458,10 +458,10 @@ egress:
 			t.Fatal("empty access_token from /oauth/token")
 		}
 
-		baseMeshURL := fmt.Sprintf("http://%s/sam/%s/egress/api.github.com", callerAPI, pepPeer)
+		baseMeshURL := fmt.Sprintf("http://%s/mesh/%s/egress/api.github.com", callerAPI, pepPeer)
 		doWithCred := func(method, path, cred string) (int, string) {
 			req, _ := http.NewRequest(method, baseMeshURL+path, nil)
-			req.Header.Set(api.HeaderSamAuthentication, "Bearer "+cred)
+			req.Header.Set(api.HeaderMeshAuthentication, "Bearer "+cred)
 			resp, err := client.Do(req)
 			if err != nil {
 				t.Fatalf("%s %s: %v", method, path, err)
@@ -649,7 +649,7 @@ egress:
 			// Route /sam/... requests through caller node's real libp2p mesh proxy,
 			// and direct egress Host-routed requests to upstream.
 			targetBase := upstream.URL
-			if strings.HasPrefix(r.URL.Path, "/sam/") {
+			if strings.HasPrefix(r.URL.Path, "/mesh/") {
 				targetBase = "http://" + callerAPI
 			}
 			fwdReq, _ := http.NewRequestWithContext(r.Context(), r.Method, targetBase+r.URL.RequestURI(), strings.NewReader(string(bodyBytes)))
@@ -667,7 +667,7 @@ egress:
 
 		// 1. Egress credential brokering datapath over Gateway ext_proc:
 		//    Contractor sends contractorJWT with Host: api.github.com -> gateway ext_proc exchanges JWT,
-		//    strips contractorJWT, injects Authorization: Bearer ghp_upstream_secret & X-Sam-Roles: contractor,
+		//    strips contractorJWT, injects Authorization: Bearer ghp_upstream_secret & X-Mesh-Roles: contractor,
 		//    and forwards to upstream.
 		contractorJWT := mintToken(map[string]any{"sub": "contractor-user", "email": "contractor@example.com"})
 		egressReq, _ := http.NewRequest(http.MethodGet, gatewayProxy.URL+"/repos/acme/public/readme", nil)
@@ -707,11 +707,11 @@ egress:
 			t.Fatalf("expected mcpTaskBiscuit, got %v", mcpTokData)
 		}
 
-		mcpMeshPath := fmt.Sprintf("/sam/%s/mcp/github", pepPeer)
+		mcpMeshPath := fmt.Sprintf("/mesh/%s/mcp/github", pepPeer)
 
 		// 2a. Allowed MCP tool "get_pr" traverses:
 		//     gatewayProxy -> ext_proc (RequestHeaders -> ModeOverride BUFFERED -> RequestBody) ->
-		//     caller node (/sam/<pepPeer>/mcp/github) -> libp2p (/libp2p-http) -> pep node -> mcpBackend!
+		//     caller node (/mesh/<pepPeer>/mcp/github) -> libp2p (/libp2p-http) -> pep node -> mcpBackend!
 		mcpAllowReq, _ := http.NewRequest(http.MethodPost, gatewayProxy.URL+mcpMeshPath,
 			strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pr"}}`))
 		mcpAllowReq.Header.Set("Authorization", "Bearer "+mcpTaskBiscuit)
@@ -753,7 +753,7 @@ egress:
 		//     and enforces the Task Biscuit's tool:get_pr constraint with 403 Forbidden!
 		directMeshDenyReq, _ := http.NewRequest(http.MethodPost, "http://"+callerAPI+mcpMeshPath,
 			strings.NewReader(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"delete_repo"}}`))
-		directMeshDenyReq.Header.Set(api.HeaderSamAuthentication, "Bearer "+mcpTaskBiscuit)
+		directMeshDenyReq.Header.Set(api.HeaderMeshAuthentication, "Bearer "+mcpTaskBiscuit)
 		directMeshDenyReq.Header.Set("Content-Type", "application/json")
 		directMeshDenyResp, err := client.Do(directMeshDenyReq)
 		if err != nil {

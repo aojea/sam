@@ -19,8 +19,8 @@ import { CID } from "multiformats/cid";
 import * as raw from "multiformats/codecs/raw";
 import { sha256 } from "multiformats/hashes/sha2";
 
-/** The DHT protocol, go-libp2p-kad-dht with dht.ProtocolPrefix("/sam"). */
-export const DHT_PROTOCOL = "/sam/kad/1.0.0";
+/** The DHT protocol, go-libp2p-kad-dht with dht.ProtocolPrefix("/mesh"). */
+export const DHT_PROTOCOL = "/mesh/kad/1.0.0";
 
 export type ServiceType = "mcp" | "inference" | "a2a" | "egress";
 
@@ -30,7 +30,7 @@ export function isServiceType(value: unknown): value is ServiceType {
 
 /** The DHT key of a service: by type and name, or by type alone when name is omitted. */
 export async function serviceCID(type: ServiceType, name?: string): Promise<CID> {
-  const key = ["sam:service", type, ...(name !== undefined && name !== "" ? [name] : [])].join(":");
+  const key = ["mesh:service", type, ...(name !== undefined && name !== "" ? [name] : [])].join(":");
   return CID.createV1(raw.code, await sha256.digest(new TextEncoder().encode(key)));
 }
 

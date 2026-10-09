@@ -228,7 +228,7 @@ for i in $(seq 1 30); do
 done
 pause 2
 
-caption "One token per member, minted for its role. The office node gets sam:role:node and the label site=office; the agent gets the role agent."
+caption "One token per member, minted for its role. The office node gets mesh:role:node and the label site=office; the agent gets the role agent."
 type_in "$ADMIN" "export URL=$URL"
 expect "$ADMIN" "make tokens URL=\$URL" 'tokens in' 30
 # The developer receives the token out of band; here, over ssh.

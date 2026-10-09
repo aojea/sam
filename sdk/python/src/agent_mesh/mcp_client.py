@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""MCP over a mesh stream, the client side of sam-node's /sam/mcp/1.0.0
+"""MCP over a mesh stream, the client side of sam-node's /mesh/mcp/1.0.0
 (internal/node/gate.go): an AuthFrame naming the service, the provider's
 AuthResponse, then JSON-RPC messages each with a varint length prefix."""
 
@@ -32,7 +32,7 @@ from libp2p.utils.varint import encode_varint_prefixed
 from mcp import ClientSession
 from mcp.shared.message import SessionMessage
 
-from ._proto import sam_pb2 as pb
+from ._proto import agentmesh_pb2 as pb
 from .auth import (
     AUTH_HANDSHAKE_TIMEOUT,
     MAX_AUTH_FRAME_BYTES,
@@ -113,7 +113,7 @@ async def open_mcp_session(
     required_labels: Optional[Mapping[str, str]] = None,
     egress_require_labels: Optional[Mapping[str, str]] = None,
 ) -> AsyncIterator[tuple[ClientSession, VerifiedBiscuit]]:
-    """Opens /sam/mcp/1.0.0 to a connected provider with `frame`, this member's
+    """Opens /mesh/mcp/1.0.0 to a connected provider with `frame`, this member's
     AuthFrame naming the service, verifies the provider and yields an
     initialized MCP ClientSession with the provider's credential; egress_require_labels
     is the session's, not the caller's (require_egress_labels)."""

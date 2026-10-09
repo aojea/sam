@@ -35,7 +35,7 @@ labelled `testnet-health` names the failed check.
 ## What they are not
 
 The testnets run on donated resources with no uptime commitment. Their
-policy binds `sam:system:authenticated` to `sam:role:node`, so anyone who
+policy binds `mesh:system:authenticated` to `mesh:role:node`, so anyone who
 can log in with Google or GitHub can enroll a node, and the demo services
 are granted to every node. Nothing that you publish from a node enrolled
 there is private. The testnets are a place to see the software work and the

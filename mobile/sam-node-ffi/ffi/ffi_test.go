@@ -52,7 +52,7 @@ func newMockMesh(t *testing.T) *mockMesh {
 	}
 	t.Cleanup(func() { _ = routerHost.Close() })
 
-	routerDHT, err := dht.New(routerHost, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	routerDHT, err := dht.New(routerHost, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mesh"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,10 +171,10 @@ func TestMobileFFILifecycle(t *testing.T) {
 func TestEnrollNodeBootstrap(t *testing.T) {
 	mesh := newMockMesh(t)
 	dir := t.TempDir()
-	if err := EnrollNodeBootstrap(dir, mesh.url, " sam_dev_join-token\n", true, `{"region":"eu-west-1"}`); err != nil {
+	if err := EnrollNodeBootstrap(dir, mesh.url, " mesh_dev_join-token\n", true, `{"region":"eu-west-1"}`); err != nil {
 		t.Fatalf("EnrollNodeBootstrap failed: %v", err)
 	}
-	if mesh.bootstrapRequest.BootstrapToken != "sam_dev_join-token" {
+	if mesh.bootstrapRequest.BootstrapToken != "mesh_dev_join-token" {
 		t.Fatalf("bootstrap token not sent (trimmed) to /enroll, got %q", mesh.bootstrapRequest.BootstrapToken)
 	}
 	if mesh.bootstrapRequest.Labels["region"] != "eu-west-1" {

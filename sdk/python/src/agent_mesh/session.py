@@ -36,7 +36,7 @@ from libp2p.tools.anyio_service import background_trio_service
 from mcp import ClientSession
 
 from ._proto import circuit_pb2 as circuit
-from ._proto import sam_pb2 as pb
+from ._proto import agentmesh_pb2 as pb
 from .auth import AUTH_PROTOCOL, auth_stream_handler, authenticate_with_peer
 from .authorizer import ProviderAuthorizerOptions
 from .biscuit import ROLE_ROUTER, VerifiedBiscuit, attenuate_biscuit, require_role, seal_biscuit
@@ -190,7 +190,7 @@ class MeshSession:
     @staticmethod
     def mesh_url(peer_id: str, target_service: str, path: str = "") -> str:
         """The URL an httpx client on `MeshTransport` uses for a service on a
-        peer: http://mesh/sam/<peer-id>/<type>/<name>/<path>, the shape of
+        peer: http://mesh/mesh/<peer-id>/<type>/<name>/<path>, the shape of
         sam-node's egress proxy and of an agent card rewritten for the mesh."""
         return mesh_url(canonical_peer_id(peer_id), target_service, path)
 
@@ -596,7 +596,7 @@ class MeshSession:
         body: bytes | str | None = None,
     ) -> HTTPResponse:
         """Calls an inference or A2A service on a provider over /libp2p-http,
-        the way sam-node's egress proxy does for /sam/<peer>/<type>/<name>/<path>."""
+        the way sam-node's egress proxy does for /mesh/<peer>/<type>/<name>/<path>."""
         peer_id = await self._egress_peer(peer)
         return await http_request_over_stream(
             self.host, peer_id, self.biscuit, target_service, path, method=method, headers=headers, body=body

@@ -176,7 +176,7 @@ func TestIdentityBanCoversUserSurfaceAndOwnedTokens(t *testing.T) {
 		t.Fatalf("/user/status before ban: %d %s", status, body)
 	}
 	_, nodeID := h.register(sub)
-	status, minted := h.userToken(sub, `{"role":"sam:role:node","max_usages":5}`)
+	status, minted := h.userToken(sub, `{"role":"mesh:role:node","max_usages":5}`)
 	if status != http.StatusCreated {
 		t.Fatalf("token before ban: %d %v", status, minted)
 	}
@@ -194,7 +194,7 @@ func TestIdentityBanCoversUserSurfaceAndOwnedTokens(t *testing.T) {
 			{http.MethodPost, "/user/bootstrap-tokens"},
 			{http.MethodPost, "/user/revoke?id=" + nodeID.String()},
 		} {
-			status, body := h.do(tc.method, tc.path, userJWT, []byte(`{"role":"sam:role:node"}`), "application/json")
+			status, body := h.do(tc.method, tc.path, userJWT, []byte(`{"role":"mesh:role:node"}`), "application/json")
 			if status != http.StatusForbidden {
 				t.Errorf("%s %s with a banned identity: got %d (%s), want 403", tc.method, tc.path, status, body)
 			}
@@ -217,7 +217,7 @@ func TestIdentityBanCoversUserSurfaceAndOwnedTokens(t *testing.T) {
 		// Another user's token, queued, then that user is banned.
 		const other = "queued-then-banned"
 		_, otherNode := h.register(other)
-		status, minted := h.userToken(other, `{"role":"sam:role:node","max_usages":1}`)
+		status, minted := h.userToken(other, `{"role":"mesh:role:node","max_usages":1}`)
 		if status != http.StatusCreated {
 			t.Fatalf("token: %d %v", status, minted)
 		}
@@ -267,7 +267,7 @@ func TestIdentityBanCoversUserSurfaceAndOwnedTokens(t *testing.T) {
 // concurrent enrollments on a 1-use token could all pass the read.
 func TestBootstrapTokenUsageCapHoldsUnderConcurrency(t *testing.T) {
 	h := newLifecycleHarness(t)
-	status, minted := h.userToken("issuer-of-one", `{"role":"sam:role:node","max_usages":1}`)
+	status, minted := h.userToken("issuer-of-one", `{"role":"mesh:role:node","max_usages":1}`)
 	if status != http.StatusCreated {
 		t.Fatalf("token: %d %v", status, minted)
 	}
@@ -319,7 +319,7 @@ func TestApproveRechecksTokenAndResolvesOnce(t *testing.T) {
 
 	queue := func(maxUsages int) (tokenID, requestID string) {
 		t.Helper()
-		status, minted := h.userToken("queuer", `{"role":"sam:role:node","max_usages":`+strconv.Itoa(maxUsages)+`}`)
+		status, minted := h.userToken("queuer", `{"role":"mesh:role:node","max_usages":`+strconv.Itoa(maxUsages)+`}`)
 		if status != http.StatusCreated {
 			t.Fatalf("token: %d %v", status, minted)
 		}
@@ -383,7 +383,7 @@ func TestApproveRechecksTokenAndResolvesOnce(t *testing.T) {
 
 	t.Run("exhausted since queued", func(t *testing.T) {
 		// Two requests queued on a 1-use token: only one approval can land.
-		status, minted := h.userToken("queuer", `{"role":"sam:role:node","max_usages":1}`)
+		status, minted := h.userToken("queuer", `{"role":"mesh:role:node","max_usages":1}`)
 		if status != http.StatusCreated {
 			t.Fatalf("token: %d %v", status, minted)
 		}
@@ -418,19 +418,19 @@ func TestApproveRechecksTokenAndResolvesOnce(t *testing.T) {
 func TestUserBootstrapTokenCeilings(t *testing.T) {
 	h := newLifecycleHarness(t)
 	for name, body := range map[string]string{
-		"ttl":    `{"role":"sam:role:node","ttl_hours":` + strconv.Itoa(userTokenMaxTTLHours+1) + `}`,
-		"usages": `{"role":"sam:role:node","max_usages":` + strconv.Itoa(userTokenMaxUsages+1) + `}`,
+		"ttl":    `{"role":"mesh:role:node","ttl_hours":` + strconv.Itoa(userTokenMaxTTLHours+1) + `}`,
+		"usages": `{"role":"mesh:role:node","max_usages":` + strconv.Itoa(userTokenMaxUsages+1) + `}`,
 	} {
 		if status, resp := h.userToken("greedy", body); status != http.StatusBadRequest {
 			t.Errorf("%s over the ceiling: got %d %v, want 400", name, status, resp)
 		}
 	}
-	if status, resp := h.userToken("modest", `{"role":"sam:role:node","ttl_hours":`+strconv.Itoa(userTokenMaxTTLHours)+`,"max_usages":`+strconv.Itoa(userTokenMaxUsages)+`}`); status != http.StatusCreated {
+	if status, resp := h.userToken("modest", `{"role":"mesh:role:node","ttl_hours":`+strconv.Itoa(userTokenMaxTTLHours)+`,"max_usages":`+strconv.Itoa(userTokenMaxUsages)+`}`); status != http.StatusCreated {
 		t.Errorf("at the ceiling: got %d %v, want 201", status, resp)
 	}
 	// Admins are not bounded.
 	status, body := h.do(http.MethodPost, "/user/bootstrap-tokens", "super-secret-admin-token",
-		[]byte(`{"role":"sam:role:router","ttl_hours":`+strconv.Itoa(userTokenMaxTTLHours*10)+`,"max_usages":`+strconv.Itoa(userTokenMaxUsages*10)+`}`), "application/json")
+		[]byte(`{"role":"mesh:role:router","ttl_hours":`+strconv.Itoa(userTokenMaxTTLHours*10)+`,"max_usages":`+strconv.Itoa(userTokenMaxUsages*10)+`}`), "application/json")
 	if status != http.StatusCreated {
 		t.Errorf("admin over the user ceiling: got %d (%s), want 201", status, body)
 	}

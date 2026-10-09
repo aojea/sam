@@ -28,9 +28,9 @@ from a2a.types import Message, Part, Role, SendMessageRequest
 
 async def send_once(url: str, prompt: str, context_id: str, required_labels: str = "") -> None:
     token = os.environ.get("SAM_API_TOKEN", "")
-    headers = {"X-Sam-Authentication": f"Bearer {token}"}
+    headers = {"X-Mesh-Authentication": f"Bearer {token}"}
     if required_labels:
-        headers["X-Sam-Required-Labels"] = required_labels
+        headers["X-Mesh-Required-Labels"] = required_labels
 
     async with httpx.AsyncClient(timeout=120.0, headers=headers) as http:
         card = await A2ACardResolver(http, url).get_agent_card()

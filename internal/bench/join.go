@@ -550,7 +550,7 @@ func unixClient(socket string) *http.Client {
 func discover(ctx context.Context, client *http.Client, service string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
-	url := "http://localhost/sam/service/discover?type=mcp&name=" + service + "&timeout=20s"
+	url := "http://localhost/mesh/service/discover?type=mcp&name=" + service + "&timeout=20s"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -587,7 +587,7 @@ func discover(ctx context.Context, client *http.Client, service string) ([]strin
 func initialize(ctx context.Context, client *http.Client, peer, service string) error {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
-	url := "http://localhost/sam/" + peer + "/mcp/" + service
+	url := "http://localhost/mesh/" + peer + "/mcp/" + service
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(mcpInitialize))
 	if err != nil {
 		return err

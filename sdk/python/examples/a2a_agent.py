@@ -54,7 +54,7 @@ class EchoExecutor(AgentExecutor):
 
 def a2a_app(agent_url: str) -> Starlette:
     """The A2A SDK's server, as its samples build it. The card names the agent
-    as the mesh reaches it: http://mesh/sam/<peer-id>/a2a/agent."""
+    as the mesh reaches it: http://mesh/mesh/<peer-id>/a2a/agent."""
     card = AgentCard(
         name="Echo agent",
         description="Answers every message with what it said and who sent it.",

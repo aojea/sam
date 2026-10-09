@@ -86,9 +86,9 @@ function newHost(): Promise<Libp2p> {
 // What the control plane renders for a policy granting the node role every
 // A2A service on any target, and nothing else.
 const POLICY_RULES = [
-  `granted_service_all("a2a") <- role("sam:role:node")`,
-  `granted_service_all("sam:system") <- role("sam:role:node")`,
-  `target_unrestricted(true) <- role("sam:role:node")`,
+  `granted_service_all("a2a") <- role("mesh:role:node")`,
+  `granted_service_all("mesh:system") <- role("mesh:role:node")`,
+  `target_unrestricted(true) <- role("mesh:role:node")`,
 ];
 
 function providerOptions(biscuit: Uint8Array): ProviderOptions {
@@ -121,7 +121,7 @@ function fakeA2AServer(req: http.IncomingMessage, res: http.ServerResponse): voi
   req.on("data", (c: Buffer) => (body += c.toString()));
   req.on("end", () => {
     backendSeen.push({ method: req.method ?? "", url: req.url ?? "", peer: req.headers["x-peer-id"] as string | undefined, body, encoding: req.headers["accept-encoding"] as string | undefined });
-    assert.equal(req.headers["x-sam-biscuit"], undefined, "biscuit leaked to the backend");
+    assert.equal(req.headers["x-mesh-biscuit"], undefined, "biscuit leaked to the backend");
     if (req.url === `/${AGENT_CARD_PATH}` && req.headers["x-card"] === "missing") {
       res.writeHead(404, { "content-type": "text/plain" });
       res.end("no card");
@@ -172,7 +172,7 @@ before(async () => {
   // Express app carrying the A2A SDK's handlers would.
   listenerAgent = await newHost();
   const listener = (req: http.IncomingMessage, res: http.ServerResponse) => {
-    listenerSeen.push({ url: req.url ?? "", peer: req.headers["x-peer-id"] as string | undefined, biscuit: req.headers["x-sam-biscuit"] as string | undefined });
+    listenerSeen.push({ url: req.url ?? "", peer: req.headers["x-peer-id"] as string | undefined, biscuit: req.headers["x-mesh-biscuit"] as string | undefined });
     res.writeHead(202, { "content-type": "text/plain" });
     res.end(`listener ${req.method} ${req.url}`);
   };
@@ -206,7 +206,7 @@ before(async () => {
       // An agent that declares its length, as a static file server would.
       return new Response(request.method === "HEAD" ? null : "x".repeat(42), { headers: { "content-type": "text/plain", "content-length": "42" } });
     }
-    return Response.json({ path: url.pathname + url.search, method: request.method, peer: request.headers.get("x-peer-id"), biscuit: request.headers.get("x-sam-biscuit"), echo: await request.text() });
+    return Response.json({ path: url.pathname + url.search, method: request.method, peer: request.headers.get("x-peer-id"), biscuit: request.headers.get("x-mesh-biscuit"), echo: await request.text() });
   };
   await handlerAgent.handle(HTTP_PROTOCOL, httpIngressHandler(a2aEndpoint({ handler }), providerOptions(mint(handlerAgent.peerId.toString(), ROLE_NODE))), {
     runOnLimitedConnection: true,
@@ -214,7 +214,7 @@ before(async () => {
 
   caller = await newHost();
   callerBiscuit = mint(caller.peerId.toString(), ROLE_NODE);
-  guestBiscuit = mint(caller.peerId.toString(), "sam:role:guest");
+  guestBiscuit = mint(caller.peerId.toString(), "mesh:role:guest");
 });
 
 after(async () => {
@@ -231,7 +231,7 @@ async function dial(to: Libp2p = agent): Promise<Connection> {
 
 test("the agent is forwarded the request with the caller's identity and without its biscuit", async () => {
   const conn = await dial();
-  const res = await httpRequestOverStream(conn, callerBiscuit, "a2a://agent", "/card?x=1", { headers: { "x-sam-biscuit": "spoof" } });
+  const res = await httpRequestOverStream(conn, callerBiscuit, "a2a://agent", "/card?x=1", { headers: { "x-mesh-biscuit": "spoof" } });
   assert.equal(res.status, 200);
   assert.equal(res.headers["x-backend"], "fake");
   assert.deepEqual(JSON.parse(res.text()), { path: "/card?x=1", echo: "" });
@@ -250,7 +250,7 @@ test("the agent is forwarded the request with the caller's identity and without 
 test("a fetch over the stream delivers an SSE body event by event", async () => {
   const conn = await dial();
   const url = meshURL(agent.peerId.toString(), "a2a://agent", "/stream");
-  assert.equal(url, `http://mesh/sam/${agent.peerId.toString()}/a2a/agent/stream`);
+  assert.equal(url, `http://mesh/mesh/${agent.peerId.toString()}/a2a/agent/stream`);
   const response = await fetchOverStream(conn, callerBiscuit, new Request(url));
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("content-type"), "text/event-stream");
@@ -315,7 +315,7 @@ test("rewriteAgentCard keeps only what the mesh carries", () => {
 
 test("a fetch handler sees the caller and the path, and its streaming body goes out as it is written", async () => {
   const conn = await dial(handlerAgent);
-  const res = await httpRequestOverStream(conn, callerBiscuit, "a2a://agent", "/tasks?x=1", { method: "POST", headers: { "x-sam-biscuit": "spoof", "content-type": "text/plain" }, body: "hello" });
+  const res = await httpRequestOverStream(conn, callerBiscuit, "a2a://agent", "/tasks?x=1", { method: "POST", headers: { "x-mesh-biscuit": "spoof", "content-type": "text/plain" }, body: "hello" });
   assert.equal(res.status, 200);
   assert.deepEqual(JSON.parse(res.text()), { path: "/tasks?x=1", method: "POST", peer: caller.peerId.toString(), biscuit: null, echo: "hello" });
 
@@ -349,7 +349,7 @@ test("a fetch handler sees the caller and the path, and its streaming body goes 
   const socket = streamToNodeDuplex(stream, handlerAgent.peerId.toString());
   const viaNode = await new Promise<{ status: number; body: string }>((resolve, reject) => {
     const req = http.request(
-      { method: "GET", path: "/a2a/agent/card", headers: { host: handlerAgent.peerId.toString(), "x-sam-biscuit": Buffer.from(callerBiscuit).toString("base64") }, createConnection: () => socket },
+      { method: "GET", path: "/a2a/agent/card", headers: { host: handlerAgent.peerId.toString(), "x-mesh-biscuit": Buffer.from(callerBiscuit).toString("base64") }, createConnection: () => socket },
       (r) => {
         let body = "";
         r.on("data", (c: Buffer) => (body += c.toString()));
@@ -366,7 +366,7 @@ test("a fetch handler sees the caller and the path, and its streaming body goes 
 
 test("a Node request listener sees the path relative to the agent and the verified caller", async () => {
   const conn = await dial(listenerAgent);
-  const res = await httpRequestOverStream(conn, callerBiscuit, "a2a://worker", "/tasks/1?q=1", { method: "POST", headers: { "x-sam-biscuit": "spoof" }, body: "{}" });
+  const res = await httpRequestOverStream(conn, callerBiscuit, "a2a://worker", "/tasks/1?q=1", { method: "POST", headers: { "x-mesh-biscuit": "spoof" }, body: "{}" });
   assert.equal(res.status, 202);
   assert.equal(res.text(), "listener POST /tasks/1?q=1");
   assert.deepEqual(listenerSeen.at(-1), { url: "/tasks/1?q=1", peer: caller.peerId.toString(), biscuit: undefined });
@@ -395,7 +395,7 @@ test("the ingress rejects a request without a biscuit and a dotted path", async 
   const socket = streamToNodeDuplex(stream, agent.peerId.toString());
   const status = await new Promise<number>((resolve, reject) => {
     const req = http.request(
-      { method: "GET", path: "/a2a/agent/../other/x", headers: { host: agent.peerId.toString(), "x-sam-biscuit": Buffer.from(callerBiscuit).toString("base64") }, createConnection: () => socket },
+      { method: "GET", path: "/a2a/agent/../other/x", headers: { host: agent.peerId.toString(), "x-mesh-biscuit": Buffer.from(callerBiscuit).toString("base64") }, createConnection: () => socket },
       (res) => {
         res.resume();
         resolve(res.statusCode ?? 0);
@@ -429,15 +429,15 @@ test("a dot segment is refused however it is spelled", async () => {
   }
   // Not dot segments: the request reaches the next check, the missing biscuit.
   for (const target of ["/a2a/agent/%2e%2ex/x", "/a2a/agent/..x/x", "/a2a/agent/x?p=../y"]) {
-    assert.deepEqual(await admitIngress({ method: "GET", target, headers: new Headers(), remotePeer: "peer" }, endpoint, options), { status: 401, text: "Missing X-Sam-Biscuit header" }, target);
+    assert.deepEqual(await admitIngress({ method: "GET", target, headers: new Headers(), remotePeer: "peer" }, endpoint, options), { status: 401, text: "Missing X-Mesh-Biscuit header" }, target);
   }
 });
 
 test("mesh URLs name a peer and a service", () => {
   const peer = "12D3KooWJ2Yhy3CKwVPDw7AnkxN5HbZbb65xDoRif54hdXXUzh1U";
-  assert.deepEqual(splitMeshURL(new URL(`http://mesh/sam/${peer}/a2a/agent`)), { peerId: peer, target: "/a2a/agent" });
-  assert.deepEqual(splitMeshURL(new URL(`http://anything:1/sam/${peer}/inference/llm/v1/models?x=1`)), { peerId: peer, target: "/inference/llm/v1/models?x=1" });
-  for (const bad of ["http://mesh/a2a/agent", `http://mesh/sam/${peer}`, `http://mesh/sam/${peer}/a2a`, "http://mesh/sam//a2a/agent"]) {
+  assert.deepEqual(splitMeshURL(new URL(`http://mesh/mesh/${peer}/a2a/agent`)), { peerId: peer, target: "/a2a/agent" });
+  assert.deepEqual(splitMeshURL(new URL(`http://anything:1/mesh/${peer}/inference/llm/v1/models?x=1`)), { peerId: peer, target: "/inference/llm/v1/models?x=1" });
+  for (const bad of ["http://mesh/a2a/agent", `http://mesh/mesh/${peer}`, `http://mesh/mesh/${peer}/a2a`, "http://mesh/mesh//a2a/agent"]) {
     assert.throws(() => splitMeshURL(new URL(bad)), TypeError);
   }
   assert.equal(meshHTTPTarget("a2a://agent"), "/a2a/agent");

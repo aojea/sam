@@ -87,7 +87,7 @@ func TestIdentityEvidenceRequiresStrongTransport(t *testing.T) {
 	}))
 
 	plainRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(plainRecorder, httptest.NewRequest(http.MethodGet, "/sam/identity", nil))
+	handler.ServeHTTP(plainRecorder, httptest.NewRequest(http.MethodGet, "/mesh/identity", nil))
 	if plainRecorder.Code != http.StatusForbidden {
 		t.Fatalf("plain TCP status = %d, want %d", plainRecorder.Code, http.StatusForbidden)
 	}
@@ -96,12 +96,12 @@ func TestIdentityEvidenceRequiresStrongTransport(t *testing.T) {
 	}
 
 	socketRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(socketRecorder, localSocketRequest(http.MethodGet, "/sam/identity"))
+	handler.ServeHTTP(socketRecorder, localSocketRequest(http.MethodGet, "/mesh/identity"))
 	if socketRecorder.Code != http.StatusOK {
 		t.Fatalf("socket status = %d, body = %s", socketRecorder.Code, socketRecorder.Body.String())
 	}
 
-	mtlsRequest := httptest.NewRequest(http.MethodGet, "/sam/identity", nil)
+	mtlsRequest := httptest.NewRequest(http.MethodGet, "/mesh/identity", nil)
 	mtlsRequest.TLS = &tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{{}}}}
 	mtlsRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(mtlsRecorder, mtlsRequest)
@@ -113,7 +113,7 @@ func TestIdentityEvidenceRequiresStrongTransport(t *testing.T) {
 func TestIdentityEvidenceReturnsVerifiableClosedResponse(t *testing.T) {
 	node, _, expiresAt := newIdentityEvidenceTestNode(t, map[string]string{"region": "us-east-1"})
 	recorder := httptest.NewRecorder()
-	handleIdentityEvidence(node, recorder, localSocketRequest(http.MethodGet, "/sam/identity"))
+	handleIdentityEvidence(node, recorder, localSocketRequest(http.MethodGet, "/mesh/identity"))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}

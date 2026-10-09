@@ -143,7 +143,7 @@ func startReadmissionMesh(t *testing.T, ctx context.Context) *readmissionMesh {
 	cp, err := controlplane.NewServer(controlplane.Options{
 		ListenAddr:            "127.0.0.1:0",
 		OIDCIssuer:            oidcURL,
-		AllowedAudiences:      []string{"sam-mesh-audience"},
+		AllowedAudiences:      []string{"agentmesh-audience"},
 		LeaseDuration:         5 * time.Second,
 		InsecureSkipTLSVerify: true,
 	}, store)

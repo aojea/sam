@@ -17,7 +17,7 @@ import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { fromBase64Url, toBase64Url } from "./bytes.ts";
 import { isServiceType } from "./discovery.ts";
 import { BASELINE_DATALOG } from "./gen/datalog.ts";
-import { TaskAuthorizationRuleSchema, type TaskAuthorizationRule, type TaskRule } from "./gen/sam_pb.ts";
+import { TaskAuthorizationRuleSchema, type TaskAuthorizationRule, type TaskRule } from "./gen/agentmesh_pb.ts";
 
 const TAR_BLOCK_SOURCE_RE = new RegExp(BASELINE_DATALOG.tar_block_source_pattern);
 const HTTP_METHOD_RE = new RegExp(BASELINE_DATALOG.http_method_syntax);

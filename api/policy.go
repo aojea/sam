@@ -16,7 +16,7 @@ package api
 
 const (
 	// SystemAuthenticated is a special member string representing any authenticated user.
-	SystemAuthenticated = "sam:system:authenticated"
+	SystemAuthenticated = "mesh:system:authenticated"
 )
 
 type ServiceConfig struct {

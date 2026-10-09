@@ -132,8 +132,8 @@ bindings:
     members: ["user:nodeB"]
   # This suite permutes service/target grants, not enrollment; every identity
   # (including the deliberately unknown one) must still get a seat.
-  - role: sam:role:node
-    members: ["sam:system:authenticated"]
+  - role: mesh:role:node
+    members: ["mesh:system:authenticated"]
 `
 	if err := os.WriteFile(controlPlanePolicyFile, []byte(controlPlanePolicyYAML), 0644); err != nil {
 		t.Fatal(err)
@@ -248,8 +248,8 @@ services:
 				homeA := filepath.Join(tmpDir, fmt.Sprintf("nodeA_%d", i))
 				apiTokenA := "tokenA"
 
-				// The seat comes from the sam:system:authenticated binding above,
-				// never from a roles claim naming sam:role:node.
+				// The seat comes from the mesh:system:authenticated binding above,
+				// never from a roles claim naming mesh:role:node.
 				jwtA := mintToken(tt.jwtClaims)
 
 				nodeA := launchNode(t, nodeBin, os.Environ(), homeA, "run",

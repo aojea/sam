@@ -24,8 +24,8 @@ import { Duplex } from "node:stream";
 import { AUTH_HANDSHAKE_TIMEOUT_MS } from "./auth.ts";
 import {
   HEADER_PEER_ID,
-  HEADER_SAM_BISCUIT,
-  HEADER_SAM_NO_TRAILING_SLASH,
+  HEADER_MESH_BISCUIT,
+  HEADER_MESH_NO_TRAILING_SLASH,
   admitIngress,
   httpIngressHandler,
   type A2AEndpoint,
@@ -107,12 +107,12 @@ async function serveListener(req: http.IncomingMessage, res: http.ServerResponse
   // X-Peer-Id is set, not added, so an inbound value cannot pose as the
   // verified peer.
   req.url = admission.path;
-  delete req.headers[HEADER_SAM_BISCUIT];
+  delete req.headers[HEADER_MESH_BISCUIT];
   req.headers[HEADER_PEER_ID] = remotePeer;
   if (admission.noTrailingSlash) {
-    req.headers[HEADER_SAM_NO_TRAILING_SLASH] = "true";
+    req.headers[HEADER_MESH_NO_TRAILING_SLASH] = "true";
   } else {
-    delete req.headers[HEADER_SAM_NO_TRAILING_SLASH];
+    delete req.headers[HEADER_MESH_NO_TRAILING_SLASH];
   }
   listener(req, res);
 }

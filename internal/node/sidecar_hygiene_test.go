@@ -27,13 +27,13 @@ import (
 // sibling service the caller was not granted.
 func TestHasDotSegment(t *testing.T) {
 	for path, want := range map[string]bool{
-		"/mcp/a/tools":        false,
-		"/mcp/a/../b/tools":   true,
-		"/mcp/a/./tools":      true,
-		"/mcp/a/..":           true,
-		"/mcp/a/x..y/tools":   false, // ".." inside a segment is just a name
-		"/mcp/a/tools/...":    false,
-		"/sam/p/mcp/a/../b/x": true,
+		"/mcp/a/tools":         false,
+		"/mcp/a/../b/tools":    true,
+		"/mcp/a/./tools":       true,
+		"/mcp/a/..":            true,
+		"/mcp/a/x..y/tools":    false, // ".." inside a segment is just a name
+		"/mcp/a/tools/...":     false,
+		"/mesh/p/mcp/a/../b/x": true,
 	} {
 		if got := hasDotSegment(path); got != want {
 			t.Errorf("hasDotSegment(%q) = %v, want %v", path, got, want)
@@ -42,7 +42,7 @@ func TestHasDotSegment(t *testing.T) {
 }
 
 // L30: an OpenAI SDK pointed at the sidecar with api_key=<sidecar token> plus
-// X-Sam-Authentication as a default header sends the token twice. The gate
+// X-Mesh-Authentication as a default header sends the token twice. The gate
 // stripped only the header it consumed and forwarded the other copy to the
 // remote inference provider.
 func TestWithAuthStripsDuplicateSidecarToken(t *testing.T) {
@@ -72,7 +72,7 @@ func TestWithAuthStripsDuplicateSidecarToken(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 			req.RemoteAddr = "127.0.0.1:12345"
 			if tc.samAuth != "" {
-				req.Header.Set(api.HeaderSamAuthentication, tc.samAuth)
+				req.Header.Set(api.HeaderMeshAuthentication, tc.samAuth)
 			}
 			if tc.authorization != "" {
 				req.Header.Set("Authorization", tc.authorization)
@@ -85,8 +85,8 @@ func TestWithAuthStripsDuplicateSidecarToken(t *testing.T) {
 			if got := seen.Get("Authorization"); got != tc.wantAuthorization {
 				t.Errorf("Authorization reaching the handler = %q, want %q", got, tc.wantAuthorization)
 			}
-			if seen.Get(api.HeaderSamAuthentication) != "" {
-				t.Error("X-Sam-Authentication reached the handler")
+			if seen.Get(api.HeaderMeshAuthentication) != "" {
+				t.Error("X-Mesh-Authentication reached the handler")
 			}
 		})
 	}

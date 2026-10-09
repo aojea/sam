@@ -119,7 +119,7 @@ start_node() {
 
   # Two real nodes join through the single port with the persisted join token.
   JOIN_TOKEN="$(cat "$SAM_ONE_DATA/join-token")"
-  [[ "$JOIN_TOKEN" == sam_tok_* ]]
+  [[ "$JOIN_TOKEN" == mesh_tok_* ]]
 
   # An OpenAI-compatible and MCP backend on node A's host, declared in node A's
   # configuration, as in docs/getting-started/your-own-mesh. Services only exist
@@ -219,7 +219,7 @@ EOF
 
   # Real Envoy proxy CUJ: when Docker is available, place Envoy in front of node B
   # with both ext_authz and ext_proc configured over gRPC h2c, and drive real
-  # inference (/v1/chat/completions) and MCP (/sam/<peer_a>/mcp/github) calls
+  # inference (/v1/chat/completions) and MCP (/mesh/<peer_a>/mcp/github) calls
   # through Envoy -> Node B -> sam-one Router -> Node A -> Backend.
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     envoy_port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
@@ -316,7 +316,7 @@ EOF
 
     envoy_ready=0
     for _ in $(seq 1 50); do
-      code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${envoy_port}/sam/${peer_a}/mcp/github" -X POST || true)"
+      code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${envoy_port}/mesh/${peer_a}/mcp/github" -X POST || true)"
       if [[ "$code" == "401" ]]; then
         envoy_ready=1
         break
@@ -332,7 +332,7 @@ EOF
     # 1. OpenAI inference completion through Envoy -> Node B -> Router -> Node A -> fake_openai.py
     run curl -sS -i "http://127.0.0.1:${envoy_port}/v1/chat/completions" \
       -H "Authorization: Bearer $task_biscuit" \
-      -H "X-Sam-Target-Service: inference://laptop-llm" \
+      -H "X-Mesh-Target-Service: inference://laptop-llm" \
       -H 'Content-Type: application/json' \
       -d '{"model":"e2e-model","messages":[{"role":"user","content":"hi through envoy"}]}'
     if [[ "$status" -ne 0 || "$output" != *"hello from the mesh"* ]]; then
@@ -351,8 +351,8 @@ EOF
     [[ -n "$mcp_task_biscuit" ]]
 
     # 2a. Allowed MCP tools/call ("get_pr") traverses Envoy (ext_authz + ext_proc body buffering) ->
-    #     Node B (/sam/<peer_a>/mcp/github) -> Router -> Node A -> MCP backend!
-    run curl -sS -i "http://127.0.0.1:${envoy_port}/sam/${peer_a}/mcp/github" \
+    #     Node B (/mesh/<peer_a>/mcp/github) -> Router -> Node A -> MCP backend!
+    run curl -sS -i "http://127.0.0.1:${envoy_port}/mesh/${peer_a}/mcp/github" \
       -H "Authorization: Bearer $mcp_task_biscuit" \
       -H "Content-Type: application/json" \
       -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pr"}}'
@@ -365,7 +365,7 @@ EOF
     fi
 
     # 2b. Disallowed MCP tools/call ("delete_repo") is blocked at Envoy by ext_proc body inspection with 403 Forbidden.
-    deny_code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${envoy_port}/sam/${peer_a}/mcp/github" \
+    deny_code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${envoy_port}/mesh/${peer_a}/mcp/github" \
       -H "Authorization: Bearer $mcp_task_biscuit" \
       -H "Content-Type: application/json" \
       -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"delete_repo"}}')"
@@ -388,7 +388,7 @@ EOF
   if [[ -n "${envoy_port:-}" ]]; then
     envoy_revoked_code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${envoy_port}/v1/chat/completions" \
       -H "Authorization: Bearer $task_biscuit" \
-      -H "X-Sam-Target-Service: inference://laptop-llm" \
+      -H "X-Mesh-Target-Service: inference://laptop-llm" \
       -H 'Content-Type: application/json' \
       -d '{"model":"e2e-model","messages":[{"role":"user","content":"revoked task via envoy"}]}')"
     [[ "$envoy_revoked_code" -eq 403 ]]
@@ -398,7 +398,7 @@ EOF
   # registered every configured service before its API came up, so its
   # absence here is a verdict, not a race.
   run curl -sf --unix-socket "$sock_b" \
-    "http://localhost/sam/service/discover?type=mcp&name=not-an-mcp-server&timeout=3s"
+    "http://localhost/mesh/service/discover?type=mcp&name=not-an-mcp-server&timeout=3s"
   [[ "$status" -eq 0 ]]
   [[ "$output" != *"$peer_a"* ]]
 

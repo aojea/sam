@@ -267,9 +267,9 @@ func TestHandleConnectTunnelRequiredLabels(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodConnect, "http://pg.internal.example:5432", nil)
 	req.Host = "pg.internal.example:5432"
-	req.Header.Set(api.HeaderSamRequiredLabels, ",,")
+	req.Header.Set(api.HeaderMeshRequiredLabels, ",,")
 	handleConnectTunnel(nil, rec, req)
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("malformed X-Sam-Required-Labels on CONNECT: got %d, want 400", rec.Code)
+		t.Fatalf("malformed X-Mesh-Required-Labels on CONNECT: got %d, want 400", rec.Code)
 	}
 }

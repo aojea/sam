@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// A provider in one process: a js-libp2p host that serves /sam/mcp/1.0.0
+// A provider in one process: a js-libp2p host that serves /mesh/mcp/1.0.0
 // the way sam-node does (AuthFrame in, AuthResponse out, then MCP over the
 // stream) with the official MCP server behind it. The real sam-node is
 // exercised by tests/integration/sdk_mesh_test.go.
@@ -34,7 +34,7 @@ import { AuthRejectedError, MAX_AUTH_FRAME_BYTES, MCP_PROTOCOL } from "./auth.ts
 import { ROLE_ROUTER, loadBiscuit, verifyPeerBiscuit } from "./biscuit.ts";
 import { ROLE_NODE } from "./controlplane.ts";
 import { parseServiceTarget, serviceCID } from "./discovery.ts";
-import { AuthFrameSchema, AuthResponseSchema } from "./gen/sam_pb.ts";
+import { AuthFrameSchema, AuthResponseSchema } from "./gen/agentmesh_pb.ts";
 import { Identity } from "./identity.ts";
 import { LabelsNotSatisfiedError, StreamTransport, openMCPSession, requireEgressLabels, requireLabels } from "./mcp.ts";
 
@@ -240,7 +240,7 @@ test("only a node is a provider, as sam-node's checkPeerLabels requires", async 
   providerBiscuit = mint(provider.peerId.toString(), ROLE_ROUTER, { region: "eu" });
   try {
     const conn = await caller.dial(provider.getMultiaddrs()[0] as Parameters<typeof caller.dial>[0]);
-    await assert.rejects(openMCPSession(conn, frame("mcp://calc"), [cpKey], {}, { region: "eu" }), /lacks expected role "sam:role:node"/);
+    await assert.rejects(openMCPSession(conn, frame("mcp://calc"), [cpKey], {}, { region: "eu" }), /lacks expected role "mesh:role:node"/);
   } finally {
     providerBiscuit = nodeBiscuit;
   }

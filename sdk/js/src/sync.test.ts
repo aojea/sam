@@ -45,7 +45,7 @@ import {
   MeshEvent_Type,
   MeshEventSchema,
   TokenRefreshResponseSchema,
-} from "./gen/sam_pb.ts";
+} from "./gen/agentmesh_pb.ts";
 import { Identity } from "./identity.ts";
 import { AgentMesh } from "./mesh.ts";
 import { BanSet, EVENT_FRESHNESS_MS, verifyMeshEvent } from "./sync.ts";

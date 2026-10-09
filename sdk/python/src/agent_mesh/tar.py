@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from importlib import resources
 from typing import Callable, Sequence
 
-from ._proto import sam_pb2
+from ._proto import agentmesh_pb2
 
 _DATALOG: dict = json.loads(resources.files("agent_mesh._gen").joinpath("datalog.json").read_text())
 
@@ -125,7 +125,7 @@ def _validate_tar_string_list(field_name: str, values: Sequence[str], check_elem
             raise ValueError(f"TaskRule.{field_name}[{i}]: {err}") from err
 
 
-def validate_task_rule(r: sam_pb2.TaskRule) -> None:
+def validate_task_rule(r: agentmesh_pb2.TaskRule) -> None:
     max_desc = _DATALOG["max_tar_description_length"]
     max_name = _DATALOG["max_tar_name_length"]
     if len(r.description.encode("utf-8")) > max_desc:
@@ -179,7 +179,7 @@ def validate_task_rule(r: sam_pb2.TaskRule) -> None:
         _validate_tar_string_list("operation.allowed_permissions", op.allowed_permissions, _check_perm)
 
 
-def validate_task_authorization_rule(rule: sam_pb2.TaskAuthorizationRule, require_non_empty_rules: bool = True) -> None:
+def validate_task_authorization_rule(rule: agentmesh_pb2.TaskAuthorizationRule, require_non_empty_rules: bool = True) -> None:
     max_name = _DATALOG["max_tar_name_length"]
     if len(rule.name.encode("utf-8")) > max_name:
         raise ValueError(f"TaskAuthorizationRule.name exceeds {max_name} bytes")
@@ -209,7 +209,7 @@ def validate_task_authorization_rule(rule: sam_pb2.TaskAuthorizationRule, requir
             raise ValueError(f"TaskAuthorizationRule.rules[{i}]: {err}") from err
 
 
-def encode_tar_block_payload(rule: sam_pb2.TaskAuthorizationRule) -> str:
+def encode_tar_block_payload(rule: agentmesh_pb2.TaskAuthorizationRule) -> str:
     validate_task_authorization_rule(rule, require_non_empty_rules=True)
     raw = rule.SerializeToString(deterministic=True)
     max_bytes = _DATALOG["max_tar_bytes"]
@@ -218,17 +218,17 @@ def encode_tar_block_payload(rule: sam_pb2.TaskAuthorizationRule) -> str:
     return _b64url_encode(raw)
 
 
-def encode_tar_block_fact(rule: sam_pb2.TaskAuthorizationRule) -> str:
+def encode_tar_block_fact(rule: agentmesh_pb2.TaskAuthorizationRule) -> str:
     b64 = encode_tar_block_payload(rule)
     return f'{_DATALOG["fact_tar_block"]}("{b64}")'
 
 
-def decode_tar_block_payload(b64_payload: str) -> sam_pb2.TaskAuthorizationRule:
+def decode_tar_block_payload(b64_payload: str) -> agentmesh_pb2.TaskAuthorizationRule:
     raw = _b64url_decode(b64_payload)
     max_bytes = _DATALOG["max_tar_bytes"]
     if len(raw) == 0 or len(raw) > max_bytes:
         raise ValueError(f"tar_block decoded payload size {len(raw)} out of bounds [1, {max_bytes}]")
-    rule = sam_pb2.TaskAuthorizationRule()
+    rule = agentmesh_pb2.TaskAuthorizationRule()
     try:
         rule.ParseFromString(raw)
     except Exception as err:  # noqa: BLE001
@@ -242,21 +242,21 @@ def decode_tar_block_payload(b64_payload: str) -> sam_pb2.TaskAuthorizationRule:
     return rule
 
 
-def parse_tar_block_source(block_source: str) -> sam_pb2.TaskAuthorizationRule:
+def parse_tar_block_source(block_source: str) -> agentmesh_pb2.TaskAuthorizationRule:
     m = _TAR_BLOCK_SOURCE_RE.match(block_source.strip())
     if not m:
         raise ValueError('non-authority block does not match single tar_block("<base64url>") grammar')
     return decode_tar_block_payload(m.group(1))
 
 
-def _tar_expire_datetime(rule: sam_pb2.TaskAuthorizationRule) -> datetime | None:
+def _tar_expire_datetime(rule: agentmesh_pb2.TaskAuthorizationRule) -> datetime | None:
     if not rule.HasField("expire_time"):
         return None
     ts = rule.expire_time
     return datetime.fromtimestamp(ts.seconds + ts.nanos / 1e9, tz=timezone.utc)
 
 
-def effective_tar_expiration(authority_expiration: datetime, rules: Sequence[sam_pb2.TaskAuthorizationRule]) -> datetime:
+def effective_tar_expiration(authority_expiration: datetime, rules: Sequence[agentmesh_pb2.TaskAuthorizationRule]) -> datetime:
     effective = authority_expiration
     for r in rules:
         exp = _tar_expire_datetime(r)
@@ -310,7 +310,7 @@ def match_http_path(pattern: str, req_path: str) -> bool:
     return req_path == pattern
 
 
-def match_task_rule(rule: sam_pb2.TaskRule, req: TaskRequestContext) -> bool:
+def match_task_rule(rule: agentmesh_pb2.TaskRule, req: TaskRequestContext) -> bool:
     if not rule.allowed_services:
         return False
     if not any(match_service_pattern(pat, req.service_type, req.service_name) for pat in rule.allowed_services):
@@ -338,7 +338,7 @@ def match_task_rule(rule: sam_pb2.TaskRule, req: TaskRequestContext) -> bool:
 
 
 def evaluate_task_rules(
-    chain: Sequence[sam_pb2.TaskAuthorizationRule],
+    chain: Sequence[agentmesh_pb2.TaskAuthorizationRule],
     req: TaskRequestContext,
     now: datetime,
 ) -> None:

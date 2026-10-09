@@ -73,7 +73,7 @@ test('generating a token shows a copyable value and lists it', async ({ page }) 
 
   await expect(page.locator('#token-result')).toBeHidden();
 
-  await page.selectOption('#token-role', 'sam:role:node');
+  await page.selectOption('#token-role', 'mesh:role:node');
   await page.fill('#token-desc', 'playwright smoke');
   await page.click('#form-generate-token button[type="submit"]');
 
@@ -93,7 +93,7 @@ test('generating a token shows a copyable value and lists it', async ({ page }) 
 
   // The new token must appear in the active token list after the refresh.
   await expect(page.locator('#table-bootstrap')).toContainText('root-admin');
-  await expect(page.locator('#table-bootstrap')).toContainText('sam:role:node');
+  await expect(page.locator('#table-bootstrap')).toContainText('mesh:role:node');
 });
 
 test('omitting the owner attributes the token to the session user', async ({ page }) => {
@@ -353,7 +353,7 @@ test('reported services render with type, labels and report time', async ({ page
     const status = await response.json();
     status.enrolled_nodes = [...(status.enrolled_nodes || []), {
       peer_id: PEER,
-      role: 'sam:role:node',
+      role: 'mesh:role:node',
       owner_id: 'root-admin',
       labels: { component: 'stvv', region: 'eu-west' },
     }];
@@ -408,8 +408,8 @@ test('revoked nodes disappear from the Nodes view and the node count', async ({ 
     const response = await route.fetch();
     const status = await response.json();
     status.enrolled_nodes = [
-      { peer_id: LIVE, role: 'sam:role:node', owner_id: 'root-admin' },
-      { peer_id: REVOKED, role: 'sam:role:node', owner_id: 'root-admin', banned: true },
+      { peer_id: LIVE, role: 'mesh:role:node', owner_id: 'root-admin' },
+      { peer_id: REVOKED, role: 'mesh:role:node', owner_id: 'root-admin', banned: true },
     ];
     await route.fulfill({ response, json: status });
   });

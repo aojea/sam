@@ -28,7 +28,7 @@ import (
 // A control plane hands a new device everything it needs to enroll in one
 // scannable string:
 //
-//	sam://enroll?server=<control-plane-url>&token=<bootstrap-token>
+//	mesh://enroll?server=<control-plane-url>&token=<bootstrap-token>
 //
 // The token is an ordinary bootstrap token (POST /enroll spends it), so the
 // URI grants exactly what the token grants: one enrollment, in the token's
@@ -43,7 +43,7 @@ import (
 
 const (
 	// EnrollURIScheme is the URI scheme of a device enrollment payload.
-	EnrollURIScheme = "sam"
+	EnrollURIScheme = "mesh"
 	// EnrollURIHost is the fixed host component; it names the action.
 	EnrollURIHost = "enroll"
 )

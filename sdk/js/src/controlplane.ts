@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Client for the control plane's mesh-protocol surface: protobuf over HTTP
-// (api/sam.proto). The operator plane (/admin/*, JSON) is out of scope.
+// (api/agentmesh.proto). The operator plane (/admin/*, JSON) is out of scope.
 
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { timestampMs, type Timestamp } from "@bufbuild/protobuf/wkt";
@@ -32,18 +32,18 @@ import {
   type BootstrapEnrollResponse,
   type ControlPlaneInfoResponse,
   type KeysResponse,
-} from "./gen/sam_pb.ts";
+} from "./gen/agentmesh_pb.ts";
 import type { Identity } from "./identity.ts";
 import { bytesEqual, toBase64, toBase64Url } from "./bytes.ts";
 import { verifyEd25519 } from "./identity.ts";
 
 export const PROTOBUF_CONTENT_TYPE = "application/x-protobuf";
-export const HEADER_CHALLENGE_TIMESTAMP = "X-Sam-Challenge-Ts";
-export const HEADER_CHALLENGE_SIGNATURE = "X-Sam-Challenge-Sig";
+export const HEADER_CHALLENGE_TIMESTAMP = "X-Mesh-Challenge-Ts";
+export const HEADER_CHALLENGE_SIGNATURE = "X-Mesh-Challenge-Sig";
 export const STALE_CHALLENGE_TIMESTAMP_MESSAGE = "stale or invalid challenge timestamp";
 
 /** The role a plain mesh member enrolls with (api.RoleNode). */
-export const ROLE_NODE = "sam:role:node";
+export const ROLE_NODE = "mesh:role:node";
 
 /** How far a signed /keys response's timestamp may drift from our clock. */
 export const KEYS_RESPONSE_FRESHNESS_MS = 5 * 60 * 1000;

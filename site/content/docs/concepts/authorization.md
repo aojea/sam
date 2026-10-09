@@ -23,7 +23,7 @@ appended task block denies the request, the answer is no.
 
 A node publishes services, each with a type and a name: `mcp://calculator`,
 `inference://vllm-eu`, `a2a://triage`, `egress://bigquery.googleapis.com`, and
-the built-in `system://sam.catalog` that answers discovery queries.
+the built-in `system://mesh.catalog` that answers discovery queries.
 
 Standing mesh roles grant access to services by name (`allowed_services`) and
 can narrow HTTP methods and paths (`http`). On top of standing roles, a
@@ -78,7 +78,7 @@ from a file (`--policy-file`).
 
 A member is one of: `user:`, `email:`, `group:` or `idp_role:` followed by a
 value from the identity's OIDC claims; `node:` followed by a peer ID; or the
-special value `sam:system:authenticated`, which matches every identity that
+special value `mesh:system:authenticated`, which matches every identity that
 the identity provider authenticates. Be careful with the last one. On a
 public identity provider it means everyone, so bind it only to roles with
 few grants.
@@ -86,8 +86,8 @@ few grants.
 Roles are never members and never claims. `role:x` is not a valid member,
 and an identity provider cannot give out a mesh role by putting it in a
 `roles` claim. Such a claim becomes an `idp_role` fact, and a binding can
-choose to honour it. The two built-in roles, `sam:role:node` and
-`sam:role:router`, follow the same rule: a binary can only enroll if a
+choose to honour it. The two built-in roles, `mesh:role:node` and
+`mesh:role:router`, follow the same rule: a binary can only enroll if a
 binding gives its identity the role it needs.
 
 The control plane validates a policy when it is posted. It rejects a policy
@@ -248,7 +248,7 @@ Labels are used in three places:
 - **A provider restricting callers** adds `check if label("region", "eu")`
   to its `attenuation.checks`. Every caller's credential must then carry
   that label.
-- **A caller choosing providers** sends `X-Sam-Required-Labels: region=eu`
+- **A caller choosing providers** sends `X-Mesh-Required-Labels: region=eu`
   on the node's `/v1` inference endpoints or on a proxied A2A request, or
   passes `required_labels` to `call_remote_tool`. Before it sends any request
   data, the calling node fetches the provider's credential through the

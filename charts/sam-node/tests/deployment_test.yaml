@@ -32,7 +32,7 @@ tests:
           content: "--bind-addr=127.0.0.1:8080"
       - equal:
           path: spec.template.spec.volumes[2].projected.sources[0].serviceAccountToken.audience
-          value: sam-mesh-audience
+          value: agentmesh-audience
 
   - it: does not opt into plaintext for an https control plane
     template: templates/deployment.yaml

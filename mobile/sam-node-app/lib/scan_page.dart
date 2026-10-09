@@ -3,7 +3,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'enroll_link.dart';
 
-/// Full-screen camera view that pops with the first `sam://enroll` link it
+/// Full-screen camera view that pops with the first `mesh://enroll` link it
 /// sees. Other codes are ignored with a hint rather than returned, so the
 /// caller never has to second-guess the result.
 class ScanEnrollCodePage extends StatefulWidget {
@@ -65,7 +65,7 @@ class _ScanEnrollCodePageState extends State<ScanEnrollCodePage> {
                 padding: const EdgeInsets.all(24),
                 child: Text(
                   'Camera unavailable: ${error.errorDetails?.message ?? error.errorCode.name}\n\n'
-                  'Paste the sam://enroll link or the token instead.',
+                  'Paste the mesh://enroll link or the token instead.',
                   textAlign: TextAlign.center,
                 ),
               ),

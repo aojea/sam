@@ -94,11 +94,11 @@ func (s *A2AService) Probe(ctx context.Context) error {
 // the fail-closed labels gate. On refusal it writes the HTTP error itself
 // and returns ok=false.
 func a2aEgressGate(node *SamNode, w http.ResponseWriter, r *http.Request, route egressRoute) (*http.Request, bool) {
-	if labelsHeader := r.Header.Get(api.HeaderSamRequiredLabels); labelsHeader != "" {
-		r.Header.Del(api.HeaderSamRequiredLabels)
+	if labelsHeader := r.Header.Get(api.HeaderMeshRequiredLabels); labelsHeader != "" {
+		r.Header.Del(api.HeaderMeshRequiredLabels)
 		required, err := parseRequiredLabels(labelsHeader)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Invalid %s header: %v", api.HeaderSamRequiredLabels, err), http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf("Invalid %s header: %v", api.HeaderMeshRequiredLabels, err), http.StatusBadRequest)
 			return r, false
 		}
 		pid, err := peer.Decode(route.peerID)
@@ -159,7 +159,7 @@ func a2aServeAgentCard(node *SamNode, rt http.RoundTripper, w http.ResponseWrite
 		http.Error(w, "Bad Gateway: agent card is not valid JSON", http.StatusBadGateway)
 		return true
 	}
-	base := fmt.Sprintf("http://%s/sam/%s/%s/%s", r.Host, route.peerID, route.serviceType, route.serviceName)
+	base := fmt.Sprintf("http://%s/mesh/%s/%s/%s", r.Host, route.peerID, route.serviceType, route.serviceName)
 	if err := regenerateAgentCardForMesh(&card, base); err != nil {
 		logger.Warnf("[A2A] agent card from %s unusable through the mesh: %v", route.peerID, err)
 		http.Error(w, fmt.Sprintf("Bad Gateway: %v", err), http.StatusBadGateway)

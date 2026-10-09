@@ -251,8 +251,8 @@ func TestSplitToolName(t *testing.T) {
 		},
 		{
 			name:        "Strict system catalog URI",
-			input:       "system://sam.catalog/some-tool",
-			wantService: "system://sam.catalog",
+			input:       "system://mesh.catalog/some-tool",
+			wantService: "system://mesh.catalog",
 			wantTool:    "some-tool",
 			wantErr:     false,
 		},

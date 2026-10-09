@@ -26,8 +26,8 @@ may call it and how.
 {
   "roles": [
     {
-      "name": "sam:role:node",
-      "allowed_services": ["system://sam.catalog"],
+      "name": "mesh:role:node",
+      "allowed_services": ["system://mesh.catalog"],
       "allowed_targets": ["*"]
     },
     {
@@ -44,7 +44,7 @@ may call it and how.
     }
   ],
   "bindings": [
-    { "role": "sam:role:node", "members": ["group:platform", "group:external"] },
+    { "role": "mesh:role:node", "members": ["group:platform", "group:external"] },
     { "role": "pep",           "members": ["group:platform"] },
     { "role": "contractor",    "members": ["group:external"] }
   ],
@@ -157,8 +157,8 @@ A member whose role grants `egress://api.github.com` reaches the same
 destination through its own node, which finds the serving node by name:
 
 ```bash
-curl -sS -H "X-Sam-Authentication: Bearer $TOKEN" \
-  "http://127.0.0.1:8080/sam/$PEP_PEER_ID/egress/api.github.com/repos/acme/dubbing/pulls"
+curl -sS -H "X-Mesh-Authentication: Bearer $TOKEN" \
+  "http://127.0.0.1:8080/mesh/$PEP_PEER_ID/egress/api.github.com/repos/acme/dubbing/pulls"
 ```
 
 The serving node evaluates the member's credential. With the policy above a

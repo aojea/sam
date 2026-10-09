@@ -59,12 +59,12 @@ func newReverseProxyHandler(targetURL string) (http.Handler, error) {
 	u := target.url
 	return &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			noTrailingSlash := pr.In.Header.Get(api.HeaderSamNoTrailingSlash) == "true"
+			noTrailingSlash := pr.In.Header.Get(api.HeaderMeshNoTrailingSlash) == "true"
 			pr.SetURL(u)
 			// The inbound Host is whatever the remote peer sent; the backend
 			// is addressed by its configured URL.
 			pr.Out.Host = u.Host
-			pr.Out.Header.Del(api.HeaderSamNoTrailingSlash)
+			pr.Out.Header.Del(api.HeaderMeshNoTrailingSlash)
 			target.apply(pr.Out.Header)
 			if noTrailingSlash && !strings.HasSuffix(u.Path, "/") && strings.HasSuffix(pr.Out.URL.Path, "/") {
 				pr.Out.URL.Path = strings.TrimSuffix(pr.Out.URL.Path, "/")
@@ -177,7 +177,7 @@ func buildRegisterRequest(sCfg api.ServiceConfig) (*api.RegisterServiceRequest, 
 
 // serviceKeyToCID hashes "sam:service[:part]..." into a DHT rendezvous CID.
 func serviceKeyToCID(parts ...string) (cid.Cid, error) {
-	srvKey := strings.Join(append([]string{"sam:service"}, parts...), ":")
+	srvKey := strings.Join(append([]string{"mesh:service"}, parts...), ":")
 	hash, err := multihash.Sum([]byte(srvKey), multihash.SHA2_256, -1)
 	if err != nil {
 		return cid.Undef, err

@@ -48,9 +48,9 @@ import { canonicalPeerId } from "./identity.ts";
 export const HTTP_PROTOCOL = "/libp2p-http";
 
 /** Headers of the mesh HTTP datapath (api/network.go). */
-export const HEADER_SAM_BISCUIT = "x-sam-biscuit";
+export const HEADER_MESH_BISCUIT = "x-mesh-biscuit";
 export const HEADER_PEER_ID = "x-peer-id";
-export const HEADER_SAM_NO_TRAILING_SLASH = "x-sam-no-trailing-slash";
+export const HEADER_MESH_NO_TRAILING_SLASH = "x-mesh-no-trailing-slash";
 
 /** Options for libp2p.handle() so the agent is reachable over relayed connections. */
 export const HTTP_HANDLER_OPTIONS = { runOnLimitedConnection: true };
@@ -59,12 +59,12 @@ export const HTTP_HANDLER_OPTIONS = { runOnLimitedConnection: true };
 export const DEFAULT_A2A_NAME = "agent";
 
 /**
- * The path prefix of a mesh URL, http://mesh/sam/<peer-id>/<type>/<name>/<path>:
+ * The path prefix of a mesh URL, http://mesh/mesh/<peer-id>/<type>/<name>/<path>:
  * the shape of sam-node's egress proxy and of an agent card rewritten for the
  * mesh, by sam-node or by this SDK. The host is ignored; the peer ID is in the
  * path because URL parsers lowercase the host and a peer ID is case-sensitive.
  */
-export const MESH_PATH_PREFIX = "/sam/";
+export const MESH_PATH_PREFIX = "/mesh/";
 
 /** The well-known agent card location (A2A spec / RFC 8615). */
 export const AGENT_CARD_PATH = ".well-known/agent-card.json";
@@ -176,7 +176,7 @@ export interface IngressAdmission {
 /**
  * Server-side admission of /libp2p-http, as sam-node's StartIngressServer:
  * the path is /<type>/<name>[/<upstream>], the caller's biscuit is
- * X-Sam-Biscuit, and the request is authorized for <type>://<name> before
+ * X-Mesh-Biscuit, and the request is authorized for <type>://<name> before
  * anything is forwarded. Only the agent's own endpoint is answered; anything
  * else is 404 after authorization, so an unauthorized caller learns nothing
  * about it.
@@ -199,9 +199,9 @@ export async function admitIngress(req: IngressRequest, endpoint: A2AEndpoint, o
   }
   const upstreamPath = rest.join("/");
 
-  const biscuitB64 = req.headers.get(HEADER_SAM_BISCUIT);
+  const biscuitB64 = req.headers.get(HEADER_MESH_BISCUIT);
   if (biscuitB64 === null || biscuitB64 === "") {
-    return { status: 401, text: "Missing X-Sam-Biscuit header" };
+    return { status: 401, text: "Missing X-Mesh-Biscuit header" };
   }
   let biscuit: Uint8Array;
   try {
@@ -210,7 +210,7 @@ export async function admitIngress(req: IngressRequest, endpoint: A2AEndpoint, o
       throw new Error("empty");
     }
   } catch {
-    return { status: 400, text: "Invalid X-Sam-Biscuit encoding" };
+    return { status: 400, text: "Invalid X-Mesh-Biscuit encoding" };
   }
 
   const targetService = `${serviceType}://${serviceName}`;
@@ -248,7 +248,7 @@ export async function admitIngress(req: IngressRequest, endpoint: A2AEndpoint, o
 }
 
 /** Headers of the mesh datapath and of the hop itself, not passed on to the agent. */
-const HOP_HEADERS = new Set([HEADER_SAM_BISCUIT, HEADER_SAM_NO_TRAILING_SLASH, HEADER_PEER_ID, "host", "connection", "transfer-encoding", "content-length", "keep-alive"]);
+const HOP_HEADERS = new Set([HEADER_MESH_BISCUIT, HEADER_MESH_NO_TRAILING_SLASH, HEADER_PEER_ID, "host", "connection", "transfer-encoding", "content-length", "keep-alive"]);
 
 /**
  * The headers the agent sees: the request's own, less the datapath's, with
@@ -264,7 +264,7 @@ export function agentHeaders(inbound: Headers, remotePeer: string, noTrailingSla
   });
   headers.set(HEADER_PEER_ID, remotePeer);
   if (noTrailingSlash) {
-    headers.set(HEADER_SAM_NO_TRAILING_SLASH, "true");
+    headers.set(HEADER_MESH_NO_TRAILING_SLASH, "true");
   }
   return headers;
 }
@@ -387,7 +387,7 @@ export function meshHTTPTarget(targetService: string, path = ""): string {
 
 /**
  * The URL a fetch bound to a session (session.fetch()) takes for a service
- * on a peer: http://mesh/sam/<peer-id>/<type>/<name>/<path>.
+ * on a peer: http://mesh/mesh/<peer-id>/<type>/<name>/<path>.
  */
 export function meshURL(peerId: string, targetService: string, path = ""): string {
   return "http://mesh" + MESH_PATH_PREFIX + canonicalPeerId(peerId) + meshHTTPTarget(targetService, path);
@@ -501,7 +501,7 @@ export interface HTTPStreamOptions {
 /**
  * Client side of /libp2p-http, as go-libp2p-http's RoundTripper: one stream
  * per request, plain HTTP/1.1 with Host set to the peer ID and the biscuit in
- * X-Sam-Biscuit. Resolves once the response headers are in; the body streams
+ * X-Mesh-Biscuit. Resolves once the response headers are in; the body streams
  * after, so an SSE response is consumed as the peer sends it. An agent card
  * is served rewritten for the mesh (rewriteAgentCard), as sam-node serves one.
  */
@@ -537,12 +537,12 @@ async function sendOverStream(conn: Connection, biscuit: Uint8Array, request: Re
 
   const headers = new Headers();
   request.headers.forEach((value, name) => {
-    if (name !== "host" && name !== "content-length" && name !== "transfer-encoding" && name !== HEADER_SAM_BISCUIT && name !== HEADER_PEER_ID) {
+    if (name !== "host" && name !== "content-length" && name !== "transfer-encoding" && name !== HEADER_MESH_BISCUIT && name !== HEADER_PEER_ID) {
       headers.set(name, value);
     }
   });
   headers.set("host", peerId);
-  headers.set(HEADER_SAM_BISCUIT, toBase64(biscuit));
+  headers.set(HEADER_MESH_BISCUIT, toBase64(biscuit));
   const body = request.body === null ? new Uint8Array(0) : new Uint8Array(await request.arrayBuffer());
   headers.set("content-length", String(body.length));
 

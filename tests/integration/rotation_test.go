@@ -50,7 +50,7 @@ func TestKeyRotationIntegration(t *testing.T) {
   - members: ["user:mock-user"]
     role: admin
   - members: ["user:mock-user"]
-    role: sam:role:node
+    role: mesh:role:node
 roles:
   - name: admin
     allowed_services: ["*"]
@@ -132,7 +132,7 @@ roles:
 	nodeLogFile, _ := os.Create(nodeLogPath)
 	defer func() { _ = nodeLogFile.Close() }()
 
-	// The owner socket serves /sam/identity, the node's own credential;
+	// The owner socket serves /mesh/identity, the node's own credential;
 	// t.TempDir is too long for a socket path.
 	socketDir, err := os.MkdirTemp("", "sam-rot-")
 	if err != nil {
@@ -173,7 +173,7 @@ roles:
 	// retirement matters: read the credential the way an owner application
 	// would and find its signer among the control plane's live keys.
 	var initial api.IdentityEvidenceResponse
-	getIdentityEvidenceJSON(t, socketClient, "/sam/identity", &initial)
+	getIdentityEvidenceJSON(t, socketClient, "/mesh/identity", &initial)
 	nodePeer, err := peer.Decode(initial.PeerId)
 	if err != nil {
 		t.Fatalf("decode node PeerID from evidence: %v", err)
@@ -190,7 +190,7 @@ roles:
 	}
 
 	var current api.IdentityEvidenceResponse
-	getIdentityEvidenceJSON(t, socketClient, "/sam/identity", &current)
+	getIdentityEvidenceJSON(t, socketClient, "/mesh/identity", &current)
 	if _, err := verifyBiscuitForApplication(current.Biscuit, nodePeer, publicKeysFrom(fetchPublicKeys(t, cpPort))); err != nil {
 		t.Fatalf("node credential does not verify under the current control plane keys after its signer retired: %v\n--- node.log ---\n%s", err, readLog(t, nodeLogPath))
 	}

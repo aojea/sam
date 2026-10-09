@@ -196,7 +196,7 @@ admin_api() {
 mint_token() {
   local uses=$(( COUNT + 2 * LATE + 5 ))
   admin_api POST /admin/bootstrap-tokens -H 'Content-Type: application/json' \
-    -d "{\"role\":\"sam:role:node\",\"max_usages\":${uses},\"ttl_hours\":48,\"description\":\"member-journey ${COUNT}+${LATE} from $(hostname)\"}" \
+    -d "{\"role\":\"mesh:role:node\",\"max_usages\":${uses},\"ttl_hours\":48,\"description\":\"member-journey ${COUNT}+${LATE} from $(hostname)\"}" \
     > "$OUT/token.json" || fail "minting a bootstrap token failed"
   python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["token"])' "$OUT/token.json" > "$OUT/bootstrap-token"
   TOKEN_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$OUT/token.json")

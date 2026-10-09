@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// MCP over a mesh stream, the client side of sam-node's /sam/mcp/1.0.0
+// MCP over a mesh stream, the client side of sam-node's /mesh/mcp/1.0.0
 // (internal/node/gate.go): an AuthFrame naming the service, the provider's
 // AuthResponse, then JSON-RPC messages each with a varint length prefix.
 
@@ -147,7 +147,7 @@ export function requireEgressLabels(provider: VerifiedBiscuit, required: Record<
 }
 
 /**
- * Opens /sam/mcp/1.0.0 to a connected provider for targetService ("" is the
+ * Opens /mesh/mcp/1.0.0 to a connected provider for targetService ("" is the
  * provider's own catalog), verifies the provider, and returns a connected
  * MCP client. frame is this member's AuthFrame for that service; egressRequireLabels
  * is the session's, not the caller's (requireEgressLabels).
