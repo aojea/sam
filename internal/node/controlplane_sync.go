@@ -193,7 +193,7 @@ func (n *AgentMeshNode) syncMeshInfo(ctx context.Context, controlPlaneURL string
 	if err != nil {
 		return err
 	}
-	if len(info.RouterAddresses) > 0 {
+	if len(info.RouterAddresses) > 0 || len(info.GetRouters()) > 0 {
 		pubKey, _, loadErr := n.Store.LoadMeshConfig()
 		switch {
 		case loadErr != nil:
@@ -208,6 +208,9 @@ func (n *AgentMeshNode) syncMeshInfo(ctx context.Context, controlPlaneURL string
 				n.config.RouterAddrs = addrs
 			}
 		}
+		// What the node chooses its routers from, with the labels and load
+		// the stored addresses do not carry.
+		n.setRouterCatalog(candidatesFromInfo(ctx, info))
 	}
 	n.reconcileBannedPeers(info.GetBannedPeerIds(), fetchedAt)
 	return nil

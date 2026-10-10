@@ -14,100 +14,57 @@
 
 package node
 
-import (
-	"context"
+import "context"
 
-	"github.com/multiformats/go-multiaddr"
-)
-
-type routerConnectionManager interface {
-	IsConnected() bool
-	LoadMeshConfig() ([]byte, []string, error)
-	ConnectAndAuthWithRouter(ctx context.Context, addr multiaddr.Multiaddr) error
-	LoadControlPlaneURL() (string, error)
-
-	SaveMeshConfig(pubKey []byte, addrs []string) error
-	UpdateRelays(addrs []multiaddr.Multiaddr)
+// routerAttacher is the node as the connection monitor sees it: how many
+// routers it keeps, how many it wants, and the two ways to get more.
+type routerAttacher interface {
+	// AttachedRouters is how many routers the node holds a live session with
+	// among those it keeps.
+	AttachedRouters() int
+	// WantRouters is how many it keeps: Options.Routers, or every router it
+	// knows of when there are fewer.
+	WantRouters() int
+	// TopUp attaches to more routers from what the node knows and returns how
+	// many it then keeps.
+	TopUp(ctx context.Context) int
+	// RefreshRouters re-reads the routers from the control plane.
+	RefreshRouters(ctx context.Context) error
 }
 
-// checkRouterConnection monitors the connection to the routers and attempts to recover it if disconnected.
-// It returns two booleans indicating the current state of the connection:
-// - stable: true if the connection was already established and is healthy.
-// - reconnected: true if the connection was lost but successfully recovered during this check.
+// checkRouterConnection keeps the node attached to the routers it wants.
+// It returns two booleans:
+//   - stable: the node holds at least one router and did not have to
+//     recover one on this check. Short of its count but on the mesh, it
+//     tops up and still reports stable: the mesh is there, the margin is
+//     being restored.
+//   - reconnected: the node had no router and found one, either among the
+//     routers it already knew of or after re-reading them from the control
+//     plane. Neither is a failure of the mesh.
 //
-// The recovery process follows these steps:
-//  1. Connection Check: If already connected, return (stable=true, reconnected=false).
-//  2. P2P Retry: If disconnected, attempt to reconnect using the known P2P multiaddresses stored locally.
-//  3. HTTP Fallback: If P2P retries fail, fall back to HTTP discovery using the stored Control plane URL to fetch
-//     the new router addresses and Peer IDs, update the local config, and attempt to reconnect.
-//  4. Total Failure: If all reconnection attempts fail, return (stable=false, reconnected=false).
-func checkRouterConnection(ctx context.Context, mgr routerConnectionManager) (stable bool, reconnected bool) {
-	if mgr.IsConnected() {
+// Only a node left with no router at all, after both, reports a failure;
+// the caller counts those and exits on too many in a row.
+func checkRouterConnection(ctx context.Context, mgr routerAttacher) (stable bool, reconnected bool) {
+	have, want := mgr.AttachedRouters(), mgr.WantRouters()
+	if have > 0 {
+		if have < want {
+			logger.Infof("[Monitor] Attached to %d of %d routers; attaching to more", have, want)
+			mgr.TopUp(ctx)
+		}
 		return true, false
 	}
 
-	logger.Warn("[Monitor] Disconnected from router. Attempting to reconnect...")
-
-	var p2pAddrs []multiaddr.Multiaddr
-	if _, storedAddrs, err := mgr.LoadMeshConfig(); err == nil {
-		for _, addrStr := range storedAddrs {
-			if ma, err := multiaddr.NewMultiaddr(addrStr); err == nil {
-				p2pAddrs = append(p2pAddrs, ma)
-			}
-		}
-	}
-
-	var connectedAddrs []multiaddr.Multiaddr
-	for _, addr := range p2pAddrs {
-		if err := mgr.ConnectAndAuthWithRouter(ctx, addr); err == nil {
-			logger.Infof("[Monitor] Successfully reconnected to router via P2P: %s", addr)
-			connectedAddrs = append(connectedAddrs, addr)
-		}
-	}
-	if len(connectedAddrs) > 0 {
-		mgr.UpdateRelays(connectedAddrs)
+	logger.Warn("[Monitor] Disconnected from every router. Attempting to reconnect...")
+	if mgr.TopUp(ctx) > 0 {
 		return false, true
 	}
-
-	controlPlaneURL, err := mgr.LoadControlPlaneURL()
-	if err != nil || controlPlaneURL == "" {
+	logger.Infof("[Monitor] No known router admitted this node. Re-reading the routers from the control plane...")
+	if err := mgr.RefreshRouters(ctx); err != nil {
+		logger.Warnf("[Monitor] Could not re-read the routers: %v", err)
 		return false, false
 	}
-
-	logger.Infof("[Monitor] Reconnect P2P failed. Discovering control plane info from %s...", controlPlaneURL)
-	info, err := FetchControlPlaneInfo(ctx, controlPlaneURL)
-	if err != nil || len(info.RouterAddresses) == 0 {
-		return false, false
-	}
-
-	var newRouterAddrs []multiaddr.Multiaddr
-	for _, addrStr := range info.RouterAddresses {
-		if ma, err := multiaddr.NewMultiaddr(addrStr); err == nil {
-			newRouterAddrs = append(newRouterAddrs, ma)
-		}
-	}
-
-	if len(newRouterAddrs) == 0 {
-		return false, false
-	}
-
-	if pubKeyBytes, _, err := mgr.LoadMeshConfig(); err == nil {
-		if saveErr := mgr.SaveMeshConfig(pubKeyBytes, info.RouterAddresses); saveErr != nil {
-			logger.Errorf("[Monitor] Failed to save updated mesh config: %v", saveErr)
-		}
-	}
-
-	var connectedAddrsFallback []multiaddr.Multiaddr
-	for _, addr := range newRouterAddrs {
-		if err := mgr.ConnectAndAuthWithRouter(ctx, addr); err == nil {
-			logger.Infof("[Monitor] Successfully reconnected to router via HTTP fallback: %s", addr)
-			connectedAddrsFallback = append(connectedAddrsFallback, addr)
-		}
-	}
-	if len(connectedAddrsFallback) > 0 {
-		mgr.UpdateRelays(connectedAddrsFallback)
+	if mgr.TopUp(ctx) > 0 {
 		return false, true
 	}
-
 	return false, false
 }

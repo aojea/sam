@@ -764,7 +764,7 @@ func TestConnectToRouters_EmptyAddrs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = node.connectToRouters(context.Background(), nil)
+	err = node.connectToRouters(context.Background(), "", nil)
 	if err == nil || !strings.Contains(err.Error(), "returned no router addresses") {
 		t.Fatalf("Expected no router addresses error, got: %v", err)
 	}

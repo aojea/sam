@@ -18,122 +18,80 @@ import (
 	"context"
 	"errors"
 	"testing"
-
-	"github.com/google/agentmesh/api"
-	"github.com/multiformats/go-multiaddr"
 )
 
-type mockRouterConnectionManager struct {
-	connected          bool
-	meshConfigErr      error
-	storedAddrs        []string
-	controlPlaneURLErr error
-	controlPlaneURL    string
-	discoverErr        error
-	discoverResp       *api.ControlPlaneInfoResponse
-	connectP2PErr      error
-	connectHTTPReq     bool
-	connectHTTPErr     error
-	saveConfigErr      error
+// fakeAttacher scripts a node for the monitor: how many routers it holds,
+// how many it wants, how many each top-up yields, and whether the control
+// plane answers.
+type fakeAttacher struct {
+	attached   int
+	want       int
+	topUps     []int // what AttachedRouters reads after each TopUp, in order
+	refreshErr error
+	refreshed  bool
+	topUpCalls int
 }
 
-func (m *mockRouterConnectionManager) IsConnected() bool {
-	return m.connected
-}
-
-func (m *mockRouterConnectionManager) LoadMeshConfig() ([]byte, []string, error) {
-	return nil, m.storedAddrs, m.meshConfigErr
-}
-
-func (m *mockRouterConnectionManager) ConnectAndAuthWithRouter(ctx context.Context, addr multiaddr.Multiaddr) error {
-	if m.connectHTTPReq {
-		return m.connectHTTPErr
+func (f *fakeAttacher) AttachedRouters() int { return f.attached }
+func (f *fakeAttacher) WantRouters() int     { return f.want }
+func (f *fakeAttacher) TopUp(context.Context) int {
+	if f.topUpCalls < len(f.topUps) {
+		f.attached = f.topUps[f.topUpCalls]
 	}
-	return m.connectP2PErr
+	f.topUpCalls++
+	return f.attached
 }
-
-func (m *mockRouterConnectionManager) LoadControlPlaneURL() (string, error) {
-	return m.controlPlaneURL, m.controlPlaneURLErr
+func (f *fakeAttacher) RefreshRouters(context.Context) error {
+	f.refreshed = true
+	return f.refreshErr
 }
-
-func (m *mockRouterConnectionManager) DiscoverControlPlaneInfo(ctx context.Context, url string) (*api.ControlPlaneInfoResponse, error) {
-	return m.discoverResp, m.discoverErr
-}
-
-func (m *mockRouterConnectionManager) SaveMeshConfig(pubKey []byte, addrs []string) error {
-	return m.saveConfigErr
-}
-
-func (m *mockRouterConnectionManager) UpdateRelays(addrs []multiaddr.Multiaddr) {}
 
 func TestCheckRouterConnection(t *testing.T) {
 	cases := []struct {
-		name       string
-		mgr        *mockRouterConnectionManager
-		wantStable bool
-		wantReconn bool
+		name          string
+		mgr           *fakeAttacher
+		wantStable    bool
+		wantReconn    bool
+		wantTopUps    int
+		wantRefreshed bool
 	}{
 		{
-			name: "already connected",
-			mgr: &mockRouterConnectionManager{
-				connected: true,
-			},
+			name:       "holds every router it wants",
+			mgr:        &fakeAttacher{attached: 2, want: 2},
 			wantStable: true,
-			wantReconn: false,
 		},
 		{
-			name: "disconnected, reconnects via P2P",
-			mgr: &mockRouterConnectionManager{
-				connected:     false,
-				storedAddrs:   []string{"/ip4/127.0.0.1/tcp/4001"},
-				connectP2PErr: nil,
-			},
-			wantStable: false,
+			// On the mesh with one router short: the margin is restored,
+			// and this is not a failure of the mesh.
+			name:       "short of its count tops up and stays stable",
+			mgr:        &fakeAttacher{attached: 1, want: 2, topUps: []int{2}},
+			wantStable: true,
+			wantTopUps: 1,
+		},
+		{
+			name:       "no router, reattaches from what it knows",
+			mgr:        &fakeAttacher{attached: 0, want: 2, topUps: []int{1}},
 			wantReconn: true,
+			wantTopUps: 1,
 		},
 		{
-			name: "disconnected, P2P fails, reconnects via HTTP",
-			mgr: &mockRouterConnectionManager{
-				connected:       false,
-				storedAddrs:     []string{"/ip4/127.0.0.1/tcp/4001"},
-				connectP2PErr:   errors.New("p2p failed"),
-				controlPlaneURL: "https://cp.example.com",
-				discoverResp: &api.ControlPlaneInfoResponse{
-					RouterAddresses: []string{"/ip4/127.0.0.1/tcp/4002"},
-				},
-				connectHTTPReq: true,
-				connectHTTPErr: nil,
-			},
-			wantStable: false,
-			wantReconn: true,
+			name:          "no router, reattaches after re-reading the control plane",
+			mgr:           &fakeAttacher{attached: 0, want: 2, topUps: []int{0, 2}},
+			wantReconn:    true,
+			wantTopUps:    2,
+			wantRefreshed: true,
 		},
 		{
-			name: "disconnected, all fail",
-			mgr: &mockRouterConnectionManager{
-				connected:       false,
-				storedAddrs:     []string{"/ip4/127.0.0.1/tcp/4001"},
-				connectP2PErr:   errors.New("p2p failed"),
-				controlPlaneURL: "https://cp.example.com",
-				discoverResp: &api.ControlPlaneInfoResponse{
-					RouterAddresses: []string{"/ip4/127.0.0.1/tcp/4002"},
-				},
-				connectHTTPReq: true,
-				connectHTTPErr: errors.New("http fallback connect failed"),
-			},
-			wantStable: false,
-			wantReconn: false,
+			name:          "no router, control plane unreachable",
+			mgr:           &fakeAttacher{attached: 0, want: 2, topUps: []int{0}, refreshErr: errors.New("dial tcp: connection refused")},
+			wantTopUps:    1,
+			wantRefreshed: true,
 		},
 		{
-			name: "disconnected, HTTP discovery fails",
-			mgr: &mockRouterConnectionManager{
-				connected:       false,
-				storedAddrs:     []string{"/ip4/127.0.0.1/tcp/4001"},
-				connectP2PErr:   errors.New("p2p failed"),
-				controlPlaneURL: "https://cp.example.com",
-				discoverErr:     errors.New("discovery failed"),
-			},
-			wantStable: false,
-			wantReconn: false,
+			name:          "no router admits it even after re-reading",
+			mgr:           &fakeAttacher{attached: 0, want: 2, topUps: []int{0, 0}},
+			wantTopUps:    2,
+			wantRefreshed: true,
 		},
 	}
 
@@ -141,10 +99,16 @@ func TestCheckRouterConnection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stable, reconnected := checkRouterConnection(context.Background(), tc.mgr)
 			if stable != tc.wantStable {
-				t.Errorf("expected stable %v, got %v", tc.wantStable, stable)
+				t.Errorf("stable = %v, want %v", stable, tc.wantStable)
 			}
 			if reconnected != tc.wantReconn {
-				t.Errorf("expected reconnected %v, got %v", tc.wantReconn, reconnected)
+				t.Errorf("reconnected = %v, want %v", reconnected, tc.wantReconn)
+			}
+			if tc.mgr.topUpCalls != tc.wantTopUps {
+				t.Errorf("top-ups = %d, want %d", tc.mgr.topUpCalls, tc.wantTopUps)
+			}
+			if tc.mgr.refreshed != tc.wantRefreshed {
+				t.Errorf("refreshed = %v, want %v", tc.mgr.refreshed, tc.wantRefreshed)
 			}
 		})
 	}

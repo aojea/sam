@@ -171,7 +171,15 @@ type AgentMeshNode struct {
 	RouterPeerID         peer.ID
 	authenticatedRouters map[peer.ID]bool
 	// redialing holds the routers a redialRouter goroutine is working on.
-	redialing             map[peer.ID]bool
+	redialing map[peer.ID]bool
+	// routerCatalog is every router the node knows of; attached are the
+	// Options.Routers of them it keeps a session with; shunned are the ones
+	// it stays off until the time given, having been sent away or having
+	// not come back. connMgr protects the attached ones from being trimmed.
+	routerCatalog         []routerCandidate
+	attached              map[peer.ID]bool
+	shunned               map[peer.ID]time.Time
+	connMgr               *connmgr.BasicConnMgr
 	peerLastEventTime     map[string]int64
 	mu                    sync.Mutex
 	nodeConfig            *NodeConfigComplete
@@ -532,18 +540,23 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 	// Layer 2: Attach the Bouncer (Gater)
 	gater := &nodeConnGate{node: n}
 
-	// The routers, one entry per peer with every address it is known by;
-	// they double as the static relays.
-	staticRelays := routerPeers(ctx, n.config.RouterAddrs)
+	// The routers, one entry per peer with every address it is known by.
+	// SyncControlPlane may already have listed them with labels and load;
+	// otherwise they are the stored addresses, which say nothing more.
+	if len(n.routerCandidates()) == 0 {
+		n.setRouterCatalog(candidatesFromAddrs(ctx, n.config.RouterAddrs))
+	}
+	staticRelays := n.routerCandidates()
 	if n.RouterPeerID == "" && len(staticRelays) > 0 {
 		n.RouterPeerID = staticRelays[0].ID
 	}
-	logger.Infof("Configured %d static relays: %v", len(staticRelays), staticRelays)
+	logger.Infof("Configured %d routers, attaching to %d: %v", len(staticRelays), n.wantRouters(), staticRelays)
 
 	cm, err := connmgr.NewConnManager(100, 400, connmgr.WithGracePeriod(time.Minute))
 	if err != nil {
 		return fmt.Errorf("failed to create connection manager: %w", err)
 	}
+	n.connMgr = cm
 
 	// Layer 1: Transports & NAT Services. TLS first: Go peers and the
 	// Node/Python SDKs land on it. Noise is what a browser can speak, and a
@@ -574,7 +587,6 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 
 	// If we have routers, configure them as our static fallback relays for NAT hole-punching
 	if len(staticRelays) > 0 {
-		n.currentRelays = staticRelays
 		opts = append(opts, libp2p.EnableAutoRelayWithPeerSource(
 			func(ctx context.Context, numPeers int) <-chan peer.AddrInfo {
 				logger.Infof("[Relay] AutoRelay called PeerSource for %d peers", numPeers)
@@ -589,10 +601,15 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 					case <-ctx.Done():
 						logger.Infof("[Relay] PeerSource context done")
 					case <-n.authSuccess:
-						logger.Infof("[Relay] Yielding static relays to AutoRelay")
-						// Shuffle the relays to distribute load evenly across routers
-						shuffled := make([]peer.AddrInfo, len(currentRelays))
-						copy(shuffled, currentRelays)
+						// The routers the node is attached to, which are the
+						// ones that will grant it a reservation; shuffled so
+						// a fleet spreads its reservations across them.
+						n.mu.Lock()
+						attachedRelays := n.currentRelays
+						n.mu.Unlock()
+						logger.Infof("[Relay] Yielding %d attached routers to AutoRelay", len(attachedRelays))
+						shuffled := make([]peer.AddrInfo, len(attachedRelays))
+						copy(shuffled, attachedRelays)
 						rand.Shuffle(len(shuffled), func(i, j int) {
 							shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 						})
@@ -603,6 +620,7 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 				}()
 				return c
 			},
+			autorelay.WithNumRelays(n.config.Routers),
 			autorelay.WithBootDelay(n.config.AutoRelayBootDelay),
 			autorelay.WithBackoff(n.config.AutoRelayBackoff),
 			autorelay.WithMinInterval(n.config.AutoRelayMinInterval),
@@ -643,15 +661,18 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 			n.mu.Lock()
 			_, wasAuthenticated := n.authenticatedRouters[remotePeer]
 			delete(n.authenticatedRouters, remotePeer)
+			attached := n.attached[remotePeer]
 			n.mu.Unlock()
 			if wasAuthenticated {
 				logger.Warnf("[AuthN] Router %s disconnected; clearing authenticated session so the next check re-handshakes", remotePeer)
-				n.redialRouter(ctx, remotePeer)
+				if attached {
+					n.redialRouter(ctx, remotePeer)
+				}
 			}
 		},
 	})
 
-	// Permanently add the static relay address to the peerstore so we can build relay paths later
+	// Permanently add the router addresses to the peerstore so we can build relay paths later
 	for _, pi := range staticRelays {
 		h.Peerstore().AddAddrs(pi.ID, pi.Addrs, peerstore.PermanentAddrTTL)
 	}
@@ -687,7 +708,7 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 	n.services.reprovideNow = n.triggerReprovide
 	n.applyPendingEgress(ctx)
 
-	authenticated, err := n.admitByRouters(ctx, staticRelays)
+	authenticated, err := n.admitByRouters(ctx)
 	if err != nil {
 		return err
 	}
@@ -993,23 +1014,44 @@ dhtLoop:
 	return nil
 }
 
-// admitByRouters runs authWithRouters until a router admits this node, with
-// RouterRedialDelay doubling between attempts, up to RouterAuthAttempts of
-// them. A router that is up but slow, as every router is while a fleet
-// joins through it, fails the first handshake on its deadline and admits
-// the node on the next; without the retry a member that had just enrolled
-// exited at that first deadline. A router that refuses the credential ends
-// it at once, and no router at all is reported as before. authenticated is
-// false with a nil error only when there are no routers to admit the node.
-func (n *AgentMeshNode) admitByRouters(ctx context.Context, routers []peer.AddrInfo) (authenticated bool, err error) {
-	if len(routers) == 0 {
+// admitByRouters attaches the node to the routers it keeps and returns as
+// soon as one has admitted it, retrying with RouterRedialDelay doubling
+// between attempts, up to RouterAuthAttempts of them. Each attempt chooses
+// afresh from the catalog, re-read from the control plane when it can be,
+// so a router that is up but slow, as every router is while a fleet joins
+// through it, admits the node on the next attempt, and a router that
+// restarts with the labels a selector names is found when it is back. A
+// router that refuses the credential ends it at once, and no router at all
+// is reported as before. authenticated is false with a nil error only when
+// the node knows of no router to admit it.
+func (n *AgentMeshNode) admitByRouters(ctx context.Context) (authenticated bool, err error) {
+	if len(n.routerCandidates()) == 0 {
 		return false, nil
+	}
+	biscuitBytes, err := n.loadIdentityForAuth()
+	if err != nil {
+		return false, fmt.Errorf("fatal auth failure: %w", err)
 	}
 	delay := n.config.RouterRedialDelay
 	for attempt := 1; ; attempt++ {
-		authenticated, fatal := n.authWithRouters(ctx, routers)
-		if authenticated {
-			return true, nil
+		if attempt > 1 {
+			if refreshErr := n.refreshRouterCatalog(ctx); refreshErr != nil {
+				logger.Debugf("[AuthN] Routers not re-read from the control plane: %v", refreshErr)
+			}
+		}
+		targets := n.pickRouters(n.wantRouters())
+		var fatal error
+		if len(targets) > 0 {
+			results := n.dialAndAttach(ctx, targets, biscuitBytes)
+			for range targets {
+				err := <-results
+				if err == nil {
+					return true, nil
+				}
+				if errors.Is(err, ErrFatalAuth) {
+					fatal = err
+				}
+			}
 		}
 		if fatal != nil {
 			return false, fmt.Errorf("fatal auth failure: %w", fatal)
@@ -1025,34 +1067,6 @@ func (n *AgentMeshNode) admitByRouters(ctx context.Context, routers []peer.AddrI
 		}
 		delay *= 2
 	}
-}
-
-// authWithRouters dials every router at once and returns as soon as one has
-// admitted this node, or once all have refused. A router that is down costs
-// its dial timeout; paid up front and one router after another, that was
-// every member's cold-join cost for as long as the control plane still
-// listed a router that had gone. The dials still in flight finish in the
-// background and record their sessions as they land; the connection monitor
-// re-handshakes whatever drops later.
-func (n *AgentMeshNode) authWithRouters(ctx context.Context, routers []peer.AddrInfo) (authenticated bool, fatal error) {
-	if len(routers) == 0 {
-		return false, nil
-	}
-	biscuitBytes, err := n.loadIdentityForAuth()
-	if err != nil {
-		return false, err
-	}
-	results := n.dialRouters(ctx, routers, biscuitBytes)
-	for range routers {
-		err := <-results
-		if err == nil {
-			return true, nil
-		}
-		if errors.Is(err, ErrFatalAuth) {
-			fatal = err
-		}
-	}
-	return false, fatal
 }
 
 // dialRouters runs authRouter against every router at once and delivers one
@@ -1116,9 +1130,13 @@ func (n *AgentMeshNode) redialRouter(ctx context.Context, router peer.ID) {
 			if n.isAuthenticatedAndConnected(router) {
 				return
 			}
+			if !n.isAttached(router) {
+				return
+			}
 			addrs := n.Host.Peerstore().Addrs(router)
 			if len(addrs) == 0 {
-				logger.Warnf("[AuthN] Router %s dropped and no address for it is known; leaving it to the connection monitor", router)
+				logger.Warnf("[AuthN] Router %s dropped and no address for it is known; replacing it", router)
+				n.detach(router)
 				return
 			}
 			err := n.authRouter(ctx, peer.AddrInfo{ID: router, Addrs: addrs}, biscuitBytes)
@@ -1129,12 +1147,18 @@ func (n *AgentMeshNode) redialRouter(ctx context.Context, router peer.ID) {
 			}
 			if errors.Is(err, ErrFatalAuth) {
 				logger.Warnf("[AuthN] Router %s refused this node's credential on redial: %v", router, err)
+				n.detach(router)
+				n.shun(router, n.config.RouterShunDuration)
 				return
 			}
 			logger.Debugf("[AuthN] Redial %d of router %s failed: %v", attempt, router, err)
 			delay *= 2
 		}
-		logger.Warnf("[AuthN] Router %s did not come back within %d redials; leaving it to the connection monitor", router, n.config.RouterRedialAttempts)
+		// Given up: the monitor tops up from the other routers, and this one
+		// is a candidate again once it is back on /info and the shun lapses.
+		logger.Warnf("[AuthN] Router %s did not come back within %d redials; replacing it", router, n.config.RouterRedialAttempts)
+		n.detach(router)
+		n.shun(router, n.config.RouterShunDuration)
 	}()
 }
 

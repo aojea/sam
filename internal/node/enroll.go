@@ -31,7 +31,6 @@ import (
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -82,7 +81,7 @@ func (n *AgentMeshNode) Enroll(ctx context.Context, controlPlaneURL string, jwt 
 	// Routers already holding a session are shown the new credential;
 	// connectToRouters skips them, as their sessions are live.
 	n.readmitRouters(ctx)
-	return n.connectToRouters(ctx, enrollResp.RouterAddresses)
+	return n.connectToRouters(ctx, controlPlaneURL, enrollResp.RouterAddresses)
 }
 
 // adoptEnrolledKeys widens the trust set from the single key an enrollment
@@ -225,36 +224,37 @@ func (n *AgentMeshNode) processEnrollResponse(resp *http.Response) (*api.EnrollR
 	return &enrollResp, nil
 }
 
-func (n *AgentMeshNode) connectToRouters(ctx context.Context, addrs []string) error {
+func (n *AgentMeshNode) connectToRouters(ctx context.Context, controlPlaneURL string, addrs []string) error {
 	if len(addrs) == 0 {
 		return fmt.Errorf("failed to connect and authenticate after HTTP enrollment: control plane returned no router addresses")
 	}
-	if err := n.joinRouters(ctx, addrs); err != nil {
+	if err := n.joinRouters(ctx, controlPlaneURL, addrs); err != nil {
 		return fmt.Errorf("failed to connect and authenticate with any router after HTTP enrollment: %w", err)
 	}
 	logger.Info("Successfully enrolled via HTTP and stored identity and mesh config.")
 	return nil
 }
 
-// joinRouters is the handshake that follows an enrollment: every router
-// the control plane answered with is dialled at once and the node is in
-// the mesh when one admits it, retried as at Start, since the routers are
-// busiest exactly when a fleet enrolls.
-func (n *AgentMeshNode) joinRouters(ctx context.Context, addrs []string) error {
-	parsed := make([]multiaddr.Multiaddr, 0, len(addrs))
-	for _, addrStr := range addrs {
-		addr, err := multiaddr.NewMultiaddr(addrStr)
-		if err != nil {
-			logger.Warnf("Failed to parse router address from response: %v", err)
-			continue
-		}
-		parsed = append(parsed, addr)
+// joinRouters is the handshake that follows an enrollment: the node attaches
+// through the same admission as at Start, so the routers are chosen and
+// retried the same way. The enrollment answer lists addresses alone, so the
+// catalog is read from /info first, where the routers carry the labels a
+// selector matches; the answer is the fallback when /info cannot be read.
+func (n *AgentMeshNode) joinRouters(ctx context.Context, controlPlaneURL string, addrs []string) error {
+	var cands []routerCandidate
+	if info, err := FetchControlPlaneInfo(ctx, controlPlaneURL); err == nil {
+		cands = candidatesFromInfo(ctx, info)
+	} else {
+		logger.Debugf("Routers not read from /info after enrollment, using the enrollment answer: %v", err)
 	}
-	routers := routerPeers(ctx, parsed)
-	if len(routers) == 0 {
+	if len(cands) == 0 {
+		cands = candidatesFromAddrs(ctx, parseMultiaddrs(addrs))
+	}
+	if len(cands) == 0 {
 		return fmt.Errorf("no router peer behind %v", addrs)
 	}
-	_, err := n.admitByRouters(ctx, routers)
+	n.setRouterCatalog(cands)
+	_, err := n.admitByRouters(ctx)
 	return err
 }
 
@@ -426,7 +426,7 @@ func (n *AgentMeshNode) EnrollBootstrap(ctx context.Context, controlPlaneURL str
 	if len(enrollResp.RouterAddresses) == 0 {
 		return fmt.Errorf("failed to connect and authenticate after bootstrap enrollment: control plane returned no router addresses")
 	}
-	if err := n.joinRouters(ctx, enrollResp.RouterAddresses); err != nil {
+	if err := n.joinRouters(ctx, controlPlaneURL, enrollResp.RouterAddresses); err != nil {
 		return fmt.Errorf("failed to connect/auth with router after bootstrap enrollment: %w", err)
 	}
 

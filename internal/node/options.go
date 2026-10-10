@@ -40,6 +40,15 @@ const (
 	// for a router that is busy admitting a fleet, short enough that a
 	// member with no router at all still reports it within a minute.
 	DefaultRouterAuthAttempts = 4
+	// DefaultRouters is how many routers a node keeps a session with: one
+	// is enough to be on the mesh, the second is there for when the first
+	// restarts. Every session costs a router a connection, so a node does
+	// not keep one with every router it knows of.
+	DefaultRouters = 2
+	// DefaultRouterShunDuration is how long a node stays off a router that
+	// sent it away or did not come back: past a rollout of the router, short
+	// enough that one back for good is used again.
+	DefaultRouterShunDuration = 5 * time.Minute
 	// DefaultSocketName is the local API socket the node creates in its data directory.
 	DefaultSocketName = "agentmesh.sock"
 )
@@ -101,6 +110,23 @@ type Options struct {
 	// an enrollment, dial the routers before giving up, RouterRedialDelay
 	// doubling between attempts. Zero uses the default.
 	RouterAuthAttempts int
+	// Routers is how many routers the node keeps a session with, out of
+	// those the control plane lists; every router when there are fewer.
+	// Zero uses DefaultRouters. A session that drops is redialled, and a
+	// router that does not come back is replaced from the list.
+	Routers int
+	// RouterSelector names labels a router must attest for the node to
+	// attach to it, every pair; RouterPrefer names labels whose routers the
+	// node attaches to first, the more pairs attested the earlier. Among
+	// routers equal on preference the node takes the ones with the most
+	// room. Both are matched against the labels /info lists for a router,
+	// which are the ones the control plane attested at its enrollment.
+	RouterSelector map[string]string
+	RouterPrefer   map[string]string
+	// RouterShunDuration is how long the node stays off a router that told
+	// it to go away or that did not come back on redial. Zero uses the
+	// default.
+	RouterShunDuration time.Duration
 	// BiscuitTimeout bounds Datalog evaluation when verifying biscuit tokens.
 	BiscuitTimeout time.Duration
 	// DHT Options
@@ -184,6 +210,12 @@ func (o *Options) Default() {
 	if o.RouterAuthAttempts <= 0 {
 		o.RouterAuthAttempts = DefaultRouterAuthAttempts
 	}
+	if o.Routers <= 0 {
+		o.Routers = DefaultRouters
+	}
+	if o.RouterShunDuration <= 0 {
+		o.RouterShunDuration = DefaultRouterShunDuration
+	}
 	if o.Reachability == "" {
 		o.Reachability = ReachabilityPrivate
 	}
@@ -244,6 +276,12 @@ func (o *Options) Validate() error {
 	case "", ReachabilityPrivate, ReachabilityAuto:
 	default:
 		return fmt.Errorf("reachability %q is not %q or %q", o.Reachability, ReachabilityPrivate, ReachabilityAuto)
+	}
+	if err := api.ValidateLabels(o.RouterSelector); err != nil {
+		return fmt.Errorf("RouterSelector: %w", err)
+	}
+	if err := api.ValidateLabels(o.RouterPrefer); err != nil {
+		return fmt.Errorf("RouterPrefer: %w", err)
 	}
 	// ed25519 verification panics on a wrong-size key, and this one comes
 	// from a flag or FFI config.

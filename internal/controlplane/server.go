@@ -1223,7 +1223,7 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 
 		finalRoles := []string{nodeRecord.Role}
 		finalRoles = append(finalRoles, customAccessRoles...)
-		nodeRecord.Labels = filterAllowedLabels(allowedLabelPatterns(finalRoles, policyRoles), nodeRecord.Labels)
+		nodeRecord.Labels = labelsStillAllowed(canonical, allowedLabelPatterns(finalRoles, policyRoles), nodeRecord.Labels)
 
 		bBytes, _, err := identity.MintBiscuitToken(privKey, claims, nil, pID, biscuitExpiry, finalRoles, policyRoles, nodeRecord.Labels)
 		if err != nil {
@@ -1235,7 +1235,7 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Bootstrap node
 		finalRoles, _ := nodeRoles(nodeRecord, bindings)
-		nodeRecord.Labels = filterAllowedLabels(allowedLabelPatterns(finalRoles, policyRoles), nodeRecord.Labels)
+		nodeRecord.Labels = labelsStillAllowed(canonical, allowedLabelPatterns(finalRoles, policyRoles), nodeRecord.Labels)
 		bBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, nodeRecord.Role, biscuitExpiry, policyRoles, nodeRecord.Labels)
 		if err != nil {
 			logger.Errorf("Failed to mint refreshed token for node %s: %v", nodeRecord.PeerID, err)
@@ -3370,6 +3370,22 @@ func allowedLabelPatterns(roles []string, policyRoles []*api.PolicyRole) []strin
 // filterAllowedLabels returns the subset of labels that are still permitted by
 // patterns. On /refresh, labels declared at enrollment time whose grant has
 // since been removed from the policy are dropped from the re-minted Biscuit.
+// labelsStillAllowed is filterAllowedLabels for a credential refresh, where
+// a label the policy no longer allows is dropped from the new credential
+// rather than ending the session. Nobody asked for the drop, so it is
+// logged: a router that loses the label a node's --router-selector names
+// stops being chosen, and the operator who narrowed allowed_labels should
+// see why.
+func labelsStillAllowed(peerID string, patterns []string, labels map[string]string) map[string]string {
+	kept := filterAllowedLabels(patterns, labels)
+	for k, v := range labels {
+		if kept[k] != v {
+			logger.Warnw("Label no longer allowed by policy, dropped at refresh", "peer_id", peerID, "label", k+"="+v)
+		}
+	}
+	return kept
+}
+
 func filterAllowedLabels(patterns []string, labels map[string]string) map[string]string {
 	if len(labels) == 0 {
 		return nil

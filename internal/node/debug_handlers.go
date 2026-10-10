@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -114,11 +115,12 @@ func writeDebugJSON(w http.ResponseWriter, v any) {
 // api/agentmesh.proto mesh contract.
 
 type meshInfoResponse struct {
-	PeerID         string   `json:"peer_id"`
-	ConnectedPeers []string `json:"connected_peers"`
-	DHTSize        int      `json:"dht_size"`
-	RouterPeerID   string   `json:"router_peer_id"`
-	LocalAPISocket string   `json:"local_api_socket,omitempty"`
+	PeerID          string   `json:"peer_id"`
+	ConnectedPeers  []string `json:"connected_peers"`
+	AttachedRouters []string `json:"attached_routers"`
+	DHTSize         int      `json:"dht_size"`
+	RouterPeerID    string   `json:"router_peer_id"`
+	LocalAPISocket  string   `json:"local_api_socket,omitempty"`
 }
 
 type connectivityResponse struct {
@@ -160,13 +162,22 @@ func (n *AgentMeshNode) meshInfo() (*meshInfoResponse, error) {
 	for _, p := range peers {
 		connectedPeers = append(connectedPeers, p.String())
 	}
+	// Routers the node holds as relays, a subset of the connected peers: a
+	// DHT query connects the node to other routers without attaching to them.
+	attached := n.attachedRouters()
+	attachedRouters := make([]string, 0, len(attached))
+	for _, p := range attached {
+		attachedRouters = append(attachedRouters, p.String())
+	}
+	slices.Sort(attachedRouters)
 
 	return &meshInfoResponse{
-		PeerID:         n.Host.ID().String(),
-		ConnectedPeers: connectedPeers,
-		DHTSize:        n.DHT.RoutingTable().Size(),
-		RouterPeerID:   n.RouterPeerID.String(),
-		LocalAPISocket: n.BoundSocketPath,
+		PeerID:          n.Host.ID().String(),
+		ConnectedPeers:  connectedPeers,
+		AttachedRouters: attachedRouters,
+		DHTSize:         n.DHT.RoutingTable().Size(),
+		RouterPeerID:    n.RouterPeerID.String(),
+		LocalAPISocket:  n.BoundSocketPath,
 	}, nil
 }
 

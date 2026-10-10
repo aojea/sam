@@ -87,6 +87,9 @@ var (
 	allowLoopbackFlag            bool
 	announcePrivateFlag          bool
 	reachabilityFlag             string
+	routersFlag                  int
+	routerSelectorFlags          []string
+	routerPreferFlags            []string
 	monitorBootstrapFlag         time.Duration
 	monitorCheckIntervalFlag     time.Duration
 	autoRelayMinIntervalFlag     time.Duration
@@ -440,6 +443,15 @@ func main() {
 				}
 			}
 
+			routerSelector, err := api.ParseLabelFlags(routerSelectorFlags)
+			if err != nil {
+				logger.Fatalf("Invalid --router-selector: %v", err)
+			}
+			routerPrefer, err := api.ParseLabelFlags(routerPreferFlags)
+			if err != nil {
+				logger.Fatalf("Invalid --router-prefer: %v", err)
+			}
+
 			buildRuntimeNodeOptions := func(priv crypto.PrivKey, cpPub ed25519.PublicKey, rAddrs []multiaddr.Multiaddr) node.Options {
 				return node.Options{
 					PrivKey:                  priv,
@@ -455,6 +467,9 @@ func main() {
 					AllowLoopback:            allowLoopbackFlag,
 					AnnouncePrivateAddrs:     &announcePrivateFlag,
 					Reachability:             node.Reachability(reachabilityFlag),
+					Routers:                  routersFlag,
+					RouterSelector:           routerSelector,
+					RouterPrefer:             routerPrefer,
 					MonitorBootstrap:         monitorBootstrapFlag,
 					MonitorInterval:          monitorCheckIntervalFlag,
 					AutoRelayMinInterval:     autoRelayMinIntervalFlag,
@@ -865,6 +880,9 @@ func main() {
 	runCmd.Flags().BoolVar(&allowLoopbackFlag, "allow-loopback", false, "Allow publishing and connecting to loopback/link-local addresses")
 	runCmd.Flags().BoolVar(&announcePrivateFlag, "announce-private", true, "Publish this host's private (RFC1918/ULA) addresses to the mesh; keep enabled for LAN or on-premises meshes, disable when peers are only reachable through routers or public addresses")
 	runCmd.Flags().StringVar(&reachabilityFlag, "reachability", string(node.ReachabilityPrivate), "private: always hold a relay reservation and be reached through the routers, which works behind any NAT. auto: let AutoNAT v2 decide; a node the routers can dial on a public address advertises it and skips the relay. Use auto only where the routers are on the public side of every NAT this node is behind")
+	runCmd.Flags().IntVar(&routersFlag, "routers", node.DefaultRouters, "Routers to keep a session with, out of those the control plane lists (every router when there are fewer); one is enough to be on the mesh, the others are there for when it restarts")
+	runCmd.Flags().StringArrayVar(&routerSelectorFlags, "router-selector", nil, "Attach only to routers that attest this key=value label, repeatable, every pair required (e.g. --router-selector region=eu)")
+	runCmd.Flags().StringArrayVar(&routerPreferFlags, "router-prefer", nil, "Attach to routers that attest this key=value label before others, repeatable, the more pairs attested the earlier (e.g. --router-prefer zone=eu-a)")
 	runCmd.Flags().BoolVar(&offlineAccessFlag, "offline-access", false, "With --join, request OIDC offline access/refresh token for automatic renewal")
 	joinCmd.Flags().BoolVar(&allowLoopbackFlag, "allow-loopback", false, "Allow publishing and connecting to loopback/link-local addresses")
 	joinCmd.Flags().BoolVar(&announcePrivateFlag, "announce-private", true, "Publish this host's private (RFC1918/ULA) addresses to the mesh; keep enabled for LAN or on-premises meshes, disable when peers are only reachable through routers or public addresses")
