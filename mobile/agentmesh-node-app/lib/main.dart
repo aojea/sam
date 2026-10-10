@@ -1029,7 +1029,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
         'type': 'mcp',
         'name': 'phone-sensors',
         'description':
-            'Exposes phone sensors like battery and location to the SAM mesh',
+            'Exposes phone sensors like battery and location to the Agent Mesh',
         'targetUrl': _embeddedMcpServer.targetUrl,
       },
       if (_externalMcpUrlController.text.isNotEmpty &&
@@ -1509,7 +1509,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
           ),
           const SizedBox(height: 16),
           Text(
-            'SAM $_version',
+            'Agent Mesh $_version',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodySmall,
           ),
@@ -1555,7 +1555,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('Welcome to SAM',
+          const Text('Welcome to Agent Mesh',
               style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center),
           const SizedBox(height: 12),

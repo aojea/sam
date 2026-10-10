@@ -20,7 +20,7 @@ one safely, you need two things that work together:
    current task.
 
 This page shows the four deployment blueprints for connecting sandboxed agents
-and multi-hop sub-agents to a Agent Mesh.
+and multi-hop sub-agents to an Agent Mesh.
 
 ## Blueprint 1: NVIDIA OpenShell (zero credentials inside the sandbox)
 

@@ -17,13 +17,13 @@ served on the same listeners.
 | Listener | Requirement |
 |---|---|
 | TCP (`--bind-addr`) | `X-Mesh-Authentication: Bearer <token>` on every request, or `Authorization: Bearer <token>` on non-proxy endpoints (`/mcp`, `/v1/*`, `/egress/*`, `/oauth/*`), or a client certificate when `--tls-ca` is set. |
-| Unix socket (`--socket-path`) | None required for node-level access (the socket has mode `0600`). A caller may still pass a Agent Mesh Task Biscuit or platform JWT in `X-Mesh-Authentication` or `Authorization` to scope the request to that caller's identity and task rules. |
+| Unix socket (`--socket-path`) | None required for node-level access (the socket has mode `0600`). A caller may still pass an Agent Mesh Task Biscuit or platform JWT in `X-Mesh-Authentication` or `Authorization` to scope the request to that caller's identity and task rules. |
 
 The bearer `<token>` accepted by `agentmesh-node` can be:
 
 1. **The node's static API token** (`--api-token-path` or `AGENTMESH_API_TOKEN`),
    which exercises the node's own enrolled credential.
-2. **A Agent Mesh Biscuit** (a Member Biscuit, a Delegated Session Biscuit, or a
+2. **An Agent Mesh Biscuit** (a Member Biscuit, a Delegated Session Biscuit, or a
    task-attenuated Biscuit with `tar_block` blocks), base64-encoded.
 3. **An external platform JWT** (an OIDC ID token, Kubernetes projected service
    account token, or SPIFFE JWT-SVID). On `/mcp`, `/v1/*`, `/mesh/*` (via

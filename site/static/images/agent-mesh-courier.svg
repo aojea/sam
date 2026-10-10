@@ -24,7 +24,7 @@
      viewBox="0 0 1240 676" width="1240" height="676"
      font-family="Inter, -apple-system, 'Segoe UI', Roboto, sans-serif">
   <title>How a task travels the agent mesh</title>
-  <desc>Agents on a developer laptop, in Kubernetes on premises or in a cloud, on a SaaS platform or inside a sandbox hand each request to their local sam-node office. The first time, the office checks the sender's platform identity at the Registry (the control plane) and receives a passport (the Biscuit authority block: who the sender is and their memberships). For each errand the holder writes a mandate (an attenuation block) that can only narrow. Routers carry the sealed bag and cannot open it. The destination office for mcp://github, mcp://bigquery, inference://gemini, inference://claude, egress://generativelanguage.googleapis.com or a2a://partner-agent reads the passport, the law it already holds and the mandates, decides offline, inspects, and at a cloud border obtains a border pass from the Registry.</desc>
+  <desc>Agents on a developer laptop, in Kubernetes on premises or in a cloud, on a SaaS platform or inside a sandbox hand each request to their local agentmesh-node office. The first time, the office checks the sender's platform identity at the Registry (the control plane) and receives a passport (the Biscuit authority block: who the sender is and their memberships). For each errand the holder writes a mandate (an attenuation block) that can only narrow. Routers carry the sealed bag and cannot open it. The destination office for mcp://github, mcp://bigquery, inference://gemini, inference://claude, egress://generativelanguage.googleapis.com or a2a://partner-agent reads the passport, the law it already holds and the mandates, decides offline, inspects, and at a cloud border obtains a border pass from the Registry.</desc>
 
   <defs>
     <style>
@@ -75,16 +75,16 @@
       <path d="M8.5 8.5 L12.5 12.5" stroke="#f6c344" stroke-width="2" stroke-linecap="round"/>
     </symbol>
 
-    <!-- A sam-node office at the edge: the post office that checks and stamps -->
+    <!-- An agentmesh-node office at the edge: the post office that checks and stamps -->
     <symbol id="office" viewBox="0 0 64 40">
       <path d="M2 14 L32 2 L62 14 Z" fill="#132a44" stroke="#00f0ff" stroke-width="1.6" stroke-linejoin="round"/>
       <rect x="4" y="14" width="56" height="24" rx="3" fill="#0f2238" stroke="#00f0ff" stroke-width="1.6"/>
-      <text x="32" y="23" text-anchor="middle" style="font-family:'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;font-size:7.5px;font-weight:700;fill:#00f0ff;letter-spacing:0.04em">sam-node</text>
+      <text x="32" y="23" text-anchor="middle" style="font-family:'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;font-size:5.2px;font-weight:700;fill:#00f0ff;letter-spacing:0.01em">agentmesh-node</text>
       <rect x="26" y="27" width="12" height="11" rx="1.5" fill="#132a44" stroke="#00f0ff" stroke-width="1.2"/>
       <rect x="8" y="27" width="10" height="7" rx="1" fill="#132a44" stroke="#00f0ff" stroke-width="1"/>
       <rect x="46" y="27" width="10" height="7" rx="1" fill="#132a44" stroke="#00f0ff" stroke-width="1"/>
     </symbol>
-    <!-- A sam-router at the core: a relay, grey because it only forwards -->
+    <!-- An agentmesh-router at the core: a relay, grey because it only forwards -->
     <symbol id="relay" viewBox="-14 -14 28 28">
       <path d="M-10 -5 a11 11 0 0 0 0 10 M10 -5 a11 11 0 0 1 0 10" fill="none" stroke="#94a3b8" stroke-width="1.4" stroke-linecap="round" opacity="0.8"/>
       <circle r="6" fill="#0f2238" stroke="#94a3b8" stroke-width="2"/>
@@ -187,17 +187,17 @@
   <text x="28" y="58" class="lead">Every parcel carries its sender's passport and a mandate for this errand.</text>
   <text x="28" y="76" class="lead">Every office reads them and decides alone.</text>
   <g>
-    <rect x="818" y="24" width="394" height="22" rx="11" fill="none" stroke="#00f0ff" stroke-opacity="0.45"/>
-    <text x="1015" y="39" text-anchor="middle" class="sub" fill="#00f0ff" style="fill:#00f0ff;font-weight:600">Not another gateway: Istio, agentgateway and kgateway ask SAM over ext_proc</text>
+    <rect x="794" y="24" width="418" height="22" rx="11" fill="none" stroke="#00f0ff" stroke-opacity="0.45"/>
+    <text x="1003" y="39" text-anchor="middle" class="sub" fill="#00f0ff" style="fill:#00f0ff;font-weight:600">Not another gateway: Istio, agentgateway and kgateway ask Agent Mesh over ext_proc</text>
   </g>
 
   <!-- Edge / core headers -->
-  <text x="306" y="130" text-anchor="middle" class="sub" style="fill:#00f0ff;font-weight:700;letter-spacing:0.12em">EDGE · SAM-NODE OFFICES</text>
-  <text x="1090" y="130" text-anchor="middle" class="sub" style="fill:#00f0ff;font-weight:700;letter-spacing:0.12em">EDGE · SAM-NODE OFFICES</text>
+  <text x="306" y="130" text-anchor="middle" class="sub" style="fill:#00f0ff;font-weight:700;letter-spacing:0.12em">EDGE · AGENTMESH-NODE OFFICES</text>
+  <text x="1090" y="130" text-anchor="middle" class="sub" style="fill:#00f0ff;font-weight:700;letter-spacing:0.12em">EDGE · AGENTMESH-NODE OFFICES</text>
 
   <!-- Core band -->
   <rect x="342" y="168" width="516" height="352" rx="18" fill="#00f0ff" fill-opacity="0.03" stroke="#94a3b8" stroke-opacity="0.3" stroke-dasharray="4 6"/>
-  <text x="600" y="186" text-anchor="middle" class="sub" style="fill:#94a3b8;font-weight:700;letter-spacing:0.12em">CORE · SAM-ROUTERS</text>
+  <text x="600" y="186" text-anchor="middle" class="sub" style="fill:#94a3b8;font-weight:700;letter-spacing:0.12em">CORE · AGENTMESH-ROUTERS</text>
   <text x="600" y="508" text-anchor="middle" class="sub">relay only · the bag is sealed between two offices, a router cannot open it</text>
 
   <!-- Routes: the parcels travel along these -->
@@ -219,7 +219,7 @@
     <line x1="306" y1="440" x2="600" y2="132" opacity="0"><animate attributeName="opacity" dur="12s" begin="6s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.03;0.04;0.08;0.09;1"/></line>
     <!-- the only destination that needs the Registry: a cloud border does not read passports, so a border pass is written (and cached) -->
     <line x1="960" y1="490" x2="600" y2="132" opacity="0"><animate attributeName="opacity" dur="12s" begin="6s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.68;0.69;0.73;0.74;1"/></line>
-    <!-- row 3: the gateway asks its sam-node over ext_proc, the sam-node asks the Registry -->
+    <!-- row 3: the gateway asks its agentmesh-node over ext_proc, the agentmesh-node asks the Registry -->
     <line x1="320" y1="370" x2="352" y2="370" opacity="0"><animate attributeName="opacity" dur="12s" begin="8s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.02;0.03;0.08;0.09;1"/></line>
     <line x1="384" y1="350" x2="600" y2="132" opacity="0"><animate attributeName="opacity" dur="12s" begin="8s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.03;0.04;0.08;0.09;1"/></line>
     <!-- the developer's second parcel (10s): same passport, no call -->
@@ -243,7 +243,7 @@
     <g transform="translate(830,470)"><circle r="11" fill="#94a3b8" opacity="0.1"><animate attributeName="r" values="9;16;9" dur="2.0s" repeatCount="indefinite"/></circle><use xlink:href="#relay" x="-14" y="-14" width="28" height="28"/></g>
   </g>
 
-  <!-- Bring your own gateway: it stays in the data path and asks the sam-node office over ext_proc -->
+  <!-- Bring your own gateway: it stays in the data path and asks the agentmesh-node office over ext_proc -->
   <g>
     <g transform="translate(306,370)">
       <polygon points="0,-13 11.3,-6.5 11.3,6.5 0,13 -11.3,6.5 -11.3,-6.5" fill="#132a44" stroke="#00f0ff" stroke-width="2" stroke-linejoin="round"/>
@@ -274,11 +274,11 @@
       <rect x="87" y="2" width="12" height="16" rx="3" fill="#f6c344"/>
       <rect x="78" y="17" width="30" height="8" rx="2" fill="#d9a62e" stroke="#7a4e00" stroke-width="1"/>
     </g>
-    <text x="0" y="78" text-anchor="middle" class="sub">sam-control-plane · issues passports · writes the law and the watchlist · never touches a parcel</text>
+    <text x="0" y="78" text-anchor="middle" class="sub">agentmesh-control-plane · issues passports · writes the law and the watchlist · never touches a parcel</text>
     <text x="0" y="91" text-anchor="middle" class="sub" style="fill:#f6c344;opacity:0.85">◌ law, watchlist and seal specimen reach every office on a timer</text>
   </g>
 
-  <!-- Senders, each with its sam-node office -->
+  <!-- Senders, each with its agentmesh-node office -->
   <g>
     <use xlink:href="#ico-dev" x="36" y="162" width="60" height="56"/>
     <text x="106" y="186" class="name">Developer</text>
@@ -305,11 +305,11 @@
     <use xlink:href="#office" x="274" y="530" width="64" height="40"/>
   </g>
 
-  <!-- Destination offices: each booth is the egress sam-node for one destination -->
+  <!-- Destination offices: each booth is the egress agentmesh-node for one destination -->
   <g>
     <g style="font-family:'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;font-size:7.5px;font-weight:700;fill:#00f0ff;letter-spacing:0.04em" text-anchor="middle">
-      <text x="1090" y="154.5">sam-node</text><text x="1090" y="234.5">sam-node</text><text x="1090" y="314.5">sam-node</text>
-      <text x="1090" y="394.5">sam-node</text><text x="1090" y="474.5">sam-node</text><text x="1090" y="554.5">sam-node</text>
+      <text x="1090" y="154.5">agentmesh-node</text><text x="1090" y="234.5">agentmesh-node</text><text x="1090" y="314.5">agentmesh-node</text>
+      <text x="1090" y="394.5">agentmesh-node</text><text x="1090" y="474.5">agentmesh-node</text><text x="1090" y="554.5">agentmesh-node</text>
     </g>
     <use xlink:href="#booth" x="960" y="141" width="260" height="58"/>
     <use xlink:href="#g-fork" x="980" y="163" width="24" height="24"/>
@@ -525,9 +525,9 @@
     <use xlink:href="#passport" x="96" y="-13" width="12" height="14"/><text x="114" y="0" class="legend">passport: who sends and their memberships, issued once by the Registry</text>
     <use xlink:href="#mandate" x="520" y="-12" width="11" height="12"/><text x="538" y="0" class="legend">mandate: written by the holder for this errand, narrower and shorter, never wider</text>
     <use xlink:href="#lock" x="1006" y="-13" width="9" height="11"/><text x="1022" y="0" class="legend">sealed between offices</text>
-    <use xlink:href="#office" x="0" y="8" width="27" height="17"/><text x="34" y="19" class="legend">sam-node, at the edge: reads passport, law and mandates offline, runs customs, gets a border pass at a cloud border</text>
-    <use xlink:href="#relay" x="684" y="6" width="20" height="20"/><text x="710" y="19" class="legend">sam-router, at the core: admits passport holders, relays sealed bags, opens none</text>
-    <text x="0" y="37" class="legend">Registry = sam-control-plane: issues passports, writes the law and the watchlist. Asked once per sender and once per task at a cloud border, never per request.</text>
+    <use xlink:href="#office" x="0" y="8" width="27" height="17"/><text x="34" y="19" class="legend">agentmesh-node, at the edge: reads passport, law and mandates offline, runs customs, gets a border pass at a cloud border</text>
+    <use xlink:href="#relay" x="708" y="6" width="20" height="20"/><text x="734" y="19" class="legend">agentmesh-router, at the core: admits passport holders, relays sealed bags, opens none</text>
+    <text x="0" y="37" class="legend">Registry = agentmesh-control-plane: issues passports, writes the law and the watchlist. Asked once per sender and once per task at a cloud border, never per request.</text>
     <text x="0" y="55" class="legend">✓ is the office's decision; nothing is written on the passport. Bring your own gateway (Istio, agentgateway, kgateway over ext_proc) and your own customs (any ext_proc processor).</text>
   </g>
 </svg>

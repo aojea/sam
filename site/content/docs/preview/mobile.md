@@ -54,7 +54,7 @@ update because its signature differs from the installed app, report it to
 the coordinator. Uninstalling or clearing app storage deletes the saved
 identity and settings.
 
-{{< figure src="/images/sam-connect-welcome.png" alt="Agent Mesh Connect welcome screen with Scan enrollment code and Enter details manually buttons" caption="The welcome screen offers both paths: Enter details manually for a public testnet, or Scan enrollment code for your own mesh." width="320" >}}
+{{< figure src="/images/agentmesh-connect-welcome.png" alt="Agent Mesh Connect welcome screen with Scan enrollment code and Enter details manually buttons" caption="The welcome screen offers both paths: Enter details manually for a public testnet, or Scan enrollment code for your own mesh." width="320" >}}
 
 ### 2. Choose your mesh
 
@@ -100,7 +100,7 @@ Then follow option A or option B.
   Connect using the app switcher. Keep the app open while enrollment
   finishes. The browser message only confirms the login callback.
 
-{{< figure src="/images/sam-connect-public-login.png" alt="Cropped manual enrollment form with the Bananas control plane URL, an empty Enrollment token field, and Login and Enroll Browser button" caption="Public-testnet enrollment (cropped view). Enter your chosen testnet URL, leave Enrollment token empty, and use Login & Enroll (Browser)." width="420" >}}
+{{< figure src="/images/agentmesh-connect-public-login.png" alt="Cropped manual enrollment form with the Bananas control plane URL, an empty Enrollment token field, and Login and Enroll Browser button" caption="Public-testnet enrollment (cropped view). Enter your chosen testnet URL, leave Enrollment token empty, and use Login & Enroll (Browser)." width="420" >}}
 
 If you need to sign in on another device, choose **Device Login (TV / Other
 Device)** instead. Open the displayed verification URL on that device,
@@ -200,7 +200,7 @@ mesh://enroll?server=https%3A%2F%2Fused-encryption-assumptions-miller.trycloudfl
 Token ID: 2542ac5fa60e (revoke early with: agentmesh-one token revoke 2542ac5fa60e)
 ```
 
-{{< figure src="/images/sam-connect-join.png" alt="Join this mesh confirmation dialog showing a control plane hostname and Cancel and Join buttons" caption="After scanning, check the control plane hostname before tapping Join. This screenshot shows an example tunnel address and the app's shortened token hint; your values will differ." width="320" >}}
+{{< figure src="/images/agentmesh-connect-join.png" alt="Join this mesh confirmation dialog showing a control plane hostname and Cancel and Join buttons" caption="After scanning, check the control plane hostname before tapping Join. This screenshot shows an example tunnel address and the app's shortened token hint; your values will differ." width="320" >}}
 
 The phone must be able to reach the HTTPS address. A computer's
 `http://127.0.0.1` address refers to the phone itself when used on the phone,
@@ -247,7 +247,7 @@ or shows an error, record the status text before retrying.
 **Node is Running** alone does not prove a mesh connection. Report a peer
 count that remains zero, even if the app shows no error.
 
-{{< figure src="/images/sam-connect-running.png" alt="Agent Mesh Connect dashboard showing Node is Running, one connected peer, DHT size one, and a Node ID" caption="A connected node shows Node is Running, a Node ID, and at least one Connected Peer. Your Node ID and peer counts will differ from this example." width="320" >}}
+{{< figure src="/images/agentmesh-connect-running.png" alt="Agent Mesh Connect dashboard showing Node is Running, one connected peer, DHT size one, and a Node ID" caption="A connected node shows Node is Running, a Node ID, and at least one Connected Peer. Your Node ID and peer counts will differ from this example." width="320" >}}
 
 ### 5. Check restart and reconnection
 
@@ -312,7 +312,7 @@ Use it only when the coordinator explicitly asks for a fresh-identity test.
 | The testnet URL shows `404` in a browser | The root page is not a health check. Enter the URL in the app. Check the [testnet health workflow](https://github.com/google/agentmesh/actions/workflows/testnet-health.yaml) for service incidents. |
 | Login finishes but the app stays on enrollment | Return to the app on the same phone. Report the full status text and whether the browser showed the success message. |
 | No enrollment QR appears | Check that `agentmesh-one` printed an HTTPS API URL and is running in an interactive terminal. You can generate a code with `agentmesh-one token qr` using that HTTPS URL. |
-| A QR code or enrollment link is rejected | Confirm it is a Agent Mesh enrollment code from your operator and points to the expected HTTPS hostname. Request a fresh code if it expired or has already been used. |
+| A QR code or enrollment link is rejected | Confirm it is an Agent Mesh enrollment code from your operator and points to the expected HTTPS hostname. Request a fresh code if it expired or has already been used. |
 | Your own mesh is unreachable | Check that the computer is awake and `agentmesh-one` and its tunnel are still running. Compare the recorded URL with the current banner. |
 | `no good addresses` or `[::1]:53` | Report the app build and testnet. These were symptoms of the Android DNS bootstrap bug; confirm you installed the requested fixed build. |
 | Enrollment is denied | Record the denial text and any configured labels. Do not paste a login token into the enrollment-token field. |
@@ -386,8 +386,8 @@ further.
 
 ```text
 Flutter app (mobile/agentmesh-node-app)
-  lib/main.dart      the UI; talks to the node's local API over 127.0.0.1
-  lib/sam_ffi.dart   Dart FFI wrapper
+  lib/main.dart            the UI; talks to the node's local API over 127.0.0.1
+  lib/agentmesh_ffi.dart   Dart FFI wrapper
         │ C calls
 Go FFI library (mobile/agentmesh-node-ffi)
   StartNode, StopNode, EnrollNode, EnrollNodeBootstrap, ReEnrollNode,
@@ -406,9 +406,9 @@ Make targets:
 
 | Target | Output |
 | --- | --- |
-| `make mobile-ffi-host` | `bin/libsam.so` for the build host, for desktop tests of the FFI. |
-| `make mobile-ffi-android` | `bin/android/libsam.so` (arm64-v8a). |
-| `make mobile-ffi-android-x86_64` | `bin/android-x86_64/libsam.so`, for x86_64 emulators. Emulators on Apple Silicon run arm64 images and use the previous target. |
+| `make mobile-ffi-host` | `bin/libagentmesh.so` for the build host, for desktop tests of the FFI. |
+| `make mobile-ffi-android` | `bin/android/libagentmesh.so` (arm64-v8a). |
+| `make mobile-ffi-android-x86_64` | `bin/android-x86_64/libagentmesh.so`, for x86_64 emulators. Emulators on Apple Silicon run arm64 images and use the previous target. |
 | `make mobile-app-apk` | The FFI library copied into `jniLibs/` and a release APK. `mobile-app-apk-emulator` and `mobile-app-bundle` are the emulator and Play Store variants. |
 
 For an edit-run loop on a device:
@@ -416,7 +416,7 @@ For an edit-run loop on a device:
 ```bash
 make mobile-ffi-android
 mkdir -p mobile/agentmesh-node-app/android/app/src/main/jniLibs/arm64-v8a
-cp bin/android/libsam.so mobile/agentmesh-node-app/android/app/src/main/jniLibs/arm64-v8a/
+cp bin/android/libagentmesh.so mobile/agentmesh-node-app/android/app/src/main/jniLibs/arm64-v8a/
 cd mobile/agentmesh-node-app && flutter run
 ```
 

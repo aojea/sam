@@ -31,7 +31,7 @@ class _ScanEnrollCodePageState extends State<ScanEnrollCodePage> {
       if (raw == null) continue;
       final link = parseEnrollLink(raw);
       if (link == null) {
-        setState(() => _hint = 'Not a SAM enrollment code');
+        setState(() => _hint = 'Not an Agent Mesh enrollment code');
         continue;
       }
       _done = true;

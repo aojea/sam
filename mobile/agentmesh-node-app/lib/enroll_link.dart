@@ -1,6 +1,6 @@
 /// Device enrollment links.
 ///
-/// A control plane (sam-one's terminal QR code, or any operator holding a
+/// A control plane (agentmesh-one's terminal QR code, or any operator holding a
 /// bootstrap token) hands a device everything it needs in one string:
 ///
 ///     mesh://enroll?server=<control-plane-url>&token=<bootstrap-token>

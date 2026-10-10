@@ -14,7 +14,7 @@
     <!-- Scanning the mesh://enroll QR code shown by the control plane. -->
     <uses-permission android:name="android.permission.CAMERA"/>
     <application
-        android:label="SAM Connect"
+        android:label="Agent Mesh Connect"
         android:name=".SamApplication"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false">
@@ -69,7 +69,7 @@
         <property
             android:name="android.app.appfunctions.app_function_schema_version"
             android:value="1" />
-    <!-- Foreground Service that keeps the SAM Connect node alive -->
+    <!-- Foreground Service that keeps the Agent Mesh Connect node alive -->
         <service 
             android:name=".SamNodeForegroundService"
             android:foregroundServiceType="connectedDevice|location"
