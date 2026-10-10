@@ -73,6 +73,14 @@ instant. This proves that the caller holds the key behind the peer ID it
 names. Every instant in a response (`expire_time` and the like) is a
 `google.protobuf.Timestamp`, an RFC 3339 string in JSON.
 
+Enrollment is admitted at 10 requests a second for the whole mesh, with a
+burst of 20. A request over that is answered `429` with a `Retry-After`
+header. `agentmesh-node` waits for it and sends the request again, with
+jitter, for about a minute before it reports the failure, so a fleet of a
+few hundred members that starts at once joins over its first minute instead
+of losing the members the limiter turned away. A client of your own should
+do the same.
+
 | Route | Body | Purpose |
 |---|---|---|
 | `POST /register` | `EnrollRequest` (OIDC token, public key, requested role, labels) | OIDC enrollment. Returns `EnrollResponse`: the credential, the control plane public key, router addresses and expiry. |

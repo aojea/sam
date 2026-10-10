@@ -115,7 +115,7 @@ func (n *AgentMeshNode) enrollHTTP(ctx context.Context, controlPlaneURL, jwt str
 	logger.Infof("Enrolling via HTTP at %s", url)
 
 	client := controlPlaneHTTPClient(30 * time.Second)
-	resp, err := cpclient.DoWithChallenge(client, time.Now, func(ts int64) (*http.Request, error) {
+	resp, err := cpclient.DoWithChallengeRetry(ctx, client, time.Now, cpclient.DefaultEnrollBackoff, func(ts int64) (*http.Request, error) {
 		sig, err := privKey.Sign(api.RegisterChallenge(peerID.String(), ts))
 		if err != nil {
 			return nil, fmt.Errorf("failed to sign registration challenge: %w", err)
@@ -265,7 +265,7 @@ func (n *AgentMeshNode) EnrollBootstrap(ctx context.Context, controlPlaneURL str
 	logger.Infof("Enrolling via Bootstrap token at %s", enrollURL)
 
 	client := controlPlaneHTTPClient(30 * time.Second)
-	resp, err := cpclient.DoWithChallenge(client, time.Now, func(enrollTS int64) (*http.Request, error) {
+	resp, err := cpclient.DoWithChallengeRetry(ctx, client, time.Now, cpclient.DefaultEnrollBackoff, func(enrollTS int64) (*http.Request, error) {
 		enrollSig, err := n.config.PrivKey.Sign(api.EnrollChallenge(n.Host.ID().String(), enrollTS))
 		if err != nil {
 			return nil, fmt.Errorf("failed to sign enrollment challenge: %w", err)

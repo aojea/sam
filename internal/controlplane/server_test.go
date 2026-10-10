@@ -1540,6 +1540,11 @@ func TestEnrollStatusRateLimited(t *testing.T) {
 		}
 		_ = resp.Body.Close()
 		if resp.StatusCode == http.StatusTooManyRequests {
+			// The limiter names the wait, so a fleet turned away comes
+			// back spread over the seconds the limiter needs for it.
+			if got, err := strconv.Atoi(resp.Header.Get("Retry-After")); err != nil || got < 1 {
+				t.Fatalf("429 carries Retry-After %q, want a positive number of seconds", resp.Header.Get("Retry-After"))
+			}
 			limited = true
 			break
 		}

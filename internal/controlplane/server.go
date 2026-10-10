@@ -683,7 +683,7 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.limiter.Allow() {
-		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+		tooManyRequests(w)
 		return
 	}
 
@@ -1875,7 +1875,7 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.limiter.Allow() {
-		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+		tooManyRequests(w)
 		return
 	}
 
@@ -2172,6 +2172,15 @@ func writeChallengeError(w http.ResponseWriter, msg string) {
 	http.Error(w, msg, http.StatusUnauthorized)
 }
 
+// tooManyRequests answers a request the enrollment limiter refused. The
+// limiter admits EnrollRateLimit a second for the whole mesh, so a fleet
+// that joins at once is told when to come back; the wait spreads the fleet
+// over the seconds the limiter needs for it. Clients that retry read it.
+func tooManyRequests(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", strconv.Itoa(max(1, EnrollBurst/EnrollRateLimit)))
+	http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+}
+
 // HandleEnrollStatus HTTP GET `/enroll/status`
 //
 // The approved response carries the enrollee's Biscuit, so polling requires
@@ -2188,7 +2197,7 @@ func (s *Server) HandleEnrollStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.limiter.Allow() {
-		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+		tooManyRequests(w)
 		return
 	}
 
