@@ -325,23 +325,6 @@ jobs:
             exit 1
           }
 
-      - name: Provision Hub Secrets
-        env:
-          VAR_ENV_NAME: ${{ vars.ENV_NAME }}
-        run: |
-          export ENV_NAME="${VAR_ENV_NAME}"
-          export NAMESPACE="sam-${ENV_NAME}"
-          # Idempotently provision the sam-hub-secret if it doesn't already exist
-          if ! kubectl get secret sam-hub-secret -n ${NAMESPACE} >/dev/null 2>&1; then
-            echo "Generating a new random 32-byte hex key for AGENTMESH_HUB_KEY..."
-            HUB_KEY=$(openssl rand -hex 32)
-            kubectl create secret generic sam-hub-secret \
-              --namespace=${NAMESPACE} \
-              --from-literal=sam-hub-key="${HUB_KEY}"
-          else
-            echo "sam-hub-secret already exists in namespace ${NAMESPACE}. Skipping generation."
-          fi
-
       - name: Provision Control Plane Secrets
         env:
           VAR_ENV_NAME: ${{ vars.ENV_NAME }}
