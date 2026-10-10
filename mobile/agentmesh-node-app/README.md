@@ -44,14 +44,14 @@ Run one of the following from the **repository root directory**. The `mobile-ffi
     ```bash
     make mobile-ffi-android
     mkdir -p mobile/agentmesh-node-app/android/app/src/main/jniLibs/arm64-v8a
-    cp bin/android/libsam.so mobile/agentmesh-node-app/android/app/src/main/jniLibs/arm64-v8a/
+    cp bin/android/libagentmesh.so mobile/agentmesh-node-app/android/app/src/main/jniLibs/arm64-v8a/
     ```
 
 *   **For Android x86_64 emulators (Intel and Linux hosts)**:
     ```bash
     make mobile-ffi-android-x86_64
     mkdir -p mobile/agentmesh-node-app/android/app/src/main/jniLibs/x86_64
-    cp bin/android-x86_64/libsam.so mobile/agentmesh-node-app/android/app/src/main/jniLibs/x86_64/
+    cp bin/android-x86_64/libagentmesh.so mobile/agentmesh-node-app/android/app/src/main/jniLibs/x86_64/
     ```
 
 ### 2. Run the App

@@ -43,7 +43,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        // Only ABIs that have a libsam.so (see the Makefile jnilibs targets)
+        // Only ABIs that have a libagentmesh.so (see the Makefile jnilibs targets)
         // may be packaged. Plugin AARs (ML Kit, JNA, CameraX) ship
         // armeabi-v7a natives too; without this filter Play lists that ABI
         // as supported and serves the app to 32-bit devices, where it dies

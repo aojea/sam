@@ -37,14 +37,14 @@ build:
 .PHONY: mobile-ffi-host mobile-ffi-android mobile-ffi-android-x86_64 mobile-ffi-ios mobile-ffi mobile-app-apk mobile-app-apk-emulator mobile-app-bundle
 mobile-ffi-host:
 	mkdir -p "$(OUT_DIR)"
-	CGO_ENABLED=1 go build -v -ldflags "$(VERSION_LDFLAGS)" -buildmode=c-shared -o "$(OUT_DIR)/libsam.so" ./mobile/agentmesh-node-ffi
+	CGO_ENABLED=1 go build -v -ldflags "$(VERSION_LDFLAGS)" -buildmode=c-shared -o "$(OUT_DIR)/libagentmesh.so" ./mobile/agentmesh-node-ffi
 
 mobile-ffi-android:
 	@if [ -z "$(ANDROID_NDK_LATEST)" ]; then \
 		echo "Error: Android NDK not found under $(ANDROID_HOME_RESOLVED)/ndk/. Please install NDK (Side-by-side) via Android Studio or sdkmanager." >&2; \
 		exit 1; \
 	fi
-	GOOS=android GOARCH=arm64 CGO_ENABLED=1 CC=$(ANDROID_CC_ARM64) go build -v -ldflags="-checklinkname=0 $(VERSION_LDFLAGS)" -buildmode=c-shared -o "$(OUT_DIR)/android/libsam.so" ./mobile/agentmesh-node-ffi
+	GOOS=android GOARCH=arm64 CGO_ENABLED=1 CC=$(ANDROID_CC_ARM64) go build -v -ldflags="-checklinkname=0 $(VERSION_LDFLAGS)" -buildmode=c-shared -o "$(OUT_DIR)/android/libagentmesh.so" ./mobile/agentmesh-node-ffi
 
 mobile-ffi-android-x86_64:
 	@if [ -z "$(ANDROID_NDK_LATEST)" ]; then \
@@ -52,11 +52,11 @@ mobile-ffi-android-x86_64:
 		exit 1; \
 	fi
 	mkdir -p "$(OUT_DIR)/android-x86_64"
-	GOOS=android GOARCH=amd64 CGO_ENABLED=1 CC=$(ANDROID_CC_X86_64) go build -v -ldflags="-checklinkname=0 $(VERSION_LDFLAGS)" -buildmode=c-shared -o "$(OUT_DIR)/android-x86_64/libsam.so" ./mobile/agentmesh-node-ffi
+	GOOS=android GOARCH=amd64 CGO_ENABLED=1 CC=$(ANDROID_CC_X86_64) go build -v -ldflags="-checklinkname=0 $(VERSION_LDFLAGS)" -buildmode=c-shared -o "$(OUT_DIR)/android-x86_64/libagentmesh.so" ./mobile/agentmesh-node-ffi
 
 mobile-ffi-ios:
 	mkdir -p "$(OUT_DIR)/ios"
-	GOOS=ios GOARCH=arm64 CGO_ENABLED=1 go build -v -ldflags "$(VERSION_LDFLAGS)" -buildmode=c-archive -o "$(OUT_DIR)/ios/libsam.a" ./mobile/agentmesh-node-ffi
+	GOOS=ios GOARCH=arm64 CGO_ENABLED=1 go build -v -ldflags "$(VERSION_LDFLAGS)" -buildmode=c-archive -o "$(OUT_DIR)/ios/libagentmesh.a" ./mobile/agentmesh-node-ffi
 
 mobile-ffi: mobile-ffi-host mobile-ffi-android mobile-ffi-android-x86_64 mobile-ffi-ios
 
@@ -89,11 +89,11 @@ mobile-app-google-services:
 .PHONY: mobile-app-jnilibs-arm64 mobile-app-jnilibs-x86_64
 mobile-app-jnilibs-arm64: mobile-ffi-android
 	mkdir -p $(MOBILE_APP_DIR)/android/app/src/main/jniLibs/arm64-v8a
-	cp "$(OUT_DIR)/android/libsam.so" $(MOBILE_APP_DIR)/android/app/src/main/jniLibs/arm64-v8a/libsam.so
+	cp "$(OUT_DIR)/android/libagentmesh.so" $(MOBILE_APP_DIR)/android/app/src/main/jniLibs/arm64-v8a/libagentmesh.so
 
 mobile-app-jnilibs-x86_64: mobile-ffi-android-x86_64
 	mkdir -p $(MOBILE_APP_DIR)/android/app/src/main/jniLibs/x86_64
-	cp "$(OUT_DIR)/android-x86_64/libsam.so" $(MOBILE_APP_DIR)/android/app/src/main/jniLibs/x86_64/libsam.so
+	cp "$(OUT_DIR)/android-x86_64/libagentmesh.so" $(MOBILE_APP_DIR)/android/app/src/main/jniLibs/x86_64/libagentmesh.so
 
 mobile-app-apk: mobile-app-jnilibs-arm64 mobile-app-jnilibs-x86_64 mobile-app-google-services
 	cd $(MOBILE_APP_DIR) && flutter build apk --release --target-platform android-arm64,android-x64 $(MOBILE_FLUTTER_BUILD_FLAGS)
@@ -107,7 +107,7 @@ mobile-app-apk-emulator: mobile-app-jnilibs-x86_64 mobile-app-google-services
 # ANDROID_KEY_PASSWORD environment variables (see mobile/agentmesh-node-app/README.md).
 #
 # Play serves each device the split for its own ABI, so the bundle must only
-# contain ABIs that have a libsam.so: Flutter's default set also includes
+# contain ABIs that have a libagentmesh.so: Flutter's default set also includes
 # armeabi-v7a, which would install and then die opening the FFI library.
 .PHONY: mobile-app-bundle
 mobile-app-bundle: mobile-app-jnilibs-arm64 mobile-app-jnilibs-x86_64 mobile-app-google-services

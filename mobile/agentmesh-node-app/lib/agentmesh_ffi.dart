@@ -80,11 +80,11 @@ class SamNodeLib {
 
   SamNodeLib() {
     if (Platform.isAndroid) {
-      _dylib = ffi.DynamicLibrary.open('libsam.so');
+      _dylib = ffi.DynamicLibrary.open('libagentmesh.so');
     } else if (Platform.isIOS || Platform.isMacOS) {
       _dylib = ffi.DynamicLibrary.process();
     } else {
-      _dylib = ffi.DynamicLibrary.open('libsam.so'); // fallback
+      _dylib = ffi.DynamicLibrary.open('libagentmesh.so'); // fallback
     }
 
     _startNode = _dylib.lookupFunction<StartNodeC, StartNodeDart>('StartNode');

@@ -6,7 +6,7 @@ import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.Pointer
 
-// JNA Interface for libsam.so
+// JNA Interface for libagentmesh.so
 interface SamLib : Library {
     fun GetMeshInfo(): Pointer?
     fun CallRemoteTool(peerId: String, toolName: String, argsJson: String): Pointer?
@@ -17,11 +17,11 @@ class SamFunctions {
 
     // Load the library lazily
     private val samLib: SamLib by lazy {
-        Native.load("sam", SamLib::class.java) as SamLib
+        Native.load("agentmesh", SamLib::class.java) as SamLib
     }
 
     /**
-     * Retrieves the current status and statistics of the SAM mesh node.
+     * Retrieves the current status and statistics of the Agent Mesh node.
      * Returns a JSON string containing connected_peers, dht_size, and node_id.
      */
     @AppFunction(isDescribedByKDoc = true)
@@ -41,7 +41,7 @@ class SamFunctions {
     }
 
     /**
-     * Calls an MCP tool on a remote peer in the SAM mesh.
+     * Calls an MCP tool on a remote peer in Agent Mesh.
      * @param peerId The ID of the remote peer.
      * @param toolName The name of the tool to call (namespaced, e.g., 'scheme://service/tool').
      * @param argsJson The arguments for the tool call as a JSON string (e.g., '{"key": "value"}').

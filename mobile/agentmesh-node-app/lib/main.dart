@@ -13,7 +13,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'sam_ffi.dart';
+import 'agentmesh_ffi.dart';
 import 'mcp_server.dart';
 import 'enroll_link.dart';
 import 'scan_page.dart';
@@ -1029,7 +1029,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
         'type': 'mcp',
         'name': 'phone-sensors',
         'description':
-            'Exposes phone sensors like battery and location to the Agent Mesh',
+            'Exposes phone sensors like battery and location to Agent Mesh',
         'targetUrl': _embeddedMcpServer.targetUrl,
       },
       if (_externalMcpUrlController.text.isNotEmpty &&

@@ -56,7 +56,7 @@ setup_env() {
 go build -v -o "$REPO_ROOT/bin/mcp-client" ./cmd/mcp-client
 make -j4 docker-build-control-plane docker-build-router docker-build-node docker-build-mock-oidc mobile-ffi-android-x86_64
 mkdir -p mobile/agentmesh-node-app/android/app/src/main/jniLibs/x86_64
-cp bin/android-x86_64/libsam.so mobile/agentmesh-node-app/android/app/src/main/jniLibs/x86_64/libsam.so
+cp bin/android-x86_64/libagentmesh.so mobile/agentmesh-node-app/android/app/src/main/jniLibs/x86_64/libagentmesh.so
 
 # Warm the app dependencies so the emulator-attached phase goes straight to
 # the gradle build.
