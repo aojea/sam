@@ -213,6 +213,11 @@ keep, review these settings:
   Prometheus) or `monitoring.podMonitor.enabled` (prometheus-operator)
   scrape the control plane and the router. Both metrics endpoints are
   unauthenticated, so keep them inside the cluster.
+- **Size.** The router's watermarks bound the number of members, and the
+  chart sets requests without CPU limits because a router under a CPU
+  limit answers handshakes late. The [scalability guide](../scalability/)
+  has the arithmetic for a fleet of a given size and the metrics that say a
+  bound is near.
 
 The chart's [README](https://github.com/google/agentmesh/blob/main/charts/agentmesh/README.md)
 documents every value. The [control plane](../../reference/control-plane/)

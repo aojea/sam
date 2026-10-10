@@ -87,7 +87,8 @@ enough that members time out and retry, which costs more. Give a router at
 least one full core and no CPU limit; on Kubernetes, set a request and
 leave the limit off. The testnet runs its routers on 2 vCPU without a
 limit, and a fleet of 500 members joining at 20 a second is admitted in
-under a minute.
+under a minute. The [scalability guide](../../guides/scalability/) sizes
+the watermarks and the relay budget for a fleet.
 
 ## Metrics
 
