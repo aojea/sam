@@ -83,7 +83,9 @@ issuer with `--workload-issuer` and binds roles to the subject:
 
 The sandbox still holds nothing. What changes is that the mesh, not the
 orchestrator, decides what each sandbox identity may call, and revoking the
-sandbox's role takes effect without touching the proxy.
+sandbox's role takes effect without touching the proxy. The
+[OpenShell sandboxes guide](../../guides/openshell/) runs this end to end on
+one machine with SPIRE.
 
 ## Blueprint 2: Docker Sandbox (`docker sbx`) & Kubernetes `agent-sandbox`
 
