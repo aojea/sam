@@ -84,6 +84,10 @@ const (
 	// federationTag keeps a peer router's connection out of a trim: losing
 	// it splits the DHT, losing a member's does not.
 	federationTag = "agentmesh-federation"
+	// memberTag marks the connection of a peer that authenticated; a trim
+	// orders by tag value, lowest first, so the untagged go before members.
+	memberTag      = "agentmesh-member"
+	memberTagValue = 100
 	// DefaultDHTProviderAddrTTL is three of a node's 5-minute reprovides: a
 	// node that is gone drops out of discovery within it, one late reprovide
 	// does not. The library default (48h) keeps every past identity listed.
@@ -170,7 +174,7 @@ func (r *Router) isPeerAuthenticated(p peer.ID) bool {
 	switch exp := v.(type) {
 	case time.Time:
 		if !time.Now().Before(exp) {
-			r.authenticatedPeers.Delete(p)
+			r.forgetPeer(p)
 			return false
 		}
 		return true
@@ -178,6 +182,24 @@ func (r *Router) isPeerAuthenticated(p peer.ID) bool {
 		return exp
 	default:
 		return false
+	}
+}
+
+// admitPeer records that p proved membership until expiry and tags its
+// connection for the connection manager: a trim takes the lowest tag
+// first, so connections that never authenticated go before members.
+func (r *Router) admitPeer(p peer.ID, expiry time.Time) {
+	r.authenticatedPeers.Store(p, expiry)
+	if r.Host != nil {
+		r.Host.ConnManager().TagPeer(p, memberTag, memberTagValue)
+	}
+}
+
+// forgetPeer is the reverse of admitPeer.
+func (r *Router) forgetPeer(p peer.ID) {
+	r.authenticatedPeers.Delete(p)
+	if r.Host != nil {
+		r.Host.ConnManager().UntagPeer(p, memberTag)
 	}
 }
 
@@ -1364,7 +1386,7 @@ func (r *Router) HandleAuthHandshake(s network.Stream) {
 		return
 	}
 
-	r.authenticatedPeers.Store(remotePeer, expiry)
+	r.admitPeer(remotePeer, expiry)
 	authHandshakesTotal.WithLabelValues(handshakeOK).Inc()
 	logger.Infof("[AuthN] Successfully authenticated peer %s", remotePeer)
 
@@ -1441,7 +1463,7 @@ func (r *Router) performMutualAuth(s network.Stream) error {
 		return fmt.Errorf("failed to extract peer router biscuit expiry: %w", err)
 	}
 
-	r.authenticatedPeers.Store(remotePeer, expiry)
+	r.admitPeer(remotePeer, expiry)
 	return nil
 }
 

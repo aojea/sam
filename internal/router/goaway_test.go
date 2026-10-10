@@ -24,6 +24,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-msgio"
 	"google.golang.org/protobuf/proto"
 
@@ -180,5 +181,76 @@ func TestDrainMembersSaysDraining(t *testing.T) {
 		if r.Host.Network().Connectedness(m.host.ID()) == network.Connected {
 			t.Fatalf("%s is still connected after the drain", m.host.ID())
 		}
+	}
+}
+
+// Past the high watermark the connection manager closes connections, lowest
+// tag first: a member that authenticated carries a tag, a stranger none, so
+// the strangers go and the members stay; a peer router is protected and
+// stays whatever its age. The trim counts protected connections out, so
+// with low 1 and three candidates it closes two.
+func TestTrimTakesUnauthenticatedConnectionsFirst(t *testing.T) {
+	cm, err := connmgr.NewConnManager(1, 3, connmgr.WithGracePeriod(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"), libp2p.ConnectionManager(cm))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.Close() })
+	r := &Router{Host: h}
+
+	newPeer := func() host.Host {
+		p, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = p.Close() })
+		return p
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	connect := func(p host.Host) {
+		if err := p.Connect(ctx, peer.AddrInfo{ID: h.ID(), Addrs: h.Addrs()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Oldest first, the order a trim prefers among equal tags: a stranger,
+	// then a member, then a peer router, then a second stranger that tips
+	// the count over the high watermark.
+	stranger := newPeer()
+	connect(stranger)
+	member := newPeer()
+	connect(member)
+	r.admitPeer(member.ID(), time.Now().Add(time.Hour))
+	peerRouter := newPeer()
+	connect(peerRouter)
+	cm.Protect(peerRouter.ID(), federationTag)
+	late := newPeer()
+	connect(late)
+
+	cm.TrimOpenConns(ctx)
+
+	// The closes propagate through the swarm after TrimOpenConns returns.
+	kept := 2
+	deadline := time.Now().Add(5 * time.Second)
+	for kept > 0 && time.Now().Before(deadline) {
+		kept = 0
+		for _, p := range []host.Host{stranger, late} {
+			if h.Network().Connectedness(p.ID()) == network.Connected {
+				kept++
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if kept != 0 {
+		t.Fatalf("the trim kept %d of 2 unauthenticated connections while over the high watermark", kept)
+	}
+	if h.Network().Connectedness(member.ID()) != network.Connected {
+		t.Fatal("the trim closed the member's connection")
+	}
+	if h.Network().Connectedness(peerRouter.ID()) != network.Connected {
+		t.Fatal("the trim closed the peer router's connection")
 	}
 }

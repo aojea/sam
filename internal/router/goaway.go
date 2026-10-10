@@ -100,7 +100,7 @@ send:
 	}
 	wg.Wait()
 	for _, p := range peers {
-		r.authenticatedPeers.Delete(p)
+		r.forgetPeer(p)
 	}
 	select {
 	case <-time.After(goAwayGrace):
