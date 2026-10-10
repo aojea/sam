@@ -608,6 +608,7 @@ func TestRouterCloseWithdrawsLease(t *testing.T) {
 				config: Options{
 					ControlPlaneURL:  ts.URL,
 					ShutdownLeaseTTL: tc.ttl,
+					HighWaterMark:    4000,
 				},
 			}
 
@@ -638,6 +639,11 @@ func TestRouterCloseWithdrawsLease(t *testing.T) {
 			if leases[0].PeerId != h.ID().String() {
 				t.Fatalf("lease peer id: got %s, want %s", leases[0].PeerId, h.ID())
 			}
+			// The lease carries the load /info lists: inbound connections
+			// (none on this host) against the high watermark.
+			if leases[0].Connections != 0 || leases[0].ConnectionLimit != int32(r.config.HighWaterMark) {
+				t.Fatalf("lease load: got %d/%d, want 0/%d", leases[0].Connections, leases[0].ConnectionLimit, r.config.HighWaterMark)
+			}
 		})
 	}
 }
@@ -648,6 +654,14 @@ func TestOptionsRejectNegativeShutdownLeaseTTL(t *testing.T) {
 	o := Options{ControlPlaneURL: "http://127.0.0.1:8080", ShutdownLeaseTTL: -time.Second}
 	if err := o.Validate(); err == nil || !strings.Contains(err.Error(), "ShutdownLeaseTTL") {
 		t.Fatalf("negative ShutdownLeaseTTL: err = %v, want rejection", err)
+	}
+}
+
+func TestOptionsValidateLabels(t *testing.T) {
+	o := Options{ControlPlaneURL: "http://127.0.0.1:8080", Labels: map[string]string{"not a key": "x"}}
+	o.Default()
+	if err := o.Validate(); err == nil || !strings.Contains(err.Error(), "labels") {
+		t.Fatalf("malformed label: err = %v, want rejection", err)
 	}
 }
 

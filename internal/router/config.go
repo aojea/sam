@@ -67,6 +67,12 @@ type Options struct {
 	// the control plane's schedule. The CLIs default to
 	// DefaultShutdownLeaseTTL.
 	ShutdownLeaseTTL time.Duration
+	// Labels the router declares at enrollment, the same labels as a
+	// node's: the control plane signs them only if the router's role allows
+	// them (PolicyRole.allowed_labels) and lists them on /info, where a
+	// member selects or prefers routers by placement. Validated with
+	// api.ValidateLabels.
+	Labels map[string]string
 	// RequiredRole restricts enrollment and startup to only accept tokens containing this role.
 	RequiredRole string
 	// HTTPFallbackHandler, when set, serves ordinary (non-WebSocket-upgrade)
@@ -143,6 +149,9 @@ func (o *Options) Validate() error {
 	}
 	if o.LowWaterMark >= o.HighWaterMark {
 		return fmt.Errorf("LowWaterMark (%d) must be below HighWaterMark (%d)", o.LowWaterMark, o.HighWaterMark)
+	}
+	if err := api.ValidateLabels(o.Labels); err != nil {
+		return fmt.Errorf("labels: %w", err)
 	}
 	return api.ValidateControlPlaneTransport(o.ControlPlaneURL, o.AllowInsecureControlPlane)
 }

@@ -191,18 +191,20 @@ class CommandBackend(_message.Message):
     def __init__(self, command: _Optional[_Iterable[str]] = ..., env: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class ControlPlaneInfoResponse(_message.Message):
-    __slots__ = ["audience", "banned_peer_ids", "client_id", "oidc_issuer", "router_addresses"]
+    __slots__ = ["audience", "banned_peer_ids", "client_id", "oidc_issuer", "router_addresses", "routers"]
     AUDIENCE_FIELD_NUMBER: _ClassVar[int]
     BANNED_PEER_IDS_FIELD_NUMBER: _ClassVar[int]
     CLIENT_ID_FIELD_NUMBER: _ClassVar[int]
     OIDC_ISSUER_FIELD_NUMBER: _ClassVar[int]
+    ROUTERS_FIELD_NUMBER: _ClassVar[int]
     ROUTER_ADDRESSES_FIELD_NUMBER: _ClassVar[int]
     audience: str
     banned_peer_ids: _containers.RepeatedScalarFieldContainer[str]
     client_id: str
     oidc_issuer: str
     router_addresses: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, oidc_issuer: _Optional[str] = ..., client_id: _Optional[str] = ..., audience: _Optional[str] = ..., router_addresses: _Optional[_Iterable[str]] = ..., banned_peer_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+    routers: _containers.RepeatedCompositeFieldContainer[RouterInfo]
+    def __init__(self, oidc_issuer: _Optional[str] = ..., client_id: _Optional[str] = ..., audience: _Optional[str] = ..., router_addresses: _Optional[_Iterable[str]] = ..., banned_peer_ids: _Optional[_Iterable[str]] = ..., routers: _Optional[_Iterable[_Union[RouterInfo, _Mapping]]] = ...) -> None: ...
 
 class CredentialBroker(_message.Message):
     __slots__ = ["aws_assume_role", "oidc_federation", "platform_identity", "static_secret"]
@@ -653,6 +655,27 @@ class RevocationsResponse(_message.Message):
     revocation_ids: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, revocation_ids: _Optional[_Iterable[str]] = ..., banned_peer_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
+class RouterInfo(_message.Message):
+    __slots__ = ["addresses", "connection_limit", "connections", "labels", "peer_id"]
+    class LabelsEntry(_message.Message):
+        __slots__ = ["key", "value"]
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    ADDRESSES_FIELD_NUMBER: _ClassVar[int]
+    CONNECTIONS_FIELD_NUMBER: _ClassVar[int]
+    CONNECTION_LIMIT_FIELD_NUMBER: _ClassVar[int]
+    LABELS_FIELD_NUMBER: _ClassVar[int]
+    PEER_ID_FIELD_NUMBER: _ClassVar[int]
+    addresses: _containers.RepeatedScalarFieldContainer[str]
+    connection_limit: int
+    connections: int
+    labels: _containers.ScalarMap[str, str]
+    peer_id: str
+    def __init__(self, peer_id: _Optional[str] = ..., addresses: _Optional[_Iterable[str]] = ..., labels: _Optional[_Mapping[str, str]] = ..., connections: _Optional[int] = ..., connection_limit: _Optional[int] = ...) -> None: ...
+
 class RouterLease(_message.Message):
     __slots__ = ["addresses", "connected_peers", "dht_size", "expire_time", "last_renewal_time", "peer_id"]
     ADDRESSES_FIELD_NUMBER: _ClassVar[int]
@@ -670,12 +693,14 @@ class RouterLease(_message.Message):
     def __init__(self, peer_id: _Optional[str] = ..., addresses: _Optional[_Iterable[str]] = ..., last_renewal_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., connected_peers: _Optional[_Iterable[str]] = ..., dht_size: _Optional[int] = ...) -> None: ...
 
 class RouterLeaseRequest(_message.Message):
-    __slots__ = ["addresses", "biscuit", "challenge_signature", "challenge_unix_ms", "connected_peers", "dht_size", "peer_id", "ttl"]
+    __slots__ = ["addresses", "biscuit", "challenge_signature", "challenge_unix_ms", "connected_peers", "connection_limit", "connections", "dht_size", "peer_id", "ttl"]
     ADDRESSES_FIELD_NUMBER: _ClassVar[int]
     BISCUIT_FIELD_NUMBER: _ClassVar[int]
     CHALLENGE_SIGNATURE_FIELD_NUMBER: _ClassVar[int]
     CHALLENGE_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
     CONNECTED_PEERS_FIELD_NUMBER: _ClassVar[int]
+    CONNECTIONS_FIELD_NUMBER: _ClassVar[int]
+    CONNECTION_LIMIT_FIELD_NUMBER: _ClassVar[int]
     DHT_SIZE_FIELD_NUMBER: _ClassVar[int]
     PEER_ID_FIELD_NUMBER: _ClassVar[int]
     TTL_FIELD_NUMBER: _ClassVar[int]
@@ -684,10 +709,12 @@ class RouterLeaseRequest(_message.Message):
     challenge_signature: bytes
     challenge_unix_ms: int
     connected_peers: _containers.RepeatedScalarFieldContainer[str]
+    connection_limit: int
+    connections: int
     dht_size: int
     peer_id: str
     ttl: _duration_pb2.Duration
-    def __init__(self, peer_id: _Optional[str] = ..., addresses: _Optional[_Iterable[str]] = ..., biscuit: _Optional[bytes] = ..., connected_peers: _Optional[_Iterable[str]] = ..., dht_size: _Optional[int] = ..., challenge_unix_ms: _Optional[int] = ..., challenge_signature: _Optional[bytes] = ..., ttl: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ...) -> None: ...
+    def __init__(self, peer_id: _Optional[str] = ..., addresses: _Optional[_Iterable[str]] = ..., biscuit: _Optional[bytes] = ..., connected_peers: _Optional[_Iterable[str]] = ..., dht_size: _Optional[int] = ..., challenge_unix_ms: _Optional[int] = ..., challenge_signature: _Optional[bytes] = ..., ttl: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ..., connections: _Optional[int] = ..., connection_limit: _Optional[int] = ...) -> None: ...
 
 class RouterLeaseResponse(_message.Message):
     __slots__ = ["error", "expire_time", "success"]

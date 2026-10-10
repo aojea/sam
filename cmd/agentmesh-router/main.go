@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/agentmesh/api"
 	"github.com/google/agentmesh/internal/router"
 	"github.com/google/agentmesh/internal/version"
 	golog "github.com/ipfs/go-log/v2"
@@ -53,6 +54,7 @@ var (
 	relayMaxReservations int
 	relayMaxCircuits     int
 	shutdownLeaseTTL     time.Duration
+	labelFlags           []string
 )
 
 var logger = golog.Logger("agentmesh-router-cli")
@@ -100,6 +102,11 @@ func main() {
 				RelayMaxCircuits:          relayMaxCircuits,
 				ShutdownLeaseTTL:          shutdownLeaseTTL,
 			}
+			labels, err := api.ParseLabelFlags(labelFlags)
+			if err != nil {
+				logger.Fatalf("Invalid --label: %v", err)
+			}
+			opts.Labels = labels
 
 			r, err := router.NewRouter(cmd.Context(), opts)
 			if err != nil {
@@ -144,6 +151,7 @@ func main() {
 	rootCmd.Flags().IntVar(&relayMaxReservations, "relay-max-reservations", 0, "Members that may hold a relay reservation, which is what makes a member reachable through this router; 0 is --high-watermark")
 	rootCmd.Flags().IntVar(&relayMaxCircuits, "relay-max-circuits", 0, fmt.Sprintf("Relayed connections one peer may hold at once through this router, as caller or as destination; 0 is %d", router.DefaultRelayMaxCircuits))
 	rootCmd.Flags().DurationVar(&shutdownLeaseTTL, "shutdown-lease-ttl", router.DefaultShutdownLeaseTTL, "Sent in this router's last lease when it stops: how long it expects to be away, which is how long the control plane keeps listing it. 0 sends nothing and the lease expires on the control plane's schedule")
+	rootCmd.Flags().StringArrayVar(&labelFlags, "label", nil, "A key=value label declared at enrollment, repeatable; the control plane signs it only if the router's role allows it, and members select or prefer routers by it (e.g. region=eu, zone=us-central1-a)")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

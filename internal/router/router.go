@@ -513,6 +513,7 @@ func (r *Router) enroll(peerID peer.ID) error {
 			PeerId:             peerID.String(),
 			PublicKey:          pubBytes,
 			RequestedRole:      r.config.RequiredRole,
+			Labels:             r.config.Labels,
 			ChallengeUnixMs:    ts,
 			ChallengeSignature: sig,
 		}
@@ -577,6 +578,7 @@ func (r *Router) enrollBootstrap(peerID peer.ID) error {
 			PeerId:             peerID.String(),
 			PublicKey:          pubBytes,
 			RequestedRole:      r.config.RequiredRole,
+			Labels:             r.config.Labels,
 			ChallengeUnixMs:    enrollTS,
 			ChallengeSignature: enrollSig,
 		}
@@ -1024,9 +1026,15 @@ func (r *Router) sendLease(ctx context.Context, ttl *time.Duration, attempts int
 		}
 
 		var connectedPeers []string
+		var inbound int32
 		if r.Host != nil && r.Host.Network() != nil {
 			for _, p := range r.Host.Network().Peers() {
 				connectedPeers = append(connectedPeers, p.String())
+			}
+			for _, c := range r.Host.Network().Conns() {
+				if c.Stat().Direction == network.DirInbound {
+					inbound++
+				}
 			}
 		}
 		var dhtSize int32
@@ -1050,6 +1058,8 @@ func (r *Router) sendLease(ctx context.Context, ttl *time.Duration, attempts int
 				DhtSize:            dhtSize,
 				ChallengeUnixMs:    ts,
 				ChallengeSignature: sig,
+				Connections:        inbound,
+				ConnectionLimit:    int32(r.config.HighWaterMark),
 			}
 			if ttl != nil {
 				req.Ttl = durationpb.New(*ttl)

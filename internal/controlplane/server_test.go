@@ -1784,6 +1784,113 @@ func TestRouterLeaseTTL(t *testing.T) {
 	}
 }
 
+// TestInfoListsRoutersWithLabelsAndLoad covers what a member chooses its
+// routers by: a router that enrolls over /register with labels its role
+// allows is listed on /info with those labels and with the load its last
+// lease reported, and a lease whose load is malformed is refused.
+func TestInfoListsRoutersWithLabelsAndLoad(t *testing.T) {
+	issuer, mintToken := startCustomMockOIDC(t)
+	srv, store, baseURL := setupTestServer(t, issuer)
+	defer func() {
+		_ = srv.Close()
+		_ = store.Close()
+	}()
+
+	ctx := context.Background()
+	if err := store.SaveMeshPolicy(ctx, []*api.PolicyRole{
+		{Name: api.RoleRouter, AllowedTargets: []string{"*"}, AllowedLabels: []string{"region=*", "zone=*"}},
+	}, []*api.PolicyBinding{
+		{Role: api.RoleRouter, Members: []string{"group:routers"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	priv, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routerPeer, _ := peer.IDFromPrivateKey(priv)
+	pubBytes, _ := crypto.MarshalPublicKey(pub)
+	labels := map[string]string{"region": "eu", "zone": "eu-west1-b"}
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	// Enroll the way agentmesh-router does, declaring the labels.
+	ts, sig := registerPoP(t, priv, routerPeer.String())
+	enrollData, _ := proto.Marshal(&api.EnrollRequest{
+		Jwt:                mintToken(map[string]interface{}{"sub": "router-1", "groups": []string{"routers"}}),
+		PeerId:             routerPeer.String(),
+		PublicKey:          pubBytes,
+		RequestedRole:      api.RoleRouter,
+		Labels:             labels,
+		ChallengeUnixMs:    ts,
+		ChallengeSignature: sig,
+	})
+	resp, err := client.Post(baseURL+"/register", "application/x-protobuf", bytes.NewReader(enrollData))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/register: %s: %s", resp.Status, body)
+	}
+	var enrolled api.EnrollResponse
+	if err := proto.Unmarshal(body, &enrolled); err != nil {
+		t.Fatal(err)
+	}
+	routerBiscuit := enrolled.BiscuitToken
+
+	postLease := func(connections, limit int32) int {
+		t.Helper()
+		ts, sig := leasePoP(t, priv, routerPeer.String())
+		leaseData, _ := proto.Marshal(&api.RouterLeaseRequest{
+			PeerId:             routerPeer.String(),
+			Addresses:          []string{"/ip4/127.0.0.1/tcp/4001/p2p/" + routerPeer.String()},
+			Biscuit:            routerBiscuit,
+			ChallengeUnixMs:    ts,
+			ChallengeSignature: sig,
+			Connections:        connections,
+			ConnectionLimit:    limit,
+		})
+		resp, err := client.Post(baseURL+"/routers/lease", "application/x-protobuf", bytes.NewReader(leaseData))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := postLease(-1, 4000); got != http.StatusBadRequest {
+		t.Fatalf("lease with a negative load: got %d, want 400", got)
+	}
+	if got := postLease(1200, 4000); got != http.StatusOK {
+		t.Fatalf("lease: got %d, want 200", got)
+	}
+
+	resp, err = client.Get(baseURL + "/info")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ = io.ReadAll(resp.Body)
+	var info api.ControlPlaneInfoResponse
+	if err := proto.Unmarshal(body, &info); err != nil {
+		t.Fatal(err)
+	}
+	if len(info.Routers) != 1 {
+		t.Fatalf("/info lists %d routers, want 1", len(info.Routers))
+	}
+	got := info.Routers[0]
+	if got.PeerId != routerPeer.String() || !reflect.DeepEqual(got.Addresses, info.RouterAddresses) {
+		t.Errorf("router = %s %v, want %s %v", got.PeerId, got.Addresses, routerPeer, info.RouterAddresses)
+	}
+	if !reflect.DeepEqual(got.Labels, labels) {
+		t.Errorf("router labels = %v, want the attested %v", got.Labels, labels)
+	}
+	if got.Connections != 1200 || got.ConnectionLimit != 4000 {
+		t.Errorf("router load = %d/%d, want 1200/4000", got.Connections, got.ConnectionLimit)
+	}
+}
+
 // TestRouterLeaseUnderRotatedKey covers the rotation grace window on
 // /routers/lease: both keys are valid, the retiring one is listed first, and
 // the biscuit is signed by the new one, so the role check has to run under the

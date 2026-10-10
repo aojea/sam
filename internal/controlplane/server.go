@@ -71,6 +71,28 @@ func routerAddresses(routers []storage.RouterLease) []string {
 	return addrs
 }
 
+// routerInfos is the per-router listing of /info, in the order routers
+// already has (shuffled by routerAddresses, so the two agree). A router's
+// labels are the ones the control plane attested at its enrollment, the
+// same labels, with the same meaning, as a node's; a router whose record
+// is gone is listed without any.
+func (s *Server) routerInfos(ctx context.Context, routers []storage.RouterLease) []*api.RouterInfo {
+	infos := make([]*api.RouterInfo, 0, len(routers))
+	for _, r := range routers {
+		info := &api.RouterInfo{
+			PeerId:          r.PeerID,
+			Addresses:       r.Addresses,
+			Connections:     int32(r.Connections),
+			ConnectionLimit: int32(r.ConnectionLimit),
+		}
+		if record, err := s.store.GetNode(ctx, r.PeerID); err == nil && record != nil {
+			info.Labels = record.Labels
+		}
+		infos = append(infos, info)
+	}
+	return infos
+}
+
 const (
 	EnrollRateLimit        = 10
 	EnrollBurst            = 20
@@ -647,6 +669,7 @@ func (s *Server) HandleInfo(w http.ResponseWriter, r *http.Request) {
 		ClientId:        clientID,
 		Audience:        aud,
 		RouterAddresses: routerAddrs, // Reused this field for back-compatibility with bootstrap routers list
+		Routers:         s.routerInfos(r.Context(), activeRouters),
 		BannedPeerIds:   bannedPeerIDs,
 	}
 
@@ -1398,6 +1421,10 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.Connections < 0 || req.ConnectionLimit < 0 {
+		http.Error(w, "Invalid load: connections and connection_limit must not be negative", http.StatusBadRequest)
+		return
+	}
 
 	// The lease lasts the control plane's duration unless the router asked
 	// for less: a router that is stopping says how long it expects to be
@@ -1421,12 +1448,14 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	expiresAt := now.Add(ttl)
 	lease := &storage.RouterLease{
-		PeerID:         canonical,
-		Addresses:      req.Addresses,
-		LastRenewal:    now,
-		ExpiresAt:      expiresAt,
-		ConnectedPeers: req.ConnectedPeers,
-		DHTSize:        int(req.DhtSize),
+		PeerID:          canonical,
+		Addresses:       req.Addresses,
+		LastRenewal:     now,
+		ExpiresAt:       expiresAt,
+		ConnectedPeers:  req.ConnectedPeers,
+		DHTSize:         int(req.DhtSize),
+		Connections:     int(req.Connections),
+		ConnectionLimit: int(req.ConnectionLimit),
 	}
 
 	if err := s.store.UpsertRouterLease(r.Context(), lease); err != nil {

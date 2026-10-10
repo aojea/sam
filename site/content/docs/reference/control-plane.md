@@ -58,7 +58,7 @@ Responses that carry credentials are sent with `Cache-Control: no-store`.
 | `GET /healthz` | Liveness. |
 | `GET /readyz` | Readiness. Returns `503` when the database is unreachable. |
 | `GET /metrics` | Prometheus metrics. |
-| `GET /info` | `ControlPlaneInfoResponse`: the OIDC issuer, client ID and audience, the addresses of routers with live leases, and the list of banned peer IDs. This is what a node needs before it can enroll. |
+| `GET /info` | `ControlPlaneInfoResponse`: the OIDC issuer, client ID and audience, the routers with live leases (`routers`: peer ID, addresses, the labels attested at the router's enrollment, and its connections against its limit as of its last lease; `router_addresses` is the same routers flattened), and the list of banned peer IDs. This is what a node needs before it can enroll, and what it chooses its routers from. |
 | `GET /keys` | The current set of signing public keys, signed by every key in the set. A caller accepts the set only if one signature verifies under a key it already trusts. |
 | `GET /.well-known/openid-configuration`, `GET /.well-known/oauth-authorization-server` | OIDC Discovery and OAuth 2.1 Authorization Server metadata for outbound STS federation and MCP OAuth 2.1 clients. |
 | `GET /jwks` | JSON Web Key Set (`ES256` public keys) for verifying border JWTs minted by `POST /sts/token`. |
@@ -91,7 +91,7 @@ arithmetic. A client of your own should retry the same way.
 | `POST /token/exchange` | `TokenExchangeRequest` (`subject_token`, optional `task_rule` and `seal`, challenge signature), node credential as bearer | Stateless JWT-to-Biscuit exchange. Mints a Delegated Session Biscuit bound to the calling node (`actor_node`, `client_peer_id`) with zero database writes. |
 | `POST /sts/token` | `STSTokenRequest` (`biscuit`, `destination`, optional `audience`, challenge signature), node credential as bearer | Stateless Biscuit-to-JWT minting. Verifies the Biscuit and `tar_block` chain against `egress://<destination>` and mints a short-lived ES256 border JWT (`sub`, `act.sub`, `aud`, `mesh_roles`, `mesh_task`). |
 | `GET /revocations` | credential as `Authorization: Bearer <base64>` | `RevocationsResponse`: revoked root Biscuit revocation IDs (`revocation_ids`) and banned peer IDs (`banned_peer_ids`). |
-| `POST /routers/lease` | `RouterLeaseRequest` (credential, addresses, telemetry) | Register or renew a router lease. Requires `role("mesh:role:router")`. Announced addresses must end in the router's own peer ID. |
+| `POST /routers/lease` | `RouterLeaseRequest` (credential, addresses, telemetry: connected peers, DHT size, open connections against the connection limit) | Register or renew a router lease. Requires `role("mesh:role:router")`. Announced addresses must end in the router's own peer ID. The load is what `/info` lists for the router. |
 | `GET /policies` | credential as `Authorization: Bearer <base64>` | The mesh policy as `PolicyConfigGetResponse`: the Datalog rules a member adds to its authorizer, one per entry. Operators read the document at `GET /admin/policy`. |
 | `GET /egress` | credential as `Authorization: Bearer <base64>` | `EgressAssignmentsResponse`: the [egress destinations](../policy/#egress-destinations) whose `served_by` selects the calling node, by its roles or labels. A node registers and serves what it receives here. |
 | `POST /nodes/catalog` | `NodeCatalogReport`, credential as bearer | A node's report of the services it publishes, for the console. Display only. Never used for authorization. |

@@ -39,6 +39,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/google/agentmesh/api"
 	"github.com/google/agentmesh/internal/bench"
 	"github.com/google/agentmesh/internal/version"
 )
@@ -328,18 +329,7 @@ func parseHeaders(raw []string) (map[string][]string, error) {
 }
 
 func parseLabels(raw []string) (map[string]string, error) {
-	if len(raw) == 0 {
-		return nil, nil
-	}
-	labels := map[string]string{}
-	for _, l := range raw {
-		name, value, found := strings.Cut(l, "=")
-		if !found {
-			return nil, fmt.Errorf("label %q is not name=value", l)
-		}
-		labels[strings.TrimSpace(name)] = strings.TrimSpace(value)
-	}
-	return labels, nil
+	return api.ParseLabelFlags(raw)
 }
 
 func write(path string, obs any) error {

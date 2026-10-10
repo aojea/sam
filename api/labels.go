@@ -97,6 +97,26 @@ func ValidateLabels(labels map[string]string) error {
 	return nil
 }
 
+// ParseLabelFlags turns repeated "key=value" flag values into a label set
+// that passes ValidateLabels. nil for none.
+func ParseLabelFlags(raw []string) (map[string]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	labels := make(map[string]string, len(raw))
+	for _, l := range raw {
+		key, value, found := strings.Cut(l, "=")
+		if !found {
+			return nil, fmt.Errorf("label %q is not key=value", l)
+		}
+		labels[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	}
+	if err := ValidateLabels(labels); err != nil {
+		return nil, err
+	}
+	return labels, nil
+}
+
 // A node declares its own labels when it enrols, so on its own a label is a
 // claim rather than an attestation. A role's allowed_labels is what makes it
 // one: the control plane only signs a label the operator said that role may

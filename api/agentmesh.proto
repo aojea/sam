@@ -185,6 +185,9 @@ message ControlPlaneInfoResponse {
   string oidc_issuer = 1;
   string client_id = 2;
   string audience = 3;
+  // The addresses of every router with a live lease, one multiaddr per
+  // address, each ending in the router's peer ID. The same routers as
+  // routers, flattened; kept for members that only need something to dial.
   repeated string router_addresses = 4;
   // The complete set of currently banned peer IDs. Consumers reconcile their
   // local blocklist against this list rather than merging into it, so that a
@@ -193,6 +196,31 @@ message ControlPlaneInfoResponse {
   // sub-second eviction; this is how a node that restarted or was offline
   // when the event was published catches up.
   repeated string banned_peer_ids = 5;
+  // Every router with a live lease, with what a member needs to choose
+  // among them: its attested labels, to select or prefer routers by
+  // placement, and its load as of its last lease, to prefer the ones with
+  // room.
+  repeated RouterInfo routers = 6;
+}
+
+// RouterInfo is one router as the control plane lists it on /info.
+message RouterInfo {
+  string peer_id = 1;
+  // The router's announced addresses, each ending in its peer ID.
+  repeated string addresses = 2;
+  // The router's labels, the same labels as a node's: declared at
+  // enrollment (agentmesh-router --label), signed by the control plane only
+  // if the router's role allows them (PolicyRole.allowed_labels), and
+  // carried as label() facts in the router's credential, where a member
+  // verifies them at the handshake. A member selects routers by them
+  // (--router-selector, every pair must match) or prefers routers by them
+  // (--router-prefer). They place a router; they grant it nothing.
+  map<string, string> labels = 3;
+  // Connections the router held when it last renewed its lease, and the
+  // number it accepts (its high watermark). A member attaches to the
+  // routers with the most room; connection_limit of zero means unknown.
+  int32 connections = 4;
+  int32 connection_limit = 5;
 }
 
 message RouterLeaseRequest {
@@ -214,6 +242,10 @@ message RouterLeaseRequest {
   // be withdrawn at once, so a joiner is not handed a router that is gone
   // and a router back within that time is still listed.
   google.protobuf.Duration ttl = 8;
+  // The router's load, listed for it on /info (RouterInfo): its open
+  // inbound connections and the number it accepts.
+  int32 connections = 9;
+  int32 connection_limit = 10;
 }
 
 message RouterLeaseResponse {

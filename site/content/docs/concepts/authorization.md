@@ -241,9 +241,11 @@ the control plane writes them into the node's credential as `label(k, v)`
 facts, one per label, if a role the node holds allows them. Labels let
 policy describe where a node is or what it is for. Agent Mesh does not define a
 fixed set of keys: `region`, `jurisdiction`, `team`, `compliance`, or
-whatever the operator needs.
+whatever the operator needs. A router declares labels the same way
+(`agentmesh-router --label`), under the same `allowed_labels` of its role,
+and carries them in its credential the same way.
 
-Labels are used in three places:
+Labels are used in four places:
 
 - **A provider restricting callers** adds `check if label("region", "eu")`
   to its `attenuation.checks`. Every caller's credential must then carry
@@ -258,13 +260,21 @@ Labels are used in three places:
   node configuration. Every provider this node talks to must attest all of
   those labels, whether or not the caller asked for any. The caller can add
   further requirements but cannot remove the operator's.
+- **A node choosing routers** sets `--router-selector key=value` to attach
+  only to routers that attest every pair, and `--router-prefer key=value`
+  to attach to routers that attest more of those pairs before routers that
+  attest fewer. The control plane lists each router's labels on `/info`, so
+  the node chooses before it connects, and the node verifies them in the
+  router's credential at the handshake, so a router that does not attest
+  the selector is dropped. This places a node on routers; it grants the
+  routers nothing, and a call still reaches any peer on any router.
 
-The header and the operator floor follow the same matching rule: a map of
-`key=value` pairs, one value per key, and the provider must attest every
-pair. Listing more pairs narrows the set of acceptable providers, as it does
-in a Kubernetes label selector or a Prometheus matcher. Labels seen in
-discovery results are only used to rank candidates. The only labels that
-authorize anything are the signed ones in a credential.
+The header, the operator floor and the router selector follow the same
+matching rule: a map of `key=value` pairs, one value per key, and the peer
+must attest every pair. Listing more pairs narrows the set of acceptable
+peers, as it does in a Kubernetes label selector or a Prometheus matcher.
+Labels seen in discovery results are only used to rank candidates. The only
+labels that authorize anything are the signed ones in a credential.
 
 ## See also
 

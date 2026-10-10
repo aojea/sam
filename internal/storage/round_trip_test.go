@@ -424,12 +424,14 @@ func TestRouterLeaseRoundTripsEveryField(t *testing.T) {
 	ctx := context.Background()
 
 	want := &RouterLease{
-		PeerID:         "12D3KooWRouter",
-		Addresses:      []string{"/ip4/127.0.0.1/tcp/4001"},
-		LastRenewal:    time.Now().Add(-time.Minute),
-		ExpiresAt:      time.Now().Add(time.Hour),
-		ConnectedPeers: []string{"12D3KooWPeerA"},
-		DHTSize:        42,
+		PeerID:          "12D3KooWRouter",
+		Addresses:       []string{"/ip4/127.0.0.1/tcp/4001"},
+		LastRenewal:     time.Now().Add(-time.Minute),
+		ExpiresAt:       time.Now().Add(time.Hour),
+		ConnectedPeers:  []string{"12D3KooWPeerA"},
+		DHTSize:         42,
+		Connections:     1200,
+		ConnectionLimit: 4000,
 	}
 	requireAllFieldsSet(t, want)
 

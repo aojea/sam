@@ -65,6 +65,10 @@ type RouterLease struct {
 	ExpiresAt      time.Time
 	ConnectedPeers []string
 	DHTSize        int
+	// The router's load as of this lease: open inbound connections and the
+	// number it accepts. Listed on /info for members to choose routers by.
+	Connections     int
+	ConnectionLimit int
 }
 
 // User represents a human identity in the mesh.

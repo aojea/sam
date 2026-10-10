@@ -543,6 +543,18 @@ var migrations = []migration{
 		postgres: meshPrefixMigration,
 		sqlite:   meshPrefixMigration,
 	},
+	{
+		// A router's load as of its last lease, for /info to list.
+		version: 18,
+		postgres: []string{
+			`ALTER TABLE routers ADD COLUMN IF NOT EXISTS connections INT`,
+			`ALTER TABLE routers ADD COLUMN IF NOT EXISTS connection_limit INT`,
+		},
+		sqlite: []string{
+			`ALTER TABLE routers ADD COLUMN connections INTEGER`,
+			`ALTER TABLE routers ADD COLUMN connection_limit INTEGER`,
+		},
+	},
 }
 
 var meshPrefixMigration = []string{
@@ -1090,22 +1102,23 @@ func (s *SQLStore) UpsertRouterLease(ctx context.Context, lease *RouterLease) er
 		return err
 	}
 
+	const columns = `peer_id, multiaddresses, last_lease_renewal, expires_at, connected_peers, dht_size, connections, connection_limit`
 	var query string
 	if s.isPostgres() {
 		query = s.rebind(`
-			INSERT INTO routers (peer_id, multiaddresses, last_lease_renewal, expires_at, connected_peers, dht_size) 
-			VALUES (?, ?, ?, ?, ?, ?)
-			ON CONFLICT (peer_id) 
-			DO UPDATE SET multiaddresses = EXCLUDED.multiaddresses, last_lease_renewal = EXCLUDED.last_lease_renewal, expires_at = EXCLUDED.expires_at, connected_peers = EXCLUDED.connected_peers, dht_size = EXCLUDED.dht_size`)
+			INSERT INTO routers (` + columns + `)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (peer_id)
+			DO UPDATE SET multiaddresses = EXCLUDED.multiaddresses, last_lease_renewal = EXCLUDED.last_lease_renewal, expires_at = EXCLUDED.expires_at, connected_peers = EXCLUDED.connected_peers, dht_size = EXCLUDED.dht_size, connections = EXCLUDED.connections, connection_limit = EXCLUDED.connection_limit`)
 	} else {
 		query = s.rebind(`
-			INSERT INTO routers (peer_id, multiaddresses, last_lease_renewal, expires_at, connected_peers, dht_size) 
-			VALUES (?, ?, ?, ?, ?, ?)
-			ON CONFLICT (peer_id) 
-			DO UPDATE SET multiaddresses = excluded.multiaddresses, last_lease_renewal = excluded.last_lease_renewal, expires_at = excluded.expires_at, connected_peers = excluded.connected_peers, dht_size = excluded.dht_size`)
+			INSERT INTO routers (` + columns + `)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (peer_id)
+			DO UPDATE SET multiaddresses = excluded.multiaddresses, last_lease_renewal = excluded.last_lease_renewal, expires_at = excluded.expires_at, connected_peers = excluded.connected_peers, dht_size = excluded.dht_size, connections = excluded.connections, connection_limit = excluded.connection_limit`)
 	}
 
-	_, err = s.db.ExecContext(ctx, query, lease.PeerID, string(addrsBytes), lease.LastRenewal.UnixMilli(), lease.ExpiresAt.UnixMilli(), string(peersBytes), lease.DHTSize)
+	_, err = s.db.ExecContext(ctx, query, lease.PeerID, string(addrsBytes), lease.LastRenewal.UnixMilli(), lease.ExpiresAt.UnixMilli(), string(peersBytes), lease.DHTSize, lease.Connections, lease.ConnectionLimit)
 	return err
 }
 
@@ -1113,7 +1126,7 @@ func (s *SQLStore) UpsertRouterLease(ctx context.Context, lease *RouterLease) er
 // reads the same to every replica and caller; the control plane shuffles the
 // list it hands members (routerAddresses) so they spread across the routers.
 func (s *SQLStore) GetActiveRouters(ctx context.Context) ([]RouterLease, error) {
-	query := s.rebind(`SELECT peer_id, multiaddresses, last_lease_renewal, expires_at, connected_peers, dht_size FROM routers WHERE expires_at > ? ORDER BY peer_id`)
+	query := s.rebind(`SELECT peer_id, multiaddresses, last_lease_renewal, expires_at, connected_peers, dht_size, connections, connection_limit FROM routers WHERE expires_at > ? ORDER BY peer_id`)
 	rows, err := s.db.QueryContext(ctx, query, time.Now().UnixMilli())
 	if err != nil {
 		return nil, err
@@ -1125,9 +1138,9 @@ func (s *SQLStore) GetActiveRouters(ctx context.Context) ([]RouterLease, error) 
 		var l RouterLease
 		var addrsStr string
 		var peersStr sql.NullString
-		var dhtSize sql.NullInt64
+		var dhtSize, connections, connectionLimit sql.NullInt64
 		var lastRenewalUnix, expiresAtUnix int64
-		if err := rows.Scan(&l.PeerID, &addrsStr, &lastRenewalUnix, &expiresAtUnix, &peersStr, &dhtSize); err != nil {
+		if err := rows.Scan(&l.PeerID, &addrsStr, &lastRenewalUnix, &expiresAtUnix, &peersStr, &dhtSize, &connections, &connectionLimit); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(addrsStr), &l.Addresses); err != nil {
@@ -1140,6 +1153,12 @@ func (s *SQLStore) GetActiveRouters(ctx context.Context) ([]RouterLease, error) 
 		}
 		if dhtSize.Valid {
 			l.DHTSize = int(dhtSize.Int64)
+		}
+		if connections.Valid {
+			l.Connections = int(connections.Int64)
+		}
+		if connectionLimit.Valid {
+			l.ConnectionLimit = int(connectionLimit.Int64)
 		}
 		l.LastRenewal = time.UnixMilli(lastRenewalUnix)
 		l.ExpiresAt = time.UnixMilli(expiresAtUnix)
