@@ -566,4 +566,58 @@ func (n *AgentMeshNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID
 		n.Host.Peerstore().AddAddrs(targetPeer, validAddrs, peerstore.TempAddrTTL)
 		logger.Debugf("[Discovery] Replaced addrs for %s with %d routable/circuit addrs", targetPeer, len(validAddrs))
 	}
+
+	n.authenticateTransitRouters(ctx, validAddrs)
+}
+
+// authenticateTransitRouters runs the credential handshake with every
+// router the given circuit addresses go through that this node is not yet
+// authenticated to. A router relays only between peers it has admitted,
+// and a node keeps sessions with a few routers, so the destination's router
+// is often not one of them: the handshake is the one the node runs at
+// start, on the connection the circuit will use, before the circuit is
+// asked for. A relay that is not a router (a node with --enable-relay) is
+// left alone; it admits what it has handshaken with on its own terms.
+func (n *AgentMeshNode) authenticateTransitRouters(ctx context.Context, addrs []multiaddr.Multiaddr) {
+	var relays []peer.ID
+	seen := map[peer.ID]bool{}
+	for _, ma := range addrs {
+		parts := multiaddr.Split(ma)
+		if len(parts) < 2 || parts[len(parts)-1].Protocol().Code != multiaddr.P_CIRCUIT || parts[len(parts)-2].Protocol().Code != multiaddr.P_P2P {
+			continue
+		}
+		relayID, err := peer.Decode(parts[len(parts)-2].Value())
+		if err != nil || seen[relayID] {
+			continue
+		}
+		seen[relayID] = true
+		relays = append(relays, relayID)
+	}
+	if len(relays) == 0 {
+		return
+	}
+	routers := map[peer.ID]bool{}
+	for _, c := range n.routerCandidates() {
+		routers[c.ID] = true
+	}
+	var biscuitBytes []byte
+	for _, relayID := range relays {
+		if !routers[relayID] || n.isAuthenticatedAndConnected(relayID) {
+			continue
+		}
+		if biscuitBytes == nil {
+			b, err := n.loadIdentityForAuth()
+			if err != nil {
+				logger.Debugf("[AuthN] Cannot authenticate to transit router %s: %v", relayID, err)
+				return
+			}
+			biscuitBytes = b
+		}
+		router := peer.AddrInfo{ID: relayID, Addrs: n.Host.Peerstore().Addrs(relayID)}
+		if err := n.authRouter(ctx, router, biscuitBytes); err != nil {
+			logger.Warnf("[AuthN] Transit router %s did not admit this node; a circuit through it will be refused: %v", relayID, err)
+			continue
+		}
+		logger.Debugf("[AuthN] Authenticated to transit router %s", relayID)
+	}
 }
