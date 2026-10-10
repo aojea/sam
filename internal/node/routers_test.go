@@ -142,6 +142,43 @@ func TestCandidatesFromInfoFallsBackToAddresses(t *testing.T) {
 	}
 }
 
+// A router's /info entry lists it under a dnsaddr, and a dnsaddr resolves
+// to every router behind the name. The entry's labels and load belong to
+// the peer it names and to no other, so a node with a selector is not
+// attached to a router that carries another router's labels.
+func TestCandidatesFromInfoKeepOnlyTheNamedPeer(t *testing.T) {
+	idA, _ := peer.Decode("12D3KooWGvdRCJLYATauVWfsieF2j3a2wXZoEQJUS2MsvRdDtgLM")
+	idB, _ := peer.Decode("12D3KooWKgpmErz5j2Trn1xfUveATnszHSTBnJRZRrTpsFHkDXnp")
+	addrA := "/ip4/10.0.0.1/tcp/4501/p2p/" + idA.String()
+	addrB := "/ip4/10.0.0.2/tcp/4501/p2p/" + idB.String()
+	// What resolving the shared name yields for each entry: both routers.
+	both := []string{addrA, addrB}
+	info := &api.ControlPlaneInfoResponse{
+		Routers: []*api.RouterInfo{
+			{PeerId: idA.String(), Addresses: both, Labels: map[string]string{"site": "a"}, Connections: 1, ConnectionLimit: 100},
+			{PeerId: idB.String(), Addresses: both, Labels: map[string]string{"site": "b"}, Connections: 90, ConnectionLimit: 100},
+		},
+	}
+	cands := candidatesFromInfo(context.Background(), info)
+	if len(cands) != 2 {
+		t.Fatalf("got %d candidates, want 2 (one per router): %+v", len(cands), cands)
+	}
+	byID := map[peer.ID]routerCandidate{}
+	for _, c := range cands {
+		byID[c.ID] = c
+	}
+	if byID[idA].Labels["site"] != "a" || byID[idA].Connections != 1 {
+		t.Fatalf("router A = %+v, want site=a with 1 connection", byID[idA])
+	}
+	if byID[idB].Labels["site"] != "b" || byID[idB].Connections != 90 {
+		t.Fatalf("router B = %+v, want site=b with 90 connections", byID[idB])
+	}
+	picked, matched := selectRouters(cands, 2, map[string]string{"site": "a"}, nil, nil)
+	if matched != 1 || len(picked) != 1 || picked[0].ID != idA {
+		t.Fatalf("selector site=a picked %v (matched %d), want router A alone", ids(picked), matched)
+	}
+}
+
 // A node wants as many routers as it is configured for, but no more than
 // attest its selector: with one matching router it is complete at one, and
 // the monitor does not keep topping up.

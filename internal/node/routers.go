@@ -61,8 +61,19 @@ func candidatesFromInfo(ctx context.Context, info *api.ControlPlaneInfoResponse)
 		return candidatesFromAddrs(ctx, parseMultiaddrs(info.GetRouterAddresses()))
 	}
 	var out []routerCandidate
+	seen := map[peer.ID]bool{}
 	for _, r := range info.GetRouters() {
+		id, err := peer.Decode(r.GetPeerId())
+		if err != nil || seen[id] {
+			continue
+		}
+		// A dnsaddr resolves to every router behind the name; only the peer
+		// this entry is about carries its labels and load.
 		for _, pi := range routerPeers(ctx, parseMultiaddrs(r.GetAddresses())) {
+			if pi.ID != id {
+				continue
+			}
+			seen[id] = true
 			out = append(out, routerCandidate{
 				AddrInfo:        pi,
 				Labels:          r.GetLabels(),
