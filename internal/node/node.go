@@ -2617,27 +2617,64 @@ func (n *AgentMeshNode) StartIngressServer(ctx context.Context) error {
 // announceFilter selects which of the host's addresses are published to the
 // mesh (via Identify and DHT provider records). Relay addresses always pass:
 // their IP belongs to the router, and dropping one would strand a node behind
-// NAT.
+// NAT. The routers the node holds a reservation on are added as circuit
+// addresses: AutoRelay publishes those only for a router on a public IP, and
+// a mesh on private or loopback addresses would otherwise publish no path to
+// a node that is reachable through its routers alone.
 func (n *AgentMeshNode) announceFilter(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
 	announcePrivate := n.config.AnnouncePrivateAddrs == nil || *n.config.AnnouncePrivateAddrs
-	if n.config.AllowLoopback && announcePrivate {
+	if !n.config.AllowLoopback || !announcePrivate {
+		var filtered []multiaddr.Multiaddr
+		for _, addr := range addrs {
+			if hasCircuit(addr) {
+				filtered = append(filtered, addr)
+				continue
+			}
+			if !n.config.AllowLoopback && isLoopbackOrLinkLocal(addr) {
+				continue
+			}
+			if !announcePrivate && isPrivateIP(addr) {
+				continue
+			}
+			filtered = append(filtered, addr)
+		}
+		addrs = filtered
+	}
+	extra := n.reservedCircuitAddrs(addrs)
+	if len(extra) == 0 {
 		return addrs
 	}
-	var filtered []multiaddr.Multiaddr
-	for _, addr := range addrs {
-		if hasCircuit(addr) {
-			filtered = append(filtered, addr)
-			continue
-		}
-		if !n.config.AllowLoopback && isLoopbackOrLinkLocal(addr) {
-			continue
-		}
-		if !announcePrivate && isPrivateIP(addr) {
-			continue
-		}
-		filtered = append(filtered, addr)
+	out := make([]multiaddr.Multiaddr, 0, len(addrs)+len(extra))
+	out = append(out, addrs...)
+	return append(out, extra...)
+}
+
+// reservedCircuitAddrs is one <router>/p2p/<id>/p2p-circuit address per
+// address of each router AutoRelay holds a reservation on, leaving out those
+// already in have.
+func (n *AgentMeshNode) reservedCircuitAddrs(have []multiaddr.Multiaddr) []multiaddr.Multiaddr {
+	if n.connMgr == nil {
+		return nil
 	}
-	return filtered
+	seen := make(map[string]bool, len(have))
+	for _, a := range have {
+		seen[a.String()] = true
+	}
+	var out []multiaddr.Multiaddr
+	for _, c := range n.routerCandidates() {
+		if !n.connMgr.IsProtected(c.ID, autorelayTag) {
+			continue
+		}
+		circuit := multiaddr.StringCast("/p2p/" + c.ID.String() + "/p2p-circuit")
+		for _, addr := range c.Addrs {
+			full := addr.Encapsulate(circuit)
+			if !seen[full.String()] {
+				seen[full.String()] = true
+				out = append(out, full)
+			}
+		}
+	}
+	return out
 }
 
 func isLoopbackOrLinkLocal(addr multiaddr.Multiaddr) bool {

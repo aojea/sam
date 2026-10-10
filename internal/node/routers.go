@@ -46,6 +46,11 @@ type routerCandidate struct {
 // take the router before a stranger.
 const routerTag = "agentmesh-router"
 
+// autorelayTag is the tag go-libp2p's AutoRelay protects a relay with once
+// it holds a reservation there; reading it is how the node knows which
+// routers relay for it.
+const autorelayTag = "autorelay"
+
 // candidatesFromInfo reads the routers /info lists. A control plane that
 // predates RouterInfo lists addresses only; those become candidates without
 // labels or load.

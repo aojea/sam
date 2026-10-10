@@ -36,6 +36,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	"github.com/libp2p/go-libp2p/p2p/discovery/util"
+	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/proto"
@@ -112,6 +113,54 @@ func TestAnnounceFilter(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A router AutoRelay holds a reservation on is announced as a circuit
+// address even when AutoRelay itself publishes none for it (a router on a
+// loopback or private IP); a router merely attached is not, and an address
+// AutoRelay already published is not repeated.
+func TestAnnounceFilterAddsReservedCircuits(t *testing.T) {
+	cm, err := connmgr.NewConnManager(10, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cm.Close() })
+	realCandidate := func() routerCandidate {
+		priv, _, err := crypto.GenerateEd25519Key(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := peer.IDFromPrivateKey(priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return routerCandidate{AddrInfo: peer.AddrInfo{ID: id}}
+	}
+	reserved := realCandidate()
+	reserved.Addrs = []multiaddr.Multiaddr{multiaddr.StringCast("/ip4/127.0.0.1/tcp/4501"), multiaddr.StringCast("/ip4/10.0.0.7/tcp/4501")}
+	attachedOnly := realCandidate()
+	attachedOnly.Addrs = []multiaddr.Multiaddr{multiaddr.StringCast("/ip4/127.0.0.1/tcp/4502")}
+	n := &AgentMeshNode{config: Options{AllowLoopback: true}, connMgr: cm}
+	n.routerCatalog = []routerCandidate{reserved, attachedOnly}
+	cm.Protect(attachedOnly.ID, routerTag)
+	cm.Protect(reserved.ID, routerTag)
+	cm.Protect(reserved.ID, autorelayTag)
+
+	already := multiaddr.StringCast("/ip4/10.0.0.7/tcp/4501/p2p/" + reserved.ID.String() + "/p2p-circuit")
+	got := n.announceFilter([]multiaddr.Multiaddr{multiaddr.StringCast("/ip4/127.0.0.1/tcp/5002"), already})
+	want := []string{
+		"/ip4/127.0.0.1/tcp/5002",
+		already.String(),
+		"/ip4/127.0.0.1/tcp/4501/p2p/" + reserved.ID.String() + "/p2p-circuit",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("announced %v, want %v", got, want)
+	}
+	for i, addr := range got {
+		if addr.String() != want[i] {
+			t.Errorf("addr %d: got %s, want %s", i, addr, want[i])
+		}
 	}
 }
 
