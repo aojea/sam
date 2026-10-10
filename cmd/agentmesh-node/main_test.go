@@ -64,9 +64,9 @@ func TestResolveSocketPath(t *testing.T) {
 
 func TestNormalizeControlPlaneURL(t *testing.T) {
 	cases := map[string]string{
-		"bananas.sam-mesh.dev":          "https://bananas.sam-mesh.dev",
-		"http://localhost:8080":         "http://localhost:8080",
-		"https://bananas.sam-mesh.dev/": "https://bananas.sam-mesh.dev",
+		"bananas.agentmesh.page":          "https://bananas.agentmesh.page",
+		"http://localhost:8080":           "http://localhost:8080",
+		"https://bananas.agentmesh.page/": "https://bananas.agentmesh.page",
 	}
 	for in, want := range cases {
 		if got := normalizeControlPlaneURL(in); got != want {

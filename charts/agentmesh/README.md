@@ -6,7 +6,7 @@ own mesh.
 
 > For deployments on GKE/EKS/AKS with externally managed Postgres, DNS and
 > OIDC, see the
-> [Kubernetes guide](https://sam-mesh.dev/docs/guides/kubernetes/).
+> [Kubernetes guide](../../site/content/docs/guides/kubernetes.md).
 
 ## Install
 
@@ -64,7 +64,7 @@ Defaults to `true` (any node/router presenting a valid identity token is
 enrolled immediately, no manual step). Set to `false` if you want an
 administrator to approve each enrollment via `/admin/enrollments` before a
 node can join — see the
-[Headless enrollment guide](https://sam-mesh.dev/docs/guides/headless-enrollment/).
+[Headless enrollment guide](../../site/content/docs/guides/headless-enrollment.md).
 
 ## `controlPlane.workloadIssuer` and `controlPlane.workloadSessionTtl`
 

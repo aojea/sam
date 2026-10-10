@@ -29,7 +29,7 @@ func TestValidateControlPlaneTransport(t *testing.T) {
 		wantErr  bool
 		wantKind error
 	}{
-		{"https://hub.sam-mesh.dev", false, false, nil},
+		{"https://hub.agentmesh.page", false, false, nil},
 		{"https://10.0.0.5:8443", false, false, nil},
 		{"http://127.0.0.1:8080", false, false, nil},
 		{"http://localhost:8080", false, false, nil},
@@ -49,8 +49,8 @@ func TestValidateControlPlaneTransport(t *testing.T) {
 		{"https://", false, true, nil},
 		{"https://:8443", false, true, nil},
 		{"http://", true, true, nil},
-		{"ftp://hub.sam-mesh.dev", false, true, nil},
-		{"hub.sam-mesh.dev", false, true, nil},
+		{"ftp://hub.agentmesh.page", false, true, nil},
+		{"hub.agentmesh.page", false, true, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.url, func(t *testing.T) {

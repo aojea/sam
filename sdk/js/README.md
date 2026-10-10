@@ -1,4 +1,4 @@
-# @agentmesh-p2p/sdk
+# agentmesh-p2p
 
 Native JavaScript SDK for joining an Agent Mesh from inside the agent
 process. It replaces the `agentmesh-node` sidecar for agents written for Node.js
@@ -9,19 +9,19 @@ and follows the control plane's keys, bans and policy while it runs. It
 publishes no service; a tool or a model others should find by name runs
 behind a `agentmesh-node`.
 
-Guide: [sam-mesh.dev/docs/guides/native-sdks](https://sam-mesh.dev/docs/guides/native-sdks/),
+Guide: [Native SDKs](https://github.com/google/agentmesh/blob/main/site/content/docs/guides/native-sdks.md),
 from an empty machine to two programs on a mesh.
 Source: [github.com/google/agentmesh/tree/main/sdk/js](https://github.com/google/agentmesh/tree/main/sdk/js).
 
 ## Install
 
 ```bash
-npm install @agentmesh-p2p/sdk @modelcontextprotocol/sdk zod
+npm install agentmesh-p2p @modelcontextprotocol/sdk zod
 ```
 
 Requires Node.js 22.18 or later. In a browser, bundle it with the page
 (the package's `browser` field selects the browser files); the guide's
-[In a browser](https://sam-mesh.dev/docs/guides/native-sdks/#in-a-browser)
+[In a browser](https://github.com/google/agentmesh/blob/main/site/content/docs/guides/native-sdks.md#in-a-browser)
 section has the details and an example page.
 
 ## Use
