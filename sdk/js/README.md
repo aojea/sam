@@ -1,4 +1,4 @@
-# agentmesh-p2p
+# @agentmesh-p2p/sdk
 
 Native JavaScript SDK for joining an Agent Mesh from inside the agent
 process. It replaces the `agentmesh-node` sidecar for agents written for Node.js
@@ -16,7 +16,7 @@ Source: [github.com/google/agentmesh/tree/main/sdk/js](https://github.com/google
 ## Install
 
 ```bash
-npm install agentmesh-p2p @modelcontextprotocol/sdk zod
+npm install @agentmesh-p2p/sdk @modelcontextprotocol/sdk zod
 ```
 
 Requires Node.js 22.18 or later. In a browser, bundle it with the page

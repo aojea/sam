@@ -4,7 +4,7 @@ weight: 25
 description: "How Developer, Platform, Central Security, Department Leads, Individual End-Users, and Day-2 Ops each enforce their own layer of guardrails on the same mesh."
 ---
 
-<video controls playsinline preload="metadata" poster="../../../demo-poster.png" style="width:100%; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.4); margin-bottom: 1.5rem;">
+<video controls playsinline preload="metadata" style="width:100%; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.4); margin-bottom: 1.5rem;">
   <source src="../../../demo-multi-tier-guardrails.mp4" type="video/mp4">
 </video>
 
