@@ -180,6 +180,39 @@ func waitForConnectedness(t *testing.T, node *AgentMeshNode, router peer.ID, wan
 	t.Fatalf("connectedness to router: got %s, want %s", got, want)
 }
 
+// dropFromRouter closes the router's side of its connections to the node, as
+// a restarting pod does, and returns once the node's swarm has seen the
+// close. The close is only visible to the node once it propagates, and
+// AutoRelay or a DHT lookup can have the socket back within milliseconds of
+// it, so polling Connectedness for NotConnected can miss the gap entirely; a
+// Disconnected notification registered before the close cannot.
+func dropFromRouter(t *testing.T, router host.Host, node *AgentMeshNode) {
+	t.Helper()
+	dropped := make(chan struct{}, 1)
+	nb := &network.NotifyBundle{
+		DisconnectedF: func(_ network.Network, c network.Conn) {
+			if c.RemotePeer() != router.ID() {
+				return
+			}
+			select {
+			case dropped <- struct{}{}:
+			default:
+			}
+		},
+	}
+	node.Host.Network().Notify(nb)
+	defer node.Host.Network().StopNotify(nb)
+
+	if err := router.Network().ClosePeer(node.Host.ID()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-dropped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("node did not see the router close its connection")
+	}
+}
+
 // A router without an external URL advertises one multiaddr per interface,
 // all for the same peer. Authenticating once per address re-runs the
 // handshake on the already-open connection, which trips the router's
@@ -544,10 +577,7 @@ func TestRouterDropIsRedialed(t *testing.T) {
 	}
 
 	// The router side closes, as a restarting pod does.
-	if err := h.Network().ClosePeer(node.Host.ID()); err != nil {
-		t.Fatal(err)
-	}
-	waitForConnectedness(t, node, h.ID(), network.NotConnected)
+	dropFromRouter(t, h, node)
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) && (!node.IsConnected() || handshakes.Load() != 2) {
@@ -562,10 +592,7 @@ func TestRouterDropIsRedialed(t *testing.T) {
 
 	// Dropping it again while the first redial has finished starts another;
 	// the session comes back a second time.
-	if err := h.Network().ClosePeer(node.Host.ID()); err != nil {
-		t.Fatal(err)
-	}
-	waitForConnectedness(t, node, h.ID(), network.NotConnected)
+	dropFromRouter(t, h, node)
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) && handshakes.Load() < 3 {
 		time.Sleep(20 * time.Millisecond)
