@@ -43,6 +43,15 @@ type routerCandidate struct {
 	ConnectionLimit int
 }
 
+// loadRatio is how full the router is, 0 to 1; 0.5 when its last lease
+// said nothing.
+func (c routerCandidate) loadRatio() float64 {
+	if c.ConnectionLimit <= 0 {
+		return 0.5
+	}
+	return float64(c.Connections) / float64(c.ConnectionLimit)
+}
+
 // routerTag protects an attached router's connection from the node's own
 // connection manager, which otherwise trims by age and tag value and would
 // take the router before a stranger.
@@ -122,11 +131,7 @@ func selectRouters(cands []routerCandidate, k int, selector, prefer map[string]s
 				preferred++
 			}
 		}
-		load := 0.5
-		if c.ConnectionLimit > 0 {
-			load = float64(c.Connections) / float64(c.ConnectionLimit)
-		}
-		load += rand.Float64() * 0.05
+		load := c.loadRatio() + rand.Float64()*0.05
 		eligible = append(eligible, scored{c, preferred, load})
 	}
 	sort.SliceStable(eligible, func(i, j int) bool {

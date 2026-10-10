@@ -193,6 +193,32 @@ func peerIDStrings(ids ...peer.ID) []string {
 	return out
 }
 
+// announcedCircuitRelays lists the relays the node publishes circuit
+// addresses through, from its own debug endpoint.
+func announcedCircuitRelays(t *testing.T, n *backgroundNode) []string {
+	t.Helper()
+	var info struct {
+		AnnouncedAddresses []string `json:"announced_addresses"`
+	}
+	if err := json.Unmarshal([]byte(debugGetWithToken(t, n.apiAddr, n.token, "/debug/network-info")), &info); err != nil {
+		t.Fatalf("decode network-info: %v", err)
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, a := range info.AnnouncedAddresses {
+		if i := strings.Index(a, "/p2p-circuit"); i > 0 {
+			parts := strings.Split(a[:i], "/p2p/")
+			relay := parts[len(parts)-1]
+			if !seen[relay] {
+				seen[relay] = true
+				out = append(out, relay)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // waitForEqual polls get until it returns want.
 func waitForEqual(t *testing.T, what string, get func() []string, want []string, timeout time.Duration) {
 	t.Helper()
@@ -235,7 +261,7 @@ func startAttachmentMesh(t *testing.T) *attachmentMesh {
   - name: %s
     allowed_services: []
     allowed_targets: ["*"]
-    allowed_labels: ["site=*"]
+    allowed_labels: ["site=*", "pa=*", "pb=*"]
   - name: %s
     allowed_services: ["mcp://*"]
     allowed_targets: ["*"]
@@ -354,52 +380,10 @@ func TestNodesOnDifferentRoutersReachEachOther(t *testing.T) {
 	waitForEqual(t, "routers attached by node A", func() []string { return attachedRouters(t, nodeA) }, peerIDStrings(routerA.peerID), 10*time.Second)
 	waitForEqual(t, "routers attached by node B", func() []string { return attachedRouters(t, nodeB) }, peerIDStrings(routerB.peerID), 10*time.Second)
 
-	// B finds A's service: the DHT spans both routers.
-	client := &http.Client{Timeout: 5 * time.Second}
-	discover := func() string {
-		req, _ := http.NewRequest(http.MethodGet, "http://"+nodeB.apiAddr+"/mesh/service/discover?type=mcp&name=site-tool", nil)
-		req.Header.Set(api.HeaderMeshAuthentication, "Bearer token-b")
-		resp, err := client.Do(req)
-		if err != nil {
-			return ""
-		}
-		defer func() { _ = resp.Body.Close() }()
-		body, _ := io.ReadAll(resp.Body)
-		return string(body)
-	}
-	deadline := time.Now().Add(20 * time.Second)
-	for !strings.Contains(discover(), "site-tool") {
-		if time.Now().After(deadline) {
-			t.Fatalf("node B never discovered node A's service.\n--- node A ---\n%s\n--- node B ---\n%s", nodeA.log(), nodeB.log())
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
-
-	// B calls A: the circuit goes through router A, where B is a stranger
-	// until it runs the handshake there.
-	callURL := fmt.Sprintf("http://%s/mesh/%s/mcp/site-tool", nodeB.apiAddr, nodeA.peerID)
-	var lastStatus int
-	var lastBody string
-	deadline = time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		req, _ := http.NewRequest(http.MethodPost, callURL, bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json, text/event-stream")
-		req.Header.Set(api.HeaderMeshAuthentication, "Bearer token-b")
-		resp, err := client.Do(req)
-		if err == nil {
-			body, _ := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			lastStatus, lastBody = resp.StatusCode, string(body)
-			if resp.StatusCode == http.StatusOK {
-				break
-			}
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
-	if lastStatus != http.StatusOK {
-		t.Fatalf("call from B to A across routers: %d %s\n--- node A ---\n%s\n--- node B ---\n%s", lastStatus, lastBody, nodeA.log(), nodeB.log())
-	}
+	// B finds A's service: the DHT spans both routers. B calls A: the
+	// circuit goes through router A, where B is a stranger until it runs
+	// the handshake there.
+	callAcrossMesh(t, nodeB, "token-b", nodeA, "site-tool")
 
 	// The call left B connected to router A as well, without attaching to
 	// it; A still holds only its own router.
@@ -548,5 +532,103 @@ func TestIdleNodesHoldOnlyTheirRouters(t *testing.T) {
 				t.Logf("--- node %s, last handshake line ---\n%s", s, out[i:min(len(out), i+300)])
 			}
 		}
+	}
+}
+
+// callAcrossMesh has caller discover provider's MCP service by name and
+// call it, retrying until the call answers 200 or the deadlines pass.
+func callAcrossMesh(t *testing.T, caller *backgroundNode, callerToken string, provider *backgroundNode, service string) {
+	t.Helper()
+	client := &http.Client{Timeout: 5 * time.Second}
+	discover := func() string {
+		req, _ := http.NewRequest(http.MethodGet, "http://"+caller.apiAddr+"/mesh/service/discover?type=mcp&name="+service, nil)
+		req.Header.Set(api.HeaderMeshAuthentication, "Bearer "+callerToken)
+		resp, err := client.Do(req)
+		if err != nil {
+			return ""
+		}
+		defer func() { _ = resp.Body.Close() }()
+		body, _ := io.ReadAll(resp.Body)
+		return string(body)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for !strings.Contains(discover(), service) {
+		if time.Now().After(deadline) {
+			t.Fatalf("caller never discovered %s.\n--- provider ---\n%s\n--- caller ---\n%s", service, provider.log(), caller.log())
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	callURL := fmt.Sprintf("http://%s/mesh/%s/mcp/%s", caller.apiAddr, provider.peerID, service)
+	var lastStatus int
+	var lastBody string
+	deadline = time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		req, _ := http.NewRequest(http.MethodPost, callURL, bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set(api.HeaderMeshAuthentication, "Bearer "+callerToken)
+		resp, err := client.Do(req)
+		if err == nil {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			lastStatus, lastBody = resp.StatusCode, string(body)
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	t.Fatalf("call to %s: %d %s\n--- provider ---\n%s\n--- caller ---\n%s", service, lastStatus, lastBody, provider.log(), caller.log())
+}
+
+// TestCallerTransitsTheRouterItShares pins what a call costs the routers.
+// Router b carries both labels, so the provider (pa) holds a and b and the
+// caller (pb) holds b and c. The caller reaches the provider through b, the
+// router both hold, and runs no handshake at a: a service the whole mesh
+// calls must not hold every caller at every one of its routers.
+func TestCallerTransitsTheRouterItShares(t *testing.T) {
+	m := startAttachmentMesh(t)
+	routerA := m.startRouter(t, "router-a", "pa=1")
+	routerB := m.startRouter(t, "router-b", "pa=1", "pb=1")
+	routerC := m.startRouter(t, "router-c", "pb=1")
+	waitForEqual(t, "routers connected to router c", func() []string { return routersConnectedTo(t, m.cpPort, routerC.peerID) },
+		peerIDStrings(routerA.peerID, routerB.peerID), 10*time.Second)
+
+	mcpServer := httptest.NewServer(newBoundaryMCPHandler(t))
+	t.Cleanup(mcpServer.Close)
+	common := append(m.nodeArgs(), "--monitor-bootstrap", "500ms", "--monitor-interval", "500ms")
+	provider := launchNode(t, m.nodeBin, m.nodeEnv("provider"), filepath.Join(m.tmpDir, "provider"), append(slices.Clone(common),
+		"--api-token-path", tokenPath(t, "token-p"),
+		"--router-selector", "pa=1",
+		"--config", writeNodeConfig(t, m.tmpDir, nil, svcDecl{Type: "mcp", Name: "shared-tool", TargetURL: mcpServer.URL}),
+	)...)
+	caller := launchNode(t, m.nodeBin, m.nodeEnv("caller"), filepath.Join(m.tmpDir, "caller"), append(slices.Clone(common),
+		"--api-token-path", tokenPath(t, "token-c"),
+		"--router-selector", "pb=1",
+	)...)
+	provider.waitForAPI(t)
+	caller.waitForAPI(t)
+	waitForEqual(t, "routers attached by the provider", func() []string { return attachedRouters(t, provider) }, peerIDStrings(routerA.peerID, routerB.peerID), 10*time.Second)
+	waitForEqual(t, "routers attached by the caller", func() []string { return attachedRouters(t, caller) }, peerIDStrings(routerB.peerID, routerC.peerID), 10*time.Second)
+	// The provider's record must name both circuits, or the caller has only
+	// router a to go through. A reservation on the second router comes a
+	// moment after the first, and the record follows it after a 2 s debounce.
+	waitForEqual(t, "routers the provider announces circuits through", func() []string { return announcedCircuitRelays(t, provider) },
+		peerIDStrings(routerA.peerID, routerB.peerID), 15*time.Second)
+	time.Sleep(3 * time.Second)
+
+	callAcrossMesh(t, caller, "token-c", provider, "shared-tool")
+
+	// Router a authenticated the provider and the two routers; the caller
+	// never came. Router b has both nodes and the two routers.
+	if got := routerA.gauge(t, "agentmesh_router_authenticated_peers"); got != 3 {
+		t.Errorf("router a authenticated %v peers, want 3: the caller must transit router b, which it holds", got)
+	}
+	if got := routerB.gauge(t, "agentmesh_router_authenticated_peers"); got != 4 {
+		t.Errorf("router b authenticated %v peers, want 4", got)
+	}
+	if t.Failed() {
+		t.Logf("--- caller ---\n%s", caller.log())
 	}
 }

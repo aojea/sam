@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -560,64 +561,102 @@ func (n *AgentMeshNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID
 		}
 	}
 
+	if kept := n.selectTransit(ctx, validAddrs); len(kept) != len(validAddrs) {
+		validAddrs = kept
+		changed = true
+	}
+
 	if changed && len(validAddrs) > 0 {
 		// Clear existing addresses to prevent libp2p from hanging on dead private IPs
 		n.Host.Peerstore().ClearAddrs(targetPeer)
 		n.Host.Peerstore().AddAddrs(targetPeer, validAddrs, peerstore.TempAddrTTL)
 		logger.Debugf("[Discovery] Replaced addrs for %s with %d routable/circuit addrs", targetPeer, len(validAddrs))
 	}
-
-	n.authenticateTransitRouters(ctx, validAddrs)
 }
 
-// authenticateTransitRouters runs the credential handshake with every
-// router the given circuit addresses go through that this node is not yet
-// authenticated to. A router relays only between peers it has admitted,
-// and a node keeps sessions with a few routers, so the destination's router
-// is often not one of them: the handshake is the one the node runs at
-// start, on the connection the circuit will use, before the circuit is
-// asked for. A relay that is not a router (a node with --enable-relay) is
-// left alone; it admits what it has handshaken with on its own terms.
-func (n *AgentMeshNode) authenticateTransitRouters(ctx context.Context, addrs []multiaddr.Multiaddr) {
-	var relays []peer.ID
+// circuitRelay is the relay a circuit address goes through, or "" for any
+// other address.
+func circuitRelay(ma multiaddr.Multiaddr) peer.ID {
+	parts := multiaddr.Split(ma)
+	if len(parts) < 2 || parts[len(parts)-1].Protocol().Code != multiaddr.P_CIRCUIT || parts[len(parts)-2].Protocol().Code != multiaddr.P_P2P {
+		return ""
+	}
+	relayID, err := peer.Decode(parts[len(parts)-2].Value())
+	if err != nil {
+		return ""
+	}
+	return relayID
+}
+
+// selectTransit decides which of a peer's circuit addresses to dial and
+// makes sure the node is admitted at the router behind them. A router
+// relays only between peers it has admitted, and a node keeps sessions
+// with a few routers, so the peer's routers are often not among them. One
+// transit router is enough: a router the node already holds when the peer
+// is on it too, which costs the mesh nothing; otherwise the peer's router
+// with the most room, which the node runs the handshake with, as it does
+// at start, before the circuit is asked for. Circuits through the peer's
+// other routers are dropped: each would be a handshake and a session
+// there, and a service the whole mesh calls would hold every caller at
+// every one of its routers. A relay that is not a router (a node with
+// --enable-relay) is kept and left alone; it admits what it has handshaken
+// with on its own terms. Direct addresses always pass.
+func (n *AgentMeshNode) selectTransit(ctx context.Context, addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
+	routers := map[peer.ID]routerCandidate{}
+	for _, c := range n.routerCandidates() {
+		routers[c.ID] = c
+	}
+	var viaRouters []peer.ID
 	seen := map[peer.ID]bool{}
 	for _, ma := range addrs {
-		parts := multiaddr.Split(ma)
-		if len(parts) < 2 || parts[len(parts)-1].Protocol().Code != multiaddr.P_CIRCUIT || parts[len(parts)-2].Protocol().Code != multiaddr.P_P2P {
+		relay := circuitRelay(ma)
+		if _, isRouter := routers[relay]; relay == "" || !isRouter || seen[relay] {
 			continue
 		}
-		relayID, err := peer.Decode(parts[len(parts)-2].Value())
-		if err != nil || seen[relayID] {
-			continue
+		seen[relay] = true
+		viaRouters = append(viaRouters, relay)
+	}
+	if len(viaRouters) == 0 {
+		return addrs
+	}
+
+	usable := map[peer.ID]bool{}
+	for _, r := range viaRouters {
+		if n.isAuthenticatedAndConnected(r) {
+			usable[r] = true
 		}
-		seen[relayID] = true
-		relays = append(relays, relayID)
 	}
-	if len(relays) == 0 {
-		return
-	}
-	routers := map[peer.ID]bool{}
-	for _, c := range n.routerCandidates() {
-		routers[c.ID] = true
-	}
-	var biscuitBytes []byte
-	for _, relayID := range relays {
-		if !routers[relayID] || n.isAuthenticatedAndConnected(relayID) {
-			continue
+	if len(usable) == 0 {
+		sort.SliceStable(viaRouters, func(i, j int) bool {
+			return routers[viaRouters[i]].loadRatio() < routers[viaRouters[j]].loadRatio()
+		})
+		biscuitBytes, err := n.loadIdentityForAuth()
+		if err != nil {
+			logger.Debugf("[AuthN] Cannot authenticate to a transit router: %v", err)
+			return addrs
 		}
-		if biscuitBytes == nil {
-			b, err := n.loadIdentityForAuth()
-			if err != nil {
-				logger.Debugf("[AuthN] Cannot authenticate to transit router %s: %v", relayID, err)
-				return
+		for _, r := range viaRouters {
+			router := peer.AddrInfo{ID: r, Addrs: n.Host.Peerstore().Addrs(r)}
+			if err := n.authRouter(ctx, router, biscuitBytes); err != nil {
+				logger.Warnf("[AuthN] Transit router %s did not admit this node: %v", r, err)
+				continue
 			}
-			biscuitBytes = b
+			logger.Debugf("[AuthN] Authenticated to transit router %s", r)
+			usable[r] = true
+			break
 		}
-		router := peer.AddrInfo{ID: relayID, Addrs: n.Host.Peerstore().Addrs(relayID)}
-		if err := n.authRouter(ctx, router, biscuitBytes); err != nil {
-			logger.Warnf("[AuthN] Transit router %s did not admit this node; a circuit through it will be refused: %v", relayID, err)
+		if len(usable) == 0 {
+			return addrs
+		}
+	}
+
+	kept := make([]multiaddr.Multiaddr, 0, len(addrs))
+	for _, ma := range addrs {
+		relay := circuitRelay(ma)
+		if _, isRouter := routers[relay]; relay != "" && isRouter && !usable[relay] {
 			continue
 		}
-		logger.Debugf("[AuthN] Authenticated to transit router %s", relayID)
+		kept = append(kept, ma)
 	}
+	return kept
 }
