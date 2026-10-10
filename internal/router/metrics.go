@@ -24,6 +24,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/google/agentmesh/api"
 )
 
 // Outcomes of an inbound /mesh/auth handshake.
@@ -44,6 +46,13 @@ const (
 	leaseRejected     = "rejected"
 )
 
+// Outcomes of a go-away sent to a member.
+const (
+	goAwayOK          = "ok"
+	goAwayUnsupported = "unsupported"
+	goAwayFailed      = "failed"
+)
+
 var (
 	authHandshakesTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -60,6 +69,14 @@ var (
 		},
 		[]string{"result"},
 	)
+
+	goAwaySentTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "agentmesh_router_goaway_sent_total",
+			Help: "Members told to attach elsewhere, by reason (DRAINING, OVERLOADED) and outcome",
+		},
+		[]string{"reason", "result"},
+	)
 )
 
 // Every outcome exists from the first scrape, so a rate() over one that has
@@ -70,6 +87,11 @@ func init() {
 	}
 	for _, v := range []string{leaseOK, leaseUnreachable, leaseUnauthorized, leaseRejected} {
 		leaseRenewalsTotal.WithLabelValues(v)
+	}
+	for _, reason := range []api.RouterGoAway_Reason{api.RouterGoAway_DRAINING, api.RouterGoAway_OVERLOADED} {
+		for _, v := range []string{goAwayOK, goAwayUnsupported, goAwayFailed} {
+			goAwaySentTotal.WithLabelValues(reason.String(), v)
+		}
 	}
 }
 

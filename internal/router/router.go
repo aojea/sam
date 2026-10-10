@@ -81,6 +81,9 @@ const (
 	// of the mesh at once.
 	TrimShare       = 0.15
 	ConnGracePeriod = 1 * time.Minute
+	// federationTag keeps a peer router's connection out of a trim: losing
+	// it splits the DHT, losing a member's does not.
+	federationTag = "agentmesh-federation"
 	// DefaultDHTProviderAddrTTL is three of a node's 5-minute reprovides: a
 	// node that is gone drops out of discovery within it, one late reprovide
 	// does not. The library default (48h) keeps every past identity listed.
@@ -253,6 +256,9 @@ type Router struct {
 	EventTopic         *pubsub.Topic
 	authenticatedPeers sync.Map
 	bannedPeers        sync.Map
+	// peerRouters is the other routers of the mesh, as /info lists them:
+	// held whatever the load and never sent away.
+	peerRouters sync.Map
 	// handshakeLimiter bounds /mesh/auth attempts per peer; any internet peer
 	// can open those streams.
 	handshakeLimiter *ratelimit.PeerRateLimiter
@@ -483,11 +489,12 @@ func (r *Router) Start() (retErr error) {
 	})
 
 	// 5. Start background routines
-	r.wg.Add(5)
+	r.wg.Add(6)
 	go r.runLeaseRenewalLoop()
 	go r.runKeysSyncLoop()
 	go r.runFederationLoop()
 	go r.runBiscuitRenewalLoop()
+	go r.runShedLoop()
 	go r.listenForControlPlaneEvents(r.ctx)
 
 	r.isReady.Store(true)
@@ -1248,6 +1255,8 @@ func (r *Router) connectBootstrapRouters() {
 			if err != nil || pi.ID == r.Host.ID() {
 				continue
 			}
+			r.peerRouters.Store(pi.ID, true)
+			r.Host.ConnManager().Protect(pi.ID, federationTag)
 
 			if len(r.Host.Network().ConnsToPeer(pi.ID)) == 0 {
 				logger.Infof("[Federation] Connecting to peer router: %s via %s", pi.ID, resolved)
@@ -1443,6 +1452,7 @@ func (r *Router) Close() error {
 	// which goes out while the host and the credential are still there.
 	r.shutdown.Store(true)
 	r.withdrawLease()
+	r.drainMembers()
 	r.cancel()
 
 	var errs []error

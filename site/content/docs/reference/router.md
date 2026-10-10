@@ -42,7 +42,7 @@ replica count.
 | `--lease-renew-interval` | `300s` | How often the lease is renewed. Must be well below the control plane's `--lease-duration`. |
 | `--allow-loopback` | `false` | Announce and accept loopback and link-local addresses. For a router and nodes on one host. |
 | `--conns-per-source-ip` | a quarter of `--high-watermark` (`1000`) | Inbound connections accepted per source address. One address can hold at most this share of the router's connection budget, so filling a router takes at least four addresses. Members behind a NAT or a cluster's SNAT share one address and each holds one connection per router, two while enrolling. |
-| `--low-watermark`, `--high-watermark` | 15% below the high mark (`3400`), `4000` | Connection manager limits. Every member holds one connection, so the high mark is the size of the mesh. Above it, the router closes connections down to the low mark, so the gap between the two is what one trim sheds; the default sheds 15%. |
+| `--low-watermark`, `--high-watermark` | 15% below the high mark (`3400`), `4000` | Connection limits. Every member holds one connection, so the high mark is how many members the router holds. At the high mark the router sends members away (see below) until it is back at the low mark, so the gap between the two is what one shedding moves; the default moves 15%. The connection manager closes connections above the high mark as well, for peers that do not take the message. |
 | `--dht-provider-addr-ttl` | `15m` | How long a service announcement lives after a node last made it. Nodes re-announce every 5 minutes, so a node that is gone drops out of discovery within this time. `0` keeps the default. |
 | `--dht-max-record-age` | library default | DHT value record lifetime. |
 | `--relay-limit-duration`, `--relay-limit-data` | `1h`, `0` | Caps on each relayed connection: lifetime, and bytes per direction (`512MiB`, `1GB`). The relay cuts the connection when either is reached. `0` means no limit. |
@@ -64,13 +64,22 @@ replica count.
 4. Runs the mutual credential handshake on every inbound connection and
    refuses peers whose credential does not verify and peers on the ban list.
 5. Refreshes its own credential before it expires, like a node.
-6. On `SIGTERM` or `SIGINT`, sends a last lease with `--shutdown-lease-ttl`
-   and then closes its connections. The control plane lists the router for
-   that long and no longer, so a router that restarts in place is still
-   there when its members redial it, and joiners are sent to the routers
-   that remain once the time has passed. The operator states the time the
-   router will be down, the way BGP graceful shutdown announces a
-   maintenance window.
+6. Every 5 seconds, compares its inbound connections with
+   `--high-watermark`. At the mark it picks members at random, as many as
+   take it back to `--low-watermark`, and sends each a go-away on
+   `/mesh/goaway/1.0.0` with the reason `OVERLOADED` and a retry time of
+   5 minutes. A member that takes the message attaches to another router
+   at once and stays off this one for that time; one that does not is
+   closed after a 5 second grace, like any other. Connections to the other
+   routers are never shed: the DHT runs over them.
+7. On `SIGTERM` or `SIGINT`, sends a last lease with `--shutdown-lease-ttl`,
+   sends every member a go-away with the reason `DRAINING` and that ttl as
+   the retry time, and after the same grace closes its connections. The
+   control plane lists the router for that long and no longer, so a router
+   that restarts in place is still there when its members redial it, and
+   joiners are sent to the routers that remain once the time has passed.
+   The operator states the time the router will be down, the way BGP
+   graceful shutdown announces a maintenance window.
 
 A router stores nothing except its key. Restarting a router loses no
 important state. Nodes reconnect and publish their services again.
@@ -106,6 +115,7 @@ The metrics address exposes, next to the Go runtime metrics:
 | `agentmesh_router_connected_peers`, `agentmesh_router_authenticated_peers`, `agentmesh_router_banned_peers` | Peers in each state. |
 | `agentmesh_router_dht_routing_table_size` | DHT routing table size. |
 | `agentmesh_router_auth_handshakes_total{result}`, `agentmesh_router_lease_renewals_total{result}` | Handshakes and lease renewals by outcome. |
+| `agentmesh_router_goaway_sent_total{reason,result}` | Members sent away, by reason (`DRAINING`, `OVERLOADED`) and outcome: `ok` when the member took the message, `unsupported` when it does not speak the protocol and was closed instead, `failed` when the stream broke. A rising `OVERLOADED` count on a router that is not draining is a fleet that has outgrown its routers. |
 | `agentmesh_router_inbound_connections_refused_total` | Inbound connections refused by the per-address cap. |
 | `libp2p_relaysvc_*` | The relay service's own counters: `reservations_total{type}` and `connections_total{type}` (`opened`, `closed`, `renewed`), requests by response status, rejections and bytes relayed. The difference between `opened` and `closed` is the number in use; read it against `agentmesh_router_relay_limit` to see how close the relay is to its budget. |
 

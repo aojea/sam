@@ -27,7 +27,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
+	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
+	"google.golang.org/protobuf/proto"
 )
 
 // routerCandidate is one router as the node knows it: where to reach it,
@@ -352,3 +354,47 @@ func (n *AgentMeshNode) topUpRouters(ctx context.Context) int {
 // TopUp attaches to more routers from what the node knows and returns how
 // many it then keeps.
 func (n *AgentMeshNode) TopUp(ctx context.Context) int { return n.topUpRouters(ctx) }
+
+// goAwayMaxRetryAfter caps what a router may ask: a mistaken or hostile
+// value does not keep the node off a router for good.
+const goAwayMaxRetryAfter = time.Hour
+
+// HandleGoAway takes a router's word that it will no longer hold this node:
+// the node lets the router go, stays off it for the time the router named
+// and attaches elsewhere now, rather than when the connection dies. Only a
+// router the node holds is listened to; anyone may open the stream.
+func (n *AgentMeshNode) HandleGoAway(ctx context.Context, s network.Stream) {
+	defer func() { _ = s.Close() }()
+	router := s.Conn().RemotePeer()
+	if !n.isAttached(router) {
+		logger.Debugf("[GoAway] Ignoring go-away from %s: not a router this node holds", router)
+		_ = s.Reset()
+		return
+	}
+	_ = s.SetReadDeadline(time.Now().Add(5 * time.Second))
+	msg, err := msgio.NewVarintReaderSize(s, 1024).ReadMsg()
+	if err != nil {
+		logger.Debugf("[GoAway] Reading go-away from %s: %v", router, err)
+		_ = s.Reset()
+		return
+	}
+	var goAway api.RouterGoAway
+	if err := proto.Unmarshal(msg, &goAway); err != nil {
+		logger.Debugf("[GoAway] Malformed go-away from %s: %v", router, err)
+		_ = s.Reset()
+		return
+	}
+	retryAfter := goAway.GetRetryAfter().AsDuration()
+	if retryAfter <= 0 {
+		retryAfter = n.config.RouterShunDuration
+	}
+	retryAfter = min(retryAfter, goAwayMaxRetryAfter)
+	logger.Infof("[GoAway] Router %s sent this node away (%s); attaching elsewhere and staying off it for %s", router, goAway.GetReason(), retryAfter)
+	goAwayReceivedTotal.WithLabelValues(goAway.GetReason().String()).Inc()
+	n.shun(router, retryAfter)
+	n.detach(router)
+	n.mu.Lock()
+	delete(n.authenticatedRouters, router)
+	n.mu.Unlock()
+	go n.topUpRouters(ctx)
+}

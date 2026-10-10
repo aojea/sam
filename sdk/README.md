@@ -286,9 +286,9 @@ messages in `api/agentmesh.proto`. Bodies are capped at 1 MiB on both sides.
 
 ### Streams
 
-Three protocols. The first two start with a length-prefixed protobuf frame;
-framing is the go-msgio varint style (unsigned varint byte length, then the
-bytes), with a 64 KiB cap on the first frame.
+Four protocols. The first two and the last start with a length-prefixed
+protobuf frame; framing is the go-msgio varint style (unsigned varint byte
+length, then the bytes), with a 64 KiB cap on the first frame.
 
 - `/mesh/auth/1.0.0` (`HandleAuthHandshake`, and the router's equivalent).
   Client sends `AuthFrame{biscuit}`; server verifies the biscuit against the
@@ -321,6 +321,15 @@ bytes), with a 64 KiB cap on the first frame.
   `Content-Length` or chunked transfer coding; a response with neither runs
   to the end of the stream. The JS SDK frames these itself
   (`http1.ts`), so the same code runs in a browser.
+- `/mesh/goaway/1.0.0` (`HandleGoAway`). A router opens it to a member it
+  will no longer hold and sends one `RouterGoAway{reason, retry_after}`:
+  `DRAINING` when it is stopping, `OVERLOADED` when it holds more members
+  than its high watermark. The member closes the stream once it has acted,
+  attaches to another router and does not dial this one again before
+  `retry_after`; the router closes the connection 5 seconds after the
+  message either way. A member that does not register the protocol only
+  sees the connection close, which is what the SDKs do today: they redial
+  the routers on `/info` as before. Handling the message is an open item.
 
 ### Discovery (`internal/node/service.go`)
 

@@ -40,6 +40,10 @@ const (
 	// AuthProtocolID is the libp2p protocol identifier for the zero-trust auth handshake.
 	AuthProtocolID protocol.ID = "/mesh/auth/1.0.0"
 
+	// GoAwayProtocolID is the libp2p protocol on which a router tells a member
+	// it will no longer hold it; the stream carries one RouterGoAway.
+	GoAwayProtocolID protocol.ID = "/mesh/goaway/1.0.0"
+
 	// GossipEvents is the GossipSub topic used to broadcast mesh event updates (e.g., node bans).
 	GossipEvents = "/mesh/events/v1"
 

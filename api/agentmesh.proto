@@ -32,6 +32,21 @@ message AuthResponse {
   bytes biscuit = 3; // The server's own Biscuit token (for mutual auth)
 }
 
+// RouterGoAway is what a router sends, on GoAwayProtocolID, to a member it
+// will no longer hold: it is stopping, or it holds more members than it is
+// sized for. The member attaches to another router and does not come back
+// to this one before retry_after has passed. A member that does not speak
+// the protocol sees its connection close instead.
+message RouterGoAway {
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    DRAINING = 1;   // the router is shutting down
+    OVERLOADED = 2; // the router is above its high watermark
+  }
+  Reason reason = 1;
+  google.protobuf.Duration retry_after = 2;
+}
+
 
 
 message MeshEvent {

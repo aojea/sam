@@ -23,8 +23,25 @@ import (
 
 	"github.com/google/agentmesh/api"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+// goAwayReceivedTotal counts the routers that sent this node away, by the
+// reason they gave; process-wide, like the other counters.
+var goAwayReceivedTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "agentmesh_node_router_goaway_received_total",
+		Help: "Times a router told this node to attach elsewhere, by reason (DRAINING, OVERLOADED)",
+	},
+	[]string{"reason"},
+)
+
+func init() {
+	for _, reason := range []api.RouterGoAway_Reason{api.RouterGoAway_DRAINING, api.RouterGoAway_OVERLOADED} {
+		goAwayReceivedTotal.WithLabelValues(reason.String())
+	}
+}
 
 // nodeStateCollector exports the node's own view of its mesh membership: the
 // same figures GET /debug/mesh-info and /debug/token-info answer on demand,

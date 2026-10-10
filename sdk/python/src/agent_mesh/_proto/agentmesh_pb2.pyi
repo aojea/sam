@@ -655,6 +655,19 @@ class RevocationsResponse(_message.Message):
     revocation_ids: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, revocation_ids: _Optional[_Iterable[str]] = ..., banned_peer_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
+class RouterGoAway(_message.Message):
+    __slots__ = ["reason", "retry_after"]
+    class Reason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+        __slots__ = []
+    DRAINING: RouterGoAway.Reason
+    OVERLOADED: RouterGoAway.Reason
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    REASON_UNSPECIFIED: RouterGoAway.Reason
+    RETRY_AFTER_FIELD_NUMBER: _ClassVar[int]
+    reason: RouterGoAway.Reason
+    retry_after: _duration_pb2.Duration
+    def __init__(self, reason: _Optional[_Union[RouterGoAway.Reason, str]] = ..., retry_after: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ...) -> None: ...
+
 class RouterInfo(_message.Message):
     __slots__ = ["addresses", "connection_limit", "connections", "labels", "peer_id"]
     class LabelsEntry(_message.Message):

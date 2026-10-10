@@ -60,6 +60,13 @@ type fakeRouter struct {
 func newFakeRouter(t *testing.T, listenAddrs ...string) *fakeRouter {
 	t.Helper()
 	cpPub, cpPriv, _ := ed25519.GenerateKey(nil)
+	return newFakeRouterWithKey(t, cpPub, cpPriv, listenAddrs...)
+}
+
+// newFakeRouterWithKey is newFakeRouter for a mesh of several routers, which
+// share the control plane key.
+func newFakeRouterWithKey(t *testing.T, cpPub ed25519.PublicKey, cpPriv ed25519.PrivateKey, listenAddrs ...string) *fakeRouter {
+	t.Helper()
 
 	h, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrs...))
 	if err != nil {

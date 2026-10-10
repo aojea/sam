@@ -792,6 +792,7 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 
 	// Layer 3: Open the Lobby Door (Auth Protocol is bypassed by Layer 4)
 	n.Host.SetStreamHandler(api.AuthProtocolID, recoverStreamHandler("AuthHandshake", n.HandleAuthHandshake))
+	n.Host.SetStreamHandler(api.GoAwayProtocolID, recoverStreamHandler("GoAway", func(s network.Stream) { n.HandleGoAway(ctx, s) }))
 
 	// Layer 3: Wire up MCP handler wrapped in middleware
 	n.Host.SetStreamHandler(api.MCPProtocolID, recoverStreamHandler("MCP", n.WithBiscuitAuth(n.HandleMCPStream)))
