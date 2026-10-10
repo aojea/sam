@@ -229,24 +229,33 @@ func (n *AgentMeshNode) connectToRouters(ctx context.Context, addrs []string) er
 	if len(addrs) == 0 {
 		return fmt.Errorf("failed to connect and authenticate after HTTP enrollment: control plane returned no router addresses")
 	}
+	if err := n.joinRouters(ctx, addrs); err != nil {
+		return fmt.Errorf("failed to connect and authenticate with any router after HTTP enrollment: %w", err)
+	}
+	logger.Info("Successfully enrolled via HTTP and stored identity and mesh config.")
+	return nil
+}
 
-	var lastAuthErr error
+// joinRouters is the handshake that follows an enrollment: every router
+// the control plane answered with is dialled at once and the node is in
+// the mesh when one admits it, retried as at Start, since the routers are
+// busiest exactly when a fleet enrolls.
+func (n *AgentMeshNode) joinRouters(ctx context.Context, addrs []string) error {
+	parsed := make([]multiaddr.Multiaddr, 0, len(addrs))
 	for _, addrStr := range addrs {
 		addr, err := multiaddr.NewMultiaddr(addrStr)
 		if err != nil {
 			logger.Warnf("Failed to parse router address from response: %v", err)
 			continue
 		}
-		if err := n.ConnectAndAuthWithRouter(ctx, addr); err != nil {
-			logger.Warnf("Failed to connect and auth with router after enrollment: %v", err)
-			lastAuthErr = err
-		} else {
-			logger.Info("Successfully enrolled via HTTP and stored identity and mesh config.")
-			return nil
-		}
+		parsed = append(parsed, addr)
 	}
-
-	return fmt.Errorf("failed to connect and authenticate with any router after HTTP enrollment (last error: %v)", lastAuthErr)
+	routers := routerPeers(ctx, parsed)
+	if len(routers) == 0 {
+		return fmt.Errorf("no router peer behind %v", addrs)
+	}
+	_, err := n.admitByRouters(ctx, routers)
+	return err
 }
 
 // EnrollBootstrap enrolls the node with the control plane using a pre-shared bootstrap token.
@@ -417,26 +426,8 @@ func (n *AgentMeshNode) EnrollBootstrap(ctx context.Context, controlPlaneURL str
 	if len(enrollResp.RouterAddresses) == 0 {
 		return fmt.Errorf("failed to connect and authenticate after bootstrap enrollment: control plane returned no router addresses")
 	}
-
-	var lastAuthErr error
-	var authed bool
-	for _, addrStr := range enrollResp.RouterAddresses {
-		addr, err := multiaddr.NewMultiaddr(addrStr)
-		if err != nil {
-			logger.Warnf("Failed to parse router address: %v", err)
-			continue
-		}
-		if err := n.ConnectAndAuthWithRouter(ctx, addr); err != nil {
-			logger.Warnf("Failed to connect and auth with router: %v", err)
-			lastAuthErr = err
-		} else {
-			authed = true
-			break
-		}
-	}
-
-	if !authed {
-		return fmt.Errorf("failed to connect/auth with router after bootstrap enrollment (last error: %v)", lastAuthErr)
+	if err := n.joinRouters(ctx, enrollResp.RouterAddresses); err != nil {
+		return fmt.Errorf("failed to connect/auth with router after bootstrap enrollment: %w", err)
 	}
 
 	logger.Info("Successfully enrolled via Bootstrap token and joined mesh.")

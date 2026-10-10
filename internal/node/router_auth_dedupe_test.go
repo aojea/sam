@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -51,6 +52,9 @@ type fakeRouter struct {
 	cpPub       ed25519.PublicKey
 	cpPriv      ed25519.PrivateKey
 	mint        func(peerID, role string) []byte
+	// admit is the handler installed on AuthProtocolID, for a test that
+	// wraps it.
+	admit network.StreamHandler
 }
 
 func newFakeRouter(t *testing.T, listenAddrs ...string) *fakeRouter {
@@ -89,7 +93,7 @@ func newFakeRouter(t *testing.T, listenAddrs ...string) *fakeRouter {
 
 	var handshakes atomic.Int32
 	var lastBiscuit atomic.Pointer[[]byte]
-	h.SetStreamHandler(api.AuthProtocolID, func(s network.Stream) {
+	admit := func(s network.Stream) {
 		defer func() { _ = s.Close() }()
 		handshakes.Add(1)
 		reader := msgio.NewVarintReaderSize(s, 1024*64)
@@ -105,7 +109,8 @@ func newFakeRouter(t *testing.T, listenAddrs ...string) *fakeRouter {
 		reader.ReleaseMsg(msg)
 		data, _ := proto.Marshal(&api.AuthResponse{Success: true, Biscuit: routerBiscuit})
 		_ = msgio.NewVarintWriter(s).WriteMsg(data)
-	})
+	}
+	h.SetStreamHandler(api.AuthProtocolID, admit)
 
 	var routerAddrs []multiaddr.Multiaddr
 	for _, a := range h.Addrs() {
@@ -116,7 +121,7 @@ func newFakeRouter(t *testing.T, listenAddrs ...string) *fakeRouter {
 		routerAddrs = append(routerAddrs, ma)
 	}
 
-	return &fakeRouter{h: h, routerAddrs: routerAddrs, handshakes: &handshakes, lastBiscuit: &lastBiscuit, cpPub: cpPub, cpPriv: cpPriv, mint: mint}
+	return &fakeRouter{h: h, routerAddrs: routerAddrs, handshakes: &handshakes, lastBiscuit: &lastBiscuit, cpPub: cpPub, cpPriv: cpPriv, mint: mint, admit: admit}
 }
 
 // startNode brings up a node enrolled against this router and authenticated.
@@ -412,6 +417,90 @@ func TestStartIsReadyOnceOneRouterAdmitsTheNode(t *testing.T) {
 	}
 	if got := live.handshakes.Load(); got != 1 {
 		t.Fatalf("live router saw %d handshakes, want 1", got)
+	}
+}
+
+// A router that is up but too busy to answer a handshake before its
+// deadline, as every router is while a fleet joins through it, admits the
+// node on the next attempt. Start used to give up at that first deadline,
+// and a member that had just enrolled exited.
+func TestStartRetriesABusyRouter(t *testing.T) {
+	router := newFakeRouter(t, "/ip4/127.0.0.1/tcp/0")
+	// The first handshake is swallowed: the stream is held open and never
+	// answered, so the node's deadline on it fires.
+	var busy atomic.Bool
+	busy.Store(true)
+	router.h.SetStreamHandler(api.AuthProtocolID, func(s network.Stream) {
+		if busy.CompareAndSwap(true, false) {
+			<-time.After(2 * time.Second)
+			_ = s.Reset()
+			return
+		}
+		router.admit(s)
+	})
+
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	privKey := GetOrGenerateKey(store)
+	pid, _ := peer.IDFromPrivateKey(privKey)
+	if err := store.SaveIdentity(router.mint(pid.String(), api.RoleNode)); err != nil {
+		t.Fatal(err)
+	}
+	node, err := NewAgentMeshNode(Options{
+		PrivKey:              privKey,
+		Store:                store,
+		ControlPlanePubKey:   router.cpPub,
+		RouterAddrs:          router.routerAddrs,
+		ListenAddrs:          []string{"/ip4/127.0.0.1/tcp/0"},
+		AllowLoopback:        true,
+		RouterConnectTimeout: time.Second,
+		RouterRedialDelay:    100 * time.Millisecond,
+		RouterAuthAttempts:   3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = node.Teardown() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := node.Start(ctx); err != nil {
+		t.Fatalf("Start against a router that was busy once: %v", err)
+	}
+	if !node.IsConnected() {
+		t.Fatal("Start returned without an authenticated router")
+	}
+	if busy.Load() {
+		t.Fatal("the router never saw the handshake it was to swallow")
+	}
+	if got := router.handshakes.Load(); got != 1 {
+		t.Fatalf("router admitted %d handshakes, want 1 after the swallowed one", got)
+	}
+
+	// With no router willing at all, Start still reports it, after the
+	// configured attempts.
+	fresh, err := NewAgentMeshNode(Options{
+		PrivKey:              privKey,
+		Store:                store,
+		ControlPlanePubKey:   router.cpPub,
+		RouterAddrs:          router.routerAddrs,
+		ListenAddrs:          []string{"/ip4/127.0.0.1/tcp/0"},
+		AllowLoopback:        true,
+		RouterConnectTimeout: 500 * time.Millisecond,
+		RouterRedialDelay:    50 * time.Millisecond,
+		RouterAuthAttempts:   2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fresh.Teardown() })
+	router.h.SetStreamHandler(api.AuthProtocolID, func(s network.Stream) { _ = s.Reset() })
+	err = fresh.Start(ctx)
+	if err == nil || !strings.Contains(err.Error(), "all connection attempts failed") {
+		t.Fatalf("Start with no router admitting: err = %v, want all connection attempts failed", err)
 	}
 }
 

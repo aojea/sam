@@ -63,7 +63,7 @@ bootstrap token, `join` runs an interactive OIDC login.
 | `--offline-access` | `false` | Request an OIDC refresh token, so that the node can re-enroll on its own when its credential expires. |
 | `--allow-loopback` | `false` | Advertise and dial loopback and link-local addresses. For several nodes on one host. |
 | `--announce-private` | `true` | Advertise RFC 1918 and ULA addresses. Turn off when peers are only reachable through a relay. |
-| `--router-connect-timeout` | `5s` | Dial timeout per router. |
+| `--router-connect-timeout` | `5s` | Dial timeout per router. The node dials every router at once and is in the mesh when the first admits it. When none does within the timeout, as happens while a router is busy admitting a fleet, it dials them again after 2 s, then 4 s, then 8 s, and reports the failure after the fourth attempt. |
 
 Labels declared in the configuration file are sent with the enrollment.
 Running `join` for a node that already holds a credential for the same

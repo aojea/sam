@@ -35,6 +35,11 @@ const (
 	// connection monitor's own interval takes over.
 	DefaultRouterRedialDelay    = 2 * time.Second
 	DefaultRouterRedialAttempts = 6
+	// DefaultRouterAuthAttempts with DefaultRouterRedialDelay doubling
+	// between them waits 14 s in all beyond the dials themselves: enough
+	// for a router that is busy admitting a fleet, short enough that a
+	// member with no router at all still reports it within a minute.
+	DefaultRouterAuthAttempts = 4
 	// DefaultSocketName is the local API socket the node creates in its data directory.
 	DefaultSocketName = "agentmesh.sock"
 )
@@ -92,6 +97,10 @@ type Options struct {
 	// connection monitor.
 	RouterRedialDelay    time.Duration
 	RouterRedialAttempts int
+	// RouterAuthAttempts is how many times Start, and the handshake after
+	// an enrollment, dial the routers before giving up, RouterRedialDelay
+	// doubling between attempts. Zero uses the default.
+	RouterAuthAttempts int
 	// BiscuitTimeout bounds Datalog evaluation when verifying biscuit tokens.
 	BiscuitTimeout time.Duration
 	// DHT Options
@@ -171,6 +180,9 @@ func (o *Options) Default() {
 	}
 	if o.RouterRedialAttempts <= 0 {
 		o.RouterRedialAttempts = DefaultRouterRedialAttempts
+	}
+	if o.RouterAuthAttempts <= 0 {
+		o.RouterAuthAttempts = DefaultRouterAuthAttempts
 	}
 	if o.Reachability == "" {
 		o.Reachability = ReachabilityPrivate

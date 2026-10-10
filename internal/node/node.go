@@ -687,12 +687,9 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 	n.services.reprovideNow = n.triggerReprovide
 	n.applyPendingEgress(ctx)
 
-	authenticated, fatalAuthErr := n.authWithRouters(ctx, staticRelays)
-	if len(staticRelays) > 0 && !authenticated {
-		if fatalAuthErr != nil {
-			return fmt.Errorf("fatal auth failure: %w", fatalAuthErr)
-		}
-		return fmt.Errorf("failed to authenticate with any router: all connection attempts failed")
+	authenticated, err := n.admitByRouters(ctx, staticRelays)
+	if err != nil {
+		return err
 	}
 
 	if authenticated {
@@ -994,6 +991,40 @@ dhtLoop:
 	}
 	logger.Infof("[ServiceRegistry] Successfully registered %d static services", len(services))
 	return nil
+}
+
+// admitByRouters runs authWithRouters until a router admits this node, with
+// RouterRedialDelay doubling between attempts, up to RouterAuthAttempts of
+// them. A router that is up but slow, as every router is while a fleet
+// joins through it, fails the first handshake on its deadline and admits
+// the node on the next; without the retry a member that had just enrolled
+// exited at that first deadline. A router that refuses the credential ends
+// it at once, and no router at all is reported as before. authenticated is
+// false with a nil error only when there are no routers to admit the node.
+func (n *AgentMeshNode) admitByRouters(ctx context.Context, routers []peer.AddrInfo) (authenticated bool, err error) {
+	if len(routers) == 0 {
+		return false, nil
+	}
+	delay := n.config.RouterRedialDelay
+	for attempt := 1; ; attempt++ {
+		authenticated, fatal := n.authWithRouters(ctx, routers)
+		if authenticated {
+			return true, nil
+		}
+		if fatal != nil {
+			return false, fmt.Errorf("fatal auth failure: %w", fatal)
+		}
+		if attempt >= n.config.RouterAuthAttempts || delay <= 0 {
+			return false, errors.New("failed to authenticate with any router: all connection attempts failed")
+		}
+		logger.Warnf("[AuthN] No router admitted this node on attempt %d of %d; retrying in %s", attempt, n.config.RouterAuthAttempts, delay)
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(delay):
+		}
+		delay *= 2
+	}
 }
 
 // authWithRouters dials every router at once and returns as soon as one has
