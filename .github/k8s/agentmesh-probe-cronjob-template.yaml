@@ -56,9 +56,6 @@ spec:
               requests:
                 cpu: 50m
                 memory: 64Mi
-              limits:
-                cpu: 200m
-                memory: 256Mi
             volumeMounts:
             - name: config-volume
               mountPath: /etc/agentmesh
@@ -93,9 +90,6 @@ spec:
               requests:
                 cpu: 50m
                 memory: 128Mi
-              limits:
-                cpu: 500m
-                memory: 512Mi
             volumeMounts:
             - name: agentmesh-token
               mountPath: /var/run/secrets/tokens
@@ -125,9 +119,6 @@ spec:
               requests:
                 cpu: 50m
                 memory: 128Mi
-              limits:
-                cpu: 500m
-                memory: 512Mi
             volumeMounts:
             - name: agentmesh-token
               mountPath: /var/run/secrets/tokens
@@ -157,9 +148,6 @@ spec:
               requests:
                 cpu: 10m
                 memory: 16Mi
-              limits:
-                cpu: 100m
-                memory: 64Mi
             volumeMounts:
             - name: agentmesh-uds
               mountPath: /var/run/agentmesh

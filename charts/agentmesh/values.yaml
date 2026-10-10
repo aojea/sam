@@ -68,9 +68,6 @@ controlPlane:
     requests:
       cpu: 100m
       memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
   service:
     type: ClusterIP
     port: 8080
@@ -116,9 +113,6 @@ database:
       requests:
         cpu: 100m
         memory: 256Mi
-      limits:
-        cpu: 1000m
-        memory: 1Gi
 
 router:
   enabled: true
@@ -167,9 +161,6 @@ router:
     requests:
       cpu: 100m
       memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
   service:
     type: ClusterIP
     port: 4501
@@ -204,9 +195,6 @@ console:
     requests:
       cpu: 50m
       memory: 64Mi
-    limits:
-      cpu: 250m
-      memory: 256Mi
   service:
     type: ClusterIP
     port: 8081

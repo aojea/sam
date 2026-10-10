@@ -92,9 +92,6 @@ spec:
           requests:
             cpu: 100m
             memory: 256Mi
-          limits:
-            cpu: 500m
-            memory: 1Gi
         volumeMounts:
         - name: openclaw-data
           mountPath: /data
@@ -124,9 +121,6 @@ spec:
           requests:
             cpu: 50m
             memory: 64Mi
-          limits:
-            cpu: 200m
-            memory: 256Mi
         volumeMounts:
         - name: config-volume
           mountPath: /etc/agentmesh

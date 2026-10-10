@@ -572,11 +572,14 @@ jobs:
           gcloud compute instances delete sam-router-${ENV_NAME}-vm --zone=${ZONE} --project=${GCP_PROJECT_ID} --quiet || true
           gcloud compute instances delete agentmesh-router-${ENV_NAME}-vm --zone=${ZONE} --project=${GCP_PROJECT_ID} --quiet || true
 
-          # Create a new COS VM instance running the agentmesh-router
+          # Create a new COS VM instance running the agentmesh-router. The
+          # router is a hub: with 1 GB and a shared core an e2-micro refused
+          # handshakes while a fleet joined through it (libp2p sized its
+          # stream limits from the memory it saw and the core was at 100%).
           gcloud compute instances create agentmesh-router-${ENV_NAME}-vm \
             --project=${GCP_PROJECT_ID} \
             --zone=${ZONE} \
-            --machine-type=e2-micro \
+            --machine-type=e2-small \
             --image-family=cos-stable \
             --image-project=cos-cloud \
             --tags=sam-router,agentmesh-router \
@@ -601,7 +604,8 @@ jobs:
             --listen=/ip4/0.0.0.0/tcp/4501 \
             --listen=/ip4/0.0.0.0/udp/4501/quic-v1 \
             --external-addr=/ip4/${EXTERNAL_IP}/tcp/4501 \
-            --external-addr=/ip4/${EXTERNAL_IP}/udp/4501/quic-v1'
+            --external-addr=/ip4/${EXTERNAL_IP}/udp/4501/quic-v1 \
+            --metrics-addr=127.0.0.1:9090'
 
       - name: Deploy OpenClaw Canary
         env:

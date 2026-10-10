@@ -117,9 +117,6 @@ spec:
           requests:
             cpu: 50m
             memory: 64Mi
-          limits:
-            cpu: 200m
-            memory: 256Mi
         volumeMounts:
         - name: config-volume
           mountPath: /etc/agentmesh
