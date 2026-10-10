@@ -30,7 +30,7 @@ metadata:
   namespace: ${NAMESPACE}
 spec:
   serviceName: "agentmesh-router-${ENV_NAME}"
-  replicas: 3
+  replicas: ${ROUTER_REPLICAS}
   # A router that is ready has not been re-handshaken by anyone yet: members
   # redial a dropped router with a backoff that reaches a minute, and older
   # members only on their monitor interval of one minute. A rollout that
