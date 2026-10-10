@@ -32,33 +32,37 @@ type Backoff struct {
 	// Initial is the first wait when the answer carries no Retry-After;
 	// each further wait doubles, up to Max.
 	Initial, Max time.Duration
-	// Attempts is how many answers are retried before the last one is
-	// returned to the caller as it came.
-	Attempts int
+	// Budget is how long in all the caller keeps trying. The last answer
+	// before the budget runs out is returned to the caller as it came.
+	// Time, not a count of attempts: a control plane that names a short
+	// Retry-After is asking for many short waits, and a fleet of N members
+	// behind a limiter of R a second needs N/R seconds whatever it answers.
+	Budget time.Duration
 }
 
-// DefaultEnrollBackoff waits about a minute in all before giving up, which
-// covers a fleet of a few hundred members joining through a limiter of ten
-// per second.
-var DefaultEnrollBackoff = Backoff{Initial: time.Second, Max: 15 * time.Second, Attempts: 8}
+// DefaultEnrollBackoff keeps trying for three minutes, which admits a
+// fleet of about 1500 members that start at once through the control
+// plane's limiter of ten a second. A larger fleet starts in waves.
+var DefaultEnrollBackoff = Backoff{Initial: time.Second, Max: 15 * time.Second, Budget: 3 * time.Minute}
 
 // DoWithChallengeRetry is DoWithChallenge for a request the control plane
 // may answer with 429 or 503. Such an answer is retried after Retry-After
 // when the control plane names a wait, and after the backoff's own delay
 // when it does not, with jitter so a fleet told "not now" together does
-// not come back together. Any other answer, and the last retried one, is
-// returned to the caller.
+// not come back together. Any other answer, and the last one within the
+// budget, is returned to the caller.
 func DoWithChallengeRetry(ctx context.Context, httpClient *http.Client, now func() time.Time, b Backoff, build func(ts int64) (*http.Request, error)) (*http.Response, error) {
 	if now == nil {
 		now = time.Now
 	}
+	deadline := now().Add(b.Budget)
 	delay := b.Initial
-	for attempt := 0; ; attempt++ {
+	for {
 		resp, err := DoWithChallenge(httpClient, now, build)
 		if err != nil {
 			return nil, err
 		}
-		if !retryable(resp.StatusCode) || attempt >= b.Attempts {
+		if !retryable(resp.StatusCode) {
 			return resp, nil
 		}
 		wait, named := retryAfter(resp, now)
@@ -68,6 +72,9 @@ func DoWithChallengeRetry(ctx context.Context, httpClient *http.Client, now func
 		}
 		// Up to half the wait again, at random.
 		wait += time.Duration(rand.Int64N(int64(wait)/2 + 1))
+		if now().Add(wait).After(deadline) {
+			return resp, nil
+		}
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, MaxBodyBytes))
 		_ = resp.Body.Close()
 		select {

@@ -28,7 +28,7 @@ import (
 // returned at once, and a limiter that never relents hands its last answer
 // back after the configured attempts.
 func TestDoWithChallengeRetry(t *testing.T) {
-	fast := Backoff{Initial: time.Millisecond, Max: 5 * time.Millisecond, Attempts: 4}
+	fast := Backoff{Initial: time.Millisecond, Max: 5 * time.Millisecond, Budget: 2 * time.Second}
 	build := func(url string) func(ts int64) (*http.Request, error) {
 		return func(ts int64) (*http.Request, error) {
 			return http.NewRequest(http.MethodPost, url, nil)
@@ -123,20 +123,27 @@ func TestDoWithChallengeRetry(t *testing.T) {
 		}
 	})
 
-	t.Run("gives up after the attempts", func(t *testing.T) {
+	t.Run("gives up when the budget runs out", func(t *testing.T) {
 		var calls atomic.Int32
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			calls.Add(1)
+			w.Header().Set("Retry-After", "1")
 			http.Error(w, "busy", http.StatusTooManyRequests)
 		}))
 		defer srv.Close()
+		// A budget of 2 s and a named wait of 1 s to 1.5 s: one retry fits,
+		// a second would end past the budget.
+		started := time.Now()
 		resp, err := DoWithChallengeRetry(context.Background(), srv.Client(), nil, fast, build(srv.URL))
 		if err != nil {
 			t.Fatal(err)
 		}
 		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusTooManyRequests || int(calls.Load()) != fast.Attempts+1 {
-			t.Fatalf("status %d after %d calls, want 429 after %d", resp.StatusCode, calls.Load(), fast.Attempts+1)
+		if resp.StatusCode != http.StatusTooManyRequests || calls.Load() != 2 {
+			t.Fatalf("status %d after %d calls, want 429 after 2", resp.StatusCode, calls.Load())
+		}
+		if took := time.Since(started); took > fast.Budget {
+			t.Fatalf("kept trying for %s, past the %s budget", took, fast.Budget)
 		}
 	})
 
@@ -148,7 +155,8 @@ func TestDoWithChallengeRetry(t *testing.T) {
 		defer srv.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
-		if _, err := DoWithChallengeRetry(ctx, srv.Client(), nil, fast, build(srv.URL)); err != context.DeadlineExceeded {
+		patient := Backoff{Initial: time.Second, Max: time.Minute, Budget: time.Hour}
+		if _, err := DoWithChallengeRetry(ctx, srv.Client(), nil, patient, build(srv.URL)); err != context.DeadlineExceeded {
 			t.Fatalf("err = %v, want context deadline", err)
 		}
 	})

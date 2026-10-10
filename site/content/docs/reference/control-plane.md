@@ -76,10 +76,11 @@ names. Every instant in a response (`expire_time` and the like) is a
 Enrollment is admitted at 10 requests a second for the whole mesh, with a
 burst of 20. A request over that is answered `429` with a `Retry-After`
 header. `agentmesh-node` waits for it and sends the request again, with
-jitter, for about a minute before it reports the failure, so a fleet of a
-few hundred members that starts at once joins over its first minute instead
-of losing the members the limiter turned away. A client of your own should
-do the same.
+jitter, for up to three minutes before it reports the failure, so a fleet of
+up to about 1500 members that starts at once joins over its first minutes
+instead of losing the members the limiter turned away. A larger fleet starts
+in waves; the [scalability guide](../../guides/scalability/) has the
+arithmetic. A client of your own should retry the same way.
 
 | Route | Body | Purpose |
 |---|---|---|
