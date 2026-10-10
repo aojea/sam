@@ -41,7 +41,7 @@ replica count.
 | `--lease-renew-interval` | `300s` | How often the lease is renewed. Must be well below the control plane's `--lease-duration`. |
 | `--allow-loopback` | `false` | Announce and accept loopback and link-local addresses. For a router and nodes on one host. |
 | `--conns-per-source-ip` | a quarter of `--high-watermark` (`1000`) | Inbound connections accepted per source address. One address can hold at most this share of the router's connection budget, so filling a router takes at least four addresses. Members behind a NAT or a cluster's SNAT share one address and each holds one connection per router, two while enrolling. |
-| `--low-watermark`, `--high-watermark` | `1000`, `4000` | Connection manager limits. Above the high mark, connections are trimmed down to the low mark. |
+| `--low-watermark`, `--high-watermark` | 15% below the high mark (`3400`), `4000` | Connection manager limits. Every member holds one connection, so the high mark is the size of the mesh. Above it, the router closes connections down to the low mark, so the gap between the two is what one trim sheds; the default sheds 15%. |
 | `--dht-provider-addr-ttl` | `15m` | How long a service announcement lives after a node last made it. Nodes re-announce every 5 minutes, so a node that is gone drops out of discovery within this time. `0` keeps the default. |
 | `--dht-max-record-age` | library default | DHT value record lifetime. |
 | `--relay-limit-duration`, `--relay-limit-data` | `1h`, `0` | Caps on each relayed connection: lifetime, and bytes per direction (`512MiB`, `1GB`). The relay cuts the connection when either is reached. `0` means no limit. |

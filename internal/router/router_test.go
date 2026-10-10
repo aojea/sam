@@ -897,11 +897,25 @@ func TestRouterConnectionManagerWatermarks(t *testing.T) {
 
 	defaultOpts := Options{}
 	defaultOpts.Default()
-	if defaultOpts.LowWaterMark != 1000 || defaultOpts.HighWaterMark != 4000 {
-		t.Fatalf("expected default watermarks 1000/4000, got Low: %d, High: %d", defaultOpts.LowWaterMark, defaultOpts.HighWaterMark)
+	// A trim sheds TrimShare of the connections: on a hub every connection
+	// is a member session, and libp2p's own 4000 down to 1000 was most of
+	// the mesh at once.
+	if defaultOpts.LowWaterMark != 3400 || defaultOpts.HighWaterMark != 4000 {
+		t.Fatalf("expected default watermarks 3400/4000, got Low: %d, High: %d", defaultOpts.LowWaterMark, defaultOpts.HighWaterMark)
 	}
 	if defaultOpts.ConnsPerSourceIP != 1000 {
 		t.Fatalf("default ConnsPerSourceIP = %d, want 1000", defaultOpts.ConnsPerSourceIP)
+	}
+
+	// The low mark follows a high mark the operator sets.
+	highOnly := Options{HighWaterMark: 10000}
+	highOnly.Default()
+	if highOnly.LowWaterMark != 8500 {
+		t.Fatalf("LowWaterMark for a high of 10000 = %d, want 8500", highOnly.LowWaterMark)
+	}
+	inverted := Options{ControlPlaneURL: "http://127.0.0.1:8080", LowWaterMark: 4000, HighWaterMark: 3000}
+	if err := inverted.Validate(); err == nil || !strings.Contains(err.Error(), "LowWaterMark") {
+		t.Fatalf("a low mark above the high one: err = %v, want rejection", err)
 	}
 
 	pinned := Options{ConnsPerSourceIP: 8}

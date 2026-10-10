@@ -107,11 +107,11 @@ func (o *Options) Default() {
 	if o.LeaseRenewInterval <= 0 {
 		o.LeaseRenewInterval = 30 * time.Second
 	}
-	if o.LowWaterMark <= 0 {
-		o.LowWaterMark = 1000
-	}
 	if o.HighWaterMark <= 0 {
-		o.HighWaterMark = 4000
+		o.HighWaterMark = DefaultHighWaterMark
+	}
+	if o.LowWaterMark <= 0 {
+		o.LowWaterMark = DefaultLowWaterMark(o.HighWaterMark)
 	}
 	if o.ConnsPerSourceIP <= 0 {
 		o.ConnsPerSourceIP = DefaultConnsPerSourceIP(o.HighWaterMark)
@@ -140,6 +140,9 @@ func (o *Options) Validate() error {
 	}
 	if o.ShutdownLeaseTTL < 0 {
 		return fmt.Errorf("ShutdownLeaseTTL must not be negative, got %s", o.ShutdownLeaseTTL)
+	}
+	if o.LowWaterMark >= o.HighWaterMark {
+		return fmt.Errorf("LowWaterMark (%d) must be below HighWaterMark (%d)", o.LowWaterMark, o.HighWaterMark)
 	}
 	return api.ValidateControlPlaneTransport(o.ControlPlaneURL, o.AllowInsecureControlPlane)
 }

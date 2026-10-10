@@ -248,7 +248,7 @@ func main() {
 	// Embedded router tunables.
 	rootCmd.Flags().DurationVar(&routerTunables.KeysSyncInterval, "router-keys-sync-interval", 0, "Biscuit public key refresh interval (0 keeps the component default)")
 	rootCmd.Flags().DurationVar(&routerTunables.LeaseRenewInterval, "router-lease-renew-interval", 0, "Lease renewal interval (0 keeps the component default)")
-	rootCmd.Flags().IntVar(&routerTunables.LowWaterMark, "router-low-watermark", 0, "Connection manager low watermark (0 keeps the component default)")
+	rootCmd.Flags().IntVar(&routerTunables.LowWaterMark, "router-low-watermark", 0, "Connection manager low watermark (0 is 15% below the high watermark)")
 	rootCmd.Flags().IntVar(&routerTunables.HighWaterMark, "router-high-watermark", 0, "Connection manager high watermark (0 keeps the component default)")
 	rootCmd.Flags().IntVar(&routerTunables.ConnsPerSourceIP, "router-conns-per-source-ip", 0, "Per-source-IP connection budget (0 follows the high watermark; proxied peers share source IPs)")
 	rootCmd.Flags().DurationVar(&routerTunables.DHTProviderAddrTTL, "router-dht-provider-addr-ttl", 0, "How long a DHT provider record lives after its last announcement (0 keeps the component default of 15m)")

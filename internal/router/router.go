@@ -66,10 +66,21 @@ import (
 
 var logger = golog.Logger("agentmesh-router")
 
+// DefaultLowWaterMark is the low watermark for a high one: TrimShare below
+// it, so a trim sheds that share of the connections and no more.
+func DefaultLowWaterMark(highWaterMark int) int {
+	return max(1, int(float64(highWaterMark)*(1-TrimShare)))
+}
+
 const (
-	DefaultLowWaterMark  = 1000
 	DefaultHighWaterMark = 4000
-	ConnGracePeriod      = 1 * time.Minute
+	// TrimShare is the share of its connections a router sheds when it
+	// crosses the high watermark: the low watermark it trims down to is
+	// the high one less this. libp2p's own default trims from 4000 to 1000,
+	// which on a hub whose every connection is a member session is most
+	// of the mesh at once.
+	TrimShare       = 0.15
+	ConnGracePeriod = 1 * time.Minute
 	// DefaultDHTProviderAddrTTL is three of a node's 5-minute reprovides: a
 	// node that is gone drops out of discovery within it, one late reprovide
 	// does not. The library default (48h) keeps every past identity listed.
@@ -359,15 +370,7 @@ func (r *Router) Start() (retErr error) {
 	}
 
 	// 4. Initialize libp2p host
-	low := r.config.LowWaterMark
-	if low <= 0 {
-		low = DefaultLowWaterMark
-	}
-	high := r.config.HighWaterMark
-	if high <= 0 {
-		high = DefaultHighWaterMark
-	}
-	cm, err := connmgr.NewConnManager(low, high, connmgr.WithGracePeriod(ConnGracePeriod))
+	cm, err := connmgr.NewConnManager(r.config.LowWaterMark, r.config.HighWaterMark, connmgr.WithGracePeriod(ConnGracePeriod))
 	if err != nil {
 		return fmt.Errorf("failed to create connection manager: %w", err)
 	}
