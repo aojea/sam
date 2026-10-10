@@ -14,7 +14,21 @@
 
 """Native SDK for joining an Agent Mesh from inside a Python process."""
 
-from .auth import AUTH_PROTOCOL, MCP_PROTOCOL, AuthRejectedError, auth_stream_handler, authenticate_with_peer
+from .auth import (
+    AUTH_PROTOCOL,
+    GOAWAY_MAX_RETRY_AFTER,
+    GOAWAY_PROTOCOL,
+    GOAWAY_STREAM_TIMEOUT,
+    MAX_GOAWAY_MESSAGE_BYTES,
+    MCP_PROTOCOL,
+    ROUTER_SHUN_DURATION,
+    AuthRejectedError,
+    auth_stream_handler,
+    authenticate_with_peer,
+    clamp_go_away_retry_after,
+    go_away_reason_name,
+    go_away_stream_handler,
+)
 from .authorizer import BASELINE_DATALOG, AuthorizationError, AuthorizeRequest, ProviderAuthorizerOptions, authorize_caller
 from .biscuit import ROLE_ROUTER, BiscuitVerificationError, VerifiedBiscuit, attenuate_biscuit, require_role, seal_biscuit, verify_peer_biscuit
 from .challenges import (
@@ -63,7 +77,16 @@ from .libp2p_http import (
 from .mcp_client import LabelsNotSatisfiedError, ToolCallResult, ToolInfo, open_mcp_session, require_egress_labels, require_labels
 from .mesh import AgentMesh, ControlPlaneSync, CredentialRetiredError, JwtSource
 from .relay import dial_through_relay, reserve_relay
-from .session import AdmittedRouter, MeshSession, Peer
+from .session import (
+    DEFAULT_ROUTERS,
+    ROUTER_REDIAL_BACKOFFS,
+    AdmittedRouter,
+    MeshSession,
+    Peer,
+    RouterCandidate,
+    candidates_from_router_infos,
+    select_routers,
+)
 from .sync import GOSSIP_EVENTS_TOPIC, BanSet, verify_mesh_event
 from .tar import (
     TaskRequestContext,
@@ -101,10 +124,14 @@ __all__ = [
     "ControlPlaneSync",
     "CredentialRetiredError",
     "DEFAULT_A2A_NAME",
+    "DEFAULT_ROUTERS",
     "DHT_PROTOCOL",
     "DiscoveredProvider",
     "Enrollment",
     "EnrollmentRejectedError",
+    "GOAWAY_MAX_RETRY_AFTER",
+    "GOAWAY_PROTOCOL",
+    "GOAWAY_STREAM_TIMEOUT",
     "GOSSIP_EVENTS_TOPIC",
     "HTTP_PROTOCOL",
     "HTTPHandler",
@@ -115,6 +142,7 @@ __all__ = [
     "JwtSource",
     "KeysNotTrustedError",
     "LabelsNotSatisfiedError",
+    "MAX_GOAWAY_MESSAGE_BYTES",
     "MCP_PROTOCOL",
     "MESH_PATH_PREFIX",
     "MeshCredential",
@@ -125,7 +153,10 @@ __all__ = [
     "ProviderOptions",
     "ROLE_NODE",
     "ROLE_ROUTER",
+    "ROUTER_REDIAL_BACKOFFS",
+    "ROUTER_SHUN_DURATION",
     "RefreshResult",
+    "RouterCandidate",
     "StreamedResponse",
     "TaskRequestContext",
     "ToolCallResult",
@@ -135,7 +166,9 @@ __all__ = [
     "auth_stream_handler",
     "authenticate_with_peer",
     "authorize_caller",
+    "candidates_from_router_infos",
     "canonical_peer_id",
+    "clamp_go_away_retry_after",
     "decode_auth_response",
     "decode_tar_block_payload",
     "dial_through_relay",
@@ -148,6 +181,8 @@ __all__ = [
     "enroll_status_challenge",
     "evaluate_task_rules",
     "find_providers",
+    "go_away_reason_name",
+    "go_away_stream_handler",
     "http_ingress_handler",
     "http_request_over_stream",
     "libp2p_public_key",
@@ -171,6 +206,7 @@ __all__ = [
     "reserve_relay",
     "revocations_challenge",
     "seal_biscuit",
+    "select_routers",
     "service_key",
     "rewrite_agent_card",
     "split_mesh_url",

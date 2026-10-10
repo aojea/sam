@@ -21,15 +21,30 @@ import type { Connection, Stream, StreamHandler } from "@libp2p/interface";
 import { lpStream } from "@libp2p/utils";
 import { BiscuitVerificationError, verifyPeerBiscuit, type VerifiedBiscuit } from "./biscuit.ts";
 import { decodeAuthResponse } from "./credential.ts";
-import { AuthFrameSchema, AuthResponseSchema } from "./gen/agentmesh_pb.ts";
+import {
+  AuthFrameSchema,
+  AuthResponseSchema,
+  RouterGoAwaySchema,
+  RouterGoAway_Reason,
+  type RouterGoAway,
+} from "./gen/agentmesh_pb.ts";
 
 export const AUTH_PROTOCOL = "/mesh/auth/1.0.0";
 export const MCP_PROTOCOL = "/mesh/mcp/1.0.0";
+export const GOAWAY_PROTOCOL = "/mesh/goaway/1.0.0";
 
 /** The first frame on a stream is capped, as msgio.NewVarintReaderSize(s, 64 KiB). */
 export const MAX_AUTH_FRAME_BYTES = 64 * 1024;
 /** How long either side waits for the other's frame. */
 export const AUTH_HANDSHAKE_TIMEOUT_MS = 10_000;
+
+/** The go-away message on /mesh/goaway/1.0.0 is capped at 1 KiB, with a 5s read timeout. */
+export const MAX_GOAWAY_MESSAGE_BYTES = 1024;
+export const GOAWAY_STREAM_TIMEOUT_MS = 5_000;
+/** Default duration a router is shunned when retry_after is unset or non-positive (5 minutes). */
+export const ROUTER_SHUN_DURATION_MS = 5 * 60_000;
+/** Maximum duration a router go-away retry_after can shun a router (1 hour). */
+export const GOAWAY_MAX_RETRY_AFTER_MS = 60 * 60_000;
 
 export class AuthRejectedError extends Error {
   constructor(peerId: string, reason: string) {
@@ -114,3 +129,70 @@ export function authStreamHandler(options: AuthServerOptions): StreamHandler {
     }
   };
 }
+
+/** Returns the canonical proto enum name for a RouterGoAway_Reason value. */
+export function goAwayReasonName(reason: RouterGoAway_Reason): string {
+  switch (reason) {
+    case RouterGoAway_Reason.DRAINING:
+      return "DRAINING";
+    case RouterGoAway_Reason.OVERLOADED:
+      return "OVERLOADED";
+    default:
+      return "REASON_UNSPECIFIED";
+  }
+}
+
+/**
+ * Computes the shun duration in milliseconds from a RouterGoAway message:
+ * defaults to ROUTER_SHUN_DURATION_MS (5m) when retry_after <= 0, capped at
+ * GOAWAY_MAX_RETRY_AFTER_MS (1h).
+ */
+export function clampGoAwayRetryAfterMs(msg: RouterGoAway): number {
+  let ms = 0;
+  if (msg.retryAfter !== undefined) {
+    ms = Number(msg.retryAfter.seconds) * 1000 + Math.floor(msg.retryAfter.nanos / 1_000_000);
+  }
+  if (ms <= 0) {
+    return ROUTER_SHUN_DURATION_MS;
+  }
+  if (ms > GOAWAY_MAX_RETRY_AFTER_MS) {
+    return GOAWAY_MAX_RETRY_AFTER_MS;
+  }
+  return ms;
+}
+
+export interface GoAwayServerOptions {
+  /** Whether peerId is currently a router this member holds. */
+  isHeldRouter(peerId: string): boolean;
+  /** Called once a held router's RouterGoAway message has been read and the stream closed. */
+  onGoAway(peerId: string, msg: RouterGoAway, retryAfterMs: number): void | Promise<void>;
+}
+
+/**
+ * Server side of /mesh/goaway/1.0.0, mirroring agentmesh-node's HandleGoAway:
+ * reads one varint-prefixed RouterGoAway message (1024 B cap, 5s timeout) only
+ * from a router the member currently holds, closes the stream, and notifies
+ * the session to shun the router and top up from the catalog.
+ */
+export function goAwayStreamHandler(options: GoAwayServerOptions): StreamHandler {
+  return async (stream: Stream, connection: Connection) => {
+    const peerId = connection.remotePeer.toString();
+    if (!options.isHeldRouter(peerId)) {
+      stream.abort(new Error(`ignoring go-away from unattached peer ${peerId}`));
+      return;
+    }
+    const signal = AbortSignal.timeout(GOAWAY_STREAM_TIMEOUT_MS);
+    let msg: RouterGoAway;
+    try {
+      const lp = lpStream(stream, { maxDataLength: MAX_GOAWAY_MESSAGE_BYTES });
+      msg = fromBinary(RouterGoAwaySchema, (await lp.read({ signal })).subarray());
+    } catch (err) {
+      stream.abort(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
+    await stream.close().catch(() => stream.abort(new Error("goaway stream close failed")));
+    const retryAfterMs = clampGoAwayRetryAfterMs(msg);
+    await options.onGoAway(peerId, msg, retryAfterMs);
+  };
+}
+

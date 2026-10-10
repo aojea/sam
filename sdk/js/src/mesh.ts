@@ -26,7 +26,7 @@ import {
   withCredentialMethods,
   type MeshCredential,
 } from "./credential.ts";
-import type { TaskAuthorizationRuleSchema } from "./gen/agentmesh_pb.ts";
+import type { RouterInfo, TaskAuthorizationRuleSchema } from "./gen/agentmesh_pb.ts";
 import { Identity } from "./identity.ts";
 import { openState, readTextFile } from "./platform/state.ts";
 import type { StateStore } from "./platform/types.ts";
@@ -126,6 +126,8 @@ export interface ControlPlaneSync {
   refreshed: boolean;
   /** The control plane's ban set, when /info answered. */
   bannedPeerIds: string[] | undefined;
+  /** Every router with a live lease reported by /info, when present. */
+  routers?: RouterInfo[] | undefined;
   /** When /info was asked; a ban recorded later cannot be in the answer. */
   fetchedAt: Date;
   /** One entry per part that failed; empty when everything landed. */
@@ -141,6 +143,7 @@ export class AgentMesh {
   readonly identity: Identity;
   readonly controlPlane: ControlPlaneClient;
   #credential: MeshCredential;
+  #routers: RouterInfo[] = [];
   readonly #state: StateStore | undefined;
   readonly #jwtSource: (() => Promise<string>) | undefined;
   // Refreshes run one after another, as agentmesh-node's refreshMu: the control
@@ -168,6 +171,11 @@ export class AgentMesh {
 
   get credential(): MeshCredential {
     return this.#credential;
+  }
+
+  /** The router catalog last returned by /info; empty when the control plane only listed router_addresses. */
+  get routers(): RouterInfo[] {
+    return this.#routers;
   }
 
   /** Returns a new MeshCredential with a tar_block appended offline in memory. */
@@ -391,13 +399,20 @@ export class AgentMesh {
     }
 
     let bannedPeerIds: string[] | undefined;
+    let routers: RouterInfo[] | undefined;
     // Taken before the request: a ban recorded after this instant cannot be
     // in the answer, so its absence must not be read as an unban.
     const fetchedAt = new Date();
     try {
       const info = await this.controlPlane.info();
-      if (info.routerAddresses.length > 0) {
-        this.#credential = withCredentialMethods({ ...this.#credential, routerAddresses: info.routerAddresses });
+      routers = info.routers;
+      this.#routers = info.routers;
+      const discovered =
+        info.routerAddresses.length > 0
+          ? info.routerAddresses
+          : info.routers.flatMap((r) => r.addresses).filter((a) => a.length > 0);
+      if (discovered.length > 0) {
+        this.#credential = withCredentialMethods({ ...this.#credential, routerAddresses: discovered });
       }
       bannedPeerIds = info.bannedPeerIds;
     } catch (err) {
@@ -406,7 +421,7 @@ export class AgentMesh {
     if (keysChanged || bannedPeerIds !== undefined) {
       await this.save();
     }
-    return { keysChanged, refreshed, bannedPeerIds, fetchedAt, errors };
+    return { keysChanged, refreshed, bannedPeerIds, routers, fetchedAt, errors };
   }
 
   /**

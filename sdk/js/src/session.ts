@@ -18,13 +18,22 @@ import { timestampMs } from "@bufbuild/protobuf/wkt";
 import { TopicValidatorResult } from "@libp2p/gossipsub";
 import { peerIdFromString } from "@libp2p/peer-id";
 import { isMultiaddr, multiaddr, type Multiaddr } from "@multiformats/multiaddr";
-import { AUTH_HANDLER_OPTIONS, AUTH_PROTOCOL, authenticateWithPeer, authStreamHandler } from "./auth.ts";
+import {
+  AUTH_HANDLER_OPTIONS,
+  AUTH_PROTOCOL,
+  GOAWAY_PROTOCOL,
+  ROUTER_SHUN_DURATION_MS,
+  authenticateWithPeer,
+  authStreamHandler,
+  goAwayReasonName,
+  goAwayStreamHandler,
+} from "./auth.ts";
 import { ROLE_ROUTER, attenuateBiscuit, requireRole, sealBiscuit, type VerifiedBiscuit } from "./biscuit.ts";
 import { ROLE_NODE } from "./controlplane.ts";
 import { encodeAuthFrame } from "./credential.ts";
 import { canonicalPeerId } from "./identity.ts";
 import { isServiceType, parseServiceTarget, serviceCID } from "./discovery.ts";
-import type { TaskAuthorizationRuleSchema } from "./gen/agentmesh_pb.ts";
+import type { RouterGoAway, RouterInfo, TaskAuthorizationRuleSchema } from "./gen/agentmesh_pb.ts";
 import { createMeshHost, listenThroughRelay, type MeshHost, type MeshHostOptions, type RelayListener } from "./host.ts";
 import { openMCPSession, requireEgressLabels, type MCPSession, type MCPSessionOptions } from "./mcp.ts";
 import type { AgentMesh, ControlPlaneSync } from "./mesh.ts";
@@ -45,6 +54,11 @@ import {
 import { ingressHandler } from "./platform/ingress.ts";
 import { BanSet, GOSSIP_EVENTS_TOPIC, MeshEvent_Type, verifyMeshEvent } from "./sync.ts";
 
+/** Default number of routers a member attaches to and reserves on at join. */
+export const DEFAULT_ROUTERS = 2;
+/** Default backoff delays before replacing a dropped held router. */
+export const ROUTER_REDIAL_BACKOFFS_MS: readonly number[] = [2_000, 4_000, 8_000];
+
 export interface JoinOptions extends MeshHostOptions {
   /**
    * The routers to join through, `/…/p2p/<router>` multiaddrs, instead of
@@ -54,8 +68,29 @@ export interface JoinOptions extends MeshHostOptions {
    */
   routerAddresses?: string[];
   /**
-   * Reserve a relay slot on the first router that admits us, so peers can
-   * reach this member through the router. On by default; a member that
+   * Number of routers to hold and reserve on at a time (agentmesh-node's --routers).
+   * Defaults to DEFAULT_ROUTERS (2).
+   */
+  routers?: number;
+  /**
+   * Required router labels (agentmesh-node's --router-selector): every pair must
+   * match the router's labels in ControlPlaneInfoResponse.routers.
+   */
+  routerSelector?: Record<string, string>;
+  /**
+   * Preferred router labels (agentmesh-node's --router-prefer): routers matching
+   * more pairs are chosen ahead of others before comparing load.
+   */
+  routerPrefer?: Record<string, string>;
+  /**
+   * Backoff delays (ms) when redialing a held router whose connection dropped
+   * before shunning it and failing over to another router from the catalog.
+   * Defaults to ROUTER_REDIAL_BACKOFFS_MS ([2000, 4000, 8000]).
+   */
+  routerRedialBackoffsMs?: readonly number[];
+  /**
+   * Reserve a relay slot on each held router that admits us, so peers can
+   * reach this member through the routers. On by default; a member that
    * only calls out can turn it off.
    */
   reserveRelay?: boolean;
@@ -101,6 +136,15 @@ export interface AdmittedRouter {
    */
   addr: Multiaddr;
   credential: VerifiedBiscuit;
+}
+
+/** One router candidate from the control plane's /info catalog. */
+export interface RouterCandidate {
+  peerId: string;
+  addresses: Multiaddr[];
+  labels: Record<string, string>;
+  connections: number;
+  connectionLimit: number;
 }
 
 /** A peer the DHT names as offering a service. */
@@ -158,6 +202,10 @@ export class MeshSession {
   readonly authenticatedPeers: Map<string, Date>;
   /** Peers the control plane has banned; connections to and from them are refused. */
   readonly banned: BanSet;
+  /** Count of /mesh/goaway/1.0.0 frames received from held routers, keyed by reason name (DRAINING, OVERLOADED, REASON_UNSPECIFIED). */
+  readonly goAwayReceived: Map<string, number>;
+  /** Routers currently shunned (after a go-away or failed redial), mapped to the unix ms when the shun expires. */
+  readonly shunnedRouters: Map<string, number>;
   /** This member's agent, once acceptA2A was called. */
   endpoint: A2AEndpoint | undefined;
   #refreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -166,7 +214,16 @@ export class MeshSession {
   #relayTimer: ReturnType<typeof setInterval> | undefined;
   #syncing: Promise<ControlPlaneSync> | undefined;
   #keepingRelay: Promise<void> | undefined;
-  readonly #relayListener: RelayListener | undefined;
+  #keepRelayPending = false;
+  readonly #heldRouterIds: Set<string>;
+  readonly #relayListeners: Map<string, RelayListener>;
+  readonly #freeRelayListeners: RelayListener[];
+  readonly #reserveRelay: boolean;
+  readonly #targetRouters: number;
+  readonly #routerSelector: Record<string, string> | undefined;
+  readonly #routerPrefer: Record<string, string> | undefined;
+  readonly #pinnedRouterAddresses: string[] | undefined;
+  readonly #redialBackoffsMs: readonly number[];
   readonly #refreshLeadMs: number;
   readonly #refreshRetryMs: number;
   readonly #policySyncMs: number;
@@ -187,15 +244,31 @@ export class MeshSession {
     authenticatedPeers: Map<string, Date>,
     banned: BanSet,
     options: JoinOptions,
-    relayListener?: RelayListener,
+    relayListeners?: Map<string, RelayListener>,
     taskBiscuit?: Uint8Array,
+    sharedState?: {
+      heldRouterIds: Set<string>;
+      freeRelayListeners: RelayListener[];
+      goAwayReceived: Map<string, number>;
+      shunnedRouters: Map<string, number>;
+    },
   ) {
     this.mesh = mesh;
     this.node = node;
     this.routers = routers;
     this.authenticatedPeers = authenticatedPeers;
     this.banned = banned;
-    this.#relayListener = relayListener;
+    this.goAwayReceived = sharedState?.goAwayReceived ?? new Map<string, number>();
+    this.shunnedRouters = sharedState?.shunnedRouters ?? new Map<string, number>();
+    this.#heldRouterIds = sharedState?.heldRouterIds ?? new Set(routers.map((r) => r.peerId));
+    this.#relayListeners = relayListeners ?? new Map<string, RelayListener>();
+    this.#freeRelayListeners = sharedState?.freeRelayListeners ?? [];
+    this.#reserveRelay = options.reserveRelay ?? true;
+    this.#targetRouters = options.routers !== undefined && options.routers > 0 ? options.routers : DEFAULT_ROUTERS;
+    this.#routerSelector = options.routerSelector;
+    this.#routerPrefer = options.routerPrefer;
+    this.#pinnedRouterAddresses = options.routerAddresses;
+    this.#redialBackoffsMs = options.routerRedialBackoffsMs ?? ROUTER_REDIAL_BACKOFFS_MS;
     this.#refreshLeadMs = options.refreshLeadMs ?? DEFAULT_REFRESH_LEAD_MS;
     this.#refreshRetryMs = options.refreshRetryMs ?? DEFAULT_REFRESH_RETRY_MS;
     this.#policySyncMs = options.policySyncIntervalMs ?? DEFAULT_POLICY_SYNC_MS;
@@ -211,10 +284,8 @@ export class MeshSession {
       if (this.#syncIntervalMs > 0) {
         this.#scheduleSync(Math.min(FIRST_CONTROL_PLANE_SYNC_MS, this.#syncIntervalMs));
       }
-      if (relayListener !== undefined) {
-        this.#relayTimer = setInterval(() => void this.keepRelay().catch(() => {}), options.relayCheckIntervalMs ?? DEFAULT_RELAY_CHECK_MS);
-        this.#relayTimer.unref?.();
-      }
+      this.#relayTimer = setInterval(() => void this.keepRelay().catch(() => {}), options.relayCheckIntervalMs ?? DEFAULT_RELAY_CHECK_MS);
+      this.#relayTimer.unref?.();
     }
   }
 
@@ -253,9 +324,20 @@ export class MeshSession {
       policySyncIntervalMs: this.#policySyncMs,
       controlPlaneSyncIntervalMs: 0,
       controlPlaneSyncJitterMs: this.#syncJitterMs,
+      reserveRelay: this.#reserveRelay,
+      routers: this.#targetRouters,
+      routerRedialBackoffsMs: this.#redialBackoffsMs,
+      ...(this.#routerSelector !== undefined ? { routerSelector: this.#routerSelector } : {}),
+      ...(this.#routerPrefer !== undefined ? { routerPrefer: this.#routerPrefer } : {}),
+      ...(this.#pinnedRouterAddresses !== undefined ? { routerAddresses: this.#pinnedRouterAddresses } : {}),
       ...(this.#egressRequireLabels !== undefined ? { egressRequireLabels: this.#egressRequireLabels } : {}),
     };
-    return new MeshSession(this.mesh, this.node, this.routers, this.authenticatedPeers, this.banned, opts, this.#relayListener, taskBiscuit);
+    return new MeshSession(this.mesh, this.node, this.routers, this.authenticatedPeers, this.banned, opts, this.#relayListeners, taskBiscuit, {
+      heldRouterIds: this.#heldRouterIds,
+      freeRelayListeners: this.#freeRelayListeners,
+      goAwayReceived: this.goAwayReceived,
+      shunnedRouters: this.shunnedRouters,
+    });
   }
 
   /**
@@ -277,9 +359,130 @@ export class MeshSession {
     return this.node.getMultiaddrs();
   }
 
-  /** The `.../p2p-circuit/p2p/<self>` addresses reserved on routers. */
+  /** The `.../p2p-circuit/p2p/<self>` addresses reserved on held routers. */
   get relayAddresses(): Multiaddr[] {
-    return this.node.getMultiaddrs().filter((ma) => ma.toString().includes("/p2p-circuit"));
+    return this.node
+      .getMultiaddrs()
+      .filter((ma) => {
+        const s = ma.toString();
+        return s.includes("/p2p-circuit") && [...this.#heldRouterIds].some((id) => s.includes(`/p2p/${id}/p2p-circuit`));
+      });
+  }
+
+  /** Whether peerId is currently one of the routers this member holds. */
+  isHeldRouter(peerId: string): boolean {
+    return this.#heldRouterIds.has(peerId);
+  }
+
+  /** Handles a /mesh/goaway/1.0.0 message from a held router: shuns it, detaches it, and tops up from the catalog. */
+  async handleGoAway(peerId: string, msg: RouterGoAway, retryAfterMs: number): Promise<void> {
+    if (!this.#heldRouterIds.has(peerId)) {
+      return;
+    }
+    const reason = goAwayReasonName(msg.reason);
+    this.goAwayReceived.set(reason, (this.goAwayReceived.get(reason) ?? 0) + 1);
+    this.#shunRouter(peerId, retryAfterMs);
+    await this.#detachRouter(peerId);
+    await this.keepRelay().catch(() => {});
+  }
+
+  #shunRouter(peerId: string, durationMs: number): void {
+    this.shunnedRouters.set(peerId, Date.now() + durationMs);
+  }
+
+  #isRouterShunned(peerId: string, nowMs = Date.now()): boolean {
+    const expiry = this.shunnedRouters.get(peerId);
+    if (expiry === undefined) {
+      return false;
+    }
+    if (expiry <= nowMs) {
+      this.shunnedRouters.delete(peerId);
+      return false;
+    }
+    return true;
+  }
+
+  async #detachRouter(peerId: string): Promise<void> {
+    this.#heldRouterIds.delete(peerId);
+    const idx = this.routers.findIndex((r) => r.peerId === peerId);
+    if (idx !== -1) {
+      this.routers.splice(idx, 1);
+    }
+    const listener = this.#relayListeners.get(peerId);
+    if (listener !== undefined) {
+      this.#relayListeners.delete(peerId);
+      this.#freeRelayListeners.push(listener);
+    }
+    try {
+      await this.node.hangUp(peerIdFromString(peerId));
+    } catch {
+      // Already disconnected.
+    }
+  }
+
+  async #reserveOnRouter(peerId: string, addr: Multiaddr): Promise<void> {
+    const existing = this.#relayListeners.get(peerId);
+    if (existing !== undefined) {
+      await existing.listen(addr.encapsulate("/p2p-circuit"));
+      return;
+    }
+    const free = this.#freeRelayListeners.pop();
+    if (free !== undefined) {
+      await free.listen(addr.encapsulate("/p2p-circuit"));
+      this.#relayListeners.set(peerId, free);
+      return;
+    }
+    const listener = await listenThroughRelay(this.node, addr);
+    this.#relayListeners.set(peerId, listener);
+  }
+
+  #upsertHeldRouter(router: AdmittedRouter): void {
+    this.#heldRouterIds.add(router.peerId);
+    const idx = this.routers.findIndex((r) => r.peerId === router.peerId);
+    if (idx !== -1) {
+      this.routers[idx] = router;
+    } else {
+      this.routers.push(router);
+    }
+  }
+
+  #candidatesForHolding(): RouterCandidate[] {
+    if (this.#pinnedRouterAddresses !== undefined) {
+      return candidatesFromRouterInfos([], this.#pinnedRouterAddresses, this.mesh.routers);
+    }
+    return candidatesFromRouterInfos(this.mesh.routers, this.mesh.credential.routerAddresses);
+  }
+
+  #wantRouters(): number {
+    const candidates = this.#candidatesForHolding();
+    let matched = 0;
+    for (const c of candidates) {
+      if (matchesLabels(c.labels, this.#routerSelector)) {
+        matched++;
+      }
+    }
+    if (matched > 0 && matched < this.#targetRouters) {
+      return matched;
+    }
+    return this.#targetRouters;
+  }
+
+  #candidateAddressesFor(peerId: string, fallback: Multiaddr): Multiaddr[] {
+    for (const c of candidatesFromRouterInfos(this.mesh.routers, this.mesh.credential.routerAddresses)) {
+      if (c.peerId === peerId && c.addresses.length > 0) {
+        return c.addresses;
+      }
+    }
+    const listed = this.mesh.credential.routerAddresses
+      .map((a) => {
+        try {
+          return multiaddr(a);
+        } catch {
+          return undefined;
+        }
+      })
+      .filter((ma): ma is Multiaddr => ma !== undefined && targetPeerOf(ma) === peerId);
+    return listed.length > 0 ? listed : [fallback];
   }
 
   /**
@@ -299,44 +502,138 @@ export class MeshSession {
   }
 
   /**
-   * Makes sure this member holds a relay reservation when it asked for one
-   * at join: a router that restarted or trimmed the connection dropped it
-   * and with it the relayed address peers reach this member on. Routers are
-   * tried in order, each dialed and authenticated again first, since the
-   * router forgot the admission with the connection. A router rescheduled
-   * keeps its key and comes back on another address; the list the control
-   * plane hands out, refreshed by every pull, names the current one, so the
-   * router is dialed at what that list says and keeps the address the
-   * connection was made on. Runs on relayCheckIntervalMs; exposed so a
-   * caller can force it. Concurrent calls share one attempt. Upstream:
-   * libp2p/js-libp2p#3601.
+   * Maintains held routers and relay reservations: when a held router's
+   * connection or reservation drops, redials it first (2s, 4s, 8s by default)
+   * using its current address from the catalog; if it does not recover or
+   * refuses auth, shuns it and tops up from the catalog. Runs on
+   * relayCheckIntervalMs and immediately after a /mesh/goaway/1.0.0 frame.
    */
   keepRelay(): Promise<void> {
-    this.#keepingRelay ??= this.#keepRelayOnce().finally(() => {
+    if (this.#keepingRelay !== undefined) {
+      this.#keepRelayPending = true;
+      return this.#keepingRelay;
+    }
+    const run = async (): Promise<void> => {
+      do {
+        this.#keepRelayPending = false;
+        await this.#keepRelayOnce();
+      } while (this.#keepRelayPending && !this.#closed);
+    };
+    this.#keepingRelay = run().finally(() => {
       this.#keepingRelay = undefined;
     });
     return this.#keepingRelay;
   }
 
   async #keepRelayOnce(): Promise<void> {
-    if (this.#relayListener === undefined || this.#closed || this.relayAddresses.length > 0) {
+    if (this.#closed) {
       return;
     }
-    const failures: string[] = [];
-    for (const [i, r] of this.routers.entries()) {
-      const listed = this.mesh.credential.routerAddresses.map((a) => multiaddr(a)).filter((ma) => targetPeerOf(ma) === r.peerId);
-      try {
-        const conn = await this.node.dial(listed.length > 0 ? listed : r.addr);
-        await authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys);
-        const addr = connectedAddress(conn, r.peerId);
-        this.routers[i] = { ...r, addr };
-        await this.#relayListener.listen(addr.encapsulate("/p2p-circuit"));
+    const held = this.routers.filter((r) => this.#heldRouterIds.has(r.peerId));
+    for (const r of held) {
+      if (this.#closed) {
         return;
-      } catch (err) {
-        failures.push(`${r.peerId}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      if (this.#isRouterShunned(r.peerId)) {
+        await this.#detachRouter(r.peerId);
+        continue;
+      }
+      const isConnected = this.node
+        .getConnections(peerIdFromString(r.peerId))
+        .some((c) => c.status === "open" && !c.remoteAddr.toString().includes("/p2p-circuit"));
+      const hasRelay = !this.#reserveRelay || this.relayAddresses.some((ma) => ma.toString().includes(`/p2p/${r.peerId}/p2p-circuit`));
+      if (isConnected && hasRelay) {
+        continue;
+      }
+      let reconnected = false;
+      for (const backoffMs of [0, ...this.#redialBackoffsMs]) {
+        if (this.#closed || this.#isRouterShunned(r.peerId)) {
+          break;
+        }
+        if (backoffMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        }
+        if (this.#closed || this.#isRouterShunned(r.peerId)) {
+          break;
+        }
+        const addrs = this.#candidateAddressesFor(r.peerId, r.addr);
+        let conn: Connection;
+        try {
+          conn = await this.node.dial(addrs);
+        } catch {
+          continue;
+        }
+        try {
+          const credential = await authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys);
+          requireRole(credential, ROLE_ROUTER);
+          const addr = connectedAddress(conn, r.peerId);
+          if (this.#reserveRelay) {
+            await this.#reserveOnRouter(r.peerId, addr);
+          }
+          this.#upsertHeldRouter({ peerId: r.peerId, addr, credential });
+          reconnected = true;
+          break;
+        } catch {
+          // Router refused auth or reservation after connecting; fail over immediately.
+          break;
+        }
+      }
+      if (!reconnected && !this.#closed) {
+        this.#shunRouter(r.peerId, ROUTER_SHUN_DURATION_MS);
+        await this.#detachRouter(r.peerId);
       }
     }
-    throw new Error(`no router granted a relay reservation:\n  ${failures.join("\n  ")}`);
+
+    if (!this.#closed && this.#heldRouterIds.size < this.#wantRouters()) {
+      await this.topUpRouters();
+    }
+  }
+
+  /**
+   * Attaches and reserves on additional routers from the catalog until this
+   * session holds wantRouters() routers or no more eligible candidates remain.
+   */
+  async topUpRouters(signal?: AbortSignal): Promise<string[]> {
+    const failures: string[] = [];
+    const want = this.#wantRouters();
+    const candidates = this.#candidatesForHolding();
+    const tried = new Set<string>();
+    while (!this.#closed && this.#heldRouterIds.size < want) {
+      const need = want - this.#heldRouterIds.size;
+      const exclude = new Set<string>([...this.#heldRouterIds, ...tried]);
+      const picks = selectRouters(candidates, need, {
+        ...(this.#routerSelector !== undefined ? { selector: this.#routerSelector } : {}),
+        ...(this.#routerPrefer !== undefined ? { prefer: this.#routerPrefer } : {}),
+        attached: exclude,
+        shunned: this.shunnedRouters,
+      });
+      if (picks.length === 0) {
+        break;
+      }
+      let progress = false;
+      for (const cand of picks) {
+        tried.add(cand.peerId);
+        try {
+          const conn = await this.node.dial(cand.addresses, signal !== undefined ? { signal } : {});
+          const credential = await authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys);
+          requireRole(credential, ROLE_ROUTER);
+          const addr = connectedAddress(conn, cand.peerId);
+          if (this.#reserveRelay) {
+            await this.#reserveOnRouter(cand.peerId, addr);
+          }
+          this.#upsertHeldRouter({ peerId: cand.peerId, addr, credential });
+          progress = true;
+        } catch (err) {
+          this.#shunRouter(cand.peerId, ROUTER_SHUN_DURATION_MS);
+          await this.node.hangUp(peerIdFromString(cand.peerId)).catch(() => {});
+          failures.push(`${cand.peerId}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      if (!progress && picks.length < need) {
+        break;
+      }
+    }
+    return failures;
   }
 
   /**
@@ -633,6 +930,12 @@ export class MeshSession {
       const { banned } = this.banned.reconcile(canonicalPeerIds(result.bannedPeerIds), result.fetchedAt);
       await Promise.all(banned.map((peerId) => this.#evict(peerId)));
     }
+    if (!this.#closed && this.#heldRouterIds.size < this.#wantRouters()) {
+      await this.topUpRouters().catch(() => {});
+    }
+    if (!this.#closed) {
+      void this.keepRelay().catch(() => {});
+    }
     if (this.endpoint !== undefined) {
       try {
         await this.syncPolicy();
@@ -846,6 +1149,184 @@ export class MeshSession {
   }
 }
 
+export interface SelectRoutersOptions {
+  selector?: Record<string, string>;
+  prefer?: Record<string, string>;
+  attached?: ReadonlySet<string>;
+  shunned?: ReadonlyMap<string, number>;
+  nowMs?: number;
+  random?: () => number;
+}
+
+/**
+ * Builds router candidates from ControlPlaneInfoResponse.routers, falling back
+ * to router_addresses when routers is empty (an older control plane). When
+ * routerMetadata is provided alongside explicit fallbackAddresses, labels and
+ * load from routerMetadata are attached by peerId.
+ */
+export function candidatesFromRouterInfos(
+  routers: readonly RouterInfo[],
+  fallbackAddresses: readonly string[],
+  routerMetadata: readonly RouterInfo[] = [],
+): RouterCandidate[] {
+  if (routers.length > 0) {
+    const out: RouterCandidate[] = [];
+    for (const r of routers) {
+      let peerId: string | undefined;
+      if (r.peerId !== "") {
+        try {
+          peerId = canonicalPeerId(r.peerId);
+        } catch {
+          peerId = undefined;
+        }
+      }
+      const addrs: Multiaddr[] = [];
+      for (const raw of r.addresses) {
+        let ma: Multiaddr;
+        try {
+          ma = multiaddr(raw);
+        } catch {
+          continue;
+        }
+        const target = targetPeerOf(ma);
+        if (peerId === undefined && target !== undefined) {
+          peerId = target;
+        }
+        if (peerId !== undefined && (target === undefined || target === peerId)) {
+          addrs.push(target === undefined ? ma.encapsulate(`/p2p/${peerId}`) : ma);
+        }
+      }
+      if (peerId === undefined || addrs.length === 0) {
+        continue;
+      }
+      out.push({
+        peerId,
+        addresses: addrs,
+        labels: { ...r.labels },
+        connections: r.connections,
+        connectionLimit: r.connectionLimit,
+      });
+    }
+    return out;
+  }
+
+  const metaByPeer = new Map<string, RouterInfo>();
+  for (const r of routerMetadata) {
+    if (r.peerId !== "") {
+      try {
+        metaByPeer.set(canonicalPeerId(r.peerId), r);
+      } catch {
+        // Ignore malformed peer IDs.
+      }
+    }
+  }
+
+  const byId = new Map<string, RouterCandidate>();
+  for (const raw of fallbackAddresses) {
+    let ma: Multiaddr;
+    try {
+      ma = multiaddr(raw);
+    } catch {
+      continue;
+    }
+    const peerId = targetPeerOf(ma);
+    if (peerId === undefined) {
+      continue;
+    }
+    const existing = byId.get(peerId);
+    if (existing !== undefined) {
+      existing.addresses.push(ma);
+    } else {
+      const meta = metaByPeer.get(peerId);
+      byId.set(peerId, {
+        peerId,
+        addresses: [ma],
+        labels: meta !== undefined ? { ...meta.labels } : {},
+        connections: meta?.connections ?? 0,
+        connectionLimit: meta?.connectionLimit ?? 0,
+      });
+    }
+  }
+  return [...byId.values()];
+}
+
+function matchesLabels(routerLabels: Record<string, string>, selector: Record<string, string> | undefined): boolean {
+  if (selector === undefined) {
+    return true;
+  }
+  for (const [k, v] of Object.entries(selector)) {
+    if (routerLabels[k] !== v) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function countMatchingLabels(routerLabels: Record<string, string>, prefer: Record<string, string> | undefined): number {
+  if (prefer === undefined) {
+    return 0;
+  }
+  let n = 0;
+  for (const [k, v] of Object.entries(prefer)) {
+    if (routerLabels[k] === v) {
+      n++;
+    }
+  }
+  return n;
+}
+
+function routerLoad(c: RouterCandidate): number {
+  if (c.connectionLimit <= 0) {
+    return 0.5;
+  }
+  const load = c.connections / c.connectionLimit;
+  if (load < 0) {
+    return 0;
+  }
+  if (load > 1) {
+    return 1;
+  }
+  return load;
+}
+
+/**
+ * Picks up to k routers from candidates, mirroring agentmesh-node's selectRouters:
+ * filters by selector, excludes already-attached and currently-shunned routers,
+ * and orders by matching prefer labels (descending) then load + jitter (ascending).
+ */
+export function selectRouters(candidates: readonly RouterCandidate[], k: number, options: SelectRoutersOptions = {}): RouterCandidate[] {
+  if (k <= 0) {
+    return [];
+  }
+  const nowMs = options.nowMs ?? Date.now();
+  const rand = options.random ?? Math.random;
+  const scored: Array<{ candidate: RouterCandidate; preferScore: number; load: number }> = [];
+  for (const c of candidates) {
+    if (options.attached?.has(c.peerId) === true) {
+      continue;
+    }
+    const shunExpiry = options.shunned?.get(c.peerId);
+    if (shunExpiry !== undefined && shunExpiry > nowMs) {
+      continue;
+    }
+    if (!matchesLabels(c.labels, options.selector)) {
+      continue;
+    }
+    scored.push({
+      candidate: c,
+      preferScore: countMatchingLabels(c.labels, options.prefer),
+      load: routerLoad(c) + rand() * 0.05,
+    });
+  }
+  scored.sort((a, b) => {
+    if (a.preferScore !== b.preferScore) {
+      return b.preferScore - a.preferScore;
+    }
+    return a.load - b.load;
+  });
+  return scored.slice(0, k).map((s) => s.candidate);
+}
+
 /** Implements AgentMesh.join(); lives here to keep mesh.ts free of libp2p. */
 export async function joinMesh(mesh: AgentMesh, options: JoinOptions = {}): Promise<MeshSession> {
   // The pull agentmesh-node makes before it starts: a member resuming from its
@@ -859,15 +1340,19 @@ export async function joinMesh(mesh: AgentMesh, options: JoinOptions = {}): Prom
   } catch {
     // Joining goes on with what the credential holds.
   }
-  const routerAddrs = (options.routerAddresses ?? mesh.credential.routerAddresses).map((a) => multiaddr(a));
-  if (routerAddrs.length === 0) {
+  const rawAddrs = options.routerAddresses ?? mesh.credential.routerAddresses;
+  if (rawAddrs.length === 0 && mesh.routers.length === 0) {
     throw new Error(options.routerAddresses === undefined ? "credential lists no router addresses; the control plane had no active router at enrollment" : "routerAddresses names no router");
+  }
+  // Validate explicit routerAddresses up front so malformed multiaddrs fail fast.
+  for (const a of rawAddrs) {
+    multiaddr(a);
   }
 
   const banned = new BanSet();
   const node = await createMeshHost(mesh.identity, { ...options, banned });
-  const admitted: AdmittedRouter[] = [];
   const authenticatedPeers = new Map<string, Date>();
+  let session: MeshSession | undefined;
   try {
     await node.handle(
       AUTH_PROTOCOL,
@@ -879,36 +1364,28 @@ export async function joinMesh(mesh: AgentMesh, options: JoinOptions = {}): Prom
       }),
       AUTH_HANDLER_OPTIONS,
     );
+    await node.handle(
+      GOAWAY_PROTOCOL,
+      goAwayStreamHandler({
+        isHeldRouter: (peerId) => session?.isHeldRouter(peerId) === true,
+        onGoAway: (peerId, msg, retryAfterMs) => session?.handleGoAway(peerId, msg, retryAfterMs),
+      }),
+      AUTH_HANDLER_OPTIONS,
+    );
 
-    const failures: string[] = [];
-    for (const addr of routerAddrs) {
-      const routerPeer = targetPeerOf(addr);
-      if (routerPeer === undefined) {
-        failures.push(`${addr.toString()}: no /p2p/<peer id> component`);
-        continue;
-      }
-      try {
-        const conn = await node.dial(addr, options.signal !== undefined ? { signal: options.signal } : {});
-        const credential = await authenticateWithPeer(conn, mesh.authFrame(), mesh.credential.controlPlaneKeys);
-        // Enforced under the key that verified the token; a relay that is
-        // not a router must not become our way onto the mesh.
-        requireRole(credential, ROLE_ROUTER);
-        admitted.push({ peerId: routerPeer, addr: connectedAddress(conn, routerPeer), credential });
-      } catch (err) {
-        failures.push(`${addr.toString()}: ${err instanceof Error ? err.message : String(err)}`);
-      }
+    session = new MeshSession(mesh, node, [], authenticatedPeers, banned, options);
+    const failures = await session.topUpRouters(options.signal);
+    if (session.routers.length === 0) {
+      const detail = failures.length > 0 ? `:\n  ${failures.join("\n  ")}` : "";
+      throw new Error(`no router admitted this member${detail}`);
     }
-    if (admitted.length === 0) {
-      throw new Error(`no router admitted this member:\n  ${failures.join("\n  ")}`);
-    }
-
-    let relayListener: RelayListener | undefined;
-    if (options.reserveRelay ?? true) {
-      relayListener = await listenThroughRelay(node, (admitted[0] as AdmittedRouter).addr);
-    }
-    return new MeshSession(mesh, node, admitted, authenticatedPeers, banned, options, relayListener);
+    return session;
   } catch (err) {
-    await Promise.resolve(node.stop()).catch(() => {});
+    if (session !== undefined) {
+      await session.close().catch(() => {});
+    } else {
+      await Promise.resolve(node.stop()).catch(() => {});
+    }
     throw err;
   }
 }

@@ -121,7 +121,13 @@ async def _handle(session: MeshSession, command: dict) -> dict:
         if cmd == "peers":
             return {"cmd": cmd, "authenticated_peers": sorted(session.authenticated_peers)}
         if cmd == "routers":
-            return {"cmd": cmd, "ok": True, "routers": [r.peer_id for r in session.routers], "relay_addresses": session.relay_addresses}
+            return {
+                "cmd": cmd,
+                "ok": True,
+                "routers": [r.peer_id for r in session.routers],
+                "relay_addresses": session.relay_addresses,
+                "go_away_received": dict(session.go_away_received),
+            }
         if cmd == "sync":
             result = await session.sync()
             return {
@@ -186,11 +192,21 @@ async def main() -> None:
     # is the floor every provider this member calls must attest.
     labels = _labels_from_env("AGENTMESH_SDK_LABELS")
     egress_require_labels = _labels_from_env("AGENTMESH_SDK_EGRESS_REQUIRE_LABELS")
+    router_selector = _labels_from_env("AGENTMESH_SDK_ROUTER_SELECTOR")
+    router_prefer = _labels_from_env("AGENTMESH_SDK_ROUTER_PREFER")
+    router_count_raw = os.environ.get("AGENTMESH_SDK_ROUTER_COUNT")
+    redial_backoff_raw = os.environ.get("AGENTMESH_SDK_REDIAL_BACKOFF_SECONDS")
     # AGENTMESH_SDK_RELAY_CHECK_SECONDS shortens how often the relay reservation is
     # checked and how soon a failed renewal is retried, so a test that moves
     # a router sees the member follow it within its budget.
     relay_check = os.environ.get("AGENTMESH_SDK_RELAY_CHECK_SECONDS")
-    relay_options = {"reservation_check_interval": float(relay_check), "refresh_retry": float(relay_check)} if relay_check else {}
+    relay_options: dict[str, object] = (
+        {"reservation_check_interval": float(relay_check), "refresh_retry": float(relay_check)} if relay_check else {}
+    )
+    if router_count_raw:
+        relay_options["routers"] = int(router_count_raw)
+    if redial_backoff_raw:
+        relay_options["router_redial_backoffs"] = [float(s.strip()) for s in redial_backoff_raw.split(",") if s.strip()]
 
     mesh = AgentMesh.enroll(
         control_plane_url,
@@ -209,6 +225,8 @@ async def main() -> None:
     async with mesh.join(
         listen_addrs=listen,
         router_addresses=router_addresses,
+        router_selector=router_selector or None,
+        router_prefer=router_prefer or None,
         control_plane_sync_interval=0,
         control_plane_sync_jitter=0,
         egress_require_labels=egress_require_labels or None,

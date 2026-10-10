@@ -40,7 +40,15 @@ from libp2p.utils.varint import encode_varint_prefixed, read_varint_prefixed_byt
 
 from agent_mesh._proto import circuit_pb2 as circuit
 from agent_mesh._proto import agentmesh_pb2 as pb
-from agent_mesh.auth import AUTH_PROTOCOL, auth_stream_handler, authenticate_with_peer
+from agent_mesh.auth import (
+    AUTH_PROTOCOL,
+    GOAWAY_MAX_RETRY_AFTER,
+    GOAWAY_PROTOCOL,
+    ROUTER_SHUN_DURATION,
+    auth_stream_handler,
+    authenticate_with_peer,
+    clamp_go_away_retry_after,
+)
 from agent_mesh.authorizer import ProviderAuthorizerOptions
 from agent_mesh.biscuit import ROLE_ROUTER, BiscuitVerificationError
 from agent_mesh.controlplane import ROLE_NODE
@@ -51,7 +59,8 @@ from agent_mesh.libp2p_http import HTTP_PROTOCOL, A2AEndpoint, HTTPResponse, Pro
 from agent_mesh.mcp_client import LabelsNotSatisfiedError
 from agent_mesh.mesh import AgentMesh
 from agent_mesh.relay import HOP_PROTOCOL as RELAY_HOP_PROTOCOL
-from agent_mesh.session import AdmittedRouter, MeshSession
+from agent_mesh.session import AdmittedRouter, MeshSession, candidates_from_router_infos, select_routers
+from google.protobuf.duration_pb2 import Duration
 from google.protobuf.timestamp_pb2 import Timestamp
 
 
@@ -92,10 +101,10 @@ POLICY_RULES = [
 ]
 
 
-def fake_control_plane(router_addresses):
+def fake_control_plane(router_addresses, routers=None):
     """Approves every enrollment with a biscuit bound to the requesting peer.
-    /info lists router_addresses as they are at the time of the request, so
-    a test that changes the list has the member pull the change."""
+    /info lists router_addresses and routers as they are at the time of the
+    request, so a test that changes the list has the member pull the change."""
 
     def transport(method, url, headers, body):
         path = urllib.parse.urlsplit(url).path
@@ -112,7 +121,10 @@ def fake_control_plane(router_addresses):
             # Unsigned: the client keeps the enrollment key when /keys cannot be verified.
             return 200, pb.KeysResponse(public_keys=[CP_KEY], sign_time=_ts_ms(int(time.time() * 1000))).SerializeToString()
         if (method, path) == ("GET", "/info"):
-            return 200, pb.ControlPlaneInfoResponse(router_addresses=list(router_addresses)).SerializeToString()
+            return 200, pb.ControlPlaneInfoResponse(
+                router_addresses=list(router_addresses),
+                routers=list(routers) if routers is not None else [],
+            ).SerializeToString()
         return 404, f"no route for {method} {path}".encode()
 
     return transport
@@ -342,10 +354,8 @@ def test_join_fails_when_the_relay_refuses_the_reservation():
 
 
 def test_join_admits_every_router_and_reserves_on_the_first():
-    """A peer reserves its relay slot on the first router of its list; a
-    caller reaches it only through that router. So the member authenticates
-    with every router the control plane named and connect() can try each,
-    while one reservation is enough to be reachable."""
+    """A member attaches to and reserves a relay slot on up to `routers`
+    (default 2) chosen routers."""
 
     async def main():
         async with trio.open_nursery() as nursery:
@@ -354,11 +364,14 @@ def test_join_admits_every_router_and_reserves_on_the_first():
             router_b, addr_b = await start_router(nursery, events=events)
             mesh = AgentMesh.enroll("http://127.0.0.1:1", bootstrap_token="sbt", transport=fake_control_plane([addr_a, addr_b]))
             async with mesh.join(refresh_lead=0) as session:
-                assert [r.peer_id for r in session.routers] == [str(router_a.get_id()), str(router_b.get_id())]
-                assert [r.reservation is not None for r in session.routers] == [True, False]
-                assert session.relay_addresses == [f"{addr_a}/p2p-circuit/p2p/{mesh.peer_id}"]
+                assert sorted(r.peer_id for r in session.routers) == sorted([str(router_a.get_id()), str(router_b.get_id())])
+                assert [r.reservation is not None for r in session.routers] == [True, True]
+                assert sorted(session.relay_addresses) == sorted([
+                    f"{addr_a}/p2p-circuit/p2p/{mesh.peer_id}",
+                    f"{addr_b}/p2p-circuit/p2p/{mesh.peer_id}",
+                ])
                 assert events.count(("auth", mesh.peer_id)) == 2
-                assert events.count(("reserve", mesh.peer_id)) == 1
+                assert events.count(("reserve", mesh.peer_id)) == 2
             nursery.cancel_scope.cancel()
 
     trio.run(with_timeout, 30, main)
@@ -366,9 +379,9 @@ def test_join_admits_every_router_and_reserves_on_the_first():
 
 def test_a_router_nobody_answers_costs_join_one_dial_timeout(monkeypatch):
     """The control plane may list a router this member cannot reach (a
-    public address a network policy drops). Every router is dialed at once,
-    so join ends at DIAL_TIMEOUT whatever the dark one's position, and the
-    reservation still goes to the first *admitted* router of the list."""
+    public address a network policy drops). Routers in the batch are dialed at
+    once, so join ends at DIAL_TIMEOUT whatever the dark one's position, and
+    reservations go to the admitted routers."""
     from agent_mesh import session as session_module
     from agent_mesh.host import DIAL_TIMEOUT
 
@@ -403,8 +416,8 @@ def test_a_router_nobody_answers_costs_join_one_dial_timeout(monkeypatch):
         routers = await session_module._admit(Host(), None, [multiaddr.Multiaddr(a) for a in (dark, router_a, router_b)], reserve=True)
         assert trio.current_time() - started == pytest.approx(DIAL_TIMEOUT)
         assert [r.peer_id[-6:] for r in routers] == ["UNCk88", "AFkdZm"]
-        assert [r.reservation is not None for r in routers] == [True, False]
-        assert [p[-6:] for p in reserved] == ["UNCk88"]
+        assert [r.reservation is not None for r in routers] == [True, True]
+        assert [p[-6:] for p in reserved] == ["UNCk88", "AFkdZm"]
 
     trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
 
@@ -871,3 +884,147 @@ def test_session_attenuate_and_seal_narrows_outbound_requests():
             nursery.cancel_scope.cancel()
 
     trio.run(with_timeout, 60, main)
+
+
+def test_select_routers_filters_orders_and_clamps_retry_after():
+    infos = [
+        pb.RouterInfo(
+            peer_id="12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB",
+            addresses=["/ip4/127.0.0.1/tcp/5001/p2p/12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB"],
+            labels={"region": "us-west", "zone": "b"},
+            connections=80,
+            connection_limit=100,
+        ),
+        pb.RouterInfo(
+            peer_id="12D3KooWB4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSC",
+            addresses=["/ip4/127.0.0.1/tcp/5002/p2p/12D3KooWB4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSC"],
+            labels={"region": "us-west", "zone": "a"},
+            connections=90,
+            connection_limit=100,
+        ),
+        pb.RouterInfo(
+            peer_id="12D3KooWC4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSD",
+            addresses=["/ip4/127.0.0.1/tcp/5003/p2p/12D3KooWC4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSD"],
+            labels={"region": "us-west", "zone": "b"},
+            connections=10,
+            connection_limit=100,
+        ),
+        pb.RouterInfo(
+            peer_id="12D3KooWD4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSE",
+            addresses=["/ip4/127.0.0.1/tcp/5004/p2p/12D3KooWD4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSE"],
+            labels={"region": "eu-west", "zone": "a"},
+            connections=1,
+            connection_limit=100,
+        ),
+    ]
+    catalog = candidates_from_router_infos(infos, [])
+    assert len(catalog) == 4
+
+    picked = select_routers(
+        catalog,
+        10,
+        selector={"region": "us-west"},
+        prefer={"zone": "a"},
+        rand=lambda: 0.0,
+    )
+    assert [c.peer_id for c in picked] == [
+        "12D3KooWB4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSC",
+        "12D3KooWC4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSD",
+        "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB",
+    ]
+
+    without_preferred = select_routers(
+        catalog,
+        10,
+        selector={"region": "us-west"},
+        prefer={"zone": "a"},
+        shunned={"12D3KooWB4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSC": time.time() + 60},
+        rand=lambda: 0.0,
+    )
+    assert [c.peer_id for c in without_preferred] == [
+        "12D3KooWC4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSD",
+        "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB",
+    ]
+
+    fallback = candidates_from_router_infos([], ["/ip4/127.0.0.1/tcp/5001/p2p/12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB"])
+    assert len(fallback) == 1
+    assert fallback[0].peer_id == "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB"
+
+    assert clamp_go_away_retry_after(pb.RouterGoAway()) == ROUTER_SHUN_DURATION
+    assert clamp_go_away_retry_after(pb.RouterGoAway(retry_after=Duration(seconds=0))) == ROUTER_SHUN_DURATION
+    assert clamp_go_away_retry_after(pb.RouterGoAway(retry_after=Duration(seconds=-5))) == ROUTER_SHUN_DURATION
+    assert clamp_go_away_retry_after(pb.RouterGoAway(retry_after=Duration(seconds=600))) == 600.0
+    assert clamp_go_away_retry_after(pb.RouterGoAway(retry_after=Duration(seconds=7200))) == GOAWAY_MAX_RETRY_AFTER
+
+
+def test_join_holds_two_routers_handles_go_away_and_redials_before_failover():
+    async def wait_for(predicate):
+        while not predicate():
+            await trio.sleep(0.05)
+
+    async def main():
+        async with trio.open_nursery() as nursery:
+            events1, events2, events3 = [], [], []
+            r1, addr1 = await start_router(nursery, events=events1)
+            r2, addr2 = await start_router(nursery, events=events2)
+            r3, addr3 = await start_router(nursery, events=events3)
+            pid1, pid2, pid3 = str(r1.get_id()), str(r2.get_id()), str(r3.get_id())
+
+            router_infos = [
+                pb.RouterInfo(peer_id=pid3, addresses=[addr3], labels={"region": "us", "tier": "backup"}, connections=90, connection_limit=100),
+                pb.RouterInfo(peer_id=pid1, addresses=[addr1], labels={"region": "us", "tier": "primary"}, connections=50, connection_limit=100),
+                pb.RouterInfo(peer_id=pid2, addresses=[addr2], labels={"region": "us", "tier": "backup"}, connections=10, connection_limit=100),
+            ]
+            all_addrs = [addr3, addr1, addr2]
+            mesh = AgentMesh.enroll(
+                "http://127.0.0.1:1",
+                bootstrap_token="sbt",
+                transport=fake_control_plane(all_addrs, routers=router_infos),
+            )
+            async with mesh.join(
+                refresh_lead=0,
+                routers=2,
+                router_selector={"region": "us"},
+                router_prefer={"tier": "primary"},
+                reservation_check_interval=0.2,
+                router_redial_backoffs=(0.05, 0.1),
+            ) as session:
+                # Only r1 and r2 were authenticated and reserved on at join; r3 is untouched in the catalog.
+                assert sorted(r.peer_id for r in session.routers) == sorted([pid1, pid2])
+                assert events3 == []
+                assert len(session.relay_addresses) == 2
+                assert any(a.startswith(addr1) for a in session.relay_addresses)
+                assert any(a.startswith(addr2) for a in session.relay_addresses)
+
+                # A go-away from a peer we do not hold (r3) is ignored.
+                assert await session.handle_go_away(pid3, pb.RouterGoAway(reason=pb.RouterGoAway.DRAINING), 600.0) is False
+                assert session.go_away_received == {}
+
+                # r1 opens a /mesh/goaway/1.0.0 stream over its existing connection to the member.
+                stream = await r1.new_stream(session.host.get_id(), [GOAWAY_PROTOCOL])
+                msg = pb.RouterGoAway(reason=pb.RouterGoAway.DRAINING, retry_after=Duration(seconds=600))
+                await stream.write(encode_varint_prefixed(msg.SerializeToString()))
+                await stream.close()
+
+                await wait_for(
+                    lambda: sorted(r.peer_id for r in session.routers) == sorted([pid2, pid3])
+                    and any(a.startswith(addr3) for a in session.relay_addresses)
+                )
+                assert session.go_away_received == {"DRAINING": 1}
+                assert pid1 in session.shunned_routers
+                assert any(a.startswith(addr2) for a in session.relay_addresses)
+                assert any(a.startswith(addr3) for a in session.relay_addresses)
+                assert not any(a.startswith(addr1) for a in session.relay_addresses)
+
+                # Now make r3 refuse future auth handshakes and drop the connection so redial fails and shuns r3.
+                r3.set_stream_handler(
+                    AUTH_PROTOCOL,
+                    auth_stream_handler(lambda: b"", lambda: [ba.KeyPair().public_key.to_bytes()]),
+                )
+                await r3.disconnect(session.host.get_id())
+                await wait_for(lambda: pid3 in session.shunned_routers)
+                assert [r.peer_id for r in session.routers] == [pid2]
+            nursery.cancel_scope.cancel()
+
+    trio.run(with_timeout, 60, main)
+

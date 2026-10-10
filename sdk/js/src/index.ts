@@ -52,7 +52,20 @@ export {
   registerChallenge,
   revocationsChallenge,
 } from "./challenges.ts";
-export { MeshSession, type AdmittedRouter, type DiscoveredProvider, type JoinOptions, type Peer, type ToolCallResult } from "./session.ts";
+export {
+  DEFAULT_ROUTERS,
+  MeshSession,
+  ROUTER_REDIAL_BACKOFFS_MS,
+  candidatesFromRouterInfos,
+  selectRouters,
+  type AdmittedRouter,
+  type DiscoveredProvider,
+  type JoinOptions,
+  type Peer,
+  type RouterCandidate,
+  type SelectRoutersOptions,
+  type ToolCallResult,
+} from "./session.ts";
 export {
   BiscuitVerificationError,
   ROLE_ROUTER,
@@ -78,7 +91,23 @@ export {
   validateTaskRule,
   type TaskRequestContext,
 } from "./tar.ts";
-export { AUTH_HANDLER_OPTIONS, AUTH_PROTOCOL, MCP_PROTOCOL, AuthRejectedError, authenticateWithPeer, authStreamHandler } from "./auth.ts";
+export {
+  AUTH_HANDLER_OPTIONS,
+  AUTH_PROTOCOL,
+  GOAWAY_MAX_RETRY_AFTER_MS,
+  GOAWAY_PROTOCOL,
+  GOAWAY_STREAM_TIMEOUT_MS,
+   MAX_GOAWAY_MESSAGE_BYTES,
+  MCP_PROTOCOL,
+  ROUTER_SHUN_DURATION_MS,
+  AuthRejectedError,
+  authenticateWithPeer,
+  authStreamHandler,
+  clampGoAwayRetryAfterMs,
+  goAwayReasonName,
+  goAwayStreamHandler,
+  type GoAwayServerOptions,
+} from "./auth.ts";
 export { createMeshHost, type MeshHost, type MeshHostOptions } from "./host.ts";
 export { DHT_PROTOCOL, isServiceType, parseServiceTarget, serviceCID, type ServiceType } from "./discovery.ts";
 export { LabelsNotSatisfiedError, StreamTransport, openMCPSession, requireEgressLabels, requireLabels, type MCPSession, type MCPSessionOptions } from "./mcp.ts";

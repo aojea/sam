@@ -41,8 +41,9 @@ Milestones 1 to 5 are implemented and tested in both languages:
 | Persisted state (identity and credential, owner-only files; IndexedDB in a browser) | yes | yes |
 | Biscuit verification of a peer's credential (signature, expiry, peer binding, roles, labels) | yes | yes |
 | libp2p host as `agentmesh-node` configures it (TCP and WebSocket, TLS first and Noise, yamux) | yes | yes |
-| `/mesh/auth/1.0.0`, both sides; join = handshake with a router and check its role | yes | yes |
-| Circuit relay v2 reservation on the router; dial and accept through it | yes | yes |
+| `/mesh/auth/1.0.0`, both sides; join = pick `k` routers (default 2) by selector, preference and load, handshake and check role | yes | yes |
+| Circuit relay v2 reservation on each held router; dial and accept through them | yes | yes |
+| `/mesh/goaway/1.0.0`: shun a draining or overloaded router for `retry_after` and replace it from the catalog; redial (`2s, 4s, 8s`) before failing over on a dropped connection | yes | yes |
 | Service discovery in the mesh DHT (`/mesh/kad/1.0.0`) | yes | yes |
 | `/mesh/mcp/1.0.0` client: list and call a provider's tools, or its catalog | yes | yes |
 | Caller-side label requirements on the provider's credential | yes | yes |
@@ -50,7 +51,7 @@ Milestones 1 to 5 are implemented and tested in both languages:
 | The mesh as a transport for HTTP clients: `session.fetch()` for fetch-based clients, `MeshTransport` for httpx, so the official A2A SDK's client works unchanged | `fetch` | httpx |
 | Provider authorizer: the baseline Datalog and the mesh policy (`GET /policies`), evaluated as `agentmesh-node` does | yes | yes |
 | A2A ingress for the agent: `/libp2p-http` for `a2a://<name>`, forwarded to an A2A server beside the process or answered in it; not announced anywhere | yes | yes |
-| Control plane pull before join and on `agentmesh-node`'s interval: `/keys` verified against the trusted set, credential refresh after a rotation, `/info` bans and router addresses | yes | yes |
+| Control plane pull before join and on `agentmesh-node`'s interval: `/keys` verified against the trusted set, credential refresh after a rotation, `/info` bans and router catalog (`routers` and `router_addresses`) | yes | yes |
 | Gossip events from the control plane (`/mesh/events/v1`, StrictSign): ban enforced at once, key rotation adopted, policy update pulls | yes | yes |
 | Banned peers refused: connections dropped and denied, handshakes and requests refused, dials refused | yes | yes |
 | Runs in a browser page: WebSocket and Noise to the router, state in IndexedDB, the agent answered by a fetch handler; `sdk/js/examples/browser` against `agentmesh-one`, tested in Chromium | yes | — |
@@ -324,12 +325,14 @@ length, then the bytes), with a 64 KiB cap on the first frame.
 - `/mesh/goaway/1.0.0` (`HandleGoAway`). A router opens it to a member it
   will no longer hold and sends one `RouterGoAway{reason, retry_after}`:
   `DRAINING` when it is stopping, `OVERLOADED` when it holds more members
-  than its high watermark. The member closes the stream once it has acted,
-  attaches to another router and does not dial this one again before
-  `retry_after`; the router closes the connection 5 seconds after the
-  message either way. A member that does not register the protocol only
-  sees the connection close, which is what the SDKs do today: they redial
-  the routers on `/info` as before. Handling the message is an open item.
+  than its high watermark. Both SDKs register the protocol, act only on a
+  message from a router the session holds, close the stream, record the
+  router as shunned for `retry_after` (default 5m, cap 1h), and immediately
+  attach and reserve on another router from the catalog; the router closes
+  the connection 5 seconds after the message either way. When a held
+  router's connection drops without a go-away, the member redials it first
+  (`2s, 4s, 8s`) and, if it does not come back or refuses auth, shuns it and
+  tops up from the catalog.
 
 ### Discovery (`internal/node/service.go`)
 
