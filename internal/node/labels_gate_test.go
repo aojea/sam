@@ -17,6 +17,8 @@ package node
 import (
 	"context"
 	"crypto/ed25519"
+	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -246,6 +248,39 @@ func TestVerifyPeerLabelsDoesNotShortCircuit(t *testing.T) {
 	node.nodeConfig = &NodeConfigComplete{}
 	if err := node.VerifyPeerLabels(context.Background(), peer.ID("some-peer"), nil); err == nil {
 		t.Error("with no floor and no requirement the gate must still verify the peer's identity")
+	}
+}
+
+// A provider that cannot be reached is not one that refused: the gate marks
+// the first so a caller is answered 502 and may retry, and a verdict on a
+// credential that was read stays a 403. On the testnet every caller of a
+// provider that was down, or too busy to answer in time, was told
+// "destination is not an enrolled peer".
+func TestLabelGateTellsUnreachableFromDenied(t *testing.T) {
+	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond, nodeConfig: &NodeConfigComplete{}}
+	cache, err := lru.New[string, time.Time](8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node.peerLabelGate = cache
+
+	// No host, no identity: the biscuit fetch fails before any credential
+	// is read, which is the unreachable case.
+	err = node.VerifyPeerLabels(context.Background(), peer.ID("some-peer"), nil)
+	if !errors.Is(err, ErrProviderUnreachable) {
+		t.Fatalf("fetch failure: err = %v, want ErrProviderUnreachable", err)
+	}
+	if text, status := labelGateStatus(err, "denied"); status != http.StatusBadGateway || text == "denied" {
+		t.Errorf("unreachable: got %d %q, want 502", status, text)
+	}
+
+	// A credential that was read and found wanting is a verdict.
+	err = node.checkPeerLabels(nil, peer.ID("some-peer"), nil)
+	if err == nil || errors.Is(err, ErrProviderUnreachable) {
+		t.Fatalf("empty credential: err = %v, want a denial", err)
+	}
+	if text, status := labelGateStatus(err, "denied"); status != http.StatusForbidden || text != "denied" {
+		t.Errorf("denied: got %d %q, want 403 denied", status, text)
 	}
 }
 

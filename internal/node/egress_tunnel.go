@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -419,6 +420,10 @@ func handleConnectTunnel(node *AgentMeshNode, w http.ResponseWriter, r *http.Req
 		refuse(w, http.StatusNotFound, fmt.Sprintf("no provider found for egress://%s", host), proxyStatusDestinationNotFound)
 		return
 	}
+	// A provider that was heard from and refused is a verdict; one that
+	// never answered is not, and when every provider is in that state the
+	// caller is told so rather than told it was denied.
+	var denied bool
 	for _, p := range providers {
 		targetPeer, decErr := peer.Decode(p.GetPeerId())
 		if decErr != nil {
@@ -426,9 +431,14 @@ func handleConnectTunnel(node *AgentMeshNode, w http.ResponseWriter, r *http.Req
 		}
 		if err := node.VerifyPeerLabels(r.Context(), targetPeer, requiredLabels); err != nil {
 			logger.Warnf("[Egress] CONNECT label gate refused egress to %s: %v", targetPeer, err)
+			denied = denied || !errors.Is(err, ErrProviderUnreachable)
 			continue
 		}
 		forwardConnectTunnelToPeer(node, w, r, targetPeer, host, port, identity)
+		return
+	}
+	if !denied {
+		refuse(w, http.StatusBadGateway, "Bad Gateway: no provider answered", proxyStatusDestinationUnreachable)
 		return
 	}
 	recordEgressDecision(host, egressOutcomeDeny)

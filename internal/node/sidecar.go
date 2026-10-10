@@ -809,13 +809,14 @@ func createEgressProxy(node *AgentMeshNode) http.Handler {
 		}
 		if err := node.VerifyPeerLabels(r.Context(), pid, requiredLabels); err != nil {
 			logger.Warnf("[Egress] refused egress to %s: %v", pid, err)
+			denied := "Forbidden: destination is not an enrolled peer"
 			if len(requiredLabels) > 0 {
-				http.Error(w, "Required labels not attested by provider", http.StatusForbidden)
+				denied = "Required labels not attested by provider"
 			} else if len(node.egressFloor()) > 0 {
-				http.Error(w, "Forbidden: provider does not attest the egress floor", http.StatusForbidden)
-			} else {
-				http.Error(w, "Forbidden: destination is not an enrolled peer", http.StatusForbidden)
+				denied = "Forbidden: provider does not attest the egress floor"
 			}
+			text, status := labelGateStatus(err, denied)
+			http.Error(w, text, status)
 			return
 		}
 

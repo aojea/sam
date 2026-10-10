@@ -47,9 +47,10 @@ const DefaultSecretsDir = "/etc/agentmesh/secrets"
 // the destination, refuses a request. A client can then tell a policy denial
 // from a 403 the destination sent.
 const (
-	proxyStatusDenied              = "http_request_denied"
-	proxyStatusDestinationNotFound = "destination_not_found"
-	proxyStatusConfigurationError  = "proxy_configuration_error"
+	proxyStatusDenied                 = "http_request_denied"
+	proxyStatusDestinationNotFound    = "destination_not_found"
+	proxyStatusDestinationUnreachable = "destination_unavailable"
+	proxyStatusConfigurationError     = "proxy_configuration_error"
 )
 
 // refuse answers a request the node refuses itself, naming the reason in

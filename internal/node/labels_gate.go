@@ -17,7 +17,9 @@ package node
 import (
 	"context"
 	"crypto/ed25519"
+	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -90,6 +92,23 @@ const (
 	labelGateDialTimeout = 10 * time.Second
 )
 
+// ErrProviderUnreachable marks a label-gate failure in which the provider
+// could not be reached or did not answer, as against one in which it
+// answered and its credential did not satisfy the requirement. The first
+// is the mesh's state and a caller may retry it; the second is a verdict.
+var ErrProviderUnreachable = errors.New("provider unreachable")
+
+// labelGateStatus is the HTTP answer for a label-gate failure, in the
+// order http.Error takes it: 502 when the provider was never heard from, so
+// a caller does not read a dead or busy destination as a denial of its
+// request, 403 with the given text for a verdict.
+func labelGateStatus(err error, denied string) (string, int) {
+	if errors.Is(err, ErrProviderUnreachable) {
+		return "Bad Gateway: destination did not answer", http.StatusBadGateway
+	}
+	return denied, http.StatusForbidden
+}
+
 // labelGateKey builds a deterministic cache key from a required label set and
 // the floor in force. The floor is part of the key because a verdict reached
 // under one floor says nothing about another: keying on the caller's
@@ -155,7 +174,7 @@ func (n *AgentMeshNode) VerifyPeerLabels(ctx context.Context, peerID peer.ID, re
 
 	providerBiscuit, err := n.fetchPeerBiscuit(ctx, peerID)
 	if err != nil {
-		return fmt.Errorf("provider %s labels unverifiable: %w", peerID, err)
+		return fmt.Errorf("provider %s labels unverifiable: %w: %w", peerID, ErrProviderUnreachable, err)
 	}
 	if err := n.checkPeerLabels(providerBiscuit, peerID, required); err != nil {
 		return err
