@@ -15,7 +15,7 @@
 
 # Multi-Tier Guardrails & Quality Gates — End-to-End 5-Persona Runner
 #
-# Demonstrates how SAM serves all 5 enterprise personas across 4 acts with real
+# Demonstrates how Agent Mesh serves all 5 enterprise personas across 4 acts with real
 # backends (Ollama gemma3:1b, official a2a-sdk, official mcp SDK + SQLite, and
 # https://api.github.com), while clarifying the 3 points where labels are used:
 #   1. Mesh Enforcement (policy.json allowed_labels): Control Plane attests

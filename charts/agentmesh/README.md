@@ -11,7 +11,7 @@ own mesh.
 ## Install
 
 ```bash
-helm upgrade --install agentmesh ./charts/agentmesh --namespace sam --create-namespace \
+helm upgrade --install agentmesh ./charts/agentmesh --namespace agentmesh --create-namespace \
   --set controlPlane.oidcIssuer=<your OIDC issuer URL>
 ```
 
@@ -118,10 +118,10 @@ gateway:
     allowedRoutes:
       namespaces:
         from: Same
-  hostnames: [sam.example.com]
+  hostnames: [mesh.example.com]
   addresses:
   - type: NamedAddress
-    value: sam-cp-ip
+    value: agentmesh-cp-ip
 ```
 
 ## OIDC login for the console

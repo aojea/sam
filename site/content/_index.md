@@ -7,6 +7,8 @@ the tools and models it offers, finds what other nodes offer, and calls them
 over authenticated peer-to-peer connections, through relays when the machines
 cannot reach each other directly.
 
+> **Note:** We have updated the name to **Agent Mesh** to better align with the goals of the project in the ecosystem.
+
 Nothing is reachable by default: a node exposes no services until told to, and
 no node may call a service the mesh policy has not granted. Identity comes from
 your identity provider, and the control plane that turns it into mesh

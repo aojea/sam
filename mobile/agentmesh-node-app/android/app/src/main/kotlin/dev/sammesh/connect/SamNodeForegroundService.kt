@@ -79,7 +79,7 @@ class SamNodeForegroundService : Service() {
 
     private fun createNotification(): Notification {
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("SAM Connect is running")
+            .setContentTitle("Agent Mesh Connect is running")
             .setContentText("Maintaining the mesh connection in the background")
             .setSmallIcon(android.R.drawable.ic_menu_share) // Placeholder icon
             .setOngoing(true)
@@ -90,8 +90,8 @@ class SamNodeForegroundService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val name = "SAM Connect mesh connection"
-            val descriptionText = "Keeps SAM Connect connected to the mesh in the background"
+            val name = "Agent Mesh Connect mesh connection"
+            val descriptionText = "Keeps Agent Mesh Connect connected to the mesh in the background"
             val importance = NotificationManager.IMPORTANCE_LOW
             val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
                 description = descriptionText

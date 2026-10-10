@@ -44,7 +44,7 @@ gossip-fed; retry for a few seconds after startup if the list comes back empty.
 
 ```sh
 curl -s -H 'X-Mesh-Authentication: Bearer devtoken' \
-  "http://127.0.0.1:9099/sam/$PEER/a2a/chat/.well-known/agent-card.json" | jq
+  "http://127.0.0.1:9099/mesh/$PEER/a2a/chat/.well-known/agent-card.json" | jq
 ```
 
 The interface URLs point back at this mesh path (not the agent's own address)
@@ -57,7 +57,7 @@ Requires [`uv`](https://docs.astral.sh/uv/).
 
 ```sh
 cd development/examples/chat-a2a
-uv run --with-requirements requirements.txt chat.py "http://127.0.0.1:9099/sam/$PEER/a2a/chat"
+uv run --with-requirements requirements.txt chat.py "http://127.0.0.1:9099/mesh/$PEER/a2a/chat"
 ```
 
 Tell the agent your name, then ask for it back a couple of turns later: the

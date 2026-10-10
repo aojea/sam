@@ -1,4 +1,4 @@
-# sam-mesh (Python)
+# agentmesh-p2p (Python)
 
 Native Python SDK for joining an Agent Mesh from inside the agent
 process. It replaces the `agentmesh-node` sidecar for agents written in Python:

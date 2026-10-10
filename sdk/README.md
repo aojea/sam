@@ -1,9 +1,9 @@
 # Native SDKs
 
-This directory holds the SDKs that let an agent join a SAM mesh from inside
+This directory holds the SDKs that let an agent join an Agent Mesh from inside
 its own process, without a `agentmesh-node` sidecar. Two languages are in scope:
 
-- [`js/`](js/) — `@agentmesh-p2p/sdk`, TypeScript for Node.js, built on
+- [`js/`](js/) — `agentmesh-p2p`, TypeScript for Node.js, built on
   [js-libp2p](https://github.com/libp2p/js-libp2p).
 - [`python/`](python/) — `agentmesh-p2p` (import `agent_mesh`), built on
   [py-libp2p](https://github.com/libp2p/py-libp2p).
@@ -282,7 +282,7 @@ messages in `api/agentmesh.proto`. Bodies are capped at 1 MiB on both sides.
 - Muxer: yamux (libp2p default).
 - Relay: circuit relay v2, with the routers as static relays; hole punching
   is on. A node behind NAT is reached through a router.
-- DHT: Kademlia with protocol prefix `/sam`, mode auto.
+- DHT: Kademlia with protocol prefix `/mesh`, mode auto.
 
 ### Streams
 
@@ -595,23 +595,22 @@ holds against the control plane's records.
 - Ban enforcement: the auth handshake and the A2A ingress refuse a banned
   peer before looking at its token; `connect()` refuses to dial one; its
   connections are dropped when the ban lands.
-- Publishing: `.github/workflows/release.yml` stamps the release tag's
+- Publishing: `.github/workflows/sdk.yml` stamps the release tag's
   version on both packages (`hack/sdk-version.sh`) and publishes
-  `@agentmesh-p2p/sdk` to npm and `agentmesh-p2p` to PyPI through trusted
+  `agentmesh-p2p` to npm and `agentmesh-p2p` to PyPI through trusted
   publishing. A prerelease tag (`v0.1.0-rc.4`) publishes under the npm
   dist-tag `next`, a stable tag under `latest`; PyPI needs no tag, `pip`
   skips prereleases on its own. When a publish job (`publish-sdk-js`
   or `publish-sdk-python`) fails after the GitHub release exists, re-run
   the failed job, or run the workflow by hand from the Actions tab with
   the tag and target SDK as input; it checks out that tag and publishes
-  the selected SDK. One-time setup by a package owner: on npmjs.com, create the
-  `agentmesh-p2p` organization, publish `@agentmesh-p2p/sdk` 0.1.0 once by hand
+  the selected SDK. One-time setup by a package owner: on npmjs.com, publish `agentmesh-p2p` 0.1.0 once by hand
   (`cd sdk/js && npm publish --access public`; the trusted-publisher
   settings live on the package page, which exists only after that), then
-  register `google/sam` with workflow `release.yml` under the package's
+  register `google/agentmesh` with workflow `sdk.yml` under the package's
   Settings, Trusted publishing; on pypi.org, add a pending publisher for
   project `agentmesh-p2p` with the same repository and workflow (environment
-  left empty), which reserves the name and lets the first tag create the
+  `release`), which reserves the name and lets the first tag create the
   project. No publishing token is stored in the repository.
 - Docs: `site/content/docs/guides/native-sdks.md`.
 - Tests. Unit: a fake control plane rotates its key and bans a peer; each
@@ -640,7 +639,7 @@ SDK's client every five minutes and is Ready while the last answer named
 the caller, so the Deployment's availability says whether an agent is still
 reachable after hours on the mesh. Two CronJobs cross every implementation
 boundary every 15 minutes and once per rollout: the `agentmesh-node` cold-path
-probe (`sam-probe-cronjob-template.yaml`) runs an agent per SDK as sidecars
+probe (`agentmesh-probe-cronjob-template.yaml`) runs an agent per SDK as sidecars
 and fetches each one's agent card by peer ID through the egress proxy
 (node → SDK), and the SDK cold-path probe
 (`agentmesh-sdk-probe-cronjob-template.yaml`) runs each SDK's callers against the

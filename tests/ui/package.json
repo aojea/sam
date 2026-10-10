@@ -1,7 +1,7 @@
 {
   "name": "agentmesh-console-ui-tests",
   "private": true,
-  "description": "Playwright smoke test for the SAM console UI",
+  "description": "Playwright smoke test for the Agent Mesh console UI",
   "scripts": {
     "test": "playwright test"
   },

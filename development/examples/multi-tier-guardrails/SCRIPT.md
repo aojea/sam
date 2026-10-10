@@ -1,6 +1,6 @@
 # Multi-Tier Guardrails & Quality Gates — Recording Script
 
-A ~3.5-minute terminal recording demonstrating how SAM serves all **5 enterprise personas** across **4 acts** with real backends (`gemma3:1b` on Ollama, official `a2a-sdk`, official `mcp` SDK + SQLite, and `api.github.com`). Every config file (`node-v1.yaml`, `node-caller.yaml`, `node-v2.yaml`, `node-contractor.yaml`, `policy.json`) and every command (`agentmesh-node join`, `make node-v1-staging`, `curl`, `python3 a2a_client.py`, `mcp-client`, `agentmesh-one admin ban`) is shown directly on screen.
+A ~3.5-minute terminal recording demonstrating how Agent Mesh serves all **5 enterprise personas** across **4 acts** with real backends (`gemma3:1b` on Ollama, official `a2a-sdk`, official `mcp` SDK + SQLite, and `api.github.com`). Every config file (`node-v1.yaml`, `node-caller.yaml`, `node-v2.yaml`, `node-contractor.yaml`, `policy.json`) and every command (`agentmesh-node join`, `make node-v1-staging`, `curl`, `python3 a2a_client.py`, `mcp-client`, `agentmesh-one admin ban`) is shown directly on screen.
 
 ## Scenes
 

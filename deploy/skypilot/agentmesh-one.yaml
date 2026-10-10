@@ -1,19 +1,19 @@
-# SkyPilot recipe for deploying a standalone SAM control plane + router (agentmesh-one)
+# SkyPilot recipe for deploying a standalone Agent Mesh control plane + router (agentmesh-one)
 # on any cloud provider (GCP, AWS, Azure, OCI, or Kubernetes).
 #
 # Production deployment with a permanent custom domain:
-#   sky launch -y -c sam-hub deploy/skypilot/agentmesh-one.yaml --detach-run \
+#   sky launch -y -c agentmesh-hub deploy/skypilot/agentmesh-one.yaml --detach-run \
 #     --env AGENTMESH_EXTERNAL_URL=https://mesh.example.com \
 #     --secret AGENTMESH_TUNNEL_TOKEN
 #
 # Quick deployment with an automatic HTTPS tunnel:
-#   sky launch -y -c sam-hub deploy/skypilot/agentmesh-one.yaml --detach-run
-#   sky logs sam-hub 1 --no-follow
+#   sky launch -y -c agentmesh-hub deploy/skypilot/agentmesh-one.yaml --detach-run
+#   sky logs agentmesh-hub 1 --no-follow
 #
 # Note: For lightweight testing, you can lower `cpus: 0.25+` and `memory: 1+`
 # to run on cloud free-tier instances (such as GCP `e2-micro` or AWS `t4g.micro`).
 
-name: sam-hub
+name: agentmesh-hub
 
 resources:
   disk_size: 20
@@ -44,8 +44,8 @@ setup: |
       VERSION=$(curl -fsSL "https://api.github.com/repos/google/agentmesh/releases?per_page=1" | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
     fi
     TMP_DIR=$(mktemp -d)
-    curl -fsSL -o "${TMP_DIR}/sam.tar.gz" "https://github.com/google/agentmesh/releases/download/${VERSION}/sam_Linux_${ARCH_NAME}.tar.gz"
-    tar -xzf "${TMP_DIR}/sam.tar.gz" -C "${TMP_DIR}"
+    curl -fsSL -o "${TMP_DIR}/agentmesh.tar.gz" "https://github.com/google/agentmesh/releases/download/${VERSION}/agentmesh_Linux_${ARCH_NAME}.tar.gz"
+    tar -xzf "${TMP_DIR}/agentmesh.tar.gz" -C "${TMP_DIR}"
     sudo mv "${TMP_DIR}/agentmesh-one" "${TMP_DIR}/agentmesh-node" /usr/local/bin/
     rm -rf "${TMP_DIR}"
   fi

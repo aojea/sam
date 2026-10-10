@@ -133,9 +133,9 @@ Exposes capabilities directly to the OS registry, allowing native assistants (li
 
 ### 📸 Screenshots
 
-| Node Status / Dashboard | Services & Telemetry |
-|:---:|:---:|
-| ![Node Logged](../../site/static/images/mobile_node_logged.png) | ![Services Enabled](../../site/static/images/mobile_services_enabled.png) |
+| Welcome | Join / Enroll | Node Running |
+|:---:|:---:|:---:|
+| ![Welcome](../../site/static/images/agentmesh-connect-welcome.png) | ![Join](../../site/static/images/agentmesh-connect-join.png) | ![Running](../../site/static/images/agentmesh-connect-running.png) |
 
 1.  **Dashboard Tab**: Displays current status, Node ID, connected peers, and DHT size.
 2.  **Services Tab**: Allows enabling/disabling embedded sensors (Battery/Location) and bridging external local MCP servers.
@@ -151,7 +151,7 @@ You can query the phone's telemetry from a remote machine (or another node) usin
 
 1.  **Discover tools on the remote phone service**:
     ```bash
-    # Query the local SAM node proxy for tools hosted by the phone-sensors peer
+    # Query the local Agent Mesh node proxy for tools hosted by the phone-sensors peer
     # (-token is your own node's API token, not the phone's)
     go run cmd/mcp-client/main.go \
       -url "http://localhost:8080/mesh/<PHONE_PEER_ID>/mcp/phone-sensors" \

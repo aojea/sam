@@ -45,7 +45,7 @@ class SamDartMcpServer {
     if (_server != null) throw StateError('already started');
     _token = newToken();
     _server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
-    debugPrint('SAM Dart MCP Server listening on port ${_server!.port}');
+    debugPrint('Agent Mesh Dart MCP Server listening on port ${_server!.port}');
 
     _server!.listen((HttpRequest request) async {
       if (!_authorized(request)) {
@@ -87,7 +87,7 @@ class SamDartMcpServer {
     _server = null;
     _token = null;
     _sseClients.clear();
-    debugPrint('SAM Dart MCP Server stopped');
+    debugPrint('Agent Mesh Dart MCP Server stopped');
   }
 
   static const int _maxRequestBodyBytes = 1024 * 1024;
@@ -169,7 +169,7 @@ class SamDartMcpServer {
           'result': {
             'protocolVersion': '2024-11-05',
             'capabilities': {'tools': {}},
-            'serverInfo': {'name': 'sam-dart-sensors', 'version': '1.0.0'}
+            'serverInfo': {'name': 'agentmesh-dart-sensors', 'version': '1.0.0'}
           }
         };
     }

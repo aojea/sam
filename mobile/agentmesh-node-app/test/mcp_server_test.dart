@@ -36,7 +36,7 @@ void main() {
       expect(response['id'], 1);
       expect(response['result'], isNotNull);
       expect(response['result']['protocolVersion'], '2024-11-05');
-      expect(response['result']['serverInfo']['name'], 'sam-dart-sensors');
+      expect(response['result']['serverInfo']['name'], 'agentmesh-dart-sensors');
     });
 
     test('Handle notifications/initialized (should return null for no body)', () async {

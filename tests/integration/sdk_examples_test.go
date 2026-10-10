@@ -84,7 +84,7 @@ var acceptingLine = regexp.MustCompile(`^accepting (\S+) as (\S+)$`)
 
 // TestNativeSDKExamples runs the programs the SDK READMEs and the Native
 // SDKs guide embed, unchanged, against a real mesh, configured as the
-// testnet canaries are (.github/k8s/sam-sdk-canary-template.yaml). Each
+// testnet canaries are (.github/k8s/agentmesh-sdk-canary-template.yaml). Each
 // SDK's agent example enrolls with an OIDC token through AGENTMESH_JWT_PATH, the
 // way a Kubernetes workload does, and accepts A2A requests for a2a://agent,
 // publishing nothing. Each SDK's call example enrolls with a bootstrap
