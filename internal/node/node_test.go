@@ -32,10 +32,7 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
-	"github.com/libp2p/go-libp2p/p2p/discovery/util"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
@@ -694,7 +691,6 @@ func TestConnectionMonitor_CrashesAfterFailures(t *testing.T) {
 			PrivKey:           priv,
 			RouterAddrs:       nil,
 			Store:             store,
-			MeshID:            "test",
 			DiscoveryInterval: "10s",
 			ListenAddrs:       []string{"/ip4/127.0.0.1/tcp/0"},
 			EnableRelay:       false,
@@ -893,52 +889,5 @@ func TestFindProvidersSkipsRevoked(t *testing.T) {
 	}
 	if len(providers) != 0 {
 		t.Errorf("revoked peer returned as provider: %v", providers)
-	}
-}
-
-func TestStartDiscoverySkipsRevoked(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	const meshID = "test-mesh"
-
-	// Only the bootstrap host runs a server DHT: the others are clients, so
-	// nothing dials A and every connection A opens comes from startDiscovery.
-	bootstrapHost, _ := newDHTHost(t, dht.ModeServer)
-	hostA, dhtA := newDHTHost(t, dht.ModeClient)
-	revokedHost, revokedDHT := newDHTHost(t, dht.ModeClient)
-	healthyHost, healthyDHT := newDHTHost(t, dht.ModeClient)
-
-	for _, h := range []host.Host{hostA, revokedHost, healthyHost} {
-		if err := h.Connect(ctx, peer.AddrInfo{ID: bootstrapHost.ID(), Addrs: bootstrapHost.Addrs()}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, d := range []*dht.IpfsDHT{dhtA, revokedDHT, healthyDHT} {
-		waitForRoutingTable(t, d)
-		util.Advertise(ctx, routing.NewRoutingDiscovery(d), meshID)
-	}
-
-	revokedCache, err := lru.New[string, int64](10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	revokedCache.Add(revokedHost.ID().String(), time.Now().UnixMilli())
-	node := &AgentMeshNode{Host: hostA, DHT: dhtA, revokedPeers: revokedCache}
-
-	go node.startDiscovery(ctx, meshID, 200*time.Millisecond)
-
-	// Both advertisers come back in the same FindPeers result, so the healthy
-	// one connecting proves the revoked one was offered and skipped.
-	deadline := time.Now().Add(20 * time.Second)
-	for hostA.Network().Connectedness(healthyHost.ID()) != network.Connected {
-		if time.Now().After(deadline) {
-			t.Fatalf("healthy peer never connected; discovery did not run")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	if c := hostA.Network().Connectedness(revokedHost.ID()); c == network.Connected {
-		t.Errorf("revoked peer was dialled from discovery (connectedness %s)", c)
 	}
 }

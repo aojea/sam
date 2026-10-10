@@ -180,11 +180,6 @@ func StartNode(configJSON string) error {
 		discoveryInterval = node.DefaultDiscoveryInterval
 	}
 
-	meshID := config.MeshID
-	if meshID == "" {
-		meshID = node.DefaultMeshName
-	}
-
 	// Create and initialize the node
 	var services []api.ServiceConfig
 	for _, svc := range config.Services {
@@ -213,7 +208,6 @@ func StartNode(configJSON string) error {
 		ControlPlanePubKey:   controlPlanePubKey,
 		RouterAddrs:          routerAddrs,
 		Store:                store,
-		MeshID:               meshID,
 		DiscoveryInterval:    discoveryInterval,
 		ListenAddrs:          listenAddrs,
 		EnableRelay:          config.EnableRelay,

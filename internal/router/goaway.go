@@ -163,24 +163,24 @@ func (r *Router) inboundConnections() int {
 }
 
 // shedIfOverloaded sends members away when the router holds at least its
-// high watermark of inbound connections: as many as take it back to the
-// low watermark, chosen at random so no member is always the one. The
-// connection manager still trims past the high watermark; this runs first
-// and tells the members where they stand, so they do not dial straight
-// back. Returns how many were sent away.
+// high watermark of them: as many as take it back to the low watermark,
+// chosen at random so no member is always the one. Members are counted,
+// not connections: a member attached elsewhere holds a connection here for
+// its DHT queries without being one, and those connections are what the
+// connection manager closes first past the high watermark (see memberTag).
+// Returns how many were sent away.
 func (r *Router) shedIfOverloaded(ctx context.Context) int {
-	inbound := r.inboundConnections()
-	if inbound < r.config.HighWaterMark {
+	members := r.members()
+	if len(members) < r.config.HighWaterMark {
 		return 0
 	}
-	members := r.members()
-	excess := min(inbound-r.config.LowWaterMark, len(members))
+	excess := len(members) - r.config.LowWaterMark
 	if excess <= 0 {
 		return 0
 	}
 	rand.Shuffle(len(members), func(i, j int) { members[i], members[j] = members[j], members[i] })
 	shed := members[:excess]
-	logger.Warnf("[GoAway] %d inbound connections, high watermark %d: sending %d of %d members away for %s", inbound, r.config.HighWaterMark, len(shed), len(members), DefaultOverloadRetryAfter)
+	logger.Warnf("[GoAway] %d members, high watermark %d: sending %d away for %s", len(members), r.config.HighWaterMark, len(shed), DefaultOverloadRetryAfter)
 	r.goAwayAll(ctx, shed, &api.RouterGoAway{
 		Reason:     api.RouterGoAway_OVERLOADED,
 		RetryAfter: durationpb.New(DefaultOverloadRetryAfter),

@@ -38,9 +38,33 @@ import (
 // routerFixture is one agentmesh-router the test started, with the key it
 // was given so its peer ID is known before it runs.
 type routerFixture struct {
-	cmd    *exec.Cmd
-	peerID peer.ID
-	port   int
+	cmd         *exec.Cmd
+	peerID      peer.ID
+	port        int
+	metricsAddr string
+}
+
+// gauge reads one metric from the router's /metrics, by its full name with
+// labels, and fails when it is not there.
+func (r *routerFixture) gauge(t *testing.T, name string) float64 {
+	t.Helper()
+	resp, err := http.Get("http://" + r.metricsAddr + "/metrics")
+	if err != nil {
+		t.Fatalf("scrape %s: %v", r.metricsAddr, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	for _, line := range strings.Split(string(body), "\n") {
+		if strings.HasPrefix(line, name+" ") {
+			var v float64
+			if _, err := fmt.Sscanf(strings.TrimPrefix(line, name+" "), "%g", &v); err != nil {
+				t.Fatalf("parse %q: %v", line, err)
+			}
+			return v
+		}
+	}
+	t.Fatalf("metric %s not served by %s", name, r.metricsAddr)
+	return 0
 }
 
 // startLabelledRouter runs a router that declares the given labels and
@@ -64,6 +88,7 @@ func startLabelledRouter(t *testing.T, routerBin, tmpDir, name string, cpPort in
 		t.Fatal(err)
 	}
 	port := getFreePort(t)
+	metricsAddr := fmt.Sprintf("127.0.0.1:%d", getFreePort(t))
 	args := []string{
 		"--control-plane", fmt.Sprintf("http://127.0.0.1:%d", cpPort),
 		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", port),
@@ -71,6 +96,7 @@ func startLabelledRouter(t *testing.T, routerBin, tmpDir, name string, cpPort in
 		"--allow-loopback",
 		"--oidc-token", routerJWT,
 		"--lease-renew-interval", "250ms",
+		"--metrics-addr", metricsAddr,
 	}
 	for _, l := range labels {
 		args = append(args, "--label", l)
@@ -94,7 +120,7 @@ func startLabelledRouter(t *testing.T, routerBin, tmpDir, name string, cpPort in
 			t.Logf("--- %s ---\n%s", name, out)
 		}
 	})
-	return &routerFixture{cmd: cmd, peerID: peerID, port: port}
+	return &routerFixture{cmd: cmd, peerID: peerID, port: port, metricsAddr: metricsAddr}
 }
 
 // routersConnectedTo lists the routers whose last lease reported a
@@ -113,18 +139,28 @@ func routersConnectedTo(t *testing.T, cpPort int, peerID peer.ID) []string {
 	return out
 }
 
-// attachedRouters reads the routers the node holds as relays from its own
-// debug endpoint.
-func attachedRouters(t *testing.T, n *backgroundNode) []string {
+// meshInfo reads the node's own view: the routers it holds and every peer
+// it has a connection with.
+func meshInfo(t *testing.T, n *backgroundNode) (attached, connected []string) {
 	t.Helper()
 	var info struct {
 		AttachedRouters []string `json:"attached_routers"`
+		ConnectedPeers  []string `json:"connected_peers"`
 	}
 	if err := json.Unmarshal([]byte(debugGetWithToken(t, n.apiAddr, n.token, "/debug/mesh-info")), &info); err != nil {
 		t.Fatalf("decode mesh-info: %v", err)
 	}
 	slices.Sort(info.AttachedRouters)
-	return info.AttachedRouters
+	slices.Sort(info.ConnectedPeers)
+	return info.AttachedRouters, info.ConnectedPeers
+}
+
+// attachedRouters reads the routers the node holds as relays from its own
+// debug endpoint.
+func attachedRouters(t *testing.T, n *backgroundNode) []string {
+	t.Helper()
+	attached, _ := meshInfo(t, n)
+	return attached
 }
 
 // debugGetWithToken is debugGet for a node whose API token is not the
@@ -443,4 +479,74 @@ func mustPeerID(t *testing.T, s string) peer.ID {
 		t.Fatal(err)
 	}
 	return id
+}
+
+// TestIdleNodesHoldOnlyTheirRouters pins what a member costs the mesh when
+// it is not calling anyone: a session with the routers it chose and nothing
+// else. Three routers, three nodes each pinned to its own router, no
+// service and no call; after the discovery interval has ticked many times,
+// no node is connected to another node, and each router has authenticated
+// its own node and the two other routers, nobody else. A node that sought
+// out other members on its own would be connected to them, through their
+// routers, and would have authenticated at every router on the way, which
+// is the load of a member on every router rather than on two. Connections
+// a node's DHT client holds to the other routers are allowed: they carry
+// no session and are the first a router closes when it is full.
+func TestIdleNodesHoldOnlyTheirRouters(t *testing.T) {
+	m := startAttachmentMesh(t)
+	sites := []string{"a", "b", "c"}
+	routers := map[string]*routerFixture{}
+	for _, s := range sites {
+		routers[s] = m.startRouter(t, "router-"+s, "site="+s)
+	}
+	// Federation on the first pass: every router finds the ones before it.
+	waitForEqual(t, "routers connected to router c", func() []string { return routersConnectedTo(t, m.cpPort, routers["c"].peerID) },
+		peerIDStrings(routers["a"].peerID, routers["b"].peerID), 10*time.Second)
+
+	nodes := map[string]*backgroundNode{}
+	for _, s := range sites {
+		nodes[s] = launchNode(t, m.nodeBin, m.nodeEnv("node-"+s), filepath.Join(m.tmpDir, "node-"+s), append(m.nodeArgs(),
+			"--api-token-path", tokenPath(t, "token-"+s),
+			"--allow-loopback",
+			"--router-selector", "site="+s,
+			"--monitor-bootstrap", "500ms",
+			"--monitor-interval", "500ms",
+		)...)
+	}
+	for _, s := range sites {
+		nodes[s].waitForAPI(t)
+		waitForEqual(t, "routers attached by node "+s, func() []string { return attachedRouters(t, nodes[s]) }, peerIDStrings(routers[s].peerID), 10*time.Second)
+	}
+
+	// Twenty discovery intervals (200ms) with nothing to do.
+	time.Sleep(4 * time.Second)
+
+	for _, s := range sites {
+		attached, connected := meshInfo(t, nodes[s])
+		if !slices.Equal(attached, peerIDStrings(routers[s].peerID)) {
+			t.Errorf("node %s holds %v, want its router %s", s, attached, routers[s].peerID)
+		}
+		for _, p := range connected {
+			for _, other := range sites {
+				if other != s && p == nodes[other].peerID.String() {
+					t.Errorf("idle node %s is connected to node %s", s, other)
+				}
+			}
+		}
+		// Its own node and the two peer routers.
+		if got := routers[s].gauge(t, "agentmesh_router_authenticated_peers"); got != 3 {
+			t.Errorf("router %s authenticated %v peers, want 3 (its node and two routers)", s, got)
+		}
+		if t.Failed() {
+			t.Logf("node %s connected peers: %v", s, connected)
+		}
+	}
+	if t.Failed() {
+		for _, s := range sites {
+			out := nodes[s].log()
+			if i := strings.LastIndex(out, "[AuthN] Successfully authenticated"); i > 0 {
+				t.Logf("--- node %s, last handshake line ---\n%s", s, out[i:min(len(out), i+300)])
+			}
+		}
+	}
 }

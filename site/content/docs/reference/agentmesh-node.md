@@ -114,8 +114,7 @@ explains how to enroll.
 | `--router-selector` | none | Attach only to routers whose credential attests this `key=value` label, repeatable, every pair required: `--router-selector region=eu`. The labels are the ones the control plane lists on `/info`, attested at the router's enrollment. A selector no router attests leaves the node retrying as if no router answered, with a warning naming the selector and the labels it saw. |
 | `--router-prefer` | none | Attach to routers attesting this `key=value` label before others, repeatable; a router attesting more of the pairs comes earlier, and among equals the one with the most room. `--router-prefer zone=eu-a` keeps a node on its zone's routers while they have capacity and lets it fall to the others. |
 | `--enable-relay` | `false` | Relay traffic for other peers. |
-| `--mesh` | `public-mesh` | Mesh federation name. Must match the routers' name. |
-| `--discovery-interval` | `30s` | DHT discovery polling interval. |
+| `--discovery-interval` | `30s` | Delay before the first announcement of this node's services to the DHT, capped at 5 s; services are re-announced every 5 minutes after that. |
 | `--dht-lookup-limit` | `20` | Providers to query per DHT lookup. |
 | `--discovery-concurrency` | `10` | Concurrent catalog fetches during discovery. |
 | `--dht-provider-addr-ttl` | `15m` | How long a service announcement lives after a node last made it. Nodes re-announce every 5 minutes, so a node that is gone drops out of discovery within this time. `0` keeps the default. |

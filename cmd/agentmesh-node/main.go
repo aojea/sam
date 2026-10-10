@@ -458,7 +458,6 @@ func main() {
 					ControlPlanePubKey:       cpPub,
 					RouterAddrs:              rAddrs,
 					Store:                    store,
-					MeshID:                   meshFlag,
 					DiscoveryInterval:        discoveryIntervalFlag,
 					ListenAddrs:              listenAddrs,
 					EnableRelay:              enableRelayFlag,
@@ -752,7 +751,6 @@ func main() {
 				PrivKey:                  priv,
 				RouterAddrs:              initRouterAddrs,
 				Store:                    store,
-				MeshID:                   meshFlag,
 				DiscoveryInterval:        discoveryIntervalFlag,
 				ListenAddrs:              []string{"/ip4/0.0.0.0/udp/0/quic-v1", "/ip4/0.0.0.0/tcp/0"},
 				EnableRelay:              enableRelayFlag,
@@ -865,8 +863,9 @@ func main() {
 	runCmd.Flags().StringVar(&bindAddrFlag, "bind-addr", "127.0.0.1:8080", "Local TCP address for the HTTP server (MCP and Sidecar API); pass an empty value to serve only on the Unix socket")
 	runCmd.Flags().StringVar(&socketPathFlag, "socket-path", "", "Unix socket serving the same API, where the socket's owner-only permissions replace the API token (defaults to <data-dir>/"+node.DefaultSocketName+"; pass an empty value to disable)")
 	runCmd.Flags().StringVar(&metricsAddrFlag, "metrics-addr", "", "Serve Prometheus /metrics, /healthz and /readyz on this address without authentication (e.g. 0.0.0.0:9090), for scrapers and probes that hold no API token; off by default")
-	runCmd.Flags().StringVar(&meshFlag, "mesh", node.DefaultMeshName, "Mesh federation name")
-	runCmd.Flags().StringVar(&discoveryIntervalFlag, "discovery-interval", node.DefaultDiscoveryInterval, "Polling interval for DHT discovery")
+	runCmd.Flags().StringVar(&meshFlag, "mesh", "public-mesh", "No effect; kept so existing invocations still parse")
+	_ = runCmd.Flags().MarkDeprecated("mesh", "the node no longer announces itself under a mesh name; the flag has no effect")
+	runCmd.Flags().StringVar(&discoveryIntervalFlag, "discovery-interval", node.DefaultDiscoveryInterval, "Delay before the first announcement of this node's services to the DHT, capped at 5s; they are re-announced every 5 minutes after that")
 	runCmd.Flags().DurationVar(&monitorBootstrapFlag, "monitor-bootstrap", 2*time.Minute, "Initial wait before monitoring router connection")
 	runCmd.Flags().DurationVar(&monitorCheckIntervalFlag, "monitor-interval", 1*time.Minute, "Interval for checking router connection")
 	runCmd.Flags().DurationVar(&autoRelayMinIntervalFlag, "autorelay-min-interval", 30*time.Second, "AutoRelay Min Interval")

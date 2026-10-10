@@ -52,14 +52,11 @@ import (
 	records "github.com/libp2p/go-libp2p-kad-dht/records"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/discovery"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
-	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
-	"github.com/libp2p/go-libp2p/p2p/discovery/util"
 	"github.com/libp2p/go-libp2p/p2p/host/autorelay"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-libp2p/p2p/net/swarm"
@@ -77,10 +74,6 @@ import (
 // This allows the node to "try once and remember", avoiding a 15-second timeout on
 // subsequent discovery or tool calls when dialing unroutable private networks.
 const PeerstoreKeyPrivateIPFailed = "private_ip_failed"
-
-// maxMeshProactiveConnections is the target maximum number of active mesh connections.
-// If active connections count reaches this threshold, the node skips periodic DHT peer discovery.
-const maxMeshProactiveConnections = 30
 
 const (
 	// Cache sizes
@@ -780,15 +773,6 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 
 	// Listen for Network Evictions/Revocations from the control plane
 	go n.listenForControlPlaneEvents(ctx)
-
-	interval, err := time.ParseDuration(n.config.DiscoveryInterval)
-	if err != nil {
-		logger.Warnf("[Discovery] Invalid discovery interval '%s', using default %s: %v", n.config.DiscoveryInterval, DefaultDiscoveryInterval, err)
-		interval, _ = time.ParseDuration(DefaultDiscoveryInterval)
-	}
-
-	// Start DHT Discovery
-	go n.startDiscovery(ctx, n.config.MeshID, interval)
 
 	// Layer 3: Open the Lobby Door (Auth Protocol is bypassed by Layer 4)
 	n.Host.SetStreamHandler(api.AuthProtocolID, recoverStreamHandler("AuthHandshake", n.HandleAuthHandshake))
@@ -1885,94 +1869,6 @@ func (n *AgentMeshNode) validateMeshEvent(_ context.Context, from peer.ID, msg *
 		return pubsub.ValidationIgnore
 	}
 	return pubsub.ValidationAccept
-}
-
-func (n *AgentMeshNode) startDiscovery(ctx context.Context, meshID string, interval time.Duration) {
-	awaitRoutingTable(ctx, n.DHT.RoutingTable().Size, interval)
-	routingDiscovery := routing.NewRoutingDiscovery(n.DHT)
-	util.Advertise(ctx, routingDiscovery, meshID)
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	sem := make(chan struct{}, 8)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			connectedCount := len(n.Host.Network().Peers())
-			if connectedCount >= maxMeshProactiveConnections {
-				logger.Debugf("[Discovery] Connected peers (%d) >= target (%d). Skipping peer discovery tick.", connectedCount, maxMeshProactiveConnections)
-				continue
-			}
-
-			peers, err := routingDiscovery.FindPeers(ctx, meshID, discovery.Limit(maxMeshProactiveConnections))
-			if err != nil {
-				logger.Errorf("[Discovery] Failed to find peers: %v", err)
-				continue
-			}
-			for p := range peers {
-				// Revoked peers keep advertising the mesh rendezvous, so without
-				// this every tick re-dials them and the gater denies it.
-				if p.ID == n.Host.ID() || n.peerIsRevoked(p.ID) {
-					continue
-				}
-
-				cond := n.Host.Network().Connectedness(p.ID)
-				if cond != network.Connected && cond != network.Limited {
-					logger.Debugf("[Discovery] Found peer not connected via DHT: %s (state: %s)", p.ID, cond)
-
-					n.Host.Peerstore().AddAddrs(p.ID, p.Addrs, peerstore.TempAddrTTL)
-					n.preparePeerAddrs(ctx, p.ID)
-
-					filteredAddrInfo := n.Host.Peerstore().PeerInfo(p.ID)
-					if len(filteredAddrInfo.Addrs) == 0 {
-						logger.Debugf("[Discovery] Skipping connection to %s: no valid addresses after filtering", p.ID)
-						continue
-					}
-
-					select {
-					case sem <- struct{}{}:
-						go func(pi peer.AddrInfo) {
-							defer func() { <-sem }()
-							dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-							defer cancel()
-							if err := n.Host.Connect(dialCtx, pi); err != nil {
-								logger.Debugf("[Discovery] Failed to connect to %s: %v", pi.ID, err)
-								if putErr := n.Host.Peerstore().Put(pi.ID, PeerstoreKeyPrivateIPFailed, true); putErr != nil {
-									logger.Errorf("[Discovery] Failed to put peerstore private IP failed key: %v", putErr)
-								}
-							}
-						}(filteredAddrInfo)
-					case <-ctx.Done():
-						return
-					}
-				}
-			}
-		}
-	}
-}
-
-// awaitRoutingTable blocks until the DHT routing table has a peer, ctx ends
-// or bound elapses. DHT.Bootstrap only triggers a refresh: the router enters
-// the table after an asynchronous FIND_NODE liveliness check that nothing
-// orders before the auth handshake returns. Advertising into an empty table
-// fails the lookup, and util.Advertise then backs off for two minutes with
-// the node invisible to its peers. Giving up after bound keeps the previous
-// behaviour when no router ever appears.
-func awaitRoutingTable(ctx context.Context, size func() int, bound time.Duration) {
-	deadline := time.After(bound)
-	for size() == 0 {
-		select {
-		case <-ctx.Done():
-			return
-		case <-deadline:
-			return
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
 }
 
 func (n *AgentMeshNode) getTrustedPublicKeys() []ed25519.PublicKey {

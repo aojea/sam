@@ -90,17 +90,18 @@ func newGoAwayRouter(t *testing.T, high int) *Router {
 	return &Router{Host: h, config: Options{HighWaterMark: high, LowWaterMark: DefaultLowWaterMark(high)}}
 }
 
-// A router at its high watermark sends enough members away to be back at
-// the low one, says why and for how long, and closes their connections
-// after the grace; a peer router is never among them, and a member that
+// A router at its high watermark of members sends enough of them away to be
+// back at the low one, says why and for how long, and closes their
+// connections after the grace; a peer router is never among them, a
+// connection that never authenticated is not counted, and a member that
 // does not speak the protocol is closed all the same.
 func TestShedIfOverloaded(t *testing.T) {
 	prev := goAwayGrace
 	goAwayGrace = 50 * time.Millisecond
 	t.Cleanup(func() { goAwayGrace = prev })
 
-	// High 4, low 3: at 4 inbound, one member goes.
-	r := newGoAwayRouter(t, 4)
+	// High 3, low 2: at 3 members, one goes.
+	r := newGoAwayRouter(t, 3)
 	peerRouter := newGoAwayListener(t)
 	connectAuthenticated(t, r, peerRouter.host)
 	r.peerRouters.Store(peerRouter.host.ID(), true)
@@ -114,12 +115,18 @@ func TestShedIfOverloaded(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = mute.Close() })
 	connectAuthenticated(t, r, mute)
+	// A stranger: connected, never authenticated. Five inbound connections,
+	// three members.
+	stranger := newGoAwayListener(t)
+	if err := stranger.host.Connect(context.Background(), peer.AddrInfo{ID: r.Host.ID(), Addrs: r.Host.Addrs()}); err != nil {
+		t.Fatal(err)
+	}
 
-	if got := r.inboundConnections(); got != 4 {
-		t.Fatalf("inbound = %d, want 4", got)
+	if got := r.inboundConnections(); got != 5 {
+		t.Fatalf("inbound = %d, want 5", got)
 	}
 	if got := len(r.members()); got != 3 {
-		t.Fatalf("members = %d, want 3 (the peer router is not one)", got)
+		t.Fatalf("members = %d, want 3 (the peer router and the stranger are not members)", got)
 	}
 
 	shed := r.shedIfOverloaded(context.Background())
@@ -150,8 +157,11 @@ func TestShedIfOverloaded(t *testing.T) {
 	if r.Host.Network().Connectedness(peerRouter.host.ID()) != network.Connected || len(peerRouter.received()) != 0 {
 		t.Fatal("the peer router was sent away")
 	}
-	if r.inboundConnections() != 3 {
-		t.Fatalf("inbound after the shed = %d, want 3", r.inboundConnections())
+	if r.Host.Network().Connectedness(stranger.host.ID()) != network.Connected || len(stranger.received()) != 0 {
+		t.Fatal("the stranger was sent away; it was never a member")
+	}
+	if got := len(r.members()); got != 2 {
+		t.Fatalf("members after the shed = %d, want 2", got)
 	}
 	if again := r.shedIfOverloaded(context.Background()); again != 0 {
 		t.Fatalf("below the high watermark the router shed %d more", again)

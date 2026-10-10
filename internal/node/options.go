@@ -26,7 +26,6 @@ import (
 )
 
 const (
-	DefaultMeshName             = "public-mesh"
 	DefaultDiscoveryInterval    = "30s"
 	DefaultConfigFile           = "agentmesh-node.yaml"
 	DefaultRouterConnectTimeout = 5 * time.Second
@@ -68,7 +67,6 @@ type Options struct {
 	RouterAddrs        []multiaddr.Multiaddr
 	Store              *Store
 
-	MeshID            string
 	DiscoveryInterval string
 	ListenAddrs       []string
 	EnableRelay       bool
@@ -177,9 +175,6 @@ type Options struct {
 
 // Default applies default values to Options if they are not specified.
 func (o *Options) Default() {
-	if o.MeshID == "" {
-		o.MeshID = "public-mesh"
-	}
 	if o.DiscoveryInterval == "" {
 		o.DiscoveryInterval = "30s"
 	}
