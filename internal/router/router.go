@@ -502,6 +502,9 @@ func (r *Router) Start() (retErr error) {
 
 	// Clean authenticated status on peer disconnection
 	hostNode.Network().Notify(&network.NotifyBundle{
+		ConnectedF: func(_ network.Network, c network.Conn) {
+			r.enforceAuthDeadline(c)
+		},
 		DisconnectedF: func(n network.Network, c network.Conn) {
 			p := c.RemotePeer()
 			if len(hostNode.Network().ConnsToPeer(p)) == 0 {

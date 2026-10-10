@@ -162,6 +162,31 @@ func (r *Router) inboundConnections() int {
 	return n
 }
 
+// enforceAuthDeadline closes an inbound connection whose peer has not
+// passed the handshake AuthDeadline after it opened. A peer router is left
+// alone whatever its state, as is a peer that authenticated on another
+// connection.
+func (r *Router) enforceAuthDeadline(c network.Conn) {
+	if r.config.AuthDeadline <= 0 || c.Stat().Direction != network.DirInbound {
+		return
+	}
+	time.AfterFunc(r.config.AuthDeadline, func() {
+		if c.IsClosed() || (r.ctx != nil && r.ctx.Err() != nil) {
+			return
+		}
+		p := c.RemotePeer()
+		if r.isPeerAuthenticated(p) {
+			return
+		}
+		if _, isRouter := r.peerRouters.Load(p); isRouter {
+			return
+		}
+		logger.Debugf("[AuthN] Closing connection from %s: no handshake within %s", p, r.config.AuthDeadline)
+		unauthenticatedClosedTotal.Inc()
+		_ = c.Close()
+	})
+}
+
 // shedIfOverloaded sends members away when the router holds at least its
 // high watermark of them: as many as take it back to the low watermark,
 // chosen at random so no member is always the one. Members are counted,

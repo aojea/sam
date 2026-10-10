@@ -22,16 +22,19 @@ import (
 	"sync"
 	"time"
 
+	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/identity"
 	"github.com/google/agentmesh/internal/storage"
 )
 
@@ -104,6 +107,13 @@ type P2PMeshAdapter struct {
 	topic *pubsub.Topic
 	store storage.Store
 	mu    sync.Mutex
+	// admittedUntil is, per router, when the credential this publisher
+	// showed it lapses. A router holds only connections that passed the
+	// handshake; the publisher is a member like any other on that point.
+	// Its own lock: the disconnect notification that clears it runs while
+	// Close holds mu.
+	admittedMu    sync.Mutex
+	admittedUntil map[peer.ID]time.Time
 	// close tears down what NewMeshPublisher built; nil when the host and
 	// topic belong to someone else (agentmesh-one's embedded router).
 	close func() error
@@ -123,6 +133,10 @@ func NewP2PMeshAdapter(h host.Host, topic *pubsub.Topic, store storage.Store) (*
 
 // RouterDialTimeout bounds each attempt to reach a leased router.
 const RouterDialTimeout = 10 * time.Second
+
+// publisherCredentialTTL is how long the credential the publisher mints for
+// itself lasts; it mints a new one when a quarter of that is left.
+const publisherCredentialTTL = time.Hour
 
 // DefaultMeshReconnectInterval is how often the publisher re-reads the lease
 // table; a router that just enrolled waits at most this long for events. It
@@ -160,7 +174,18 @@ func NewMeshPublisher(ctx context.Context, store storage.Store, reconnect time.D
 		_ = h.Close()
 		return nil, fmt.Errorf("join %s: %w", api.GossipEvents, err)
 	}
-	p := &P2PMeshAdapter{host: h, topic: topic, store: store}
+	p := &P2PMeshAdapter{host: h, topic: topic, store: store, admittedUntil: map[peer.ID]time.Time{}}
+	// A router forgets a peer when its last connection closes.
+	h.Network().Notify(&network.NotifyBundle{
+		DisconnectedF: func(_ network.Network, c network.Conn) {
+			if len(h.Network().ConnsToPeer(c.RemotePeer())) > 0 {
+				return
+			}
+			p.admittedMu.Lock()
+			delete(p.admittedUntil, c.RemotePeer())
+			p.admittedMu.Unlock()
+		},
+	})
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -206,18 +231,76 @@ func (p *P2PMeshAdapter) connectRouters(ctx context.Context) {
 			logger.Warnf("[Mesh] Skipping router lease %q: %v", r.PeerID, err)
 			continue
 		}
-		if p.host.Network().Connectedness(info.ID) == network.Connected {
+		if p.host.Network().Connectedness(info.ID) != network.Connected {
+			dialCtx, cancel := context.WithTimeout(ctx, RouterDialTimeout)
+			err = p.host.Connect(dialCtx, info)
+			cancel()
+			if err != nil {
+				logger.Warnf("[Mesh] Router %s unreachable for event publishing: %v", info.ID, err)
+				continue
+			}
+			logger.Infof("[Mesh] Connected to router %s", info.ID)
+		}
+		p.admittedMu.Lock()
+		until, admitted := p.admittedUntil[info.ID]
+		p.admittedMu.Unlock()
+		if admitted && time.Until(until) > publisherCredentialTTL/4 {
 			continue
 		}
-		dialCtx, cancel := context.WithTimeout(ctx, RouterDialTimeout)
-		err = p.host.Connect(dialCtx, info)
-		cancel()
-		if err != nil {
-			logger.Warnf("[Mesh] Router %s unreachable for event publishing: %v", info.ID, err)
-			continue
+		if err := p.authenticate(ctx, info.ID); err != nil {
+			logger.Warnf("[Mesh] Router %s did not admit the publisher; it will close the connection: %v", info.ID, err)
 		}
-		logger.Infof("[Mesh] Connected to router %s", info.ID)
 	}
+}
+
+// authenticate runs the mesh handshake with a router, presenting a
+// credential the control plane mints for its own peer under its signing
+// key, as it mints every member's. Without it the router would hold the
+// publisher's connection as a stranger's and close it on its deadline, and
+// an event published in the gap would reach nobody.
+func (p *P2PMeshAdapter) authenticate(ctx context.Context, router peer.ID) error {
+	priv, _, err := p.store.GetCurrentKey(ctx)
+	if err != nil {
+		return fmt.Errorf("signing key: %w", err)
+	}
+	expiry := time.Now().Add(publisherCredentialTTL)
+	biscuit, _, err := identity.MintBiscuitToken(priv, jwt.MapClaims{"sub": "control-plane"}, nil, p.host.ID(), expiry, []string{api.RoleControlPlane}, nil, nil)
+	if err != nil {
+		return fmt.Errorf("mint credential: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, RouterDialTimeout)
+	defer cancel()
+	s, err := p.host.NewStream(ctx, router, api.AuthProtocolID)
+	if err != nil {
+		return fmt.Errorf("open handshake: %w", err)
+	}
+	defer func() { _ = s.Close() }()
+	_ = s.SetDeadline(time.Now().Add(RouterDialTimeout))
+	frame, err := proto.Marshal(&api.AuthFrame{Biscuit: biscuit})
+	if err != nil {
+		return err
+	}
+	if err := msgio.NewVarintWriter(s).WriteMsg(frame); err != nil {
+		return fmt.Errorf("send credential: %w", err)
+	}
+	reader := msgio.NewVarintReaderSize(s, 64*1024)
+	msg, err := reader.ReadMsg()
+	if err != nil {
+		return fmt.Errorf("read answer: %w", err)
+	}
+	defer reader.ReleaseMsg(msg)
+	var resp api.AuthResponse
+	if err := proto.Unmarshal(msg, &resp); err != nil {
+		return fmt.Errorf("decode answer: %w", err)
+	}
+	if !resp.GetSuccess() {
+		return fmt.Errorf("refused: %s", resp.GetError())
+	}
+	p.admittedMu.Lock()
+	p.admittedUntil[router] = expiry
+	p.admittedMu.Unlock()
+	logger.Infof("[Mesh] Router %s admitted the publisher", router)
+	return nil
 }
 
 // routerAddrInfo is the dial target for a lease. Routers announce their

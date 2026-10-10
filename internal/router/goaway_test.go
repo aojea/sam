@@ -264,3 +264,49 @@ func TestTrimTakesUnauthenticatedConnectionsFirst(t *testing.T) {
 		t.Fatal("the trim closed the peer router's connection")
 	}
 }
+
+// A connection whose peer has not passed the handshake by the deadline is
+// closed; one that has, and a peer router's, stay. A member that holds
+// several connections is judged as a peer, not per connection.
+func TestAuthDeadlineClosesStrangers(t *testing.T) {
+	r := newGoAwayRouter(t, 100)
+	r.config.AuthDeadline = 300 * time.Millisecond
+	r.ctx = context.Background()
+	r.Host.Network().Notify(&network.NotifyBundle{
+		ConnectedF: func(_ network.Network, c network.Conn) { r.enforceAuthDeadline(c) },
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	dial := func(p host.Host) {
+		if err := p.Connect(ctx, peer.AddrInfo{ID: r.Host.ID(), Addrs: r.Host.Addrs()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stranger := newGoAwayListener(t)
+	dial(stranger.host)
+	member := newGoAwayListener(t)
+	dial(member.host)
+	r.authenticatedPeers.Store(member.host.ID(), time.Now().Add(time.Hour))
+	peerRouter := newGoAwayListener(t)
+	r.peerRouters.Store(peerRouter.host.ID(), true)
+	dial(peerRouter.host)
+	// Outbound connections are the router's own business.
+	dialed := newGoAwayListener(t)
+	if err := r.Host.Connect(ctx, peer.AddrInfo{ID: dialed.host.ID(), Addrs: dialed.host.Addrs()}); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for r.Host.Network().Connectedness(stranger.host.ID()) == network.Connected && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if r.Host.Network().Connectedness(stranger.host.ID()) == network.Connected {
+		t.Fatal("the stranger's connection survived the deadline")
+	}
+	for name, p := range map[string]host.Host{"member": member.host, "peer router": peerRouter.host, "dialed peer": dialed.host} {
+		if r.Host.Network().Connectedness(p.ID()) != network.Connected {
+			t.Errorf("the %s's connection was closed", name)
+		}
+	}
+}

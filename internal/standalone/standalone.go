@@ -160,6 +160,9 @@ type RouterTunables struct {
 	// ShutdownLeaseTTL is the lease the embedded router asks for as it stops;
 	// see router.Options.ShutdownLeaseTTL.
 	ShutdownLeaseTTL time.Duration
+	// AuthDeadline closes inbound connections that do not pass the handshake
+	// in time; see router.Options.AuthDeadline.
+	AuthDeadline time.Duration
 	// DisallowLoopback stops advertising loopback addresses (useful on
 	// public deployments; the default keeps local development working).
 	DisallowLoopback bool
@@ -376,6 +379,7 @@ func (s *Server) Start(ctx context.Context) (retErr error) {
 		RelayLimitDuration: s.opts.Router.RelayLimitDuration,
 		RelayLimitData:     int64(s.opts.Router.RelayLimitData),
 		ShutdownLeaseTTL:   s.opts.Router.ShutdownLeaseTTL,
+		AuthDeadline:       s.opts.Router.AuthDeadline,
 		// Single-port deployments typically sit behind a TLS-terminating
 		// proxy (Cloud Run, L7 LBs) or NAT where every peer shares a few
 		// source IPs; libp2p's default 8-conns-per-IP cap would throttle

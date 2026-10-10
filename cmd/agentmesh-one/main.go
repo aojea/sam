@@ -256,6 +256,7 @@ func main() {
 	rootCmd.Flags().DurationVar(&routerTunables.RelayLimitDuration, "router-relay-limit-duration", 0, "Relayed connection lifetime (0 keeps the component default of 1h; use e.g. 24h for longer)")
 	rootCmd.Flags().Var(&routerTunables.RelayLimitData, "router-relay-limit-data", "Bytes relayed per direction per connection, e.g. 512MiB (0 keeps the component default: no limit)")
 	rootCmd.Flags().DurationVar(&routerTunables.ShutdownLeaseTTL, "router-shutdown-lease-ttl", router.DefaultShutdownLeaseTTL, "Sent in the embedded router's last lease when it stops: how long it expects to be away, which is how long the control plane keeps listing it (0 sends nothing)")
+	rootCmd.Flags().DurationVar(&routerTunables.AuthDeadline, "router-auth-deadline", router.DefaultAuthDeadline, "The embedded router closes an inbound connection whose peer has not passed the mesh handshake within this time (0 keeps every connection)")
 	rootCmd.Flags().BoolVar(&routerAllowLoopback, "router-allow-loopback", true, "Advertise loopback addresses (disable on public deployments)")
 
 	rootCmd.AddCommand(newAdminSubcommands()...)

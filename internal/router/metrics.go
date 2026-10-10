@@ -77,6 +77,13 @@ var (
 		},
 		[]string{"reason", "result"},
 	)
+
+	unauthenticatedClosedTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "agentmesh_router_unauthenticated_connections_closed_total",
+			Help: "Inbound connections closed because the peer did not pass the handshake within --auth-deadline",
+		},
+	)
 )
 
 // Every outcome exists from the first scrape, so a rate() over one that has

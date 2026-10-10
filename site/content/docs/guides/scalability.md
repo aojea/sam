@@ -17,14 +17,14 @@ stayed through a rollout of every router and both control plane replicas.
 A member is one `agentmesh-node` process. It holds a session with two
 routers (`--routers`), chosen from those the control plane lists, and a
 relay reservation on each. Through those sessions it keeps a GossipSub
-subscription for control plane events. Its DHT client also keeps a
-connection to the other routers, which carries no session: a router
-counts members, not connections, against its watermarks, and those are the
-connections it closes first when it is full. A member connects to another
-member only to call it, through that member's router, where it runs the
-credential handshake before asking for the circuit. At rest it uses about
-55 MiB of memory, 300 goroutines and 20 file descriptors, and almost no
-CPU.
+subscription for control plane events. Its DHT client connects to the
+other routers when it queries; a router closes such a connection a minute
+later (`--auth-deadline`), since no session was opened on it, so a
+router's connections are its members' and the watermarks count members.
+A member connects to another member only to call it, through that
+member's router, where it runs the credential handshake before asking for
+the circuit. At rest it uses about 55 MiB of memory, 300 goroutines and
+20 file descriptors, and almost no CPU.
 
 Joining is the expensive moment. The member enrolls at the control plane
 (one signed request, one database write, one credential minted), reads the
@@ -44,7 +44,7 @@ them.
 | Bound | Where | Default | At the bound |
 |---|---|---|---|
 | Routers per member | `agentmesh-node --routers` | 2 | A member holds this many routers; one is enough to be on the mesh, the second covers a router restart. |
-| Connections per router | `agentmesh-router --high-watermark`, `--low-watermark` | 4000, 15% below (3400) | At the high mark of members the router sends members away, at random, down to the low mark; they attach to another router and stay off this one for five minutes. Above the high mark of connections, the connection manager closes those that carry no session first. A mesh of N routers holds about N × 4000 / 2 members. |
+| Connections per router | `agentmesh-router --high-watermark`, `--low-watermark` | 4000, 15% below (3400) | At the high mark of members the router sends members away, at random, down to the low mark; they attach to another router and stay off this one for five minutes. A mesh of N routers holds about N × 4000 / 2 members. |
 | Connections per source address | `agentmesh-router --conns-per-source-ip` | a quarter of the high mark (1000) | The router refuses the next connection from that address. Members behind one NAT or one cluster's egress share an address. |
 | Relay reservations per router | `agentmesh-router --relay-max-reservations` | the high mark (4000) | A member that cannot reserve is not reachable through that router. |
 | Relayed connections per peer | `agentmesh-router --relay-max-circuits` | 1024 | A service called through the relay holds one circuit per caller; the next caller is refused. |

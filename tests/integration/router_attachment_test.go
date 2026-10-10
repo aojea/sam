@@ -16,6 +16,7 @@ package integration_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,8 +32,11 @@ import (
 	"time"
 
 	"github.com/google/agentmesh/api"
+	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multiaddr"
 )
 
 // routerFixture is one agentmesh-router the test started, with the key it
@@ -43,6 +47,10 @@ type routerFixture struct {
 	port        int
 	metricsAddr string
 }
+
+// extraRouterArgs is appended to every router startLabelledRouter starts; a
+// test sets it before starting its routers and clears it after.
+var extraRouterArgs []string
 
 // gauge reads one metric from the router's /metrics, by its full name with
 // labels, and fails when it is not there.
@@ -101,6 +109,7 @@ func startLabelledRouter(t *testing.T, routerBin, tmpDir, name string, cpPort in
 	for _, l := range labels {
 		args = append(args, "--label", l)
 	}
+	args = append(args, extraRouterArgs...)
 	cmd := exec.Command(routerBin, args...)
 	logPath := filepath.Join(tmpDir, name+".log")
 	logFile, err := os.Create(logPath)
@@ -297,6 +306,7 @@ bindings:
 		"--db-dsn", filepath.Join(m.tmpDir, "cp.db")+"?_pragma=journal_mode(DELETE)&_pragma=busy_timeout(5000)",
 		"--issuer", oidcURL,
 		"--insecure-skip-tls-verify",
+		"--mesh-reconnect-interval", "500ms",
 	)
 	if err := cpCmd.Start(); err != nil {
 		t.Fatalf("start control plane: %v", err)
@@ -470,7 +480,8 @@ func mustPeerID(t *testing.T, s string) peer.ID {
 // else. Three routers, three nodes each pinned to its own router, no
 // service and no call; after the discovery interval has ticked many times,
 // no node is connected to another node, and each router has authenticated
-// its own node and the two other routers, nobody else. A node that sought
+// its own node, the two other routers and the control plane's publisher,
+// nobody else. A node that sought
 // out other members on its own would be connected to them, through their
 // routers, and would have authenticated at every router on the way, which
 // is the load of a member on every router rather than on two. Connections
@@ -517,9 +528,10 @@ func TestIdleNodesHoldOnlyTheirRouters(t *testing.T) {
 				}
 			}
 		}
-		// Its own node and the two peer routers.
-		if got := routers[s].gauge(t, "agentmesh_router_authenticated_peers"); got != 3 {
-			t.Errorf("router %s authenticated %v peers, want 3 (its node and two routers)", s, got)
+		// Its own node, the two peer routers and the control plane's
+		// event publisher.
+		if got := routers[s].gauge(t, "agentmesh_router_authenticated_peers"); got != 4 {
+			t.Errorf("router %s authenticated %v peers, want 4 (its node, two routers, the control plane)", s, got)
 		}
 		if t.Failed() {
 			t.Logf("node %s connected peers: %v", s, connected)
@@ -620,15 +632,63 @@ func TestCallerTransitsTheRouterItShares(t *testing.T) {
 
 	callAcrossMesh(t, caller, "token-c", provider, "shared-tool")
 
-	// Router a authenticated the provider and the two routers; the caller
-	// never came. Router b has both nodes and the two routers.
-	if got := routerA.gauge(t, "agentmesh_router_authenticated_peers"); got != 3 {
-		t.Errorf("router a authenticated %v peers, want 3: the caller must transit router b, which it holds", got)
+	// Router a authenticated the provider, the two routers and the control
+	// plane's publisher; the caller never came. Router b has both nodes.
+	if got := routerA.gauge(t, "agentmesh_router_authenticated_peers"); got != 4 {
+		t.Errorf("router a authenticated %v peers, want 4: the caller must transit router b, which it holds", got)
 	}
-	if got := routerB.gauge(t, "agentmesh_router_authenticated_peers"); got != 4 {
-		t.Errorf("router b authenticated %v peers, want 4", got)
+	if got := routerB.gauge(t, "agentmesh_router_authenticated_peers"); got != 5 {
+		t.Errorf("router b authenticated %v peers, want 5", got)
 	}
 	if t.Failed() {
 		t.Logf("--- caller ---\n%s", caller.log())
+	}
+}
+
+// TestRouterKeepsOnlyAdmittedConnections pins what a router holds: a
+// connection whose peer does not pass the handshake within --auth-deadline
+// is closed, and the control plane's event publisher, which presents a
+// credential of its own, is kept. A stranger's connection is gone a
+// deadline after it opened; a member's and the publisher's are still there
+// several deadlines later.
+func TestRouterKeepsOnlyAdmittedConnections(t *testing.T) {
+	extraRouterArgs = []string{"--auth-deadline", "1s"}
+	t.Cleanup(func() { extraRouterArgs = nil })
+	m := startAttachmentMesh(t)
+	router := m.startRouter(t, "router")
+
+	node := launchNode(t, m.nodeBin, m.nodeEnv("node"), filepath.Join(m.tmpDir, "node"), append(m.nodeArgs(),
+		"--api-token-path", tokenPath(t, "token"),
+		"--allow-loopback",
+	)...)
+	node.waitForAPI(t)
+
+	stranger, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stranger.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	routerAddr := multiaddr.StringCast(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", router.port))
+	if err := stranger.Connect(ctx, peer.AddrInfo{ID: router.peerID, Addrs: []multiaddr.Multiaddr{routerAddr}}); err != nil {
+		t.Fatalf("stranger could not connect to the router: %v", err)
+	}
+
+	// Three deadlines: the stranger is gone, the publisher and the node
+	// still there, and the counter says one connection was closed for it.
+	time.Sleep(3 * time.Second)
+	if stranger.Network().Connectedness(router.peerID) == network.Connected {
+		t.Fatal("the stranger's connection survived the deadline")
+	}
+	if got := router.gauge(t, "agentmesh_router_unauthenticated_connections_closed_total"); got < 1 {
+		t.Fatalf("closed %v unauthenticated connections, want at least the stranger's", got)
+	}
+	// The node and the control plane's publisher: both authenticated.
+	if got := router.gauge(t, "agentmesh_router_authenticated_peers"); got != 2 {
+		t.Fatalf("router authenticated %v peers, want 2 (the node and the control plane's publisher)", got)
+	}
+	if got := attachedRouters(t, node); !slices.Equal(got, peerIDStrings(router.peerID)) {
+		t.Fatalf("node holds %v after the deadlines, want %s", got, router.peerID)
 	}
 }

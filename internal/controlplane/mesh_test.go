@@ -19,17 +19,20 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"fmt"
 	"testing"
 	"time"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-msgio"
 
 	"github.com/libp2p/go-libp2p"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/identity"
 	"github.com/google/agentmesh/internal/storage"
 )
 
@@ -252,6 +255,33 @@ func TestMeshPublisherReachesLeasedRouter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to subscribe: %v", err)
 	}
+	// The router admits peers on the handshake; the publisher is one of them.
+	// What it presents must verify under the control plane's key, be bound
+	// to the publisher's peer and carry the control-plane role.
+	admitted := make(chan error, 4)
+	routerHost.SetStreamHandler(api.AuthProtocolID, func(s network.Stream) {
+		defer func() { _ = s.Close() }()
+		msg, err := msgio.NewVarintReaderSize(s, 64*1024).ReadMsg()
+		if err != nil {
+			admitted <- err
+			return
+		}
+		var frame api.AuthFrame
+		if err := proto.Unmarshal(msg, &frame); err != nil {
+			admitted <- err
+			return
+		}
+		if _, err := identity.VerifyBiscuitAndGetExpiry(frame.Biscuit, s.Conn().RemotePeer(), []ed25519.PublicKey{pub}, 5*time.Second); err != nil {
+			admitted <- fmt.Errorf("credential: %w", err)
+			return
+		}
+		if err := identity.VerifyBiscuitRole(frame.Biscuit, pub, api.RoleControlPlane, 5*time.Second); err != nil {
+			admitted <- fmt.Errorf("role: %w", err)
+			return
+		}
+		out, _ := proto.Marshal(&api.AuthResponse{Success: true})
+		admitted <- msgio.NewVarintWriter(s).WriteMsg(out)
+	})
 	now := time.Now()
 	lease := storage.RouterLease{PeerID: routerHost.ID().String(), LastRenewal: now, ExpiresAt: now.Add(time.Hour)}
 	for _, a := range routerHost.Addrs() {
@@ -297,6 +327,20 @@ func TestMeshPublisherReachesLeasedRouter(t *testing.T) {
 	}
 	if peers := routerPS.ListPeers(api.GossipEvents); len(peers) != 0 {
 		t.Errorf("publisher must not subscribe to the topic, router sees %v", peers)
+	}
+	select {
+	case err := <-admitted:
+		if err != nil {
+			t.Fatalf("publisher's handshake: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("publisher never ran the handshake with the router")
+	}
+	publisher.admittedMu.Lock()
+	until, ok := publisher.admittedUntil[routerHost.ID()]
+	publisher.admittedMu.Unlock()
+	if !ok || time.Until(until) < publisherCredentialTTL/2 {
+		t.Fatalf("publisher does not record its admission at the router (until %v, %v)", until, ok)
 	}
 
 	_, target := newTestKey(t)

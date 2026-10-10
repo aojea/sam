@@ -28,6 +28,12 @@ import (
 // termination grace period.
 const DefaultShutdownLeaseTTL = 30 * time.Second
 
+// DefaultAuthDeadline is the CLI default for Options.AuthDeadline: a
+// member's first act on a connection is the handshake, which takes well
+// under a second; a DHT query from a member attached elsewhere is done in
+// less.
+const DefaultAuthDeadline = time.Minute
+
 // Options holds configuration details for the agentmesh-router.
 type Options struct {
 	ControlPlaneURL    string
@@ -67,6 +73,14 @@ type Options struct {
 	// the control plane's schedule. The CLIs default to
 	// DefaultShutdownLeaseTTL.
 	ShutdownLeaseTTL time.Duration
+	// AuthDeadline is how long an inbound connection may stay open without
+	// its peer passing the handshake before the router closes it. Members
+	// hold a connection for their session; anyone else (a member attached
+	// elsewhere whose DHT client queried here, a scanner) is done with the
+	// connection long before, and would otherwise count against the
+	// watermarks until a trim. Zero keeps every connection. The CLIs
+	// default to DefaultAuthDeadline.
+	AuthDeadline time.Duration
 	// Labels the router declares at enrollment, the same labels as a
 	// node's: the control plane signs them only if the router's role allows
 	// them (PolicyRole.allowed_labels) and lists them on /info, where a

@@ -121,6 +121,9 @@ const (
 	// Standard role values
 	RoleRouter = "mesh:role:router"
 	RoleNode   = "mesh:role:node"
+	// RoleControlPlane is the role the control plane's own peer presents to
+	// routers when it connects to publish events.
+	RoleControlPlane = "mesh:role:control-plane"
 
 	// FactUser defines the subject (username/userID) claim extracted from the OIDC token.
 	// Contains: biscuit.String(username)
