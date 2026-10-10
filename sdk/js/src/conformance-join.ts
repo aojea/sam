@@ -139,7 +139,13 @@ async function handle(session: MeshSession, command: Command): Promise<unknown> 
       case "peers":
         return { cmd: "peers", authenticated_peers: [...session.authenticatedPeers.keys()].sort() };
       case "routers":
-        return { cmd: "routers", ok: true, routers: session.routers.map((r) => r.peerId), relay_addresses: session.relayAddresses.map((ma) => ma.toString()) };
+        return {
+          cmd: "routers",
+          ok: true,
+          routers: session.routers.map((r) => r.peerId),
+          relay_addresses: session.relayAddresses.map((ma) => ma.toString()),
+          go_away_received: Object.fromEntries(session.goAwayReceived),
+        };
       case "sync": {
         const result = await session.sync();
         return {
@@ -204,6 +210,13 @@ async function main(): Promise<void> {
   // is the floor every provider this member calls must attest.
   const labels = labelsFromEnv("AGENTMESH_SDK_LABELS");
   const egressRequireLabels = labelsFromEnv("AGENTMESH_SDK_EGRESS_REQUIRE_LABELS");
+  const routerSelector = labelsFromEnv("AGENTMESH_SDK_ROUTER_SELECTOR");
+  const routerPrefer = labelsFromEnv("AGENTMESH_SDK_ROUTER_PREFER");
+  const routerCount = process.env.AGENTMESH_SDK_ROUTER_COUNT;
+  const redialBackoffs = (process.env.AGENTMESH_SDK_REDIAL_BACKOFF_SECONDS ?? "")
+    .split(",")
+    .filter((s) => s.trim() !== "")
+    .map((s) => Number(s.trim()) * 1000);
   // AGENTMESH_SDK_RELAY_CHECK_SECONDS shortens how often the relay reservation is
   // checked, so a test that moves a router sees the member follow it within
   // its budget.
@@ -227,6 +240,10 @@ async function main(): Promise<void> {
   const session = await mesh.join({
     listenAddrs,
     ...(routerAddresses !== undefined ? { routerAddresses } : {}),
+    ...(routerCount !== undefined && routerCount !== "" ? { routers: Number(routerCount) } : {}),
+    ...(Object.keys(routerSelector).length > 0 ? { routerSelector } : {}),
+    ...(Object.keys(routerPrefer).length > 0 ? { routerPrefer } : {}),
+    ...(redialBackoffs.length > 0 ? { routerRedialBackoffsMs: redialBackoffs } : {}),
     ...(Object.keys(egressRequireLabels).length > 0 ? { egressRequireLabels } : {}),
     ...relayOptions,
     signal: AbortSignal.timeout(20_000),

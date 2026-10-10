@@ -18,7 +18,7 @@
 // plane are exercised by tests/integration/sdk_join_test.go.
 
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
-import { timestampFromMs } from "@bufbuild/protobuf/wkt";
+import { durationFromMs, timestampFromMs } from "@bufbuild/protobuf/wkt";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { circuitRelayServer, circuitRelayTransport } from "@libp2p/circuit-relay-v2";
 import { privateKeyFromProtobuf } from "@libp2p/crypto/keys";
@@ -26,6 +26,7 @@ import { identify } from "@libp2p/identify";
 import type { Libp2p } from "@libp2p/interface";
 import { tcp } from "@libp2p/tcp";
 import { tls } from "@libp2p/tls";
+import { lpStream } from "@libp2p/utils";
 import { multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p } from "libp2p";
 import assert from "node:assert/strict";
@@ -33,15 +34,15 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { AUTH_HANDLER_OPTIONS, AUTH_PROTOCOL, AuthRejectedError, authenticateWithPeer, authStreamHandler } from "./auth.ts";
+import { AUTH_HANDLER_OPTIONS, AUTH_PROTOCOL, AuthRejectedError, GOAWAY_MAX_RETRY_AFTER_MS, GOAWAY_PROTOCOL, ROUTER_SHUN_DURATION_MS, authenticateWithPeer, authStreamHandler, clampGoAwayRetryAfterMs } from "./auth.ts";
 import { BiscuitVerificationError, ROLE_ROUTER, loadBiscuit, verifyPeerBiscuit } from "./biscuit.ts";
 import { ROLE_NODE } from "./controlplane.ts";
-import { BootstrapEnrollRequestSchema, BootstrapEnrollResponseSchema, ControlPlaneInfoResponseSchema, EnrollmentStatus, KeysResponseSchema, AuthFrameSchema, TokenRefreshRequestSchema, TokenRefreshResponseSchema } from "./gen/agentmesh_pb.ts";
+import { BootstrapEnrollRequestSchema, BootstrapEnrollResponseSchema, ControlPlaneInfoResponseSchema, EnrollmentStatus, KeysResponseSchema, AuthFrameSchema, RouterGoAwaySchema, RouterGoAway_Reason, RouterInfoSchema, TokenRefreshRequestSchema, TokenRefreshResponseSchema, type RouterInfo } from "./gen/agentmesh_pb.ts";
 import { Identity } from "./identity.ts";
 import { HTTP_HANDLER_OPTIONS, HTTP_PROTOCOL, a2aEndpoint, httpIngressHandler } from "./libp2p-http.ts";
 import { LabelsNotSatisfiedError } from "./mcp.ts";
 import { AgentMesh } from "./mesh.ts";
-import { MeshSession, type JoinOptions } from "./session.ts";
+import { MeshSession, candidatesFromRouterInfos, selectRouters, type JoinOptions } from "./session.ts";
 
 type Wasm = Awaited<ReturnType<typeof loadBiscuit>>;
 type KeyPair = InstanceType<Wasm["KeyPair"]>;
@@ -90,7 +91,7 @@ function proto(bytes: Uint8Array): Response {
  * /info lists routerAddresses as they are at the time of the request, so a
  * test that changes the array has the member pull the change.
  */
-function fakeControlPlane(routerAddresses: string[]): typeof fetch {
+function fakeControlPlane(routerAddresses: string[], routers: RouterInfo[] = []): typeof fetch {
   return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const req = new Request(input, init);
     const path = new URL(req.url).pathname;
@@ -114,7 +115,7 @@ function fakeControlPlane(routerAddresses: string[]): typeof fetch {
       return proto(toBinary(KeysResponseSchema, create(KeysResponseSchema, { publicKeys: [cpKey], signTime: timestampFromMs(Date.now()) })));
     }
     if (req.method === "GET" && path === "/info") {
-      return proto(toBinary(ControlPlaneInfoResponseSchema, create(ControlPlaneInfoResponseSchema, { routerAddresses: [...routerAddresses] })));
+      return proto(toBinary(ControlPlaneInfoResponseSchema, create(ControlPlaneInfoResponseSchema, { routerAddresses: [...routerAddresses], routers: [...routers] })));
     }
     return new Response(`no route for ${req.method} ${path}`, { status: 404 });
   }) as typeof fetch;
@@ -627,3 +628,195 @@ test("session.attenuate and session.seal narrow outbound requests across hops an
     await Promise.all([session.close(), provider.stop()]);
   }
 });
+
+test("selectRouters filters by selector, orders by prefer and load, and clampGoAwayRetryAfterMs bounds durations", () => {
+  const infos: RouterInfo[] = [
+    create(RouterInfoSchema, {
+      peerId: "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB",
+      addresses: ["/ip4/127.0.0.1/tcp/5001/p2p/12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB"],
+      labels: { region: "us-west", zone: "b" },
+      connections: 80,
+      connectionLimit: 100,
+    }),
+    create(RouterInfoSchema, {
+      peerId: "12D3KooWB4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSC",
+      addresses: ["/ip4/127.0.0.1/tcp/5002/p2p/12D3KooWB4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSC"],
+      labels: { region: "us-west", zone: "a" },
+      connections: 90,
+      connectionLimit: 100,
+    }),
+    create(RouterInfoSchema, {
+      peerId: "12D3KooWC4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSD",
+      addresses: ["/ip4/127.0.0.1/tcp/5003/p2p/12D3KooWC4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSD"],
+      labels: { region: "us-west", zone: "b" },
+      connections: 10,
+      connectionLimit: 100,
+    }),
+    create(RouterInfoSchema, {
+      peerId: "12D3KooWD4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSE",
+      addresses: ["/ip4/127.0.0.1/tcp/5004/p2p/12D3KooWD4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSE"],
+      labels: { region: "eu-west", zone: "a" },
+      connections: 1,
+      connectionLimit: 100,
+    }),
+  ];
+  const catalog = candidatesFromRouterInfos(infos, []);
+  assert.equal(catalog.length, 4);
+
+  // Filter to region=us-west, prefer zone=a first, then lower load (10/100 before 80/100).
+  const picked = selectRouters(catalog, 10, {
+    selector: { region: "us-west" },
+    prefer: { zone: "a" },
+    random: () => 0,
+  });
+  assert.deepEqual(
+    picked.map((c) => c.peerId),
+    [
+      "12D3KooWB4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSC",
+      "12D3KooWC4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSD",
+      "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB",
+    ],
+  );
+
+  // Shunned routers are excluded.
+  const withoutPreferred = selectRouters(catalog, 10, {
+    selector: { region: "us-west" },
+    prefer: { zone: "a" },
+    shunned: new Map([["12D3KooWB4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSC", Date.now() + 60_000]]),
+    random: () => 0,
+  });
+  assert.deepEqual(
+    withoutPreferred.map((c) => c.peerId),
+    [
+      "12D3KooWC4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSD",
+      "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB",
+    ],
+  );
+
+  // Fallback to routerAddresses when routers is empty.
+  const fallback = candidatesFromRouterInfos([], ["/ip4/127.0.0.1/tcp/5001/p2p/12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB"]);
+  assert.equal(fallback.length, 1);
+  assert.equal(fallback[0]?.peerId, "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB");
+
+  // Retry-after clamping: default 5m when absent/non-positive, cap at 1h.
+  assert.equal(clampGoAwayRetryAfterMs(create(RouterGoAwaySchema, {})), ROUTER_SHUN_DURATION_MS);
+  assert.equal(clampGoAwayRetryAfterMs(create(RouterGoAwaySchema, { retryAfter: durationFromMs(0) })), ROUTER_SHUN_DURATION_MS);
+  assert.equal(clampGoAwayRetryAfterMs(create(RouterGoAwaySchema, { retryAfter: durationFromMs(-1000) })), ROUTER_SHUN_DURATION_MS);
+  assert.equal(clampGoAwayRetryAfterMs(create(RouterGoAwaySchema, { retryAfter: durationFromMs(600_000) })), 600_000);
+  assert.equal(clampGoAwayRetryAfterMs(create(RouterGoAwaySchema, { retryAfter: durationFromMs(7_200_000) })), GOAWAY_MAX_RETRY_AFTER_MS);
+});
+
+test("join holds two routers chosen by load and labels, handles /mesh/goaway/1.0.0, and redials before failing over", async () => {
+  const startRouterHost = async () => {
+    const host = await createLibp2p({
+      addresses: { listen: ["/ip4/127.0.0.1/tcp/0"] },
+      transports: [tcp()],
+      connectionEncrypters: [tls()],
+      streamMuxers: [yamux()],
+      services: { identify: identify(), relay: circuitRelayServer() },
+      connectionManager: { inboundConnectionThreshold: Infinity },
+    });
+    const peerId = host.peerId.toString();
+    const biscuit = mint(peerId, ROLE_ROUTER);
+    const handshakes: string[] = [];
+    await host.handle(
+      AUTH_PROTOCOL,
+      authStreamHandler({ ownBiscuit: () => biscuit, trustedKeys: () => [cpKey], onAuthenticated: (p) => handshakes.push(p) }),
+    );
+    const addr = (host.getMultiaddrs()[0] as ReturnType<typeof multiaddr>).toString();
+    return { host, peerId, addr, handshakes };
+  };
+
+  const r1 = await startRouterHost();
+  const r2 = await startRouterHost();
+  const r3 = await startRouterHost();
+  try {
+    // r1 (low load, preferred) and r2 (medium load) should be chosen over r3 (high load).
+    const routerInfos: RouterInfo[] = [
+      create(RouterInfoSchema, { peerId: r3.peerId, addresses: [r3.addr], labels: { region: "us", tier: "backup" }, connections: 90, connectionLimit: 100 }),
+      create(RouterInfoSchema, { peerId: r1.peerId, addresses: [r1.addr], labels: { region: "us", tier: "primary" }, connections: 50, connectionLimit: 100 }),
+      create(RouterInfoSchema, { peerId: r2.peerId, addresses: [r2.addr], labels: { region: "us", tier: "backup" }, connections: 10, connectionLimit: 100 }),
+    ];
+    const allAddrs = [r3.addr, r1.addr, r2.addr];
+    const mesh = await AgentMesh.enroll({
+      controlPlaneUrl: "http://127.0.0.1:1",
+      bootstrapToken: "sbt",
+      fetch: fakeControlPlane(allAddrs, routerInfos),
+    });
+    const session = await mesh.join({
+      refreshLeadMs: 0,
+      routers: 2,
+      routerSelector: { region: "us" },
+      routerPrefer: { tier: "primary" },
+      relayCheckIntervalMs: 200,
+      routerRedialBackoffsMs: [30, 60],
+    });
+    try {
+      // Only r1 and r2 were authenticated and reserved on at join; r3 is untouched in the catalog.
+      assert.deepEqual(
+        session.routers.map((r) => r.peerId).sort(),
+        [r1.peerId, r2.peerId].sort(),
+      );
+      assert.deepEqual(r3.handshakes, []);
+      assert.equal(session.relayAddresses.length, 2);
+      assert.ok(session.relayAddresses.some((ma) => ma.toString().startsWith(r1.addr)));
+      assert.ok(session.relayAddresses.some((ma) => ma.toString().startsWith(r2.addr)));
+
+      // A go-away from a peer we do NOT hold (r3) is ignored.
+      await session.handleGoAway(r3.peerId, create(RouterGoAwaySchema, { reason: RouterGoAway_Reason.DRAINING }), 600_000);
+      assert.equal(session.goAwayReceived.size, 0);
+
+      // Now r1 opens a /mesh/goaway/1.0.0 stream over its existing connection to the member.
+      const r1Conns = r1.host.getConnections(session.node.peerId);
+      assert.ok(r1Conns.length > 0, "r1 should have an active connection to the member");
+      const stream = await r1Conns[0]!.newStream(GOAWAY_PROTOCOL);
+      const goAwayBytes = toBinary(
+        RouterGoAwaySchema,
+        create(RouterGoAwaySchema, { reason: RouterGoAway_Reason.DRAINING, retryAfter: durationFromMs(600_000) }),
+      );
+      await lpStream(stream).write(goAwayBytes);
+      await stream.close();
+
+      // Wait for the member to drop r1, shun it, and top up with r3 from the catalog.
+      const deadline = Date.now() + 10_000;
+      while (
+        (!session.routers.some((r) => r.peerId === r3.peerId) ||
+          session.routers.some((r) => r.peerId === r1.peerId) ||
+          !session.relayAddresses.some((ma) => ma.toString().startsWith(r3.addr))) &&
+        Date.now() < deadline
+      ) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      assert.deepEqual(
+        session.routers.map((r) => r.peerId).sort(),
+        [r2.peerId, r3.peerId].sort(),
+      );
+      assert.deepEqual(Object.fromEntries(session.goAwayReceived), { DRAINING: 1 });
+      assert.ok(session.shunnedRouters.has(r1.peerId), "r1 should be shunned after go-away");
+      assert.ok(session.relayAddresses.some((ma) => ma.toString().startsWith(r2.addr)));
+      assert.ok(session.relayAddresses.some((ma) => ma.toString().startsWith(r3.addr)));
+      assert.ok(!session.relayAddresses.some((ma) => ma.toString().startsWith(r1.addr)));
+
+      // Stop r3 completely so redialing r3 fails and shuns r3.
+      await r3.host.stop();
+      const dropDeadline = Date.now() + 10_000;
+      while (!session.shunnedRouters.has(r3.peerId) && Date.now() < dropDeadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      assert.ok(session.shunnedRouters.has(r3.peerId), "stopped router r3 should be shunned after redial attempts fail");
+      assert.deepEqual(
+        session.routers.map((r) => r.peerId),
+        [r2.peerId],
+      );
+    } finally {
+      await session.close();
+    }
+  } finally {
+    await Promise.all([
+      Promise.resolve(r1.host.stop()).catch(() => {}),
+      Promise.resolve(r2.host.stop()).catch(() => {}),
+      Promise.resolve(r3.host.stop()).catch(() => {}),
+    ]);
+  }
+});
+

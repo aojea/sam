@@ -18,7 +18,7 @@ protobufs, go-msgio style."""
 from __future__ import annotations
 
 import logging
-from typing import Callable, Optional, Sequence
+from typing import Awaitable, Callable, Optional, Sequence
 
 import trio
 from libp2p.abc import IHost, INetStream
@@ -39,11 +39,18 @@ logger = logging.getLogger("agent_mesh")
 
 AUTH_PROTOCOL = TProtocol("/mesh/auth/1.0.0")
 MCP_PROTOCOL = TProtocol("/mesh/mcp/1.0.0")
+GOAWAY_PROTOCOL = TProtocol("/mesh/goaway/1.0.0")
 
 # The first frame on a stream is capped, as msgio.NewVarintReaderSize(s, 64 KiB).
 MAX_AUTH_FRAME_BYTES = 64 * 1024
 # How long either side waits for the other's frame.
 AUTH_HANDSHAKE_TIMEOUT = 10.0
+
+# Bounds on an inbound /mesh/goaway/1.0.0 stream, matching agentmesh-node's HandleGoAway.
+MAX_GOAWAY_MESSAGE_BYTES = 1024
+GOAWAY_STREAM_TIMEOUT = 5.0
+ROUTER_SHUN_DURATION = 5 * 60.0
+GOAWAY_MAX_RETRY_AFTER = 60 * 60.0
 
 
 class AuthRejectedError(Exception):
@@ -121,3 +128,59 @@ def auth_stream_handler(
             await stream.close()
 
     return handle
+
+
+def go_away_reason_name(reason: int) -> str:
+    """Returns the canonical proto enum name for a RouterGoAway.Reason value."""
+    if reason == pb.RouterGoAway.DRAINING:
+        return "DRAINING"
+    if reason == pb.RouterGoAway.OVERLOADED:
+        return "OVERLOADED"
+    return "REASON_UNSPECIFIED"
+
+
+def clamp_go_away_retry_after(msg: pb.RouterGoAway) -> float:
+    """Computes the shun duration in seconds from a RouterGoAway message:
+    defaults to ROUTER_SHUN_DURATION (5m) when retry_after <= 0, capped at
+    GOAWAY_MAX_RETRY_AFTER (1h)."""
+    seconds = 0.0
+    if msg.HasField("retry_after"):
+        seconds = msg.retry_after.seconds + msg.retry_after.nanos / 1_000_000_000.0
+    if seconds <= 0:
+        return ROUTER_SHUN_DURATION
+    if seconds > GOAWAY_MAX_RETRY_AFTER:
+        return GOAWAY_MAX_RETRY_AFTER
+    return seconds
+
+
+def go_away_stream_handler(
+    is_held_router: Callable[[str], bool],
+    on_go_away: Callable[[str, pb.RouterGoAway, float], Optional[Awaitable[None]]],
+) -> Callable[[INetStream], "trio.lowlevel.Awaitable[None]"]:
+    """Server side of /mesh/goaway/1.0.0, mirroring agentmesh-node's HandleGoAway:
+    reads one varint-prefixed RouterGoAway message (1024 B cap, 5s timeout) only
+    from a router the member currently holds, closes the stream, and notifies
+    the session to shun the router and top up from the catalog."""
+
+    async def handle(stream: INetStream) -> None:
+        peer_id = str(stream.muxed_conn.peer_id)
+        if not is_held_router(peer_id):
+            logger.debug("ignoring go-away from unattached peer %s", peer_id)
+            await stream.close()
+            return
+        try:
+            with trio.fail_after(GOAWAY_STREAM_TIMEOUT):
+                raw = await read_bounded_varint_prefixed_bytes(stream, MAX_GOAWAY_MESSAGE_BYTES)
+                msg = pb.RouterGoAway.FromString(raw)
+        except Exception as err:  # noqa: BLE001
+            logger.warning("go-away read from %s failed: %s", peer_id, err)
+            await stream.close()
+            return
+        await stream.close()
+        retry_after = clamp_go_away_retry_after(msg)
+        res = on_go_away(peer_id, msg, retry_after)
+        if res is not None:
+            await res
+
+    return handle
+

@@ -31,11 +31,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -175,6 +177,7 @@ func startSDKMesh(t *testing.T) *sdkMesh {
   - name: %s
     allowed_services: []
     allowed_targets: ["*"]
+    allowed_labels: ["zone=*"]
   - name: %s
     allowed_services: ["*"]
     allowed_targets: ["*"]
@@ -1052,6 +1055,79 @@ func TestNativeSDKsFollowAMovedRouter(t *testing.T) {
 	}
 }
 
+// TestNativeSDKsHoldTwoRoutersAndHandleGoAway verifies that when the control
+// plane lists three routers in /info, each SDK member picks two by preference
+// and load, authenticates and reserves a relay slot on those two only, and
+// when one held router stops and sends a /mesh/goaway/1.0.0 DRAINING frame,
+// the member records the go-away reason, drops the draining router, and
+// attaches to the remaining router from the catalog.
+func TestNativeSDKsHoldTwoRoutersAndHandleGoAway(t *testing.T) {
+	mesh := startSDKMesh(t)
+	routerJWT := mesh.mintToken(map[string]interface{}{
+		"sub":    "router-c",
+		"groups": []string{"routers"},
+		"roles":  []string{api.RoleRouter},
+	})
+	routerC := startLabelledRouter(t, buildBinary(t, "./cmd/agentmesh-router"), t.TempDir(), "router-c", mesh.cpPort, routerJWT, "zone=preferred")
+	waitForActiveRouters(t, mesh.cpPort, 3, 10*time.Second)
+
+	var members []*sdkMember
+	for _, launcher := range sdkMemberLaunchers {
+		cmd, skip := launcher.cmd(mesh.root)
+		if skip != "" {
+			t.Logf("%s SDK skipped: %s", launcher.name, skip)
+			continue
+		}
+		m := launchSDKMember(t, launcher.name, cmd, mesh.root, mesh.baseURL, mesh.adminToken,
+			"AGENTMESH_SDK_ROUTER_PREFER=zone=preferred",
+		)
+		if len(m.report.Routers) != 2 {
+			t.Fatalf("%s joined through %d routers (%v), want 2 of the 3 routers", m.name, len(m.report.Routers), routerIDs(m.report))
+		}
+		if m.report.Routers[0].PeerID != routerC.peerID.String() {
+			t.Fatalf("%s picked %v, want preferred router %s first", m.name, routerIDs(m.report), routerC.peerID)
+		}
+		if len(m.report.RelayAddresses) != 2 {
+			t.Fatalf("%s reserved %d relay addresses (%v), want 2", m.name, len(m.report.RelayAddresses), m.report.RelayAddresses)
+		}
+		m.accept(t, "agent")
+		members = append(members, m)
+	}
+	if len(members) == 0 {
+		t.Skip("no SDK toolchain available; see sdk/README.md")
+	}
+
+	// Send SIGTERM to router-c: it drains its members over /mesh/goaway/1.0.0
+	// with RouterGoAway_DRAINING before closing.
+	if err := routerC.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+
+	wantRemaining := []string{extractPeerID(mesh.routerAddrs[0]), extractPeerID(mesh.routerAddrs[1])}
+	slices.Sort(wantRemaining)
+
+	for _, m := range members {
+		deadline := time.Now().Add(15 * time.Second)
+		for {
+			ans := m.routersAnswer(t)
+			got := slices.Clone(ans.Routers)
+			slices.Sort(got)
+			if ans.GoAwayReceived["DRAINING"] == 1 && slices.Equal(got, wantRemaining) && len(ans.RelayAddresses) == 2 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s after router-c drained: routers=%v relay_addresses=%v go_away_received=%v, want routers=%v and DRAINING=1",
+					m.name, ans.Routers, ans.RelayAddresses, ans.GoAwayReceived, wantRemaining)
+			}
+			time.Sleep(150 * time.Millisecond)
+		}
+	}
+
+	for _, m := range members {
+		m.quit(t)
+	}
+}
+
 // routerIDs lists the routers a join report says admitted the member.
 func routerIDs(report sdkJoinReport) []string {
 	var ids []string
@@ -1064,8 +1140,7 @@ func routerIDs(report sdkJoinReport) []string {
 func startSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, adminToken string, routerAddrs []string) *sdkMember {
 	t.Helper()
 	m := launchSDKMember(t, name, cmd, root, baseURL, adminToken, "AGENTMESH_SDK_LISTEN_ADDRS=/ip4/127.0.0.1/tcp/0")
-	// Every router the control plane named admitted the member, in whatever
-	// order it was handed them; it reserved on the first of its own list.
+	// Both routers in the fixture admit the member and grant it a relay reservation.
 	var admitted []string
 	for _, r := range m.report.Routers {
 		admitted = append(admitted, r.PeerID)
@@ -1082,13 +1157,13 @@ func startSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, adm
 	if !reflect.DeepEqual(admitted, want) {
 		t.Fatalf("%s report routers %v, want every router the control plane listed %v", name, admitted, want)
 	}
-	if len(m.report.RelayAddresses) == 0 {
-		t.Fatalf("%s: no relay address, the router did not grant a reservation", name)
+	if len(m.report.RelayAddresses) != len(m.report.Routers) {
+		t.Fatalf("%s: got %d relay addresses (%v), want one for each of %d routers", name, len(m.report.RelayAddresses), m.report.RelayAddresses, len(m.report.Routers))
 	}
-	first := m.report.Routers[0]
-	for _, a := range m.report.RelayAddresses {
-		if !strings.HasPrefix(a, first.Addr) || !strings.HasSuffix(a, "/p2p-circuit/p2p/"+m.report.PeerID) {
-			t.Fatalf("%s relay address %s is not <router>/p2p-circuit/p2p/<self> for its first router %s (%s)", name, a, first.PeerID, first.Addr)
+	for _, r := range m.report.Routers {
+		wantRelay := r.Addr + "/p2p-circuit/p2p/" + m.report.PeerID
+		if !contains(m.report.RelayAddresses, wantRelay) {
+			t.Fatalf("%s relay addresses %v lack %s for router %s", name, m.report.RelayAddresses, wantRelay, r.PeerID)
 		}
 	}
 	return m
@@ -1115,6 +1190,7 @@ func launchSDKMember(t *testing.T, name string, cmd *exec.Cmd, root, baseURL, ad
 func launchSDKRunner(t *testing.T, name string, cmd *exec.Cmd, root, baseURL string, env ...string) *sdkMember {
 	t.Helper()
 	cmd.Env = append(append(os.Environ(),
+		"PYTHONPATH="+filepath.Join(root, "sdk", "python", "src"),
 		"AGENTMESH_CONTROL_PLANE_URL="+baseURL,
 		"AGENTMESH_SDK_STATE_DIR="+filepath.Join(t.TempDir(), "state"),
 	), env...)
@@ -1442,10 +1518,11 @@ func (m *sdkMember) relayAddresses(t *testing.T) []string {
 }
 
 func (m *sdkMember) routersAnswer(t *testing.T) (res struct {
-	OK             bool     `json:"ok"`
-	Error          string   `json:"error"`
-	Routers        []string `json:"routers"`
-	RelayAddresses []string `json:"relay_addresses"`
+	OK             bool           `json:"ok"`
+	Error          string         `json:"error"`
+	Routers        []string       `json:"routers"`
+	RelayAddresses []string       `json:"relay_addresses"`
+	GoAwayReceived map[string]int `json:"go_away_received"`
 }) {
 	t.Helper()
 	if line := m.send(t, map[string]string{"cmd": "routers"}); json.Unmarshal(line, &res) != nil {

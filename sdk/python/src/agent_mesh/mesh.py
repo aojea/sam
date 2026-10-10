@@ -77,6 +77,8 @@ class ControlPlaneSync:
     fetched_at: float
     # One entry per part that failed; empty when everything landed.
     errors: list[str] = field(default_factory=list)
+    # The control plane's router catalog (RouterInfo entries), when /info answered.
+    routers: Optional[list[pb.RouterInfo]] = None
 
 
 class AgentMesh:
@@ -95,6 +97,7 @@ class AgentMesh:
         self.identity = identity
         self.control_plane = control_plane
         self._credential = credential
+        self._routers: list[pb.RouterInfo] = []
         self._state_dir = state_dir
         self._jwt_source = jwt_source
         # refresh() and sync_control_plane() run in worker threads of the
@@ -109,6 +112,11 @@ class AgentMesh:
     @property
     def credential(self) -> MeshCredential:
         return self._credential
+
+    @property
+    def routers(self) -> list[pb.RouterInfo]:
+        """The router catalog (ControlPlaneInfoResponse.routers) from the most recent /info pull."""
+        return list(self._routers)
 
     def attenuate(self, rule: pb.TaskAuthorizationRule) -> MeshCredential:
         """Returns a new MeshCredential with a tar_block appended offline in memory."""
@@ -300,19 +308,33 @@ class AgentMesh:
             errors.append(f"keys: {err}")
 
         banned_peer_ids: Optional[list[str]] = None
+        routers: Optional[list[pb.RouterInfo]] = None
         # Taken before the request: a ban recorded after this instant cannot be
         # in the answer, so its absence must not be read as an unban.
         fetched_at = time.time()
         try:
             info = self.control_plane.info()
+            routers = list(info.routers)
+            self._routers = routers
             if info.router_addresses:
                 self._credential = replace(self._credential, router_addresses=list(info.router_addresses))
+            elif routers:
+                flattened = [addr for r in routers for addr in r.addresses]
+                if flattened:
+                    self._credential = replace(self._credential, router_addresses=flattened)
             banned_peer_ids = list(info.banned_peer_ids)
         except Exception as err:  # noqa: BLE001
             errors.append(f"info: {err}")
         if keys_changed or banned_peer_ids is not None:
             self.save()
-        return ControlPlaneSync(keys_changed=keys_changed, refreshed=refreshed, banned_peer_ids=banned_peer_ids, fetched_at=fetched_at, errors=errors)
+        return ControlPlaneSync(
+            keys_changed=keys_changed,
+            refreshed=refreshed,
+            banned_peer_ids=banned_peer_ids,
+            fetched_at=fetched_at,
+            errors=errors,
+            routers=routers,
+        )
 
     def auth_frame(self, target_service: str = "") -> bytes:
         """The frame that opens every stream to a peer: this member's biscuit plus

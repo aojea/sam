@@ -20,7 +20,7 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Mapping, Optional, Sequence, Union
+from typing import TYPE_CHECKING, AbstractSet, Any, AsyncIterator, Awaitable, Callable, Mapping, Optional, Sequence, Union
 
 import multiaddr
 import trio
@@ -37,7 +37,15 @@ from mcp import ClientSession
 
 from ._proto import circuit_pb2 as circuit
 from ._proto import agentmesh_pb2 as pb
-from .auth import AUTH_PROTOCOL, auth_stream_handler, authenticate_with_peer
+from .auth import (
+    AUTH_PROTOCOL,
+    GOAWAY_PROTOCOL,
+    ROUTER_SHUN_DURATION,
+    auth_stream_handler,
+    authenticate_with_peer,
+    go_away_reason_name,
+    go_away_stream_handler,
+)
 from .authorizer import ProviderAuthorizerOptions
 from .biscuit import ROLE_ROUTER, VerifiedBiscuit, attenuate_biscuit, require_role, seal_biscuit
 from .controlplane import ROLE_NODE
@@ -65,6 +73,11 @@ if TYPE_CHECKING:
     from .mesh import AgentMesh, ControlPlaneSync
 
 logger = logging.getLogger("agent_mesh")
+
+# Number of routers a member attaches to and reserves on by default, matching agentmesh-node's defaultRouters.
+DEFAULT_ROUTERS = 2
+# Backoff delays (seconds) when redialing a held router whose connection dropped before failing over.
+ROUTER_REDIAL_BACKOFFS: tuple[float, ...] = (2.0, 4.0, 8.0)
 
 DEFAULT_REFRESH_LEAD = 60 * 60.0
 DEFAULT_REFRESH_RETRY = 30.0
@@ -132,6 +145,146 @@ class AdmittedRouter:
     reservation: circuit.Reservation | None = None
 
 
+@dataclass(frozen=True)
+class RouterCandidate:
+    """One router candidate from the control plane's /info catalog."""
+
+    peer_id: str
+    addresses: list[multiaddr.Multiaddr]
+    labels: dict[str, str] = field(default_factory=dict)
+    connections: int = 0
+    connection_limit: int = 0
+
+
+def candidates_from_router_infos(
+    routers: Sequence[pb.RouterInfo],
+    fallback_addresses: Sequence[str],
+    router_metadata: Sequence[pb.RouterInfo] = (),
+) -> list[RouterCandidate]:
+    """Builds router candidates from ControlPlaneInfoResponse.routers, falling
+    back to router_addresses when routers is empty (an older control plane).
+    When router_metadata is provided alongside explicit fallback_addresses,
+    labels and load from router_metadata are attached by peer_id."""
+    if routers:
+        out: list[RouterCandidate] = []
+        for r in routers:
+            peer_id: Optional[str] = None
+            if r.peer_id:
+                try:
+                    peer_id = canonical_peer_id(r.peer_id)
+                except ValueError:
+                    peer_id = None
+            addrs: list[multiaddr.Multiaddr] = []
+            for raw in r.addresses:
+                try:
+                    ma = multiaddr.Multiaddr(raw)
+                except Exception:  # noqa: BLE001
+                    continue
+                target: Optional[str] = None
+                try:
+                    target = str(info_from_p2p_addr(ma).peer_id)
+                except Exception:  # noqa: BLE001
+                    target = None
+                if peer_id is None and target is not None:
+                    peer_id = target
+                if peer_id is not None and (target is None or target == peer_id):
+                    if target is None:
+                        ma = multiaddr.Multiaddr(f"{ma}/p2p/{peer_id}")
+                    addrs.append(ma)
+            if peer_id is None or not addrs:
+                continue
+            out.append(
+                RouterCandidate(
+                    peer_id=peer_id,
+                    addresses=addrs,
+                    labels=dict(r.labels),
+                    connections=r.connections,
+                    connection_limit=r.connection_limit,
+                )
+            )
+        return out
+
+    meta_by_peer: dict[str, pb.RouterInfo] = {}
+    for r in router_metadata:
+        if r.peer_id:
+            try:
+                meta_by_peer[canonical_peer_id(r.peer_id)] = r
+            except ValueError:
+                continue
+
+    by_id: dict[str, RouterCandidate] = {}
+    for raw in fallback_addresses:
+        try:
+            ma = multiaddr.Multiaddr(raw)
+            peer_id = str(info_from_p2p_addr(ma).peer_id)
+        except Exception:  # noqa: BLE001
+            continue
+        existing = by_id.get(peer_id)
+        if existing is not None:
+            existing.addresses.append(ma)
+        else:
+            meta = meta_by_peer.get(peer_id)
+            by_id[peer_id] = RouterCandidate(
+                peer_id=peer_id,
+                addresses=[ma],
+                labels=dict(meta.labels) if meta is not None else {},
+                connections=meta.connections if meta is not None else 0,
+                connection_limit=meta.connection_limit if meta is not None else 0,
+            )
+    return list(by_id.values())
+
+
+def _matches_labels(router_labels: Mapping[str, str], selector: Optional[Mapping[str, str]]) -> bool:
+    if not selector:
+        return True
+    return all(router_labels.get(k) == v for k, v in selector.items())
+
+
+def _count_matching_labels(router_labels: Mapping[str, str], prefer: Optional[Mapping[str, str]]) -> int:
+    if not prefer:
+        return 0
+    return sum(1 for k, v in prefer.items() if router_labels.get(k) == v)
+
+
+def _router_load(candidate: RouterCandidate) -> float:
+    if candidate.connection_limit <= 0:
+        return 0.5
+    load = candidate.connections / candidate.connection_limit
+    return min(max(load, 0.0), 1.0)
+
+
+def select_routers(
+    candidates: Sequence[RouterCandidate],
+    k: int,
+    *,
+    selector: Optional[Mapping[str, str]] = None,
+    prefer: Optional[Mapping[str, str]] = None,
+    attached: Optional[AbstractSet[str]] = None,
+    shunned: Optional[Mapping[str, float]] = None,
+    now: Optional[float] = None,
+    rand: Callable[[], float] = random.random,
+) -> list[RouterCandidate]:
+    """Picks up to k routers from candidates, mirroring agentmesh-node's selectRouters:
+    filters by selector, excludes already-attached and currently-shunned routers,
+    and orders by matching prefer labels (descending) then load + jitter (ascending)."""
+    if k <= 0:
+        return []
+    now_ts = time.time() if now is None else now
+    scored: list[tuple[int, float, int, RouterCandidate]] = []
+    for idx, c in enumerate(candidates):
+        if attached is not None and c.peer_id in attached:
+            continue
+        if shunned is not None and shunned.get(c.peer_id, 0.0) > now_ts:
+            continue
+        if not _matches_labels(c.labels, selector):
+            continue
+        prefer_score = _count_matching_labels(c.labels, prefer)
+        load = _router_load(c) + rand() * 0.05
+        scored.append((-prefer_score, load, idx, c))
+    scored.sort(key=lambda item: (item[0], item[1], item[2]))
+    return [item[3] for item in scored[:k]]
+
+
 @dataclass
 class MeshSession:
     """A member that is on the mesh: a libp2p host authenticated with at least
@@ -145,18 +298,31 @@ class MeshSession:
     authenticated_peers: dict[str, datetime] = field(default_factory=dict)
     # Peers the control plane has banned; connections to and from them are refused.
     banned: BanSet = field(default_factory=BanSet)
+    # Count of /mesh/goaway/1.0.0 frames received from held routers, keyed by reason name (DRAINING, OVERLOADED, REASON_UNSPECIFIED).
+    go_away_received: dict[str, int] = field(default_factory=dict)
+    # Routers currently shunned (after a go-away or failed redial), mapped to the unix seconds when the shun expires.
+    shunned_routers: dict[str, float] = field(default_factory=dict)
     # This member's agent, once accept_a2a was called.
     endpoint: Optional[A2AEndpoint] = None
     # agentmesh-node's egress.require_labels for an SDK member: every provider this
     # session calls must attest all of these pairs, on top of a call's
     # required_labels. Held on every call, MCP and HTTP alike; no call waives it.
     egress_require_labels: Optional[Mapping[str, str]] = None
+    reserve: bool = True
+    target_routers: int = DEFAULT_ROUTERS
+    router_selector: Optional[Mapping[str, str]] = None
+    router_prefer: Optional[Mapping[str, str]] = None
+    pinned_router_addresses: Optional[list[str]] = None
+    router_redial_backoffs: Sequence[float] = ROUTER_REDIAL_BACKOFFS
     policy_sync_interval: float = DEFAULT_POLICY_SYNC
     control_plane_sync_interval: float = DEFAULT_CONTROL_PLANE_SYNC
     control_plane_sync_jitter: float = DEFAULT_CONTROL_PLANE_SYNC_JITTER
     reservation_lead: float = RESERVATION_RENEW_LEAD
     reservation_retry: float = DEFAULT_REFRESH_RETRY
     reservation_check_interval: float = RESERVATION_CHECK_INTERVAL
+    _held_router_ids: set[str] = field(default_factory=set, repr=False)
+    _relay_lock: trio.Lock = field(default_factory=trio.Lock, repr=False)
+    _relay_trigger: trio.Event = field(default_factory=trio.Event, repr=False)
     _nursery: Optional[trio.Nursery] = field(default=None, repr=False)
     _policy_rules: Optional[list[str]] = field(default=None, repr=False)
     _sync_lock: trio.Lock = field(default_factory=trio.Lock, repr=False)
@@ -164,6 +330,11 @@ class MeshSession:
     # Peers verified as enrolled and holding the floor, until when; misses are never kept.
     _egress_verdicts: dict[str, float] = field(default_factory=dict, repr=False)
     _task_biscuit: Optional[bytes] = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if not self._held_router_ids and self.routers:
+            for r in self.routers:
+                self._held_router_ids.add(r.peer_id)
 
     @property
     def peer_id(self) -> str:
@@ -173,6 +344,92 @@ class MeshSession:
     def biscuit(self) -> bytes:
         """The Biscuit presented on outbound service calls (task-attenuated when derived via attenuate())."""
         return self._task_biscuit if self._task_biscuit is not None else self.mesh.credential.biscuit
+
+    def is_held_router(self, peer_id: str) -> bool:
+        """Whether peer_id is currently in this member's held router set."""
+        return peer_id in self._held_router_ids
+
+    def _want_routers(self) -> int:
+        if self.pinned_router_addresses is not None:
+            candidates = candidates_from_router_infos([], self.pinned_router_addresses, getattr(self.mesh, "routers", ()))
+            return min(self.target_routers, max(1, len(candidates)))
+        return self.target_routers
+
+    def _candidates_for_holding(self) -> list[RouterCandidate]:
+        if self.pinned_router_addresses is not None:
+            return candidates_from_router_infos([], self.pinned_router_addresses, getattr(self.mesh, "routers", ()))
+        return candidates_from_router_infos(getattr(self.mesh, "routers", ()), self.mesh.credential.router_addresses)
+
+    def _shun_router(self, peer_id: str, duration: float = ROUTER_SHUN_DURATION) -> None:
+        now = time.time()
+        for k, exp in list(self.shunned_routers.items()):
+            if exp <= now:
+                self.shunned_routers.pop(k, None)
+        until = now + (duration if duration > 0 else ROUTER_SHUN_DURATION)
+        existing = self.shunned_routers.get(peer_id, 0.0)
+        if until > existing:
+            self.shunned_routers[peer_id] = until
+
+    async def _detach_router(self, peer_id: str) -> None:
+        self._held_router_ids.discard(peer_id)
+        self.routers[:] = [r for r in self.routers if r.peer_id != peer_id]
+        try:
+            await self.host.disconnect(ID.from_base58(peer_id))
+        except Exception:  # noqa: BLE001 - not connected, or already gone
+            pass
+
+    async def handle_go_away(self, peer_id: str, msg: pb.RouterGoAway, retry_after: float) -> bool:
+        """Handles a RouterGoAway message from a router: ignores it if peer_id is
+        not in the held set; otherwise records the reason, shuns the router for
+        retry_after seconds, drops it from the held set, and tops up from the
+        catalog immediately."""
+        if peer_id not in self._held_router_ids:
+            return False
+        reason = go_away_reason_name(msg.reason)
+        self.go_away_received[reason] = self.go_away_received.get(reason, 0) + 1
+        self._shun_router(peer_id, retry_after)
+        await self._detach_router(peer_id)
+        await self.top_up_routers()
+        self._relay_trigger.set()
+        return True
+
+    async def top_up_routers(self) -> list[str]:
+        """Attaches and reserves on additional routers from the catalog until this
+        session holds _want_routers() routers or no more eligible candidates remain."""
+        failures: list[str] = []
+        want = self._want_routers()
+        if len(self._held_router_ids) >= want:
+            return failures
+        candidates = self._candidates_for_holding()
+        tried: set[str] = set()
+        while len(self._held_router_ids) < want:
+            need = want - len(self._held_router_ids)
+            exclude = self._held_router_ids | tried | set(self.banned.peers())
+            picks = select_routers(
+                candidates,
+                need,
+                selector=self.router_selector,
+                prefer=self.router_prefer,
+                attached=exclude,
+                shunned=self.shunned_routers,
+            )
+            if not picks:
+                break
+            tried.update(c.peer_id for c in picks)
+            admitted = await _admit_candidates(self.host, self.mesh, picks, self.reserve, failures)
+            for router in admitted:
+                self._held_router_ids.add(router.peer_id)
+                idx = next((i for i, r in enumerate(self.routers) if r.peer_id == router.peer_id), None)
+                if idx is not None:
+                    self.routers[idx] = router
+                else:
+                    self.routers.append(router)
+            for c in picks:
+                if not any(r.peer_id == c.peer_id for r in admitted):
+                    self._shun_router(c.peer_id, ROUTER_SHUN_DURATION)
+            if not admitted and len(picks) < need:
+                break
+        return failures
 
     def attenuate(self, rule: pb.TaskAuthorizationRule) -> "MeshSession":
         """Returns a task-scoped MeshSession view sharing the underlying libp2p host
@@ -450,6 +707,9 @@ class MeshSession:
                 newly_banned, _ = self.banned.reconcile(canonical_peer_ids(result.banned_peer_ids), result.fetched_at)
                 for peer in newly_banned:
                     await self._evict(peer)
+            if len(self._held_router_ids) < self._want_routers():
+                await self.top_up_routers()
+            self._relay_trigger.set()
             if self.endpoint is not None:
                 try:
                     await self.sync_policy()
@@ -501,6 +761,10 @@ class MeshSession:
     async def _evict(self, banned_peer: str) -> None:
         """Drops a banned peer: its admission and its connections."""
         self.authenticated_peers.pop(banned_peer, None)
+        if banned_peer in self._held_router_ids:
+            self._held_router_ids.discard(banned_peer)
+            self.routers[:] = [r for r in self.routers if r.peer_id != banned_peer]
+            self._relay_trigger.set()
         try:
             await self.host.disconnect(ID.from_base58(banned_peer))
         except Exception:  # noqa: BLE001 - not connected, or already gone
@@ -529,31 +793,96 @@ class MeshSession:
                 delay = self.control_plane_sync_interval * random.uniform(1.0, 1.1)  # noqa: S311
 
     async def _reservation_loop(self) -> None:
-        """Renews the relay reservation on each admitted router before the
-        relay lets it expire, and again as soon as the connection to that
-        router is found gone: the relay drops the reservation with the
-        connection, and a member that kept advertising the relayed address
-        would have every dial to it fail with NO_RESERVATION. A router that
-        dropped the connection forgets the admission with it, so that one is
-        dialed and authenticated again before the reservation is asked for."""
+        """Renews the relay reservation on each held router before the relay
+        lets it expire, and again as soon as the connection to that router is
+        found gone: the relay drops the reservation with the connection, and a
+        member that kept advertising the relayed address would have every dial
+        to it fail with NO_RESERVATION. When a held router's connection drops,
+        it is redialed across router_redial_backoffs first; if it does not come
+        back or refuses auth, it is shunned and replaced from the catalog."""
+        if not self.reserve and not self._held_router_ids:
+            return
         while True:
-            reserved = [r for r in self.routers if r.reservation is not None]
-            if not reserved:
+            reserved = [r for r in self.routers if r.peer_id in self._held_router_ids and r.reservation is not None]
+            if not self.reserve and not self._held_router_ids:
                 return
-            due = min(r.reservation.expire for r in reserved) - self.reservation_lead - time.time()  # type: ignore[union-attr]
-            await trio.sleep(min(max(MIN_REFRESH_DELAY, due), self.reservation_check_interval))
+            if reserved:
+                due = min(r.reservation.expire for r in reserved) - self.reservation_lead - time.time()  # type: ignore[union-attr]
+                wait_time = min(max(MIN_REFRESH_DELAY, due), self.reservation_check_interval)
+            else:
+                wait_time = self.reservation_check_interval
+            with trio.move_on_after(wait_time):
+                await self._relay_trigger.wait()
+            self._relay_trigger = trio.Event()
+
             failed = False
-            for i, r in enumerate(self.routers):
-                if r.reservation is None:
+            held_snapshot = [r for r in self.routers if r.peer_id in self._held_router_ids]
+            for r in held_snapshot:
+                if r.peer_id not in self._held_router_ids:
                     continue
-                expiring = r.reservation.expire - time.time() <= self.reservation_lead + MIN_REFRESH_DELAY
-                if not expiring and ID.from_base58(r.peer_id) in self.host.get_connected_peers():
+                connected = ID.from_base58(r.peer_id) in self.host.get_connected_peers()
+                expiring = (
+                    r.reservation is not None
+                    and r.reservation.expire - time.time() <= self.reservation_lead + MIN_REFRESH_DELAY
+                )
+                missing_res = self.reserve and r.reservation is None
+                if connected and not expiring and not missing_res:
                     continue
+
+                if connected:
+                    # Renewing an expiring reservation on an still-open connection.
+                    try:
+                        updated = await _reserve_again(self.host, self.mesh, r, reserve=self.reserve)
+                        idx = next((i for i, cur in enumerate(self.routers) if cur.peer_id == r.peer_id), None)
+                        if idx is not None:
+                            self.routers[idx] = updated
+                    except Exception as err:  # noqa: BLE001 - retried; _reserve_again disconnected so next pass redials
+                        failed = True
+                        logger.warning(
+                            "relay reservation on router %s not renewed, retrying in %.0fs: %s",
+                            r.peer_id,
+                            self.reservation_retry,
+                            err,
+                        )
+                    continue
+
+                # Connection dropped: try immediate reconnect first (covers a router
+                # that already restarted or moved to a new address), then redial with
+                # router_redial_backoffs before shunning and failing over.
+                reconnected = False
+                last_err: Optional[Exception] = None
                 try:
-                    self.routers[i] = await _reserve_again(self.host, self.mesh, r)
-                except Exception as err:  # noqa: BLE001 - retried; the relay keeps the old reservation until it expires
-                    failed = True
-                    logger.warning("relay reservation on router %s not renewed, retrying in %.0fs: %s", r.peer_id, self.reservation_retry, err)
+                    updated = await _reserve_again(self.host, self.mesh, r, reserve=self.reserve)
+                    idx = next((i for i, cur in enumerate(self.routers) if cur.peer_id == r.peer_id), None)
+                    if idx is not None:
+                        self.routers[idx] = updated
+                    reconnected = True
+                except Exception as err:  # noqa: BLE001
+                    last_err = err
+
+                if not reconnected:
+                    for backoff in self.router_redial_backoffs:
+                        await trio.sleep(backoff)
+                        if r.peer_id not in self._held_router_ids:
+                            reconnected = True
+                            break
+                        try:
+                            updated = await _reserve_again(self.host, self.mesh, r, reserve=self.reserve)
+                            idx = next((i for i, cur in enumerate(self.routers) if cur.peer_id == r.peer_id), None)
+                            if idx is not None:
+                                self.routers[idx] = updated
+                            reconnected = True
+                            break
+                        except Exception as err:  # noqa: BLE001
+                            last_err = err
+
+                if not reconnected and r.peer_id in self._held_router_ids:
+                    logger.warning("router %s unreachable after redial, shunning and failing over: %s", r.peer_id, last_err)
+                    self._shun_router(r.peer_id, ROUTER_SHUN_DURATION)
+                    await self._detach_router(r.peer_id)
+
+            if len(self._held_router_ids) < self._want_routers():
+                await self.top_up_routers()
             if failed:
                 await trio.sleep(self.reservation_retry)
 
@@ -668,6 +997,10 @@ async def join_mesh(
     *,
     listen_addrs: Sequence[str] = (),
     router_addresses: Optional[Sequence[str]] = None,
+    routers: int = DEFAULT_ROUTERS,
+    router_selector: Optional[Mapping[str, str]] = None,
+    router_prefer: Optional[Mapping[str, str]] = None,
+    router_redial_backoffs: Sequence[float] = ROUTER_REDIAL_BACKOFFS,
     reserve: bool = True,
     refresh_lead: float = DEFAULT_REFRESH_LEAD,
     refresh_retry: float = DEFAULT_REFRESH_RETRY,
@@ -695,13 +1028,30 @@ async def join_mesh(
             logger.warning("control plane sync before join: %s", "; ".join(result.errors))
     except Exception as err:  # noqa: BLE001 - joining goes on with what the credential holds
         logger.warning("control plane sync before join failed: %s", err)
-    router_addrs = [multiaddr.Multiaddr(a) for a in (mesh.credential.router_addresses if router_addresses is None else router_addresses)]
-    if not router_addrs:
-        raise RuntimeError("credential lists no router addresses; the control plane had no active router at enrollment" if router_addresses is None else "router_addresses names no router")
+
+    pinned_addrs = list(router_addresses) if router_addresses is not None else None
+    raw_addrs = pinned_addrs if pinned_addrs is not None else list(mesh.credential.router_addresses)
+    for a in raw_addrs:
+        multiaddr.Multiaddr(a)
+    if pinned_addrs is not None:
+        catalog = candidates_from_router_infos([], pinned_addrs, getattr(mesh, "routers", ()))
+    else:
+        catalog = candidates_from_router_infos(getattr(mesh, "routers", ()), raw_addrs)
+    if not catalog:
+        raise RuntimeError(
+            "credential lists no router addresses; the control plane had no active router at enrollment"
+            if router_addresses is None
+            else "router_addresses names no router"
+        )
+    target_count = max(1, routers)
+    ordered = select_routers(catalog, len(catalog), selector=router_selector, prefer=router_prefer)
+    if not ordered:
+        raise RuntimeError("no router admitted this member: no router in catalog matched router_selector")
 
     host, listen = create_mesh_host(mesh.identity, listen_addrs)
     authenticated: dict[str, datetime] = {}
     banned = BanSet()
+    session_ref: list[MeshSession] = []
     host.set_stream_handler(
         AUTH_PROTOCOL,
         auth_stream_handler(
@@ -709,6 +1059,15 @@ async def join_mesh(
             trusted_keys=lambda: mesh.credential.control_plane_keys,
             on_authenticated=lambda peer, verified: authenticated.__setitem__(peer, verified.expiration),
             is_banned=lambda peer: peer in banned,
+        ),
+    )
+    host.set_stream_handler(
+        GOAWAY_PROTOCOL,
+        go_away_stream_handler(
+            is_held_router=lambda peer_id: bool(session_ref and session_ref[0].is_held_router(peer_id)),
+            on_go_away=lambda peer_id, msg, retry_after: (
+                session_ref[0].handle_go_away(peer_id, msg, retry_after) if session_ref else None
+            ),
         ),
     )
     host.set_stream_handler(STOP_PROTOCOL, stop_stream_handler(host))
@@ -721,7 +1080,7 @@ async def join_mesh(
     try:
         async with host.run(listen_addrs=listen), background_trio_service(pubsub), background_trio_service(gossipsub):
             await pubsub.wait_until_ready()
-            admitted = await _admit(host, mesh, router_addrs, reserve)
+            admitted = await _admit(host, mesh, ordered, reserve, target_count=target_count)
             async with trio.open_nursery() as nursery:
                 session = MeshSession(
                     mesh=mesh,
@@ -730,6 +1089,12 @@ async def join_mesh(
                     authenticated_peers=authenticated,
                     banned=banned,
                     egress_require_labels=egress_require_labels,
+                    reserve=reserve,
+                    target_routers=target_count,
+                    router_selector=router_selector,
+                    router_prefer=router_prefer,
+                    pinned_router_addresses=pinned_addrs,
+                    router_redial_backoffs=tuple(router_redial_backoffs),
                     policy_sync_interval=policy_sync_interval,
                     control_plane_sync_interval=control_plane_sync_interval,
                     control_plane_sync_jitter=control_plane_sync_jitter,
@@ -738,6 +1103,7 @@ async def join_mesh(
                     reservation_check_interval=reservation_check_interval,
                     _nursery=nursery,
                 )
+                session_ref.append(session)
                 nursery.start_soon(session._refresh_loop, refresh_lead, refresh_retry)  # noqa: SLF001
                 nursery.start_soon(session._events_loop, pubsub)  # noqa: SLF001
                 nursery.start_soon(session._sync_loop)  # noqa: SLF001
@@ -753,41 +1119,93 @@ async def join_mesh(
         raise cause from None
 
 
-async def _admit(host: IHost, mesh: "AgentMesh", router_addrs: list[multiaddr.Multiaddr], reserve: bool) -> list[AdmittedRouter]:
-    """Authenticates with every router the control plane named, as the JS SDK
-    and agentmesh-node do, and reserves a relay slot on the first that admits us.
-    A peer reserves on the first router of its own list, so a caller that
-    only knew one router could not reach a peer whose list started
-    elsewhere; `connect` tries the relayed path through each of these. The
-    routers are dialed at once: one the control plane lists but this member
-    cannot reach costs a dial timeout, not one per router behind it."""
+async def _admit_candidates(
+    host: IHost,
+    mesh: "AgentMesh",
+    candidates: Sequence[RouterCandidate],
+    reserve: bool,
+    failures: list[str],
+    admitted_any_out: Optional[list[bool]] = None,
+) -> list[AdmittedRouter]:
+    """Dials and authenticates a batch of router candidates concurrently, and
+    reserves a relay slot on each admitted router when reserve is True."""
     admitted: dict[int, AdmittedRouter] = {}
-    failures: list[str] = []
 
-    async def admit(index: int, addr: multiaddr.Multiaddr) -> None:
-        try:
-            info = await peer_info(addr)
-            await dial(host, info)
-            credential = await _authenticate_router(host, mesh, info.peer_id)
-            admitted[index] = AdmittedRouter(peer_id=str(info.peer_id), addr=addr, credential=credential)
-        except Exception as err:  # noqa: BLE001 - every router is tried, the summary names each failure
-            failures.append(f"{addr}: {err}")
+    async def admit_one(index: int, candidate: RouterCandidate) -> None:
+        last_err: Optional[Exception] = None
+        for addr in candidate.addresses:
+            try:
+                info = await peer_info(addr)
+                await dial(host, info)
+                credential = await _authenticate_router(host, mesh, info.peer_id)
+                admitted[index] = AdmittedRouter(peer_id=str(info.peer_id), addr=addr, credential=credential)
+                return
+            except Exception as err:  # noqa: BLE001
+                last_err = err
+        if last_err is not None:
+            failures.append(f"{candidate.addresses[0] if candidate.addresses else candidate.peer_id}: {last_err}")
 
     async with trio.open_nursery() as nursery:
-        for index, addr in enumerate(router_addrs):
-            nursery.start_soon(admit, index, addr)
-    routers = [admitted[i] for i in sorted(admitted)]
-    if not routers:
-        raise RuntimeError("no router admitted this member:\n  " + "\n  ".join(failures))
-    if reserve:
-        for index, router in enumerate(routers):
+        for index, candidate in enumerate(candidates):
+            nursery.start_soon(admit_one, index, candidate)
+
+    ordered = [admitted[i] for i in sorted(admitted)]
+    if ordered and admitted_any_out is not None:
+        admitted_any_out.append(True)
+    if not reserve:
+        return ordered
+
+    reserved: list[AdmittedRouter] = []
+    for router in ordered:
+        try:
+            res = await reserve_relay(host, ID.from_base58(router.peer_id))
+            reserved.append(replace(router, reservation=res))
+        except Exception as err:  # noqa: BLE001
+            failures.append(f"{router.addr}: {err}")
             try:
-                routers[index] = replace(router, reservation=await reserve_relay(host, ID.from_base58(router.peer_id)))
-                break
-            except Exception as err:  # noqa: BLE001 - the next admitted router is asked
-                failures.append(f"{router.addr}: {err}")
+                await host.disconnect(ID.from_base58(router.peer_id))
+            except Exception:  # noqa: BLE001
+                pass
+    return reserved
+
+
+async def _admit(
+    host: IHost,
+    mesh: "AgentMesh",
+    candidates_or_addrs: Sequence[Union[multiaddr.Multiaddr, RouterCandidate]],
+    reserve: bool,
+    target_count: int = DEFAULT_ROUTERS,
+) -> list[AdmittedRouter]:
+    """Authenticates with up to target_count chosen routers, dialing each batch
+    at once so an unreachable router costs one dial timeout rather than one per
+    router behind it, and reserves a relay slot on each chosen router."""
+    candidates: list[RouterCandidate] = []
+    for item in candidates_or_addrs:
+        if isinstance(item, RouterCandidate):
+            candidates.append(item)
         else:
+            try:
+                pid = str(info_from_p2p_addr(item).peer_id)
+            except Exception:  # noqa: BLE001
+                pid = ""
+            candidates.append(RouterCandidate(peer_id=pid, addresses=[item]))
+
+    want = max(1, target_count)
+    routers: list[AdmittedRouter] = []
+    failures: list[str] = []
+    admitted_any: list[bool] = []
+    cursor = 0
+    while len(routers) < want and cursor < len(candidates):
+        need = want - len(routers)
+        batch = candidates[cursor : cursor + need]
+        cursor += len(batch)
+        admitted_batch = await _admit_candidates(host, mesh, batch, reserve, failures, admitted_any)
+        routers.extend(admitted_batch)
+
+    if not routers:
+        if reserve and admitted_any:
             raise RuntimeError("no router reserved a relay slot for this member:\n  " + "\n  ".join(failures))
+        raise RuntimeError("no router admitted this member:\n  " + "\n  ".join(failures))
     return routers
 
 
@@ -799,7 +1217,7 @@ async def _authenticate_router(host: IHost, mesh: "AgentMesh", peer_id: ID) -> V
     return credential
 
 
-async def _reserve_again(host: IHost, mesh: "AgentMesh", router: AdmittedRouter) -> AdmittedRouter:
+async def _reserve_again(host: IHost, mesh: "AgentMesh", router: AdmittedRouter, *, reserve: bool = True) -> AdmittedRouter:
     """Reserves on a router again, dialed and authenticated first when its
     connection is gone. A router rescheduled keeps its key and comes back on
     another address; the list the control plane hands out, refreshed by
@@ -814,7 +1232,7 @@ async def _reserve_again(host: IHost, mesh: "AgentMesh", router: AdmittedRouter)
             addr, info = await _current_router_info(mesh, router)
             await dial(host, info)
             credential = await _authenticate_router(host, mesh, peer_id)
-        reservation = await reserve_relay(host, peer_id)
+        reservation = await reserve_relay(host, peer_id) if reserve else None
     except Exception:
         # A connection that failed us is not kept: it may be half-open, or up
         # but unauthenticated. The retry then dials and authenticates again.
@@ -832,13 +1250,24 @@ async def _current_router_info(mesh: "AgentMesh", router: AdmittedRouter) -> tup
     address to keep; the admitted address when the list has none for the
     router."""
     listed: list[multiaddr.Multiaddr] = []
-    for text in mesh.credential.router_addresses:
-        try:
-            ma = multiaddr.Multiaddr(text)
-            if str(info_from_p2p_addr(ma).peer_id) == router.peer_id:
-                listed.append(ma)
-        except Exception:  # noqa: BLE001 - not a router address
-            continue
+    for r in getattr(mesh, "routers", ()):
+        if r.peer_id == router.peer_id:
+            for raw in r.addresses:
+                try:
+                    ma = multiaddr.Multiaddr(raw)
+                    if f"/p2p/{router.peer_id}" not in str(ma):
+                        ma = multiaddr.Multiaddr(f"{ma}/p2p/{router.peer_id}")
+                    listed.append(ma)
+                except Exception:  # noqa: BLE001
+                    continue
+    if not listed:
+        for text in mesh.credential.router_addresses:
+            try:
+                ma = multiaddr.Multiaddr(text)
+                if str(info_from_p2p_addr(ma).peer_id) == router.peer_id:
+                    listed.append(ma)
+            except Exception:  # noqa: BLE001 - not a router address
+                continue
     kept: Optional[multiaddr.Multiaddr] = None
     dialable: list[multiaddr.Multiaddr] = []
     failures: list[str] = []
@@ -852,3 +1281,4 @@ async def _current_router_info(mesh: "AgentMesh", router: AdmittedRouter) -> tup
     if kept is None:
         raise RuntimeError("no address to dial router at:\n  " + "\n  ".join(failures))
     return kept, PeerInfo(ID.from_base58(router.peer_id), dialable)
+
