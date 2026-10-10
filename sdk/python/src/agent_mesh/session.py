@@ -347,7 +347,11 @@ class MeshSession:
 
     def is_held_router(self, peer_id: str) -> bool:
         """Whether peer_id is currently in this member's held router set."""
-        return peer_id in self._held_router_ids
+        try:
+            canonical = canonical_peer_id(peer_id)
+        except ValueError:
+            return False
+        return canonical in self._held_router_ids
 
     def _want_routers(self) -> int:
         if self.pinned_router_addresses is not None:
@@ -383,12 +387,16 @@ class MeshSession:
         not in the held set; otherwise records the reason, shuns the router for
         retry_after seconds, drops it from the held set, and tops up from the
         catalog immediately."""
-        if peer_id not in self._held_router_ids:
+        try:
+            canonical = canonical_peer_id(peer_id)
+        except ValueError:
+            return False
+        if canonical not in self._held_router_ids:
             return False
         reason = go_away_reason_name(msg.reason)
         self.go_away_received[reason] = self.go_away_received.get(reason, 0) + 1
-        self._shun_router(peer_id, retry_after)
-        await self._detach_router(peer_id)
+        self._shun_router(canonical, retry_after)
+        await self._detach_router(canonical)
         await self.top_up_routers()
         self._relay_trigger.set()
         return True
@@ -1251,7 +1259,11 @@ async def _current_router_info(mesh: "AgentMesh", router: AdmittedRouter) -> tup
     router."""
     listed: list[multiaddr.Multiaddr] = []
     for r in getattr(mesh, "routers", ()):
-        if r.peer_id == router.peer_id:
+        try:
+            r_peer_id = canonical_peer_id(r.peer_id)
+        except ValueError:
+            continue
+        if r_peer_id == router.peer_id:
             for raw in r.addresses:
                 try:
                     ma = multiaddr.Multiaddr(raw)

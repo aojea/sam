@@ -950,6 +950,15 @@ def test_select_routers_filters_orders_and_clamps_retry_after():
     assert len(fallback) == 1
     assert fallback[0].peer_id == "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB"
 
+    # Non-canonical CIDv1 peer_id in RouterInfo is canonicalized at the boundary.
+    cidv1 = "bafzaajaiaejcaa5ba677htqqxyoxbxiy45f4bglh4tldbg5fbvpr3xegmqjfkmny"
+    cid_candidates = candidates_from_router_infos(
+        [pb.RouterInfo(peer_id=cidv1, addresses=["/ip4/127.0.0.1/tcp/5001"])],
+        [],
+    )
+    assert len(cid_candidates) == 1
+    assert cid_candidates[0].peer_id == "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB"
+
     assert clamp_go_away_retry_after(pb.RouterGoAway()) == ROUTER_SHUN_DURATION
     assert clamp_go_away_retry_after(pb.RouterGoAway(retry_after=Duration(seconds=0))) == ROUTER_SHUN_DURATION
     assert clamp_go_away_retry_after(pb.RouterGoAway(retry_after=Duration(seconds=-5))) == ROUTER_SHUN_DURATION
