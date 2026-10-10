@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -48,7 +47,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
@@ -57,8 +55,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	libp2pwebrtc "github.com/libp2p/go-libp2p/p2p/transport/webrtc"
 	ws "github.com/libp2p/go-libp2p/p2p/transport/websocket"
-	"github.com/libp2p/go-libp2p/p2p/transport/webtransport"
-	xrate "github.com/libp2p/go-libp2p/x/rate"
+	libp2pwebtransport "github.com/libp2p/go-libp2p/p2p/transport/webtransport"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
 	madns "github.com/multiformats/go-multiaddr-dns"
@@ -320,62 +317,6 @@ func (r *Router) transportOptions() libp2p.Option {
 	)
 }
 
-// perIPConnResourceManager mirrors libp2p's default resource manager with the
-// per-source-IP inbound connection cap, the per-subnet connection rate limit
-// and the system/transient scopes scaled to carry limit connections; see
-// Options.ConnsPerSourceIP. All three matter behind a proxy or NAT: every
-// peer shares a few source IPs, so libp2p's per-IP cap (8), its per-IP rate
-// (0.2 conns/s, burst 16) and the small transient scope each take down the
-// whole listener under normal reconnect churn.
-func perIPConnResourceManager(limit int) (network.ResourceManager, error) {
-	limits := rcmgr.DefaultLimits
-	libp2p.SetDefaultServiceLimits(&limits)
-	scaled := limits.AutoScale()
-
-	sysBase := max(limit, DefaultHighWaterMark)
-	overrides := rcmgr.PartialLimitConfig{
-		System: rcmgr.ResourceLimits{
-			Conns:        rcmgr.LimitVal(2 * sysBase),
-			ConnsInbound: rcmgr.LimitVal(sysBase),
-			FD:           rcmgr.LimitVal(2 * sysBase),
-		},
-		Transient: rcmgr.ResourceLimits{
-			Conns:        rcmgr.LimitVal(sysBase),
-			ConnsInbound: rcmgr.LimitVal(sysBase),
-			FD:           rcmgr.LimitVal(sysBase),
-		},
-	}
-
-	// Same shape as the rcmgr default limiter (loopback exempt, no global
-	// cap), with the per-subnet budget scaled by limit relative to the
-	// default per-IP cap of 8.
-	scale := float64(limit) / 8
-	connRateLimiter := &xrate.Limiter{
-		NetworkPrefixLimits: []xrate.PrefixLimit{
-			{Prefix: netip.MustParsePrefix("127.0.0.0/8"), Limit: xrate.Limit{}},
-			{Prefix: netip.MustParsePrefix("::1/128"), Limit: xrate.Limit{}},
-		},
-		SubnetRateLimiter: xrate.SubnetLimiter{
-			IPv4SubnetLimits: []xrate.SubnetLimit{
-				{PrefixLength: 32, Limit: xrate.Limit{RPS: 0.2 * scale, Burst: 2 * limit}},
-			},
-			IPv6SubnetLimits: []xrate.SubnetLimit{
-				{PrefixLength: 56, Limit: xrate.Limit{RPS: 0.2 * scale, Burst: 2 * limit}},
-			},
-			GracePeriod: time.Minute,
-		},
-	}
-
-	return rcmgr.NewResourceManager(
-		rcmgr.NewFixedLimiter(overrides.Build(scaled)),
-		rcmgr.WithLimitPerSubnet(
-			[]rcmgr.ConnLimitPerSubnet{{PrefixLength: 32, ConnCount: limit}},
-			[]rcmgr.ConnLimitPerSubnet{{PrefixLength: 56, ConnCount: limit}},
-		),
-		rcmgr.WithConnRateLimiters(connRateLimiter),
-	)
-}
-
 // Start performs enrollment, syncs keys, launches libp2p host, and starts tasks.
 func (r *Router) Start() (retErr error) {
 	defer func() {
@@ -460,7 +401,7 @@ func (r *Router) Start() (retErr error) {
 
 	// Every refusal the resource manager makes is counted and logged with
 	// its source; a refused dialer only sees its connection close before TLS.
-	mgr, err := perIPConnResourceManager(r.config.ConnsPerSourceIP)
+	mgr, err := perIPConnResourceManager(r.config.ConnsPerSourceIP, r.config.RelayMaxCircuits)
 	if err != nil {
 		return fmt.Errorf("failed to create resource manager: %w", err)
 	}

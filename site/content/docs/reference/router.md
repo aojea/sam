@@ -74,6 +74,21 @@ replica count.
 A router stores nothing except its key. Restarting a router loses no
 important state. Nodes reconnect and publish their services again.
 
+## Sizing
+
+The router sizes its libp2p resource limits from `--high-watermark` and
+`--conns-per-source-ip`, not from the memory of the machine: the stream
+budgets of the system, of identify, of the credential handshake and of the
+relay follow the connection budget, so a router on a small VM admits as
+many members as its watermarks say. What the machine needs is CPU: every
+member that joins costs the router a TLS handshake, an identify exchange and
+a credential verification, and a router at its CPU limit answers them late
+enough that members time out and retry, which costs more. Give a router at
+least one full core and no CPU limit; on Kubernetes, set a request and
+leave the limit off. The testnet runs its routers on 2 vCPU without a
+limit, and a fleet of 500 members joining at 20 a second is admitted in
+under a minute.
+
 ## Metrics
 
 The metrics address exposes, next to the Go runtime metrics:
