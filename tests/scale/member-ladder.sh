@@ -209,9 +209,16 @@ for step in "${STEPS[@]}"; do
   # Let the mesh settle on the new population before it is read.
   sleep 60
   snapshot "step${step_no}-after"
-  resident=$target
+  # What the next step lands on is the members that became ready and whose
+  # process is still there, not the number that were started.
+  alive=0
+  for m in "${minions[@]}"; do
+    n=$(python3 -c 'import json,sys; ms=json.load(open(sys.argv[1]))["join"]["members"]; print(sum(1 for m in ms if m.get("ready_ms") and not str(m.get("error","")).startswith("process exited")))' "$OUT/step${step_no}-${m}.json" 2>/dev/null || echo 0)
+    alive=$(( alive + n ))
+  done
+  resident=$(( resident + alive ))
   summarize || true
-  log "step ${step_no} done: ${resident} members resident"
+  log "step ${step_no} done: ${alive} of ${#minions[@]}x${PER_MINION} resident, ${resident} in all"
 done
 
 log "ladder complete: ${resident} members resident; holding until Ctrl-C or ${HOLD}"

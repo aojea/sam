@@ -98,6 +98,10 @@ for i, minions in enumerate(steps, 1):
         break
     members = [mem for r in reports for mem in r["members"]]
     ready = sorted(mem["ready_ms"] for mem in members if mem.get("ready_ms"))
+    # Resident is what the next step lands on: members that became ready and
+    # whose process is still there, which excludes the ones whose journey
+    # ended in an exit.
+    alive = sum(1 for mem in members if mem.get("ready_ms") and not str(mem.get("error", "")).startswith("process exited"))
     journey = sorted(mem["ready_ms"] + mem["first_call_ms"] for mem in members if mem.get("first_call_ms"))
     count = sum(r["count"] for r in reports)
     completed = sum(r["completed"] for r in reports)
@@ -113,7 +117,8 @@ for i, minions in enumerate(steps, 1):
             notes.append(f"step {i}: {n} x {stage}")
         for msg, n in sorted(r.get("call_errors", {}).items()):
             notes.append(f"step {i}: {n} call attempt(s) failed with: {msg}")
-    resident += count
+    resident += alive
+print(f"resident after the last step: {resident}")
 for n in notes:
     print(n)
 
