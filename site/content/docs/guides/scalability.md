@@ -6,23 +6,27 @@ weight: 7
 
 This guide is for the operator of a mesh that grows past a few hundred
 members. It explains what each component spends per member, which setting
-bounds what, how to size a deployment for the fleet you expect, and which
-metrics tell you that a bound is near. The numbers come from the public
-testnet, where a fleet of 3000 members was resident on a mesh of three
-routers on 2 vCPU each twenty minutes after the first one started, and
+bounds what, how to size a deployment for the fleet you expect, how to
+place members on routers with labels, and which metrics tell you that a
+bound is near. The numbers come from the public testnet, where routers on
+2 vCPU held 3200 to 3500 connections each and a fleet of 3200 members
 stayed through a rollout of every router and both control plane replicas.
 
 ## What a member costs
 
-A member is one `agentmesh-node` process. It holds one connection to every
-router in the mesh, two while it enrolls, and a relay reservation on two of
-them. Through those connections it keeps a GossipSub subscription for
-control plane events and a DHT client. At rest it uses about 55 MiB of
+A member is one `agentmesh-node` process. It holds a session with two
+routers (`--routers`), chosen from those the control plane lists, and a
+relay reservation on each. Through those sessions it keeps a GossipSub
+subscription for control plane events and a DHT client. It opens short
+connections to other routers when a DHT query or a call takes it there,
+and to the router of a peer it calls, where it runs the credential
+handshake before asking for the circuit. At rest it uses about 55 MiB of
 memory, 300 goroutines and 20 file descriptors, and almost no CPU.
 
 Joining is the expensive moment. The member enrolls at the control plane
-(one signed request, one database write, one credential minted), then opens
-a connection to every router, and on each one runs a TLS or Noise handshake,
+(one signed request, one database write, one credential minted), reads the
+router list with each router's labels and load, picks its routers and
+opens a connection to each, and on each one runs a TLS or Noise handshake,
 an identify exchange and the credential handshake, in which the router
 verifies the member's credential and the member verifies the router's. A
 router pays a few milliseconds of CPU per member that joins, and a fleet
@@ -36,7 +40,8 @@ them.
 
 | Bound | Where | Default | At the bound |
 |---|---|---|---|
-| Connections per router | `agentmesh-router --high-watermark`, `--low-watermark` | 4000, 1000 | Above the high mark, the router closes connections down to the low mark. Every member holds one, so this is the size of the mesh. |
+| Routers per member | `agentmesh-node --routers` | 2 | A member holds this many routers; one is enough to be on the mesh, the second covers a router restart. |
+| Connections per router | `agentmesh-router --high-watermark`, `--low-watermark` | 4000, 15% below (3400) | At the high mark the router sends members away, at random, down to the low mark; they attach to another router and stay off this one for five minutes. A mesh of N routers holds about N × 4000 / 2 members. |
 | Connections per source address | `agentmesh-router --conns-per-source-ip` | a quarter of the high mark (1000) | The router refuses the next connection from that address. Members behind one NAT or one cluster's egress share an address. |
 | Relay reservations per router | `agentmesh-router --relay-max-reservations` | the high mark (4000) | A member that cannot reserve is not reachable through that router. |
 | Relayed connections per peer | `agentmesh-router --relay-max-circuits` | 1024 | A service called through the relay holds one circuit per caller; the next caller is refused. |
@@ -44,27 +49,31 @@ them.
 | Connections per node | `agentmesh-node`, fixed | 400 high, 100 low | A node called by more peers than this at once closes connections down to 100. |
 | Router lease | `agentmesh-control-plane --lease-duration`, `agentmesh-router --shutdown-lease-ttl` | 15m, 30s | A router that stops without the last lease stays listed for the lease duration. |
 
-Two of these need a word. Adding routers does not add members: every
-member connects to every router, so a mesh of N members puts N connections
-on each router whatever their number. More routers add relay capacity,
-redundancy and places to join from; the high watermark of one router is
-what bounds N. The low watermark is a floor you must keep above the fleet:
-when a router crosses the high mark it trims to the low one, and a low
-mark below the number of members disconnects most of the mesh at once.
+The first two rows are the model. A fleet of F members on N routers, each
+member holding K of them, puts about F × K / N sessions on each router, so
+adding a router adds members: the fleet a mesh holds is N × H / K for a
+high watermark H. A member picks the routers with the most room when it
+joins, so a new router fills from the members that join after it and from
+those the full routers send away; the members already placed do not move
+on their own. When a router stops, its members spread over the N − 1
+others, which is where the headroom in the next section goes.
 
 ## Sizing the routers
 
-Start from the fleet you expect, with headroom for members that enroll
-(two connections each while they do) and for the next step of growth. For
-a fleet of F members:
+Start from the fleet you expect, F members on N routers with `--routers`
+at its default of 2, and size for the day one router is down:
 
-- `--high-watermark` at least 1.5 F. The testnet runs 4000 for 3000
-  members; three of its routers held 3200 to 3500 connections each at the
-  end of the run, which is as close to the mark as you want to be.
-- `--low-watermark` above F. Trimming is for a router that is over its
-  budget, and the members it trims lose nothing for long (the node redials
-  a router that drops it after 2 s, then 4 s, and so on), but trimming
-  below the fleet is an outage you configured.
+- `--high-watermark` at least 1.2 × F × 2 / (N − 1). Each router then
+  holds F × 2 / N sessions in normal running, with room for the members of
+  a stopped router and for the connections members open in passing (a DHT
+  query, a call to a peer on this router, two connections each while they
+  enroll). 5000 members on four routers need 4000; 10,000 members need
+  six routers at 4800 or seven at 4000.
+- `--low-watermark` at its default, 15% below the high mark. The gap is
+  what one shedding moves to the other routers; a smaller gap sheds more
+  often, a larger one moves more members at once. A router that sheds is
+  one the fleet has outgrown: the members it sends away land on routers
+  that are nearly as full, and the fix is a router, not a watermark.
 - `--conns-per-source-ip` at the number of members that share one address,
   times two if they may all enroll at once. One cluster behind one egress
   address with 500 nodes needs 1000. The default follows the high mark.
@@ -83,12 +92,46 @@ libp2p stream limits from the watermarks, so a small VM admits as many
 members as its watermarks say; what a small VM cannot do is handshake them
 quickly.
 
+Routers connect to one another, every pair, to run the DHT and GossipSub
+across the mesh; a router never sheds those connections. That is N × (N − 1)
+/ 2 connections for N routers, which is nothing at ten routers and a
+question at a hundred; a mesh that large is several meshes.
+
 When you change a router's flags, keep `minReadySeconds` at 90 s or more:
 the StatefulSet waits that long between pods so that the members of one
-router are back before the next one stops. Each router announces
-`--shutdown-lease-ttl` (30 s) in its last lease, so it stays listed for
-the time a restart takes and is dropped from `/info` if it does not come
-back.
+router have settled on the others before the next one stops. A router that
+stops announces `--shutdown-lease-ttl` (30 s) in its last lease, so it
+stays listed for the time a restart takes and is dropped from `/info` if
+it does not come back, and it tells each of its members it is draining
+before it closes, so they attach to another router within the second and
+leave this one alone for that time.
+
+## Placing members with labels
+
+A router may carry labels, `--label region=eu --label zone=eu-a`, which
+the control plane checks against the router role's `allowed_labels` at
+enrollment and lists on `/info`. A member picks its routers by them:
+
+- `--router-selector region=eu` holds only routers that carry every pair
+  named. A member whose selector no router carries waits, with a warning
+  that names the selector and the labels it saw, and is not on the mesh
+  until a router that matches exists.
+- `--router-prefer zone=eu-a` orders the routers that pass the selector:
+  those carrying more of the preferred pairs first, and among equals the
+  one with the most room. A member stays on its zone's routers while they
+  have capacity and falls to the region's others when they do not.
+
+A selector places a member; it does not isolate it. Discovery and calls
+cross the whole mesh: a member on the routers of one region finds a service
+on the routers of another and calls it through the service's router, where
+it authenticates on the way. What a selector buys is locality for the
+relayed traffic, and a sizing you can do per group: the F in the formula
+above is the members whose selector lands on a set of routers, and the N
+is that set.
+
+One value per key: a router carries `zone=eu-a` or `zone=eu-b`, not both.
+A hierarchy is several keys on one router, `region=eu zone=eu-a`, with
+members selecting on the broad key and preferring on the narrow one.
 
 ## Sizing the join
 
@@ -166,7 +209,8 @@ The router and the control plane serve Prometheus metrics on
 
 | Metric | Reads as |
 |---|---|
-| `agentmesh_router_connections{direction="inbound"}` against `agentmesh_router_connection_watermark{level="high"}` | How full a router is. The gap is the free capacity of the mesh. |
+| `agentmesh_router_connections{direction="inbound"}` against `agentmesh_router_connection_watermark{level="high"}` | How full a router is. The gap, summed over the routers that are not draining, is the free capacity of the mesh. |
+| `agentmesh_router_goaway_sent_total{reason="OVERLOADED"}` | A router at its high mark sent members to the others. Rising on a router that is not draining, the fleet has outgrown its routers. |
 | `agentmesh_router_inbound_connections_refused_total` | Members behind one address have hit `--conns-per-source-ip`. |
 | `libp2p_relaysvc_reservations_total{type="opened"}` minus `{type="closed"}`, against `agentmesh_router_relay_limit{limit="reservations"}` | Reservations in use against the budget. |
 | `libp2p_relaysvc_connection_rejections_total{reason="resource limit exceeded"}` | A service has more callers than `--relay-max-circuits`. |
@@ -176,12 +220,14 @@ The router and the control plane serve Prometheus metrics on
 | `agentmesh_control_plane_http_requests_total{code="429"}` | Members turned away by the enrollment limiter; they retry. |
 | `agentmesh_control_plane_http_request_duration_seconds` | The control plane's own latency; p99 above a second under a join burst means the database is the bound. |
 | `agentmesh_node_mesh_connected` | On every node: `0` for five minutes is a member off the mesh. |
+| `agentmesh_node_routers{state="attached"}` against `{state="wanted"}` | On every node: fewer attached than wanted for long is a member that cannot find a router with room, or one whose selector too few routers carry. `agentmesh_node_router_candidates{match="selector"}` is how many it could choose from. |
 
-An autoscaler for the routers has its inputs in the first two rows, with
-one caveat from the model above: a new router adds relay capacity and
-redundancy, and the connection count on each existing router stays what it
-was. To admit more members, raise the watermarks and give the routers the
-memory the connections need.
+An autoscaler for the routers has its inputs in the first two rows: scale
+out when the free capacity of the mesh is below what one router holds, so
+that the stop of any one router still fits, or when a router that is not
+draining sends members away. A new router fills from the members that
+join after it and from those the full routers shed; it does not pull
+members off routers that have room.
 
 ## Measuring your own mesh
 

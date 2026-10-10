@@ -71,8 +71,12 @@ credential and refuses peers it cannot verify and peers that have been
 banned.
 
 Routers keep no state apart from their key file, which fixes their peer ID.
-You can run any number of them. Nodes learn about them from the control plane
-and connect to the ones that answer.
+You can run any number of them; they connect to one another so the DHT
+and the event gossip span the mesh. A node learns about them from the
+control plane, with each router's labels and load, and holds two of them,
+chosen by label and room. A router that stops or fills up tells its
+members to attach elsewhere. Adding routers adds members; the
+[scalability guide](../../guides/scalability/) has the arithmetic.
 
 ## Nodes
 

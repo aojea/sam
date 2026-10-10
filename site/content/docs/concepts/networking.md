@@ -73,11 +73,13 @@ which is the common case, they use a **relay circuit** through a router.
 Hole punching is enabled, so a relayed connection is upgraded to a direct
 one when the NATs allow it.
 
-Routers are the fixed points. A node learns their addresses from the control
-plane's `/info` at enrollment and fetches them again when its connections
-drop. A router accepts a connection only from a peer that presents a valid
-credential, so the DHT and the relay are closed to anyone who is not
-enrolled.
+Routers are the fixed points. A node learns their addresses, labels and
+load from the control plane's `/info` at enrollment and again on a
+schedule, holds two of them with a relay reservation on each, and replaces
+one that drops or that sends it away. A call to a peer reached through a
+third router goes through that router: the caller runs the credential
+handshake there first, since a router relays only between peers it has
+verified. The DHT and the relay are closed to anyone who is not enrolled.
 
 When a node opens a stream to another node for a service request, the first
 message is an authentication frame with the caller's credential and the
