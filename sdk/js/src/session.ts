@@ -371,18 +371,28 @@ export class MeshSession {
 
   /** Whether peerId is currently one of the routers this member holds. */
   isHeldRouter(peerId: string): boolean {
-    return this.#heldRouterIds.has(peerId);
+    try {
+      return this.#heldRouterIds.has(canonicalPeerId(peerId));
+    } catch {
+      return false;
+    }
   }
 
   /** Handles a /mesh/goaway/1.0.0 message from a held router: shuns it, detaches it, and tops up from the catalog. */
   async handleGoAway(peerId: string, msg: RouterGoAway, retryAfterMs: number): Promise<void> {
-    if (!this.#heldRouterIds.has(peerId)) {
+    let canonical: string;
+    try {
+      canonical = canonicalPeerId(peerId);
+    } catch {
+      return;
+    }
+    if (!this.#heldRouterIds.has(canonical)) {
       return;
     }
     const reason = goAwayReasonName(msg.reason);
     this.goAwayReceived.set(reason, (this.goAwayReceived.get(reason) ?? 0) + 1);
-    this.#shunRouter(peerId, retryAfterMs);
-    await this.#detachRouter(peerId);
+    this.#shunRouter(canonical, retryAfterMs);
+    await this.#detachRouter(canonical);
     await this.keepRelay().catch(() => {});
   }
 

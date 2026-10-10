@@ -698,6 +698,15 @@ test("selectRouters filters by selector, orders by prefer and load, and clampGoA
   assert.equal(fallback.length, 1);
   assert.equal(fallback[0]?.peerId, "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB");
 
+  // Non-canonical CIDv1 peerId in RouterInfo is canonicalized at the boundary.
+  const cidv1 = "bafzaajaiaejcaa5ba677htqqxyoxbxiy45f4bglh4tldbg5fbvpr3xegmqjfkmny";
+  const cidCandidates = candidatesFromRouterInfos(
+    [create(RouterInfoSchema, { peerId: cidv1, addresses: ["/ip4/127.0.0.1/tcp/5001"] })],
+    [],
+  );
+  assert.equal(cidCandidates.length, 1);
+  assert.equal(cidCandidates[0]?.peerId, "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB");
+
   // Retry-after clamping: default 5m when absent/non-positive, cap at 1h.
   assert.equal(clampGoAwayRetryAfterMs(create(RouterGoAwaySchema, {})), ROUTER_SHUN_DURATION_MS);
   assert.equal(clampGoAwayRetryAfterMs(create(RouterGoAwaySchema, { retryAfter: durationFromMs(0) })), ROUTER_SHUN_DURATION_MS);
