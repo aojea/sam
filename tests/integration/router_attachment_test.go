@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -172,22 +173,28 @@ func waitForEqual(t *testing.T, what string, get func() []string, want []string,
 	}
 }
 
-// TestNodesOnDifferentRoutersReachEachOther pins the mesh's shape when a
-// node attaches to a subset of the routers: two routers labelled by site,
-// node A selecting site a and node B selecting site b, so neither router
-// holds both. B discovers A's service through the one DHT and calls it over
-// a circuit through A's router, which admits B on the handshake B runs
-// there before asking for the circuit. Attachment is read from each node;
-// the control plane's view of a router's connections also counts DHT and
-// transit connections, so it is read for federation and transit only.
-func TestNodesOnDifferentRoutersReachEachOther(t *testing.T) {
-	cpBin := buildBinary(t, "./cmd/agentmesh-control-plane")
-	routerBin := buildBinary(t, "./cmd/agentmesh-router")
-	nodeBin := buildBinary(t, "./cmd/agentmesh-node")
+// attachmentMesh is a control plane with a policy that lets routers carry
+// a site label, and the credentials and binaries to start routers and
+// nodes against it.
+type attachmentMesh struct {
+	tmpDir    string
+	cpPort    int
+	routerBin string
+	nodeBin   string
+	routerJWT string
+	jwtPath   string
+}
 
-	tmpDir := t.TempDir()
+func startAttachmentMesh(t *testing.T) *attachmentMesh {
+	t.Helper()
+	cpBin := buildBinary(t, "./cmd/agentmesh-control-plane")
+	m := &attachmentMesh{
+		tmpDir:    t.TempDir(),
+		routerBin: buildBinary(t, "./cmd/agentmesh-router"),
+		nodeBin:   buildBinary(t, "./cmd/agentmesh-node"),
+	}
 	// The router role must allow the site label, or enrollment refuses it.
-	policyFile := filepath.Join(tmpDir, "policies.yaml")
+	policyFile := filepath.Join(m.tmpDir, "policies.yaml")
 	policy := fmt.Sprintf(`roles:
   - name: %s
     allowed_services: []
@@ -207,7 +214,7 @@ bindings:
 	}
 
 	oidcURL, mintToken := startCustomMockOIDC(t)
-	routerJWT := mintToken(map[string]interface{}{
+	m.routerJWT = mintToken(map[string]interface{}{
 		"sub":    "router-sites",
 		"groups": []string{"routers"},
 		"roles":  []string{api.RoleRouter},
@@ -216,16 +223,16 @@ bindings:
 		"sub":   "mock-user",
 		"roles": []string{api.RoleNode},
 	})
-	jwtPath := filepath.Join(tmpDir, "node.jwt")
-	if err := os.WriteFile(jwtPath, []byte(nodeJWT), 0o600); err != nil {
+	m.jwtPath = filepath.Join(m.tmpDir, "node.jwt")
+	if err := os.WriteFile(m.jwtPath, []byte(nodeJWT), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	cpPort := getFreePort(t)
+	m.cpPort = getFreePort(t)
 	cpCmd := exec.Command(cpBin,
-		"--bind-address", fmt.Sprintf("127.0.0.1:%d", cpPort),
+		"--bind-address", fmt.Sprintf("127.0.0.1:%d", m.cpPort),
 		"--admin-token-path", tokenPath(t, testAdminToken),
-		"--db-dsn", filepath.Join(tmpDir, "cp.db")+"?_pragma=journal_mode(DELETE)&_pragma=busy_timeout(5000)",
+		"--db-dsn", filepath.Join(m.tmpDir, "cp.db")+"?_pragma=journal_mode(DELETE)&_pragma=busy_timeout(5000)",
 		"--issuer", oidcURL,
 		"--insecure-skip-tls-verify",
 	)
@@ -233,15 +240,53 @@ bindings:
 		t.Fatalf("start control plane: %v", err)
 	}
 	t.Cleanup(func() { _ = cpCmd.Process.Kill(); _ = cpCmd.Wait() })
-	waitForControlPlane(t, cpPort)
-	injectPolicyYAML(t, cpPort, testAdminToken, policyFile)
+	waitForControlPlane(t, m.cpPort)
+	injectPolicyYAML(t, m.cpPort, testAdminToken, policyFile)
+	return m
+}
 
-	// A router federates on its first pass over /info and then every 30s,
-	// so router B starts once router A holds a lease and finds it at once.
-	routerA := startLabelledRouter(t, routerBin, tmpDir, "router-a", cpPort, routerJWT, "site=a")
-	waitForActiveRouters(t, cpPort, 1, 10*time.Second)
-	routerB := startLabelledRouter(t, routerBin, tmpDir, "router-b", cpPort, routerJWT, "site=b")
-	waitForActiveRouters(t, cpPort, 2, 10*time.Second)
+// startRouter starts one router and waits for its lease; routers started
+// one after another federate on their first pass over /info, which a
+// router makes at start and then every 30s.
+func (m *attachmentMesh) startRouter(t *testing.T, name string, labels ...string) *routerFixture {
+	t.Helper()
+	before := len(fetchAdminStatus(t, m.cpPort, testAdminToken).GetActiveRouters())
+	r := startLabelledRouter(t, m.routerBin, m.tmpDir, name, m.cpPort, m.routerJWT, labels...)
+	waitForActiveRouters(t, m.cpPort, before+1, 10*time.Second)
+	return r
+}
+
+// nodeArgs is the run command every node of the mesh starts with.
+func (m *attachmentMesh) nodeArgs() []string {
+	return []string{
+		"run", "--control-plane", fmt.Sprintf("http://127.0.0.1:%d", m.cpPort),
+		"--jwt-path", m.jwtPath,
+		"--discovery-interval", "200ms",
+		"--autorelay-boot-delay", "0s",
+		"--autorelay-min-interval", "200ms",
+		"--autorelay-backoff", "200ms",
+	}
+}
+
+func (m *attachmentMesh) nodeEnv(name string) []string {
+	home := filepath.Join(m.tmpDir, name)
+	return append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"))
+}
+
+// TestNodesOnDifferentRoutersReachEachOther pins the mesh's shape when a
+// node attaches to a subset of the routers: two routers labelled by site,
+// node A selecting site a and node B selecting site b, so neither router
+// holds both. B discovers A's service through the one DHT and calls it over
+// a circuit through A's router, which admits B on the handshake B runs
+// there before asking for the circuit. Attachment is read from each node;
+// the control plane's view of a router's connections also counts DHT and
+// transit connections, so it is read for federation and transit only.
+func TestNodesOnDifferentRoutersReachEachOther(t *testing.T) {
+	m := startAttachmentMesh(t)
+	tmpDir, cpPort, nodeBin := m.tmpDir, m.cpPort, m.nodeBin
+
+	routerA := m.startRouter(t, "router-a", "site=a")
+	routerB := m.startRouter(t, "router-b", "site=b")
 	waitForEqual(t, "routers connected to router B", func() []string { return routersConnectedTo(t, cpPort, routerB.peerID) },
 		peerIDStrings(routerA.peerID), 10*time.Second)
 
@@ -250,20 +295,11 @@ bindings:
 	mcpServer := httptest.NewServer(newBoundaryMCPHandler(t))
 	t.Cleanup(mcpServer.Close)
 
-	nodeEnv := func(name string) []string {
-		home := filepath.Join(tmpDir, name)
-		return append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"))
-	}
-	common := []string{
-		"run", "--control-plane", fmt.Sprintf("http://127.0.0.1:%d", cpPort),
-		"--jwt-path", jwtPath,
-		"--discovery-interval", "200ms",
+	nodeEnv := m.nodeEnv
+	common := append(m.nodeArgs(),
 		"--monitor-bootstrap", "500ms",
 		"--monitor-interval", "500ms",
-		"--autorelay-boot-delay", "0s",
-		"--autorelay-min-interval", "200ms",
-		"--autorelay-backoff", "200ms",
-	}
+	)
 	// Neither node publishes its loopback address (no --allow-loopback), so
 	// the only path to either is a circuit through its router.
 	nodeA := launchNode(t, nodeBin, nodeEnv("node-a"), filepath.Join(tmpDir, "node-a"), append(slices.Clone(common),
@@ -339,4 +375,72 @@ bindings:
 	if got := attachedRouters(t, nodeA); !slices.Equal(got, peerIDStrings(routerA.peerID)) {
 		t.Fatalf("routers attached by node A after the call: got %v, want %v", got, peerIDStrings(routerA.peerID))
 	}
+}
+
+// TestNodeMovesWhenItsRouterStops pins what a router's stop does to a
+// member: the router tells its members it is draining before it closes,
+// and a node that held it attaches to another router at once. The monitor
+// is kept out of the way so the move can only come from the go-away; a
+// node that only noticed the connection drop would redial the stopped
+// router and, with the monitor off, never top up.
+func TestNodeMovesWhenItsRouterStops(t *testing.T) {
+	m := startAttachmentMesh(t)
+	routers := map[string]*routerFixture{}
+	for _, name := range []string{"router-a", "router-b", "router-c"} {
+		r := m.startRouter(t, name)
+		routers[r.peerID.String()] = r
+	}
+
+	node := launchNode(t, m.nodeBin, m.nodeEnv("node"), filepath.Join(m.tmpDir, "node"), append(m.nodeArgs(),
+		"--api-token-path", tokenPath(t, "token"),
+		"--allow-loopback",
+		"--routers", "2",
+		"--monitor-bootstrap", "1h",
+		"--monitor-interval", "1h",
+	)...)
+	node.waitForAPI(t)
+
+	var before []string
+	deadline := time.Now().Add(10 * time.Second)
+	for len(before) != 2 && time.Now().Before(deadline) {
+		before = attachedRouters(t, node)
+		time.Sleep(100 * time.Millisecond)
+	}
+	if len(before) != 2 {
+		t.Fatalf("node holds %v, want 2 of the 3 routers", before)
+	}
+	stopping, kept := routers[before[0]], before[1]
+	var spare string
+	for id := range routers {
+		if id != before[0] && id != before[1] {
+			spare = id
+		}
+	}
+
+	// SIGTERM, as a pod gets: the router withdraws its lease, sends its
+	// members away and closes.
+	stoppedAt := time.Now()
+	if err := stopping.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	waitForEqual(t, "routers attached by the node after its router stopped", func() []string { return attachedRouters(t, node) },
+		peerIDStrings(mustPeerID(t, kept), mustPeerID(t, spare)), 15*time.Second)
+	moved := time.Since(stoppedAt)
+	if err := stopping.cmd.Wait(); err != nil && !strings.Contains(err.Error(), "exit status") {
+		t.Logf("router exit: %v", err)
+	}
+	log := node.log()
+	if !strings.Contains(log, "sent this node away (DRAINING)") {
+		t.Fatalf("the node did not log the go-away; moved in %s\n--- node ---\n%s", moved, log)
+	}
+	t.Logf("node moved to the spare router %s after its router stopped", moved)
+}
+
+func mustPeerID(t *testing.T, s string) peer.ID {
+	t.Helper()
+	id, err := peer.Decode(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
