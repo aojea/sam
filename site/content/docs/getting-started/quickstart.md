@@ -19,7 +19,7 @@ On Linux and macOS, the install script downloads the latest release and
 places the binaries in `/usr/local/bin`:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/google/agentmesh/main/install.sh | bash
+curl -sL https://google.github.io/agentmesh/install.sh | bash
 ```
 
 With a Go toolchain, you can build from source instead:

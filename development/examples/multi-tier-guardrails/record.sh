@@ -394,7 +394,7 @@ caption "Act 4 (Day-2 Operations): Every ALLOW and DENY across all three layers 
 expect "$ADMIN" "agentmesh-one admin ban \$CONTRACTOR_PEER --server \$CP_URL --data-dir \$WORK_DIR/one" 'banned' 30
 pause 3.5
 
-caption "github.com/google/agentmesh"
+caption "google.github.io/agentmesh"
 pause 3
 
 END=$(date +%s.%N)

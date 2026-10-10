@@ -55,7 +55,7 @@ if [ -n "$BIN_URL" ] && [ "$BIN_URL" != "null" ]; then
 else
     echo "No custom binaries specified. Installing latest release from github..."
     export AGENTMESH_INSTALL_DIR=/usr/local/bin
-    curl --retry 5 --retry-connrefused --retry-delay 5 -sL https://raw.githubusercontent.com/google/agentmesh/main/install.sh | bash
+    curl --retry 5 --retry-connrefused --retry-delay 5 -sL https://google.github.io/agentmesh/install.sh | bash
 fi
 
 # Download the uncompressed Linux kernel for Firecracker.

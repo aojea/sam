@@ -285,7 +285,7 @@ pause 2
 # 8. Close
 caption "The developer used their own sandbox and wrote a plain program. The admin wrote one policy document and read one log. The credential never left the office."
 pause 1
-caption "github.com/google/agentmesh"
+caption "google.github.io/agentmesh"
 pause 3
 
 # Ends the recording: the attached client exits with the session.

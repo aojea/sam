@@ -48,11 +48,8 @@ jobs:
         working-directory: ./site
 
       - name: Build Hugo Site
-        run: hugo --baseURL https://sam-mesh.dev --minify
+        run: hugo --baseURL https://google.github.io/agentmesh/ --minify
         working-directory: ./site
-
-      - name: Create CNAME
-        run: echo "sam-mesh.dev" > ./site/public/CNAME
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

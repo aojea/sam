@@ -54,7 +54,7 @@ update because its signature differs from the installed app, report it to
 the coordinator. Uninstalling or clearing app storage deletes the saved
 identity and settings.
 
-{{< figure src="/images/agentmesh-connect-welcome.png" alt="Agent Mesh Connect welcome screen with Scan enrollment code and Enter details manually buttons" caption="The welcome screen offers both paths: Enter details manually for a public testnet, or Scan enrollment code for your own mesh." width="320" >}}
+{{< figure src="../../../images/agentmesh-connect-welcome.png" alt="Agent Mesh Connect welcome screen with Scan enrollment code and Enter details manually buttons" caption="The welcome screen offers both paths: Enter details manually for a public testnet, or Scan enrollment code for your own mesh." width="320" >}}
 
 ### 2. Choose your mesh
 
@@ -100,7 +100,7 @@ Then follow option A or option B.
   Connect using the app switcher. Keep the app open while enrollment
   finishes. The browser message only confirms the login callback.
 
-{{< figure src="/images/agentmesh-connect-public-login.png" alt="Cropped manual enrollment form with the Bananas control plane URL, an empty Enrollment token field, and Login and Enroll Browser button" caption="Public-testnet enrollment (cropped view). Enter your chosen testnet URL, leave Enrollment token empty, and use Login & Enroll (Browser)." width="420" >}}
+{{< figure src="../../../images/agentmesh-connect-public-login.png" alt="Cropped manual enrollment form with the Bananas control plane URL, an empty Enrollment token field, and Login and Enroll Browser button" caption="Public-testnet enrollment (cropped view). Enter your chosen testnet URL, leave Enrollment token empty, and use Login & Enroll (Browser)." width="420" >}}
 
 If you need to sign in on another device, choose **Device Login (TV / Other
 Device)** instead. Open the displayed verification URL on that device,
@@ -200,7 +200,7 @@ mesh://enroll?server=https%3A%2F%2Fused-encryption-assumptions-miller.trycloudfl
 Token ID: 2542ac5fa60e (revoke early with: agentmesh-one token revoke 2542ac5fa60e)
 ```
 
-{{< figure src="/images/agentmesh-connect-join.png" alt="Join this mesh confirmation dialog showing a control plane hostname and Cancel and Join buttons" caption="After scanning, check the control plane hostname before tapping Join. This screenshot shows an example tunnel address and the app's shortened token hint; your values will differ." width="320" >}}
+{{< figure src="../../../images/agentmesh-connect-join.png" alt="Join this mesh confirmation dialog showing a control plane hostname and Cancel and Join buttons" caption="After scanning, check the control plane hostname before tapping Join. This screenshot shows an example tunnel address and the app's shortened token hint; your values will differ." width="320" >}}
 
 The phone must be able to reach the HTTPS address. A computer's
 `http://127.0.0.1` address refers to the phone itself when used on the phone,
@@ -247,7 +247,7 @@ or shows an error, record the status text before retrying.
 **Node is Running** alone does not prove a mesh connection. Report a peer
 count that remains zero, even if the app shows no error.
 
-{{< figure src="/images/agentmesh-connect-running.png" alt="Agent Mesh Connect dashboard showing Node is Running, one connected peer, DHT size one, and a Node ID" caption="A connected node shows Node is Running, a Node ID, and at least one Connected Peer. Your Node ID and peer counts will differ from this example." width="320" >}}
+{{< figure src="../../../images/agentmesh-connect-running.png" alt="Agent Mesh Connect dashboard showing Node is Running, one connected peer, DHT size one, and a Node ID" caption="A connected node shows Node is Running, a Node ID, and at least one Connected Peer. Your Node ID and peer counts will differ from this example." width="320" >}}
 
 ### 5. Check restart and reconnection
 

@@ -30,7 +30,7 @@ guide the user through these steps. Propose each shell command and let the user
 approve it before running anything.
 
 1. Check the CLI: `agentmesh-node --help`. If it is missing, install it with
-   `curl -sL https://raw.githubusercontent.com/google/agentmesh/main/install.sh | bash` or
+   `curl -sL https://google.github.io/agentmesh/install.sh | bash` or
    `go install github.com/google/agentmesh/cmd/agentmesh-node@latest`.
 2. Start the node in the background: `agentmesh-node run --daemonize`. It returns as
    soon as the node answers, and prints the endpoint, the API token file, the

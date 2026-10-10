@@ -1,5 +1,5 @@
 title = "Agent Mesh"
-baseURL = "https://sam-mesh.dev"
+baseURL = "https://google.github.io/agentmesh/"
 languageCode = "en-us"
 
 enableRobotsTXT = true

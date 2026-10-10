@@ -179,7 +179,7 @@ Next steps:
                        --header "X-Mesh-Authentication: Bearer <token>"
        Antigravity   add that URL as "serverUrl", with the same header, to
                        ~/.gemini/config/mcp_config.json
-     Other agents: https://github.com/google/agentmesh/blob/main/site/content/docs/guides/connecting-agents.md
+     Other agents: https://google.github.io/agentmesh/docs/guides/connecting-agents/
   3. Restart your agent so it picks up the skill and the mesh tools.
 `)
 }

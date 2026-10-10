@@ -9,7 +9,7 @@ publishes no service; a tool or a model others should find by name runs
 behind a `agentmesh-node`. Import it as
 `agent_mesh`.
 
-Guide: [Native SDKs](https://github.com/google/agentmesh/blob/main/site/content/docs/guides/native-sdks.md),
+Guide: [google.github.io/agentmesh/docs/guides/native-sdks](https://google.github.io/agentmesh/docs/guides/native-sdks/),
 from an empty machine to two programs on a mesh.
 Source: [github.com/google/agentmesh/tree/main/sdk/python](https://github.com/google/agentmesh/tree/main/sdk/python).
 

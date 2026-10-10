@@ -26,18 +26,18 @@ Two properties hold everywhere:
 ## Try it
 
 ```bash
-curl -sL https://raw.githubusercontent.com/google/agentmesh/main/install.sh | bash  # agentmesh-one, agentmesh-node, mcp-client and friends
-agentmesh-one --data-dir ~/agentmesh-one --port 8080 &                              # start a local control plane, router and web console
-agentmesh-node join http://127.0.0.1:8080 --bootstrap-token-path ~/agentmesh-one/join-token
-agentmesh-node run --daemonize                                                      # local MCP server on 127.0.0.1:8080
-agentmesh-node skill install                                                        # teach your agent to use it
+curl -sL https://google.github.io/agentmesh/install.sh | bash  # agentmesh-node, mcp-client and friends
+agentmesh-node join https://bananas.sam-mesh.dev               # one-time login
+agentmesh-node run --daemonize                                 # local MCP server on 127.0.0.1:8080
+agentmesh-node skill install                                   # teach your agent to use it
 ```
 
 Your agent now has tools that discover and call services across the mesh,
 and an OpenAI-compatible endpoint that routes model requests to whoever
-serves the model. The [quick start](site/content/docs/getting-started/quickstart.md)
-and [your own mesh](site/content/docs/getting-started/your-own-mesh.md) guides
-walk through joining an existing mesh or running a control plane of your own.
+serves the model. `bananas.sam-mesh.dev` is a shared developer testnet with
+no uptime promise; the [quick start](https://google.github.io/agentmesh/docs/getting-started/quickstart/)
+walks through it, and [your own mesh](https://google.github.io/agentmesh/docs/getting-started/your-own-mesh/)
+runs a control plane on your laptop in one command.
 
 To run a control plane of your own without installing anything, open a
 GitHub codespace with the released binaries and run `make testnet`. It
@@ -46,7 +46,7 @@ on your GitHub account's free quota:
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/google/agentmesh?quickstart=1&devcontainer_path=.devcontainer%2Ftestnet%2Fdevcontainer.json)
 
-The [Codespaces guide](site/content/docs/guides/codespaces.md) has the
+The [Codespaces guide](https://google.github.io/agentmesh/docs/guides/codespaces/) has the
 steps, what persists and what stops.
 
 ## What is in a mesh
@@ -60,14 +60,14 @@ steps, what persists and what stops.
 
 ## Documentation
 
-Documentation is in [`site/content/docs/`](site/content/docs/):
+[google.github.io/agentmesh/docs](https://google.github.io/agentmesh/docs/) is built from `site/`.
 
-- [Getting started](site/content/docs/getting-started/_index.md): one node on a mesh, then a mesh of your own.
-- [Concepts](site/content/docs/concepts/_index.md): architecture, identity and enrollment, authorization, networking.
-- [Guides](site/content/docs/guides/_index.md): exposing services, connecting agent clients, headless enrollment, Kubernetes, Cloud Run.
-- [Reference](site/content/docs/reference/_index.md): every flag, configuration key, HTTP route and policy field.
-- [Preview](site/content/docs/preview/_index.md): sandboxed agents and the mobile app, which work but are still settling.
-- [Contributing](site/content/docs/contributing/_index.md): building, testing and the local kind environment.
+- [Getting started](https://google.github.io/agentmesh/docs/getting-started/): one node on the testnet, then a mesh of your own.
+- [Concepts](https://google.github.io/agentmesh/docs/concepts/): architecture, identity and enrollment, authorization, networking.
+- [Guides](https://google.github.io/agentmesh/docs/guides/): exposing services, connecting agent clients, headless enrollment, Kubernetes, Cloud Run.
+- [Reference](https://google.github.io/agentmesh/docs/reference/): every flag, configuration key, HTTP route and policy field.
+- [Preview](https://google.github.io/agentmesh/docs/preview/): sandboxed agents and the mobile app, which work but are still settling.
+- [Contributing](https://google.github.io/agentmesh/docs/contributing/): building, testing and the local kind environment.
 
 The repository has a dev container with the Go, Node and Python toolchains
 and Docker, so you can build and test in a codespace or in VS Code without

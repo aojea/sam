@@ -136,7 +136,7 @@ The site is Hugo with the Docsy theme, under `site/`. The deploy workflow
 pins Hugo 0.136.5, and newer Hugo releases do not build the current Docsy
 version, so use that release locally too. Run `npm ci` once in `site/` for
 the CSS pipeline, then `hugo server`. The site deploys from `main` to
-`sam-mesh.dev`. When a page moves, keep its old URL with `aliases` in the
+`google.github.io/agentmesh`. When a page moves, keep its old URL with `aliases` in the
 front matter. `tests/e2e/docs_snippets.bats` runs the Python snippet under
 `site/content/docs/snippets/` against a live node, so a change to that
 snippet is a change to a test.
