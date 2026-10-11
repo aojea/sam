@@ -500,9 +500,12 @@ jobs:
           # Gateway points at agentmesh-control-plane and agentmesh-console.
           kubectl delete deployment/sam-control-plane-${ENV_NAME} service/sam-control-plane-${ENV_NAME} healthcheckpolicy/sam-control-plane-healthcheck-${ENV_NAME} deployment/sam-console-${ENV_NAME} service/sam-console-${ENV_NAME} -n ${NAMESPACE} --ignore-not-found || true
 
-          # Three routers, each held 90s after it is ready (minReadySeconds)
-          # so members re-attach before the next one goes.
-          kubectl rollout status statefulset/agentmesh-router-${ENV_NAME} -n ${NAMESPACE} --timeout=600s || {
+          # Each router is held 90s after it is ready (minReadySeconds) so
+          # members re-attach before the next one goes, which with its
+          # startup is about two minutes a router. The wait follows the
+          # count: at 600s six routers outran it and the fallback below
+          # rolled a healthy deploy back.
+          kubectl rollout status statefulset/agentmesh-router-${ENV_NAME} -n ${NAMESPACE} --timeout=$(( ROUTER_REPLICAS * 180 + 120 ))s || {
             echo "Router Deployment failed!"
             print_rollout_diagnostics "${NAMESPACE}" "statefulset/agentmesh-router-${ENV_NAME}" "app=agentmesh-router-${ENV_NAME}"
 
