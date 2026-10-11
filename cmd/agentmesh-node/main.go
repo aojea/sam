@@ -66,7 +66,6 @@ var (
 	bindAddrFlag                 string
 	metricsAddrFlag              string
 	socketPathFlag               string
-	meshFlag                     string
 	discoveryIntervalFlag        string
 	listenAddrs                  []string
 	enableRelayFlag              bool
@@ -863,8 +862,6 @@ func main() {
 	runCmd.Flags().StringVar(&bindAddrFlag, "bind-addr", "127.0.0.1:8080", "Local TCP address for the HTTP server (MCP and Sidecar API); pass an empty value to serve only on the Unix socket")
 	runCmd.Flags().StringVar(&socketPathFlag, "socket-path", "", "Unix socket serving the same API, where the socket's owner-only permissions replace the API token (defaults to <data-dir>/"+node.DefaultSocketName+"; pass an empty value to disable)")
 	runCmd.Flags().StringVar(&metricsAddrFlag, "metrics-addr", "", "Serve Prometheus /metrics, /healthz and /readyz on this address without authentication (e.g. 0.0.0.0:9090), for scrapers and probes that hold no API token; off by default")
-	runCmd.Flags().StringVar(&meshFlag, "mesh", "public-mesh", "No effect; kept so existing invocations still parse")
-	_ = runCmd.Flags().MarkDeprecated("mesh", "the node no longer announces itself under a mesh name; the flag has no effect")
 	runCmd.Flags().StringVar(&discoveryIntervalFlag, "discovery-interval", node.DefaultDiscoveryInterval, "Delay before the first announcement of this node's services to the DHT, capped at 5s; they are re-announced every 5 minutes after that")
 	runCmd.Flags().DurationVar(&monitorBootstrapFlag, "monitor-bootstrap", 2*time.Minute, "Initial wait before monitoring router connection")
 	runCmd.Flags().DurationVar(&monitorCheckIntervalFlag, "monitor-interval", 1*time.Minute, "Interval for checking router connection")
@@ -893,7 +890,7 @@ func main() {
 	runCmd.Flags().StringVar(&tlsCertFlag, "tls-cert", "", "Path to TLS certificate for sidecar API")
 	runCmd.Flags().StringVar(&tlsKeyFlag, "tls-key", "", "Path to TLS key for sidecar API")
 	runCmd.Flags().StringVar(&tlsCAFlag, "tls-ca", "", "Path to TLS CA for sidecar API mTLS")
-	runCmd.Flags().DurationVar(&dhtProviderAddrTTLFlag, "dht-provider-addr-ttl", node.DefaultDHTProviderAddrTTL, "How long a DHT provider record lives after its last announcement")
+	runCmd.Flags().DurationVar(&dhtProviderAddrTTLFlag, "dht-provider-addr-ttl", node.DefaultDHTProviderAddrTTL, "How long a DHT provider record this node stores lives after its last announcement; longer than the 5m between announcements, three times it by default")
 	runCmd.Flags().DurationVar(&dhtMaxRecordAgeFlag, "dht-max-record-age", 0, "Maximum age for DHT records (0s uses library default)")
 	runCmd.Flags().IntVar(&dhtLookupLimitFlag, "dht-lookup-limit", 0, "Maximum number of providers to query from the DHT (0 uses default 20)")
 	runCmd.Flags().IntVar(&discoveryConcurrencyFlag, "discovery-concurrency", 0, "Max concurrent catalog fetches during discovery (0 uses default 10)")

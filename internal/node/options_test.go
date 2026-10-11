@@ -19,6 +19,7 @@ import (
 	"crypto/rand"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/agentmesh/api"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -53,6 +54,37 @@ func TestOptionsValidateControlPlaneKeySize(t *testing.T) {
 	err = bad.Validate()
 	if err == nil || !strings.Contains(err.Error(), "32 bytes") {
 		t.Errorf("31-byte key: err = %v, want size error", err)
+	}
+}
+
+// A provider record that expires between two announcements is absent most
+// of the time. The node refuses the configuration instead of compensating.
+func TestOptionsValidateProviderTTLOutlivesReprovide(t *testing.T) {
+	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	base := Options{PrivKey: priv, Store: store, RequiredRole: api.RoleNode}
+
+	for _, ttl := range []time.Duration{0, DefaultDHTProviderAddrTTL, time.Hour} {
+		o := base
+		o.DHTProviderAddrTTL = ttl
+		if err := o.Validate(); err != nil {
+			t.Errorf("DHTProviderAddrTTL %s rejected: %v", ttl, err)
+		}
+	}
+	for _, ttl := range []time.Duration{ReprovideInterval, ReprovideInterval - time.Second} {
+		o := base
+		o.DHTProviderAddrTTL = ttl
+		err = o.Validate()
+		if err == nil || !strings.Contains(err.Error(), "between announcements") {
+			t.Errorf("DHTProviderAddrTTL %s: err = %v, want a refusal naming the announcement interval", o.DHTProviderAddrTTL, err)
+		}
 	}
 }
 

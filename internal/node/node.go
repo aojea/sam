@@ -792,12 +792,8 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 	// Start connection monitor
 	n.startConnectionMonitor(ctx, n.config.MonitorBootstrap, n.config.MonitorInterval, 3)
 
-	// Periodically and on-demand reprovide registered services to the DHT.
-	// A record lives DHTProviderAddrTTL after its last announcement, so the
-	// announcements come at least three times within it, as the default
-	// pair does; an operator who shortens the TTL does not get a service
-	// that is absent most of the time.
-	n.startReprovideLoop(ctx, n.reprovideInterval())
+	// Periodically and on-demand reprovide registered services to the DHT
+	n.startReprovideLoop(ctx, ReprovideInterval)
 
 	// Everything read from the control plane (keys, bans, router addresses,
 	// policy) in one loop; gossip events only bring the next pull forward.
@@ -817,16 +813,6 @@ func (n *AgentMeshNode) triggerReprovide() {
 	case n.reprovideTrigger <- struct{}{}:
 	default:
 	}
-}
-
-// reprovideInterval is ReprovideInterval, or a third of a shorter provider
-// TTL, never under a second.
-func (n *AgentMeshNode) reprovideInterval() time.Duration {
-	ttl := n.config.DHTProviderAddrTTL
-	if ttl <= 0 || ttl/3 >= ReprovideInterval {
-		return ReprovideInterval
-	}
-	return max(ttl/3, time.Second)
 }
 
 func (n *AgentMeshNode) startReprovideLoop(ctx context.Context, interval time.Duration) {
