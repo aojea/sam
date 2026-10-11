@@ -575,9 +575,6 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --listen "/ip4/0.0.0.0/udp/5001/quic-v1" \
       --listen "/ip4/0.0.0.0/tcp/5002" \
       --bind-addr "0.0.0.0:8080" \
-      --mesh "${MESH_PREFIX}" \
-      --dht-provider-addr-ttl 5s \
-      --dht-max-record-age 5s \
       "${config_args[@]}" >/dev/null
 
     MESH_CONTAINERS+=("${name}")

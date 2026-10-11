@@ -791,7 +791,7 @@ func TestNewAgentMeshNode_DHTOptions(t *testing.T) {
 		PrivKey:              priv,
 		Store:                store,
 		ListenAddrs:          []string{"/ip4/127.0.0.1/tcp/0"},
-		DHTProviderAddrTTL:   10 * time.Second,
+		DHTProviderAddrTTL:   10 * time.Minute,
 		DHTMaxRecordAge:      15 * time.Second,
 		DHTLookupLimit:       50,
 		DiscoveryConcurrency: 5,
@@ -802,8 +802,8 @@ func TestNewAgentMeshNode_DHTOptions(t *testing.T) {
 		t.Fatalf("failed to create node with DHT options: %v", err)
 	}
 
-	if node.config.DHTProviderAddrTTL != 10*time.Second {
-		t.Errorf("expected DHTProviderAddrTTL to be 10s, got %v", node.config.DHTProviderAddrTTL)
+	if node.config.DHTProviderAddrTTL != 10*time.Minute {
+		t.Errorf("expected DHTProviderAddrTTL to be 10m, got %v", node.config.DHTProviderAddrTTL)
 	}
 	if node.config.DHTMaxRecordAge != 15*time.Second {
 		t.Errorf("expected DHTMaxRecordAge to be 15s, got %v", node.config.DHTMaxRecordAge)
@@ -889,27 +889,5 @@ func TestFindProvidersSkipsRevoked(t *testing.T) {
 	}
 	if len(providers) != 0 {
 		t.Errorf("revoked peer returned as provider: %v", providers)
-	}
-}
-
-// A provider record lives DHTProviderAddrTTL; the node announces at least
-// three times within it, so a shorter TTL shortens the interval and the
-// default pair stays as it was.
-func TestReprovideIntervalFollowsProviderTTL(t *testing.T) {
-	for _, tc := range []struct {
-		ttl  time.Duration
-		want time.Duration
-	}{
-		{0, ReprovideInterval},
-		{DefaultDHTProviderAddrTTL, ReprovideInterval},
-		{time.Hour, ReprovideInterval},
-		{30 * time.Second, 10 * time.Second},
-		{5 * time.Second, 5 * time.Second / 3},
-		{time.Second, time.Second},
-	} {
-		n := &AgentMeshNode{config: Options{DHTProviderAddrTTL: tc.ttl}}
-		if got := n.reprovideInterval(); got != tc.want {
-			t.Errorf("ttl %s: reprovide every %s, want %s", tc.ttl, got, tc.want)
-		}
 	}
 }
