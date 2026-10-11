@@ -95,6 +95,20 @@ func TestObservedCountsAndClassifiesRefusals(t *testing.T) {
 	if ok.GetConnLimit() != 42 {
 		t.Errorf("GetConnLimit = %d, want the wrapped manager's 42", ok.GetConnLimit())
 	}
+
+	// The QUIC transport passes no address when it could not build one, and
+	// a caller may pass no logger; both are counted and nothing more.
+	before = counterValue(t, refused.WithLabelValues(RefusedOther))
+	bare := Observe(&refusingResourceManager{err: errors.New("no address")}, refused, nil)
+	if _, err := bare.OpenConnection(network.DirInbound, true, nil); err == nil {
+		t.Fatal("refusal with no endpoint not returned")
+	}
+	if got := counterValue(t, refused.WithLabelValues(RefusedOther)); got != before+1 {
+		t.Errorf("refusal with no endpoint: counter %v, want %v", got, before+1)
+	}
+	if _, logged := bare.LastLoggedAt("?"); !logged {
+		t.Error("refusal with no endpoint not attributed to the unknown source")
+	}
 }
 
 func TestObservedLogsOneSourceOncePerInterval(t *testing.T) {
@@ -132,8 +146,12 @@ func TestObservedLogsOneSourceOncePerInterval(t *testing.T) {
 }
 
 // The per-source cap is what the manager enforces, and loopback is exempt.
+// A cap under one would refuse every peer and is refused itself.
 func TestNewResourceManagerCapsOneSourceAddress(t *testing.T) {
 	limits := rcmgr.InfiniteLimits
+	if _, err := NewResourceManager(limits, 0); err == nil {
+		t.Fatal("a cap of 0 was accepted")
+	}
 	m, err := NewResourceManager(limits, 2)
 	if err != nil {
 		t.Fatal(err)

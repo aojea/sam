@@ -23,6 +23,7 @@ package p2plimits
 
 import (
 	"errors"
+	"fmt"
 	"net/netip"
 	"strings"
 	"sync"
@@ -68,8 +69,13 @@ const libp2pDefaultConnsPerIP = 8
 // NewResourceManager is libp2p's resource manager with the given limits, a
 // per-source-IP inbound connection cap of perIP and the per-subnet
 // connection rate limit scaled to it. Loopback is exempt from both, as in
-// libp2p's default, so a local mesh never meets them.
+// libp2p's default, so a local mesh never meets them. A cap under one
+// would refuse every peer, so it is an error here rather than a silent
+// listener.
 func NewResourceManager(limits rcmgr.ConcreteLimitConfig, perIP int) (network.ResourceManager, error) {
+	if perIP <= 0 {
+		return nil, fmt.Errorf("connections per source address must be at least 1, got %d", perIP)
+	}
 	scale := float64(perIP) / libp2pDefaultConnsPerIP
 	connRateLimiter := &xrate.Limiter{
 		NetworkPrefixLimits: []xrate.PrefixLimit{
@@ -122,10 +128,14 @@ type Observed struct {
 }
 
 // Observe wraps inner. refused is counted by reason (see Reasons) and warnf
-// written once per source address per RefusalLogInterval.
+// written once per source address per RefusalLogInterval; a nil warnf only
+// counts.
 func Observe(inner network.ResourceManager, refused *prometheus.CounterVec, warnf func(format string, args ...any)) *Observed {
 	for _, v := range Reasons {
 		refused.WithLabelValues(v)
+	}
+	if warnf == nil {
+		warnf = func(string, ...any) {}
 	}
 	return &Observed{ResourceManager: inner, refused: refused, warnf: warnf, lastLogAt: map[string]time.Time{}, now: time.Now}
 }
@@ -171,9 +181,12 @@ func (m *Observed) refusedConn(endpoint multiaddr.Multiaddr, err error) {
 	reason := RefusalReason(err)
 	m.refused.WithLabelValues(reason).Inc()
 
+	// The QUIC transport passes no address when it could not build one.
 	source := "?"
-	if ip, ipErr := manet.ToIP(endpoint); ipErr == nil {
-		source = ip.String()
+	if endpoint != nil {
+		if ip, ipErr := manet.ToIP(endpoint); ipErr == nil {
+			source = ip.String()
+		}
 	}
 	m.mu.Lock()
 	last, seen := m.lastLogAt[source]
