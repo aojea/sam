@@ -309,3 +309,27 @@ func TestSplitToolName(t *testing.T) {
 		})
 	}
 }
+
+// The relay's own address is what a circuit address carries before its
+// /p2p/<relay>/p2p-circuit tail; a bare circuit and a direct address carry
+// none.
+func TestRelayTransportAddr(t *testing.T) {
+	relayHost, err := mocknet.New().GenPeer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay := relayHost.ID().String()
+	for _, tc := range []struct {
+		addr, want string
+	}{
+		{"/ip4/136.113.153.46/udp/4501/quic-v1/p2p/" + relay + "/p2p-circuit", "/ip4/136.113.153.46/udp/4501/quic-v1"},
+		{"/dns4/bootstrap.example/tcp/4501/p2p/" + relay + "/p2p-circuit", "/dns4/bootstrap.example/tcp/4501"},
+		{"/p2p/" + relay + "/p2p-circuit", ""},
+		{"/ip4/10.0.0.1/tcp/5002", ""},
+	} {
+		got := relayTransportAddr(multiaddr.StringCast(tc.addr))
+		if (got == nil) != (tc.want == "") || (got != nil && got.String() != tc.want) {
+			t.Errorf("relayTransportAddr(%s) = %v, want %q", tc.addr, got, tc.want)
+		}
+	}
+}

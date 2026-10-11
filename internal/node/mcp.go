@@ -591,17 +591,17 @@ func circuitRelay(ma multiaddr.Multiaddr) peer.ID {
 }
 
 // relayTransportAddr is the relay's own address carried in a circuit
-// address, or nil for a bare /p2p/<relay>/p2p-circuit.
+// address, the components before /p2p/<relay>/p2p-circuit, or nil for a
+// bare circuit or any other address.
 func relayTransportAddr(ma multiaddr.Multiaddr) multiaddr.Multiaddr {
+	if circuitRelay(ma) == "" {
+		return nil
+	}
 	parts := multiaddr.Split(ma)
 	if len(parts) < 3 {
 		return nil
 	}
-	var via multiaddr.Multiaddr
-	for _, c := range parts[:len(parts)-2] {
-		via = via.AppendComponent(&c)
-	}
-	return via
+	return multiaddr.Multiaddr(slices.Clone(parts[:len(parts)-2]))
 }
 
 // transitCatalogRefreshInterval bounds how often a relay the catalog does
