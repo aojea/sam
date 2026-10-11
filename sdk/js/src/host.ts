@@ -22,7 +22,7 @@ import { yamux } from "@chainsafe/libp2p-yamux";
 import { circuitRelayTransport } from "@libp2p/circuit-relay-v2";
 import { privateKeyFromProtobuf } from "@libp2p/crypto/keys";
 import { gossipsub, type GossipSub } from "@libp2p/gossipsub";
-import { identify } from "@libp2p/identify";
+import { identify, identifyPush } from "@libp2p/identify";
 import type { Libp2p, PeerId } from "@libp2p/interface";
 import { kadDHT, passthroughMapper } from "@libp2p/kad-dht";
 import { ping } from "@libp2p/ping";
@@ -79,6 +79,12 @@ export async function createMeshHost(identity: Identity, options: MeshHostOption
     },
     services: {
       identify: identify(),
+      // A member's addresses change after it connects: the relay address
+      // arrives with the reservation, which follows the auth handshake.
+      // Identify alone tells a router the addresses at connect time; push
+      // tells the routers already connected, the reservation's own among
+      // them, where the member is reached now, as agentmesh-node does.
+      identifyPush: identifyPush(),
       ping: ping(),
       // A client of the mesh DHT: it looks providers up and does not hold
       // records. Peers keep their private addresses; a mesh member often

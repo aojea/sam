@@ -22,7 +22,8 @@ import { durationFromMs, timestampFromMs } from "@bufbuild/protobuf/wkt";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { circuitRelayServer, circuitRelayTransport } from "@libp2p/circuit-relay-v2";
 import { privateKeyFromProtobuf } from "@libp2p/crypto/keys";
-import { identify } from "@libp2p/identify";
+import { peerIdFromString } from "@libp2p/peer-id";
+import { identify, identifyPush } from "@libp2p/identify";
 import type { Libp2p } from "@libp2p/interface";
 import { tcp } from "@libp2p/tcp";
 import { tls } from "@libp2p/tls";
@@ -132,7 +133,9 @@ before(async () => {
     transports: [tcp()],
     connectionEncrypters: [tls()],
     streamMuxers: [yamux()],
-    services: { identify: identify(), relay: circuitRelayServer() },
+    // identifyPush on the receiving side, as a Go router has it: a member's
+    // relay address arrives after it connected.
+    services: { identify: identify(), identifyPush: identifyPush(), relay: circuitRelayServer() },
     // Every member here dials from loopback; the per-host inbound rate limit would refuse the later ones.
     connectionManager: { inboundConnectionThreshold: Infinity },
   });
@@ -159,6 +162,19 @@ test("join authenticates with the router, reserves a relay slot and answers peer
     assert.ok(session.relayAddresses.length > 0, "no relayed address after the reservation");
     const relayed = session.relayAddresses.find((ma) => ma.toString().startsWith(routerAddr));
     assert.ok(relayed, `relayed address ${session.relayAddresses.map(String).join(",")} does not go through ${routerAddr}`);
+
+    // The router learned the member's addresses when it connected, before
+    // the reservation; the member pushes the relay address to it once it
+    // has one, so a lookup that reaches this router finds the member. The
+    // router keeps a peer's address without the peer's own /p2p suffix.
+    const pushed = `${routerAddr}/p2p-circuit`;
+    const deadline = Date.now() + 5_000;
+    let known: string[] = [];
+    while (Date.now() < deadline && !known.includes(pushed)) {
+      known = (await router.peerStore.get(peerIdFromString(mesh.peerId))).addresses.map((a) => a.multiaddr.toString());
+      if (!known.includes(pushed)) await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(known.includes(pushed), `the router holds ${JSON.stringify(known)} for the member, not its address through the router ${pushed}`);
 
     // A peer reaches the member through the router and both sides verify each other.
     const peerIdentity = Identity.generate();
