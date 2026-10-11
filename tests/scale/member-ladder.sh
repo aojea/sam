@@ -90,6 +90,17 @@ rssh() { # minion cmd...
   local m="$1"; shift
   $GCLOUD compute ssh "$m" "${SSH_OPTS[@]}" --command "$*" 2>/dev/null
 }
+# rssh_retry runs cmd until it succeeds or three attempts fail: an IAP tunnel
+# drops now and then, and one dropped session must not end a run that holds
+# thousands of members.
+rssh_retry() { # minion cmd...
+  local m="$1" attempt; shift
+  for attempt in 1 2 3; do
+    rssh "$m" "$@" && return 0
+    sleep $(( attempt * 5 ))
+  done
+  return 1
+}
 rscp_to() { $GCLOUD compute scp "${SSH_OPTS[@]}" "$1" "$2:$3" 2>/dev/null; }
 rscp_from() { $GCLOUD compute scp "${SSH_OPTS[@]}" "$1:$2" "$3" 2>/dev/null; }
 
@@ -192,7 +203,9 @@ for step in "${STEPS[@]}"; do
   event "step${step_no}-start"
   for m in "${minions[@]}"; do
     # The run detaches from the ssh session; its stderr is the progress log.
-    rssh "$m" "ulimit -n 1048576; rm -rf /var/lib/ladder/${m} /var/log/ladder/${m}.json /var/log/ladder/resident; nohup agentmesh-bench join --node-bin /usr/local/bin/agentmesh-node --control-plane ${CONTROL_PLANE} --bootstrap-token-path ${REMOTE_TOKEN_PATH} --service ${SERVICE} --count ${PER_MINION} --ramp ${RAMP} --hold ${HOLD} --dir /var/lib/ladder/${m} --label minion=${m} --label step=${step_no} --label resident_before=${resident} --resident-marker /var/log/ladder/resident --out /var/log/ladder/${m}.json > /var/log/ladder/${m}.log 2>&1 < /dev/null &" || fail "could not start the run on $m"
+    # A dropped session may have started it all the same, so a retry first
+    # asks whether it runs.
+    rssh_retry "$m" "pgrep -x agentmesh-bench >/dev/null || { ulimit -n 1048576; rm -rf /var/lib/ladder/${m} /var/log/ladder/${m}.json /var/log/ladder/resident; nohup agentmesh-bench join --node-bin /usr/local/bin/agentmesh-node --control-plane ${CONTROL_PLANE} --bootstrap-token-path ${REMOTE_TOKEN_PATH} --service ${SERVICE} --count ${PER_MINION} --ramp ${RAMP} --hold ${HOLD} --dir /var/lib/ladder/${m} --label minion=${m} --label step=${step_no} --label resident_before=${resident} --resident-marker /var/log/ladder/resident --out /var/log/ladder/${m}.json > /var/log/ladder/${m}.log 2>&1 < /dev/null & }" || fail "could not start the run on $m"
     STARTED_MINIONS+=("$m")
   done
   # Resident means every member's journey has ended, one way or the other.
@@ -200,10 +213,12 @@ for step in "${STEPS[@]}"; do
   for m in "${minions[@]}"; do
     until rssh "$m" "test -f /var/log/ladder/resident"; do
       [[ $(date +%s) -lt $deadline ]] || fail "$m was not resident within 15 minutes; see /var/log/ladder/${m}.log on it"
-      rssh "$m" "pgrep -x agentmesh-bench >/dev/null" || fail "the run on $m ended before its fleet was resident"
+      rssh_retry "$m" "pgrep -x agentmesh-bench >/dev/null" || fail "the run on $m ended before its fleet was resident"
       sleep 10
     done
-    rscp_from "$m" "/var/log/ladder/${m}.json" "$OUT/step${step_no}-${m}.json" || fail "could not fetch the join report from $m"
+    rscp_from "$m" "/var/log/ladder/${m}.json" "$OUT/step${step_no}-${m}.json" \
+      || { sleep 5; rscp_from "$m" "/var/log/ladder/${m}.json" "$OUT/step${step_no}-${m}.json"; } \
+      || fail "could not fetch the join report from $m"
   done
   event "step${step_no}-resident"
   # Let the mesh settle on the new population before it is read.
