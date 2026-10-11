@@ -76,7 +76,10 @@ one when the NATs allow it.
 Routers are the fixed points. A node learns their addresses, labels and
 load from the control plane's `/info` at enrollment and again on a
 schedule, holds two of them with a relay reservation on each, and replaces
-one that drops or that sends it away. A call to a peer reached through a
+one that drops or that sends it away. A router that grants a reservation
+records the member's address through itself, so a DHT lookup for the
+member that reaches that router learns where it is reached; an SDK member
+listens on nothing else. A call to a peer reached through a
 third router goes through that router: the caller runs the credential
 handshake there first, since a router relays only between peers it has
 verified. The DHT and the relay are closed to anyone who is not enrolled.

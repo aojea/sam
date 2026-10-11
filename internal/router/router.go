@@ -140,8 +140,59 @@ func (a *relayACL) AllowReserve(p peer.ID, addr multiaddr.Multiaddr) bool {
 	ok := a.r.isPeerAuthenticated(p)
 	if !ok {
 		logger.Debugf("[Relay] Rejecting reservation for %s: not authenticated", p)
+		return false
 	}
-	return ok
+	a.r.recordReservation(p)
+	return true
+}
+
+// recordReservation puts the addresses p is reached at through this router
+// in the peerstore, so a DHT lookup for p that reaches this router gets
+// them. A member tells its other routers about its reservations through
+// identify, but not the router it reserved with: identify ran before the
+// reservation, and an SDK member listens on nothing else. The entries last
+// as long as the reservation, which the member renews through here;
+// identify, which rewrites a peer's connected-TTL addresses whenever the
+// peer announces new ones, leaves that TTL alone. forgetPeer drops them.
+func (r *Router) recordReservation(p peer.ID) {
+	if r.Host == nil {
+		return
+	}
+	r.Host.Peerstore().AddAddrs(p, r.circuitAddrs(), r.reservationTTL())
+}
+
+// reservationTTL is the relay's reservation lifetime, which the recorded
+// circuit addresses share.
+func (r *Router) reservationTTL() time.Duration {
+	return relay.DefaultResources().ReservationTTL
+}
+
+// advertisedAddrs are the addresses the router leases to the control plane
+// and is reached at: the configured external ones, else what the host
+// listens on.
+func (r *Router) advertisedAddrs() []multiaddr.Multiaddr {
+	if len(r.config.ExternalAddrs) == 0 {
+		return r.Host.Addrs()
+	}
+	addrs := make([]multiaddr.Multiaddr, 0, len(r.config.ExternalAddrs))
+	for _, s := range r.config.ExternalAddrs {
+		if ma, err := multiaddr.NewMultiaddr(s); err == nil {
+			addrs = append(addrs, ma)
+		}
+	}
+	return addrs
+}
+
+// circuitAddrs are advertisedAddrs with /p2p/<router>/p2p-circuit appended:
+// where a peer that reserved with this router is reached.
+func (r *Router) circuitAddrs() []multiaddr.Multiaddr {
+	via := multiaddr.StringCast("/p2p/" + r.Host.ID().String() + "/p2p-circuit")
+	advertised := r.advertisedAddrs()
+	addrs := make([]multiaddr.Multiaddr, 0, len(advertised))
+	for _, a := range advertised {
+		addrs = append(addrs, a.Encapsulate(via))
+	}
+	return addrs
 }
 
 func (a *relayACL) AllowConnect(src peer.ID, srcAddr multiaddr.Multiaddr, dest peer.ID) bool {
@@ -197,11 +248,14 @@ func (r *Router) admitPeer(p peer.ID, expiry time.Time) {
 	}
 }
 
-// forgetPeer is the reverse of admitPeer.
+// forgetPeer is the reverse of admitPeer, and drops the circuit addresses
+// recordReservation put in the peerstore: the relay drops the reservation
+// with the connection.
 func (r *Router) forgetPeer(p peer.ID) {
 	r.authenticatedPeers.Delete(p)
 	if r.Host != nil {
 		r.Host.ConnManager().UntagPeer(p, memberTag)
+		r.Host.Peerstore().UpdateAddrs(p, r.reservationTTL(), 0)
 	}
 }
 
@@ -512,7 +566,7 @@ func (r *Router) Start() (retErr error) {
 		DisconnectedF: func(n network.Network, c network.Conn) {
 			p := c.RemotePeer()
 			if len(hostNode.Network().ConnsToPeer(p)) == 0 {
-				r.authenticatedPeers.Delete(p)
+				r.forgetPeer(p)
 			}
 		},
 	})
@@ -948,7 +1002,7 @@ func (r *Router) listenForControlPlaneEvents(ctx context.Context) {
 			if event.PeerId != "" {
 				if bannedPeer, err := peer.Decode(event.PeerId); err == nil {
 					logger.Infof("[Router Event] Received BANNED event for peer %s, evicting from authenticated peers and adding to blocklist", bannedPeer)
-					r.authenticatedPeers.Delete(bannedPeer)
+					r.forgetPeer(bannedPeer)
 					// The timestamp is what stops an /info answer that was
 					// already in flight from undoing this (see
 					// reconcileBannedPeers).
@@ -1051,14 +1105,8 @@ func (r *Router) sendLease(ctx context.Context, ttl *time.Duration, attempts int
 		}
 
 		var addrs []string
-		if len(r.config.ExternalAddrs) > 0 {
-			for _, addr := range r.config.ExternalAddrs {
-				addrs = append(addrs, addr+"/p2p/"+r.Host.ID().String())
-			}
-		} else {
-			for _, addr := range r.Host.Addrs() {
-				addrs = append(addrs, addr.String()+"/p2p/"+r.Host.ID().String())
-			}
+		for _, addr := range r.advertisedAddrs() {
+			addrs = append(addrs, addr.String()+"/p2p/"+r.Host.ID().String())
 		}
 
 		var connectedPeers []string
@@ -1246,7 +1294,7 @@ func (r *Router) reconcileBannedPeers(peerIDs []string, fetchedAt time.Time) {
 		}
 		logger.Infof("[Federation] Peer %s is banned, adding to blocklist", p)
 		r.bannedPeers.Store(p, fetchedAt)
-		r.authenticatedPeers.Delete(p)
+		r.forgetPeer(p)
 		if r.Host != nil {
 			_ = r.Host.Network().ClosePeer(p)
 		}

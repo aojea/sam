@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/agentmesh/api"
 	"github.com/google/agentmesh/internal/identity"
+	"github.com/multiformats/go-multiaddr"
 )
 
 // DefaultShutdownLeaseTTL is the CLI default for Options.ShutdownLeaseTTL:
@@ -166,6 +167,11 @@ func (o *Options) Validate() error {
 	}
 	if err := api.ValidateLabels(o.Labels); err != nil {
 		return fmt.Errorf("labels: %w", err)
+	}
+	for _, s := range o.ExternalAddrs {
+		if _, err := multiaddr.NewMultiaddr(s); err != nil {
+			return fmt.Errorf("external address %q: %w", s, err)
+		}
 	}
 	return api.ValidateControlPlaneTransport(o.ControlPlaneURL, o.AllowInsecureControlPlane)
 }
