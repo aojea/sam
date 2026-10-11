@@ -46,7 +46,29 @@ func init() {
 			transitHandshakesTotal.WithLabelValues(router, result)
 		}
 	}
+	for _, result := range []string{lookupFound, lookupNotFound, lookupFailed} {
+		peerLookupsTotal.WithLabelValues(result)
+	}
 }
+
+// The outcome of a DHT lookup for a peer's addresses: found, found
+// nothing, or the lookup itself failed (an empty routing table, a timeout).
+const (
+	lookupFound    = "found"
+	lookupNotFound = "not_found"
+	lookupFailed   = "failed"
+)
+
+// peerLookupsTotal counts the DHT lookups a call ran for a peer it held no
+// address for; not_found rising is a peer the DHT does not carry, failed
+// rising is this node cut off from the DHT.
+var peerLookupsTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "agentmesh_node_peer_lookups_total",
+		Help: "DHT lookups for a peer's addresses, by outcome: found, not_found, failed",
+	},
+	[]string{"result"},
+)
 
 // The router a transit handshake is with: one the control plane's catalog
 // lists, or a relay found only in a peer's record.

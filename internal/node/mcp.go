@@ -29,6 +29,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
+	"github.com/libp2p/go-libp2p/core/routing"
+	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	"github.com/libp2p/go-msgio"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/multiformats/go-multiaddr"
@@ -469,13 +471,24 @@ func (n *AgentMeshNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID
 		findCtx, cancel := context.WithTimeout(ctx, dhtLookupTimeout)
 		addrInfo, err := n.DHT.FindPeer(findCtx, targetPeer)
 		cancel()
+		addrs = addrInfo.Addrs
 		if err != nil {
-			logger.Debugf("[Discovery] Failed to find peer %s on DHT: %v", targetPeer, err)
-		} else {
-			addrs = addrInfo.Addrs
-			if len(addrs) > 0 {
-				changed = true
-			}
+			// kad-dht answers "not found" for a peer it could not dial during
+			// the lookup, which a peer reached only through a router this node
+			// has not handshaken with is; what the lookup learned is in the
+			// peerstore all the same.
+			addrs = n.Host.Peerstore().Addrs(targetPeer)
+		}
+		switch {
+		case len(addrs) > 0:
+			changed = true
+			peerLookupsTotal.WithLabelValues(lookupFound).Inc()
+		case err != nil && !errors.Is(err, routing.ErrNotFound):
+			peerLookupsTotal.WithLabelValues(lookupFailed).Inc()
+			logger.Warnf("[Discovery] DHT lookup for %s failed (routing table holds %d peers): %v", targetPeer, n.DHT.RoutingTable().Size(), err)
+		default:
+			peerLookupsTotal.WithLabelValues(lookupNotFound).Inc()
+			logger.Infof("[Discovery] DHT lookup found no address for %s (routing table holds %d peers); trying circuits through this node's routers", targetPeer, n.DHT.RoutingTable().Size())
 		}
 	}
 	logger.Debugf("[Discovery] preparePeerAddrs for %s: found %d addrs in peerstore: %v", targetPeer, len(addrs), addrs)
@@ -573,6 +586,12 @@ func (n *AgentMeshNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID
 		n.Host.Peerstore().ClearAddrs(targetPeer)
 		n.Host.Peerstore().AddAddrs(targetPeer, validAddrs, peerstore.TempAddrTTL)
 		logger.Debugf("[Discovery] Replaced addrs for %s with %d routable/circuit addrs", targetPeer, len(validAddrs))
+		// The lookup dialled the peer before any transit handshake, and a
+		// router refuses a circuit to a caller it has not admitted; the swarm
+		// put that address in dial backoff, which the handshake has outdated.
+		if sw, ok := n.Host.Network().(*swarm.Swarm); ok {
+			sw.Backoff().Clear(targetPeer)
+		}
 	}
 }
 
