@@ -169,23 +169,26 @@ type AgentMeshNode struct {
 	// Options.Routers of them it keeps a session with; shunned are the ones
 	// it stays off until the time given, having been sent away or having
 	// not come back. connMgr protects the attached ones from being trimmed.
-	routerCatalog         []routerCandidate
-	attached              map[peer.ID]bool
-	shunned               map[peer.ID]time.Time
-	connMgr               *connmgr.BasicConnMgr
-	peerLastEventTime     map[string]int64
-	mu                    sync.Mutex
-	nodeConfig            *NodeConfigComplete
-	revokedPeers          *lru.Cache[string, int64]
-	revokedTokens         *lru.Cache[string, time.Time]
-	delegatedBiscuitCache *lru.Cache[string, *api.TokenExchangeResponse]
-	stsTokenCache         *lru.Cache[string, *api.STSTokenResponse]
-	peerLabelGate         *lru.Cache[string, time.Time]
-	authPeers             sync.Map
-	trustedKeys           []TrustedKey
-	keysMu                sync.RWMutex
-	MeshPolicyRules       []biscuit.Rule
-	MeshPolicyMu          sync.RWMutex
+	routerCatalog []routerCandidate
+	// transitCatalogRefreshedAt is when a relay the catalog did not list
+	// last made the node re-read /info (selectTransit).
+	transitCatalogRefreshedAt time.Time
+	attached                  map[peer.ID]bool
+	shunned                   map[peer.ID]time.Time
+	connMgr                   *connmgr.BasicConnMgr
+	peerLastEventTime         map[string]int64
+	mu                        sync.Mutex
+	nodeConfig                *NodeConfigComplete
+	revokedPeers              *lru.Cache[string, int64]
+	revokedTokens             *lru.Cache[string, time.Time]
+	delegatedBiscuitCache     *lru.Cache[string, *api.TokenExchangeResponse]
+	stsTokenCache             *lru.Cache[string, *api.STSTokenResponse]
+	peerLabelGate             *lru.Cache[string, time.Time]
+	authPeers                 sync.Map
+	trustedKeys               []TrustedKey
+	keysMu                    sync.RWMutex
+	MeshPolicyRules           []biscuit.Rule
+	MeshPolicyMu              sync.RWMutex
 	// pendingEgress holds assignments that arrived before Start created the
 	// service registry (SyncControlPlane runs first); Start applies them.
 	pendingEgress   []*api.EgressDestination
@@ -1153,6 +1156,9 @@ func (n *AgentMeshNode) redialRouter(ctx context.Context, router peer.ID) {
 }
 
 func (n *AgentMeshNode) loadIdentityForAuth() ([]byte, error) {
+	if n.Store == nil {
+		return nil, fmt.Errorf("%w: no identity store", ErrFatalAuth)
+	}
 	biscuitBytes, err := n.Store.LoadIdentity()
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to load identity from store: %w", ErrFatalAuth, err)

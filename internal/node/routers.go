@@ -173,6 +173,9 @@ func (n *AgentMeshNode) routerCandidates() []routerCandidate {
 // refreshRouterCatalog re-reads /info. Best effort: a node started from its
 // stored addresses with no control plane in reach keeps what it has.
 func (n *AgentMeshNode) refreshRouterCatalog(ctx context.Context) error {
+	if n.Store == nil {
+		return errors.New("no store")
+	}
 	controlPlaneURL, err := n.Store.LoadControlPlaneURL()
 	if err != nil || controlPlaneURL == "" {
 		return errors.New("no control plane URL in store")

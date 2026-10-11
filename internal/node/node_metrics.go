@@ -41,7 +41,30 @@ func init() {
 	for _, reason := range []api.RouterGoAway_Reason{api.RouterGoAway_DRAINING, api.RouterGoAway_OVERLOADED} {
 		goAwayReceivedTotal.WithLabelValues(reason.String())
 	}
+	for _, router := range []string{transitListed, transitUnlisted} {
+		for _, result := range []string{"ok", "failed"} {
+			transitHandshakesTotal.WithLabelValues(router, result)
+		}
+	}
 }
+
+// The router a transit handshake is with: one the control plane's catalog
+// lists, or a relay found only in a peer's record.
+const (
+	transitListed   = "listed"
+	transitUnlisted = "unlisted"
+)
+
+// transitHandshakesTotal counts the handshakes a call made with a router it
+// did not hold, to reach a peer through it; the unlisted ones are routers
+// the catalog missed, which a rising count during a rollout explains.
+var transitHandshakesTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "agentmesh_node_transit_handshakes_total",
+		Help: "Handshakes with a router this node did not hold, run to reach a peer through it, by whether the control plane listed the router and by result",
+	},
+	[]string{"router", "result"},
+)
 
 // nodeStateCollector exports the node's own view of its mesh membership: the
 // same figures GET /debug/mesh-info and /debug/token-info answer on demand,

@@ -590,6 +590,24 @@ func circuitRelay(ma multiaddr.Multiaddr) peer.ID {
 	return relayID
 }
 
+// relayTransportAddr is the relay's own address carried in a circuit
+// address, or nil for a bare /p2p/<relay>/p2p-circuit.
+func relayTransportAddr(ma multiaddr.Multiaddr) multiaddr.Multiaddr {
+	parts := multiaddr.Split(ma)
+	if len(parts) < 3 {
+		return nil
+	}
+	var via multiaddr.Multiaddr
+	for _, c := range parts[:len(parts)-2] {
+		via = via.AppendComponent(&c)
+	}
+	return via
+}
+
+// transitCatalogRefreshInterval bounds how often a relay the catalog does
+// not list makes the node re-read /info.
+const transitCatalogRefreshInterval = 10 * time.Second
+
 // selectTransit decides which of a peer's circuit addresses to dial and
 // makes sure the node is admitted at the router behind them. A router
 // relays only between peers it has admitted, and a node keeps sessions
@@ -600,30 +618,69 @@ func circuitRelay(ma multiaddr.Multiaddr) peer.ID {
 // at start, before the circuit is asked for. Circuits through the peer's
 // other routers are dropped: each would be a handshake and a session
 // there, and a service the whole mesh calls would hold every caller at
-// every one of its routers. A relay that is not a router (a node with
-// --enable-relay) is kept and left alone; it admits what it has handshaken
-// with on its own terms. Direct addresses always pass.
+// every one of its routers.
+//
+// A relay the catalog does not list is first looked for in a fresh /info:
+// the catalog is read at start, a router that was restarting then was not
+// in it, and a member that started during a rollout would otherwise never
+// transit that router until the next sync. A relay still unlisted after
+// that is handshaken with all the same, after the listed routers: a router
+// whose lease the control plane does not carry admits the node like any
+// other, and a relay that is not a router (a node with --enable-relay)
+// admits what it has handshaken with on its own terms and is kept whatever
+// the handshake said. Direct addresses always pass.
 func (n *AgentMeshNode) selectTransit(ctx context.Context, addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
+	var relays []peer.ID
+	relayAddrs := map[peer.ID][]multiaddr.Multiaddr{}
+	for _, ma := range addrs {
+		relay := circuitRelay(ma)
+		if relay == "" {
+			continue
+		}
+		if _, seen := relayAddrs[relay]; !seen {
+			relays = append(relays, relay)
+		}
+		if via := relayTransportAddr(ma); via != nil {
+			relayAddrs[relay] = append(relayAddrs[relay], via)
+		} else if _, seen := relayAddrs[relay]; !seen {
+			relayAddrs[relay] = nil
+		}
+	}
+	if len(relays) == 0 {
+		return addrs
+	}
+
 	routers := map[peer.ID]routerCandidate{}
 	for _, c := range n.routerCandidates() {
 		routers[c.ID] = c
 	}
-	var viaRouters []peer.ID
-	seen := map[peer.ID]bool{}
-	for _, ma := range addrs {
-		relay := circuitRelay(ma)
-		if _, isRouter := routers[relay]; relay == "" || !isRouter || seen[relay] {
-			continue
+	var unlisted []peer.ID
+	for _, r := range relays {
+		if _, isRouter := routers[r]; !isRouter {
+			unlisted = append(unlisted, r)
 		}
-		seen[relay] = true
-		viaRouters = append(viaRouters, relay)
 	}
-	if len(viaRouters) == 0 {
-		return addrs
+	if len(unlisted) > 0 && n.refreshCatalogForTransit(ctx) {
+		routers = map[peer.ID]routerCandidate{}
+		for _, c := range n.routerCandidates() {
+			routers[c.ID] = c
+		}
+		unlisted = unlisted[:0]
+		for _, r := range relays {
+			if _, isRouter := routers[r]; !isRouter {
+				unlisted = append(unlisted, r)
+			}
+		}
+	}
+	var viaRouters []peer.ID
+	for _, r := range relays {
+		if _, isRouter := routers[r]; isRouter {
+			viaRouters = append(viaRouters, r)
+		}
 	}
 
 	usable := map[peer.ID]bool{}
-	for _, r := range viaRouters {
+	for _, r := range relays {
 		if n.isAuthenticatedAndConnected(r) {
 			usable[r] = true
 		}
@@ -637,12 +694,20 @@ func (n *AgentMeshNode) selectTransit(ctx context.Context, addrs []multiaddr.Mul
 			logger.Debugf("[AuthN] Cannot authenticate to a transit router: %v", err)
 			return addrs
 		}
-		for _, r := range viaRouters {
-			router := peer.AddrInfo{ID: r, Addrs: n.Host.Peerstore().Addrs(r)}
+		for _, r := range append(viaRouters, unlisted...) {
+			_, listed := routers[r]
+			kind := transitListed
+			if !listed {
+				kind = transitUnlisted
+				logger.Infof("[AuthN] Relay %s is not a router the control plane lists; handshaking with it for the circuit", r)
+			}
+			router := peer.AddrInfo{ID: r, Addrs: append(n.Host.Peerstore().Addrs(r), relayAddrs[r]...)}
 			if err := n.authRouter(ctx, router, biscuitBytes); err != nil {
+				transitHandshakesTotal.WithLabelValues(kind, "failed").Inc()
 				logger.Warnf("[AuthN] Transit router %s did not admit this node: %v", r, err)
 				continue
 			}
+			transitHandshakesTotal.WithLabelValues(kind, "ok").Inc()
 			logger.Debugf("[AuthN] Authenticated to transit router %s", r)
 			usable[r] = true
 			break
@@ -661,4 +726,26 @@ func (n *AgentMeshNode) selectTransit(ctx context.Context, addrs []multiaddr.Mul
 		kept = append(kept, ma)
 	}
 	return kept
+}
+
+// refreshCatalogForTransit re-reads the routers from the control plane for
+// a relay the catalog does not list, at most once per
+// transitCatalogRefreshInterval. It reports whether the catalog was re-read.
+func (n *AgentMeshNode) refreshCatalogForTransit(ctx context.Context) bool {
+	n.mu.Lock()
+	due := time.Since(n.transitCatalogRefreshedAt) >= transitCatalogRefreshInterval
+	if due {
+		n.transitCatalogRefreshedAt = time.Now()
+	}
+	n.mu.Unlock()
+	if !due {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := n.refreshRouterCatalog(ctx); err != nil {
+		logger.Debugf("[AuthN] Routers not re-read from the control plane for a transit relay: %v", err)
+		return false
+	}
+	return true
 }

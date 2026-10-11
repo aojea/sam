@@ -232,6 +232,7 @@ func circuitRelaysInRecord(t *testing.T, reader *backgroundNode, target peer.ID)
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		// Not in the DHT yet.
+		t.Logf("peer-addrs for %s: %d %s", target, resp.StatusCode, strings.TrimSpace(string(body)))
 		return nil
 	}
 	var info struct {
@@ -716,6 +717,60 @@ func TestCallerTransitsTheRouterItShares(t *testing.T) {
 	if t.Failed() {
 		t.Logf("--- caller ---\n%s", caller.log())
 	}
+}
+
+// TestCallerTransitsARouterItsCatalogMissed is the member that started
+// while a router was away: its catalog, read from /info once at start, does
+// not list a router that joined after, and a peer on that router announces
+// circuits only through it. A circuit through a router the caller has not
+// handshaken with is refused by the relay, so the caller must learn the
+// router from the record and admit itself there before it asks.
+func TestCallerTransitsARouterItsCatalogMissed(t *testing.T) {
+	m := startAttachmentMesh(t)
+	routerA := m.startRouter(t, "router-a", "site=a")
+	common := append(m.nodeArgs(), "--monitor-bootstrap", "500ms", "--monitor-interval", "500ms")
+	// One router wanted and one matching, so the caller is never short and
+	// never re-reads /info on its own.
+	caller := launchNode(t, m.nodeBin, m.nodeEnv("caller"), filepath.Join(m.tmpDir, "caller"), append(slices.Clone(common),
+		"--api-token-path", tokenPath(t, "token-c"),
+		"--router-selector", "site=a",
+		"--routers", "1",
+	)...)
+	caller.waitForAPI(t)
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("--- caller ---\n%s", caller.log())
+		}
+	})
+	waitForEqual(t, "routers attached by the caller", func() []string { return attachedRouters(t, caller) }, peerIDStrings(routerA.peerID), 10*time.Second)
+
+	// Router b arrives after the caller; the provider lives only there.
+	routerB := m.startRouter(t, "router-b", "site=b")
+	waitForEqual(t, "peer routers router b authenticated", func() []string {
+		return []string{fmt.Sprint(routerB.gauge(t, `agentmesh_router_peer_routers{state="authenticated"}`))}
+	}, []string{"1"}, 10*time.Second)
+	mcpServer := httptest.NewServer(newBoundaryMCPHandler(t))
+	t.Cleanup(mcpServer.Close)
+	provider := launchNode(t, m.nodeBin, m.nodeEnv("provider"), filepath.Join(m.tmpDir, "provider"), append(slices.Clone(common),
+		"--api-token-path", tokenPath(t, "token-p"),
+		"--router-selector", "site=b",
+		"--config", writeNodeConfig(t, m.tmpDir, nil, svcDecl{Type: "mcp", Name: "late-tool", TargetURL: mcpServer.URL}),
+	)...)
+	provider.waitForAPI(t)
+	waitForEqual(t, "routers attached by the provider", func() []string { return attachedRouters(t, provider) }, peerIDStrings(routerB.peerID), 10*time.Second)
+	waitForEqual(t, "routers the provider announces circuits through", func() []string { return announcedCircuitRelays(t, provider) },
+		peerIDStrings(routerB.peerID), 15*time.Second)
+	// A peer lookup by ID has to connect the peer, and the only path is the
+	// circuit through router b, so the record is not readable from here
+	// before the handshake there; discovery by service name needs no dial.
+	callAcrossMesh(t, caller, "token-c", provider, "late-tool")
+
+	// Router b admitted the provider, router a, the control plane's publisher
+	// and, for the call, the caller.
+	if got := routerB.gauge(t, "agentmesh_router_authenticated_peers"); got != 4 {
+		t.Errorf("router b authenticated %v peers, want 4: the caller must have handshaken there before asking for the circuit", got)
+	}
+	t.Logf("--- caller ---\n%s", caller.log())
 }
 
 // TestRouterKeepsOnlyAdmittedConnections pins what a router holds: a

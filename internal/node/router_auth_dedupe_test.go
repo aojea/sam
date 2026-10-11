@@ -608,3 +608,44 @@ func TestRouterDropIsRedialed(t *testing.T) {
 		t.Fatalf("handshakes after the second drop = %d, want 3", got)
 	}
 }
+
+// A peer's record names a circuit through a router the node's catalog does
+// not list: the node read the catalog while that router was restarting, or
+// the router's lease is not carried right now. The call must handshake with
+// that router before asking it for the circuit, as it would with a listed
+// one; without a control plane to re-read, the record is all it has.
+func TestSelectTransitHandshakesWithARouterTheCatalogDoesNotList(t *testing.T) {
+	known := newFakeRouter(t, "/ip4/127.0.0.1/tcp/0")
+	unlisted := newFakeRouterWithKey(t, known.cpPub, known.cpPriv, "/ip4/127.0.0.1/tcp/0")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	// The node holds the known router; the store carries no control plane
+	// URL, so a re-read of the catalog is not possible here.
+	node := known.startNode(t, ctx, known.routerAddrs)
+	if node.isAuthenticatedAndConnected(unlisted.h.ID()) {
+		t.Fatal("node already admitted at the router it was never told about")
+	}
+
+	direct := multiaddr.StringCast("/ip4/192.0.2.9/tcp/5002")
+	circuit := unlisted.routerAddrs[0].Encapsulate(multiaddr.StringCast("/p2p-circuit"))
+	kept := node.selectTransit(ctx, []multiaddr.Multiaddr{direct, circuit})
+
+	if got := unlisted.handshakes.Load(); got != 1 {
+		t.Fatalf("unlisted router saw %d handshakes, want 1", got)
+	}
+	if !node.isAuthenticatedAndConnected(unlisted.h.ID()) {
+		t.Fatal("node not admitted at the unlisted router after the handshake")
+	}
+	var got []string
+	for _, a := range kept {
+		got = append(got, a.String())
+	}
+	if len(kept) != 2 || kept[0].String() != direct.String() || kept[1].String() != circuit.String() {
+		t.Fatalf("addresses kept: %v, want the direct address and the circuit through the unlisted router", got)
+	}
+	// Admitted now: a second selection runs no handshake.
+	node.selectTransit(ctx, []multiaddr.Multiaddr{circuit})
+	if got := unlisted.handshakes.Load(); got != 1 {
+		t.Fatalf("unlisted router saw %d handshakes after the node was admitted, want still 1", got)
+	}
+}
