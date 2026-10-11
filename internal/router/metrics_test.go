@@ -143,13 +143,21 @@ func TestRouterMetricsListener(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.authenticatedPeers.Store(other.ID(), time.Now().Add(time.Hour))
-	code, body = getBody(t, base+"/debug/peer?peer_id="+other.ID().String())
-	if code != http.StatusOK {
-		t.Fatalf("/debug/peer = %d: %s", code, body)
-	}
+	// Identify runs asynchronously on the receiving host after Connect
+	// returns; wait for /debug/peer to show the peer's listen addresses.
 	var view peerView
-	if err := json.Unmarshal([]byte(body), &view); err != nil {
-		t.Fatalf("/debug/peer: %v: %s", err, body)
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		code, body = getBody(t, base+"/debug/peer?peer_id="+other.ID().String())
+		if code != http.StatusOK {
+			t.Fatalf("/debug/peer = %d: %s", code, body)
+		}
+		if err := json.Unmarshal([]byte(body), &view); err != nil {
+			t.Fatalf("/debug/peer: %v: %s", err, body)
+		}
+		if len(view.Addrs) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if view.Connectedness != "Connected" || !view.Authenticated || view.PeerRouter || len(view.Connections) != 1 || len(view.Addrs) == 0 {
 		t.Errorf("/debug/peer for a connected, authenticated member: %+v", view)

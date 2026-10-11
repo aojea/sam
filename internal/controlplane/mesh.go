@@ -182,8 +182,12 @@ func NewMeshPublisher(ctx context.Context, store storage.Store, reconnect time.D
 				return
 			}
 			p.admittedMu.Lock()
+			_, wasAdmitted := p.admittedUntil[c.RemotePeer()]
 			delete(p.admittedUntil, c.RemotePeer())
 			p.admittedMu.Unlock()
+			if wasAdmitted {
+				logger.Infof("[Mesh] Disconnected from router %s", c.RemotePeer())
+			}
 		},
 	})
 	var wg sync.WaitGroup
@@ -200,6 +204,13 @@ func NewMeshPublisher(ctx context.Context, store storage.Store, reconnect time.D
 	}
 	logger.Infof("[Mesh] Publishing control plane events as %s", h.ID())
 	return p, nil
+}
+
+func (p *P2PMeshAdapter) admittedAt(router peer.ID) (time.Time, bool) {
+	p.admittedMu.Lock()
+	defer p.admittedMu.Unlock()
+	until, ok := p.admittedUntil[router]
+	return until, ok
 }
 
 // keepRoutersConnected dials, now and every interval, each leased router the

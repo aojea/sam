@@ -336,11 +336,20 @@ func TestMeshPublisherReachesLeasedRouter(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("publisher never ran the handshake with the router")
 	}
-	publisher.admittedMu.Lock()
-	until, ok := publisher.admittedUntil[routerHost.ID()]
-	publisher.admittedMu.Unlock()
-	if !ok || time.Until(until) < publisherCredentialTTL/2 {
-		t.Fatalf("publisher does not record its admission at the router (until %v, %v)", until, ok)
+	// admitted fires as soon as the router writes its reply; the publisher
+	// records the admission once it reads that reply off the stream.
+	for {
+		if until, ok := publisher.admittedAt(routerHost.ID()); ok {
+			if time.Until(until) < publisherCredentialTTL/2 {
+				t.Fatalf("publisher does not record its admission at the router (until %v, %v)", until, ok)
+			}
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("publisher never recorded its admission at the router")
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 
 	_, target := newTestKey(t)
