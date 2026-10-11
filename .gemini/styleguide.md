@@ -170,6 +170,17 @@ per execution. Coverage belongs at the lowest layer that can express it.
 7. **Tests must not weaken production checks.** Flag test-only flags, `if
    testing` branches, or exported hooks whose only purpose is to skip a
    verification step.
+8. **Tests are plain Go on the standard `testing` package.** Flag any
+   import of `github.com/stretchr/testify`, `github.com/onsi/ginkgo`,
+   `github.com/onsi/gomega` or another assertion or matcher library, in
+   test code or in `go.mod`; the fix is `if got != want { t.Fatalf("...: got
+   %v, want %v", got, want) }`. Flag suite objects, fixture hierarchies,
+   `Describe`/`It` style nesting, and helpers whose only effect is to make
+   one test shorter: a helper is justified by repetition across tests.
+   Flag a test that logs an error and continues, or that ignores a returned
+   error (`_ = f()`) on the path under test: the error must fail the test.
+   Flag assertion messages that do not state both the observed and the
+   expected value.
 
 ## 4. Dependencies
 
@@ -216,11 +227,58 @@ regardless of how carefully the rest of the system handles them.
    `agentmesh-control-plane --admin-token-path` and `agentmesh-node
    --bootstrap-token-path` are the reference shape.
 
-## 6. Review output
+## 6. Behavior must be auditable from logs and metrics
+
+### Why
+
+Agent Mesh runs as a fleet of routers and thousands of members on networks
+nobody can attach a debugger to. When a member does not attach, a router
+pair does not federate, or a call fails, the operator has the binaries'
+logs and `/metrics` and nothing else. A decision the code takes without a
+trace (a `continue` on a condition, an early `return nil`, a branch that
+skips a handshake because a connection already exists) is correct until it
+is not, and then the failure cannot be explained without a reproduction. A
+bug whose diagnosis needed a temporary print statement is a bug in the
+instrumentation as much as in the logic.
+
+### Rules
+
+1. **Every decision about a peer leaves a trace.** Admission, refusal,
+   closing a connection, sending a peer away, skipping a candidate, giving
+   up a retry: each has a log line at the level its frequency allows
+   (`Info` for state changes, `Debug` for per-request steps, `Warn` for
+   something an operator should act on) or a counter with a `reason` or
+   `result` label. Flag a `continue`, `return` or `break` on an error or a
+   condition that has neither.
+2. **State is a gauge.** A set the component maintains (attached routers,
+   authenticated peers, peer routers listed and authenticated, leased
+   addresses, banned peers, pending retries) is exported as a gauge from the
+   live data structure, never from a counter that is incremented and
+   decremented by hand. Flag a new `sync.Map`, map or slice that models a
+   peer or member set without a corresponding metric.
+3. **Errors are not swallowed.** `_ = f()` and `if err != nil { return }` on
+   anything other than a close or a best-effort write need a log line or a
+   counter. Flag the bare form.
+4. **Log lines carry the identifier.** A line about a peer names the peer
+   ID; a line about a lease names the addresses; a line about a router
+   names the router. Flag lines that say what happened without saying to
+   whom.
+5. **A flaky-test fix adds instrumentation.** A PR that makes a test
+   deterministic by waiting on a condition must expose that condition in
+   the binary (a gauge, a `/debug` view, a log line) and wait on it there,
+   not on a `time.Sleep`. Flag a fix whose only change is in the test.
+6. **Safe defaults, zero configuration.** A new flag or option needs a
+   default that is secure without the operator reading the docs: deny, verify,
+   short-lived, loopback-only, bounded. Flag a default that opens something
+   (`AllowInsecure*` true, an unbounded limit, a disabled check) and a flag
+   whose help text does not name the risk of loosening it. Ask whether the
+   flag is needed at all when the safe default covers every deployment.
+
+## 7. Review output
 
 - Group findings by the section numbers above so the author can see which
   rule applies.
-- For rule 1, rule 2 and rule 5 findings, always propose the corrected code, not
-  just the diagnosis.
+- For rule 1, rule 2, rule 5 and rule 6 findings, always propose the
+  corrected code, not just the diagnosis.
 - Do not raise generic Go style nits (naming, comment punctuation, import
   ordering) that `gofmt` and `golangci-lint` already enforce via `make lint`.
