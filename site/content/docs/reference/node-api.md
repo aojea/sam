@@ -366,7 +366,10 @@ material is meant for the node's owner and for auditors, not for agents.
 ## Debug
 
 `GET /debug/mesh-info`, `GET /debug/connectivity`, `GET /debug/network-info`,
-`GET /debug/token-info`, `GET /debug/logs` and `POST /debug/connect-peer`
-report and probe the node's view of the mesh for troubleshooting, and answer
-even while the mesh is unreachable. `agentmesh-node debug` on the command line
-wraps them. Their output is not stable across releases.
+`GET /debug/peer-addrs?peer_id=`, `GET /debug/token-info`, `GET /debug/logs`
+and `POST /debug/connect-peer` report and probe the node's view of the mesh
+for troubleshooting, and answer even while the mesh is unreachable.
+`mesh-info` lists the routers the node holds (`attached_routers`) next to
+every peer it is connected to; `peer-addrs` is the DHT record of a peer as
+this node reads it, looked up and not dialed. `agentmesh-node debug` on the
+command line wraps them. Their output is not stable across releases.

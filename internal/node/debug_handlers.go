@@ -51,6 +51,19 @@ func newDebugHandler(n *AgentMeshNode) http.Handler {
 	mux.HandleFunc("GET /debug/network-info", func(w http.ResponseWriter, r *http.Request) {
 		writeDebugJSON(w, n.networkInfo())
 	})
+	mux.HandleFunc("GET /debug/peer-addrs", func(w http.ResponseWriter, r *http.Request) {
+		pid, err := peer.Decode(r.URL.Query().Get("peer_id"))
+		if err != nil {
+			http.Error(w, "invalid peer id", http.StatusBadRequest)
+			return
+		}
+		resp, err := n.peerAddrs(r.Context(), pid)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeDebugJSON(w, resp)
+	})
 	mux.HandleFunc("GET /debug/token-info", func(w http.ResponseWriter, r *http.Request) {
 		writeDebugJSON(w, n.tokenInfo())
 	})
@@ -145,6 +158,13 @@ type networkInfoResponse struct {
 	AnnouncedAddresses []string `json:"announced_addresses"`
 }
 
+// peerAddrsResponse is what the DHT says about a peer: the addresses it
+// published, before this node decides which to dial.
+type peerAddrsResponse struct {
+	PeerID    string   `json:"peer_id"`
+	Addresses []string `json:"addresses"`
+}
+
 type logsResponse struct {
 	Logs []string `json:"logs"`
 }
@@ -179,6 +199,27 @@ func (n *AgentMeshNode) meshInfo() (*meshInfoResponse, error) {
 		RouterPeerID:    n.RouterPeerID.String(),
 		LocalAPISocket:  n.BoundSocketPath,
 	}, nil
+}
+
+// peerAddrs backs GET /debug/peer-addrs: the addresses the DHT holds for a
+// peer, looked up and not dialed, so an operator can see what a call would
+// have to work with without making one.
+func (n *AgentMeshNode) peerAddrs(ctx context.Context, pid peer.ID) (*peerAddrsResponse, error) {
+	if err := n.debugReady(); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, dhtLookupTimeout)
+	defer cancel()
+	info, err := n.DHT.FindPeer(ctx, pid)
+	if err != nil {
+		return nil, fmt.Errorf("find %s: %w", pid, err)
+	}
+	resp := &peerAddrsResponse{PeerID: pid.String(), Addresses: make([]string, 0, len(info.Addrs))}
+	for _, a := range info.Addrs {
+		resp.Addresses = append(resp.Addresses, a.String())
+	}
+	slices.Sort(resp.Addresses)
+	return resp, nil
 }
 
 // connectivityStats backs GET /debug/connectivity: with a peer ID it pings that

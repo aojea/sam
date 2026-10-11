@@ -212,9 +212,41 @@ func announcedCircuitRelays(t *testing.T, n *backgroundNode) []string {
 	if err := json.Unmarshal([]byte(debugGetWithToken(t, n.apiAddr, n.token, "/debug/network-info")), &info); err != nil {
 		t.Fatalf("decode network-info: %v", err)
 	}
+	return circuitRelaysOf(info.AnnouncedAddresses)
+}
+
+// circuitRelaysInRecord lists the relays in a peer's DHT record as reader
+// looks it up: the addresses a call from reader would choose among.
+func circuitRelaysInRecord(t *testing.T, reader *backgroundNode, target peer.ID) []string {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, "http://"+reader.apiAddr+"/debug/peer-addrs?peer_id="+target.String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set(api.HeaderMeshAuthentication, "Bearer "+reader.token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /debug/peer-addrs: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		// Not in the DHT yet.
+		return nil
+	}
+	var info struct {
+		Addresses []string `json:"addresses"`
+	}
+	if err := json.Unmarshal(body, &info); err != nil {
+		t.Fatalf("decode peer-addrs: %v", err)
+	}
+	return circuitRelaysOf(info.Addresses)
+}
+
+func circuitRelaysOf(addrs []string) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, a := range info.AnnouncedAddresses {
+	for _, a := range addrs {
 		if i := strings.Index(a, "/p2p-circuit"); i > 0 {
 			parts := strings.Split(a[:i], "/p2p/")
 			relay := parts[len(parts)-1]
@@ -513,28 +545,32 @@ func TestIdleNodesHoldOnlyTheirRouters(t *testing.T) {
 		waitForEqual(t, "routers attached by node "+s, func() []string { return attachedRouters(t, nodes[s]) }, peerIDStrings(routers[s].peerID), 10*time.Second)
 	}
 
-	// Twenty discovery intervals (200ms) with nothing to do.
-	time.Sleep(4 * time.Second)
-
-	for _, s := range sites {
-		attached, connected := meshInfo(t, nodes[s])
-		if !slices.Equal(attached, peerIDStrings(routers[s].peerID)) {
-			t.Errorf("node %s holds %v, want its router %s", s, attached, routers[s].peerID)
-		}
-		for _, p := range connected {
-			for _, other := range sites {
-				if other != s && p == nodes[other].peerID.String() {
-					t.Errorf("idle node %s is connected to node %s", s, other)
+	// Twenty discovery intervals (200ms) with nothing to do; the invariants
+	// are checked throughout, so a node that reaches out fails the test the
+	// moment it does.
+	for end := time.Now().Add(4 * time.Second); time.Now().Before(end); time.Sleep(200 * time.Millisecond) {
+		for _, s := range sites {
+			attached, connected := meshInfo(t, nodes[s])
+			if !slices.Equal(attached, peerIDStrings(routers[s].peerID)) {
+				t.Errorf("node %s holds %v, want its router %s", s, attached, routers[s].peerID)
+			}
+			for _, p := range connected {
+				for _, other := range sites {
+					if other != s && p == nodes[other].peerID.String() {
+						t.Errorf("idle node %s is connected to node %s", s, other)
+					}
 				}
 			}
+			if t.Failed() {
+				t.Fatalf("node %s connected peers: %v", s, connected)
+			}
 		}
+	}
+	for _, s := range sites {
 		// Its own node, the two peer routers and the control plane's
 		// event publisher.
 		if got := routers[s].gauge(t, "agentmesh_router_authenticated_peers"); got != 4 {
 			t.Errorf("router %s authenticated %v peers, want 4 (its node, two routers, the control plane)", s, got)
-		}
-		if t.Failed() {
-			t.Logf("node %s connected peers: %v", s, connected)
 		}
 	}
 	if t.Failed() {
@@ -625,10 +661,12 @@ func TestCallerTransitsTheRouterItShares(t *testing.T) {
 	waitForEqual(t, "routers attached by the caller", func() []string { return attachedRouters(t, caller) }, peerIDStrings(routerB.peerID, routerC.peerID), 10*time.Second)
 	// The provider's record must name both circuits, or the caller has only
 	// router a to go through. A reservation on the second router comes a
-	// moment after the first, and the record follows it after a 2 s debounce.
+	// moment after the first, and the record follows it after a 2 s debounce;
+	// the caller's DHT lookup is what the call will read.
 	waitForEqual(t, "routers the provider announces circuits through", func() []string { return announcedCircuitRelays(t, provider) },
 		peerIDStrings(routerA.peerID, routerB.peerID), 15*time.Second)
-	time.Sleep(3 * time.Second)
+	waitForEqual(t, "relays in the provider's DHT record as the caller reads it", func() []string { return circuitRelaysInRecord(t, caller, provider.peerID) },
+		peerIDStrings(routerA.peerID, routerB.peerID), 15*time.Second)
 
 	callAcrossMesh(t, caller, "token-c", provider, "shared-tool")
 
@@ -675,18 +713,27 @@ func TestRouterKeepsOnlyAdmittedConnections(t *testing.T) {
 		t.Fatalf("stranger could not connect to the router: %v", err)
 	}
 
-	// Three deadlines: the stranger is gone, the publisher and the node
-	// still there, and the counter says one connection was closed for it.
-	time.Sleep(3 * time.Second)
+	// The stranger is gone within a deadline or so; the publisher and the
+	// node, both authenticated, are still there after several.
+	deadline := time.Now().Add(5 * time.Second)
+	for stranger.Network().Connectedness(router.peerID) == network.Connected && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
 	if stranger.Network().Connectedness(router.peerID) == network.Connected {
 		t.Fatal("the stranger's connection survived the deadline")
 	}
 	if got := router.gauge(t, "agentmesh_router_unauthenticated_connections_closed_total"); got < 1 {
 		t.Fatalf("closed %v unauthenticated connections, want at least the stranger's", got)
 	}
-	// The node and the control plane's publisher: both authenticated.
-	if got := router.gauge(t, "agentmesh_router_authenticated_peers"); got != 2 {
-		t.Fatalf("router authenticated %v peers, want 2 (the node and the control plane's publisher)", got)
+	// The node and the control plane's publisher: both authenticated, and
+	// still so two deadlines after the stranger went.
+	waitForEqual(t, "peers the router authenticated", func() []string {
+		return []string{fmt.Sprint(router.gauge(t, "agentmesh_router_authenticated_peers"))}
+	}, []string{"2"}, 5*time.Second)
+	for end := time.Now().Add(2 * time.Second); time.Now().Before(end); time.Sleep(200 * time.Millisecond) {
+		if got := router.gauge(t, "agentmesh_router_authenticated_peers"); got != 2 {
+			t.Fatalf("router authenticated %v peers, want 2 (the node and the control plane's publisher)", got)
+		}
 	}
 	if got := attachedRouters(t, node); !slices.Equal(got, peerIDStrings(router.peerID)) {
 		t.Fatalf("node holds %v after the deadlines, want %s", got, router.peerID)

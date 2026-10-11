@@ -40,7 +40,7 @@ func newDebugCmd() *cobra.Command {
 	debugCmd.PersistentFlags().StringVar(&socketPathFlag, "socket-path", "", "Unix socket of the running node (defaults to <data-dir>/"+node.DefaultSocketName+")")
 
 	debugCmd.AddCommand(
-		newDebugGetCmd("mesh-info", "Show connected peers, DHT size, and the router peer ID", "/debug/mesh-info"),
+		newDebugGetCmd("mesh-info", "Show connected peers, the routers the node holds, and DHT size", "/debug/mesh-info"),
 		newDebugGetCmd("network-info", "Show listener and announced addresses", "/debug/network-info"),
 		newDebugGetCmd("token-info", "Show the local auth token's expiration and status", "/debug/token-info"),
 		newDebugGetCmd("logs", "Show the last few lines of the node's log output", "/debug/logs"),
@@ -57,6 +57,16 @@ func newDebugCmd() *cobra.Command {
 				path += "?peer_id=" + url.QueryEscape(args[0])
 			}
 			return debugRequest(cmd, http.MethodGet, path, nil)
+		},
+	})
+
+	debugCmd.AddCommand(&cobra.Command{
+		Use:          "peer-addrs <peer-id>",
+		Short:        "Show the addresses the DHT holds for a peer, without dialing it",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return debugRequest(cmd, http.MethodGet, "/debug/peer-addrs?peer_id="+url.QueryEscape(args[0]), nil)
 		},
 	})
 
