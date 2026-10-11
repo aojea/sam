@@ -891,3 +891,25 @@ func TestFindProvidersSkipsRevoked(t *testing.T) {
 		t.Errorf("revoked peer returned as provider: %v", providers)
 	}
 }
+
+// A provider record lives DHTProviderAddrTTL; the node announces at least
+// three times within it, so a shorter TTL shortens the interval and the
+// default pair stays as it was.
+func TestReprovideIntervalFollowsProviderTTL(t *testing.T) {
+	for _, tc := range []struct {
+		ttl  time.Duration
+		want time.Duration
+	}{
+		{0, ReprovideInterval},
+		{DefaultDHTProviderAddrTTL, ReprovideInterval},
+		{time.Hour, ReprovideInterval},
+		{30 * time.Second, 10 * time.Second},
+		{5 * time.Second, 5 * time.Second / 3},
+		{time.Second, time.Second},
+	} {
+		n := &AgentMeshNode{config: Options{DHTProviderAddrTTL: tc.ttl}}
+		if got := n.reprovideInterval(); got != tc.want {
+			t.Errorf("ttl %s: reprovide every %s, want %s", tc.ttl, got, tc.want)
+		}
+	}
+}
