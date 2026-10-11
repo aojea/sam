@@ -40,9 +40,21 @@ teardown() {
     [[ "$status" -eq 0 ]]
   done
 
-  # Verify connected peer count via MCP (wait for full mesh).
+  # An idle node holds its router and nothing else: members connect to one
+  # another when they call, not ahead of time.
   for i in $(seq 1 "$node_count"); do
-    run mesh_wait_for_node_count "${i}" $((node_count - 1)) 60
+    run mesh_wait_for_attached_routers "${i}" 1 30
+    [[ "$status" -eq 0 ]]
+    run mesh_wait_for_node_count "${i}" 0 5
     [[ "$status" -eq 0 ]]
   done
+
+  # Asked to, a node reaches another through the mesh.
+  local node2_peer_id
+  node2_peer_id="$(mesh_node_peer_id 2)"
+  [[ -n "${node2_peer_id}" ]]
+  run mesh_connect_peer 1 "$(mesh_node_addr 2)"
+  [[ "$status" -eq 0 ]]
+  run mesh_wait_for_peer_connection 1 "${node2_peer_id}" 30
+  [[ "$status" -eq 0 ]]
 }

@@ -122,19 +122,10 @@ EOF
   [[ -n "${node2_peer_id}" ]]
   MESH_NETWORK=$OLD_NET
 
-  # Assert on the specific peer, not on set size: a relayed connection can leave
-  # extra entries in connected_peers, so "length - 1" is not a stable count.
-  run mesh_wait_for_peer_connection "1" "${node2_peer_id}" 60
-  [[ "$status" -eq 0 ]]
-
-  OLD_NET=$MESH_NETWORK
-  MESH_NETWORK=$MESH_NETWORK_2
-  run mesh_wait_for_peer_connection "2" "${node1_peer_id}" 60
-  [[ "$status" -eq 0 ]]
-  MESH_NETWORK=$OLD_NET
-
-  # 2. Test HTTP Datapath: Node 2 calls Node 1's HTTP service via Node 2's egress proxy (isolated network 2)
-  for ((i=0; i<15; i++)); do
+  # 2. Test HTTP Datapath: Node 2 calls Node 1's HTTP service via Node 2's
+  # egress proxy (isolated network 2). The nodes are on networks that cannot
+  # reach each other, so the call is what connects them, through the router.
+  for ((i=0; i<30; i++)); do
     run docker run --rm --network "${MESH_NETWORK_2}" python:3.12 python3 -c "
 import urllib.request
 req = urllib.request.Request(
@@ -152,6 +143,18 @@ with urllib.request.urlopen(req) as response:
 
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"{\"status\":\"success\"}"* ]]
+
+  # The call left the two connected, through the relay. Assert on the
+  # specific peer, not on set size: a relayed connection can leave extra
+  # entries in connected_peers.
+  run mesh_wait_for_peer_connection "1" "${node2_peer_id}" 30
+  [[ "$status" -eq 0 ]]
+
+  OLD_NET=$MESH_NETWORK
+  MESH_NETWORK=$MESH_NETWORK_2
+  run mesh_wait_for_peer_connection "2" "${node1_peer_id}" 30
+  [[ "$status" -eq 0 ]]
+  MESH_NETWORK=$OLD_NET
 
   docker network rm "${MESH_NETWORK_2}" >/dev/null 2>&1 || true
 }

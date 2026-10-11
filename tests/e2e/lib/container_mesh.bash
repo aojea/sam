@@ -278,9 +278,30 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       local output
       output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://${MESH_PREFIX}-node-${idx}:8080/mcp" -tool "get_mesh_info" 2>/dev/null)"
       echo "Node ${idx} get_mesh_info raw output: ${output}"
+      # Peers other than the routers the node holds.
       local count
-      count="$(echo "${output}" | jq 'if .connected_peers then (.connected_peers | length) - 1 else 0 end')"
+      count="$(echo "${output}" | jq 'if .connected_peers then ((.connected_peers - (.attached_routers // [])) | length) else 0 end')"
       echo "Node ${idx} reported known peers count: ${count}"
+      if [[ "${count}" -eq "${expected}" ]]; then
+        return 0
+      fi
+      sleep 1
+    done
+    return 1
+  }
+
+  # mesh_wait_for_attached_routers waits until the node holds expected routers.
+  mesh_wait_for_attached_routers() {
+    local idx="$1"
+    local expected="$2"
+    local timeout_s="${3:-20}"
+    local i
+    for ((i=0; i<timeout_s; i++)); do
+      local output
+      output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://${MESH_PREFIX}-node-${idx}:8080/mcp" -tool "get_mesh_info" 2>/dev/null)"
+      local count
+      count="$(echo "${output}" | jq '.attached_routers // [] | length')"
+      echo "Node ${idx} holds ${count} router(s)"
       if [[ "${count}" -eq "${expected}" ]]; then
         return 0
       fi
