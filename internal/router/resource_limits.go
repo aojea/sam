@@ -15,14 +15,31 @@
 package router
 
 import (
+	"slices"
+
 	"github.com/google/agentmesh/api"
 	"github.com/google/agentmesh/internal/p2plimits"
 	"github.com/libp2p/go-libp2p"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	circuit "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/proto"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
+)
+
+// memberProtocols are the protocols on which every member holds a stream
+// open to its router for as long as it is connected (the DHT keeps one
+// request stream per peer, gossip one per direction) or opens one when it
+// joins. libp2p's default for a protocol it was not told about is a few
+// hundred inbound streams in all, scaled from host memory: on the testnet it
+// was 768, and the 769th member's DHT and gossip streams were refused, which
+// kept the router out of that member's routing table and the member out of
+// discovery (libp2p_rcmgr_blocked_resources{scope="protocol"} counted them,
+// without saying which protocol).
+var memberProtocols = slices.Concat(
+	[]protocol.ID{identify.ID, identify.IDPush, api.AuthProtocolID, api.DHTProtocolID},
+	pubsub.GossipSubDefaultProtocols,
 )
 
 // connCapHeadroom is the resource manager's connection cap as a multiple of
@@ -73,6 +90,14 @@ func hubLimits(highWaterMark, conns, circuits int) rcmgr.ConcreteLimitConfig {
 	relayStreams.Memory = rcmgr.LimitVal64(int64(sysBase) * 64 << 10)
 	perPeerCircuits := streams(circuits)
 
+	protocols := map[protocol.ID]rcmgr.ResourceLimits{
+		circuit.ProtoIDv2Hop:  relayStreams,
+		circuit.ProtoIDv2Stop: relayStreams,
+	}
+	for _, p := range memberProtocols {
+		protocols[p] = streams(sysBase)
+	}
+
 	overrides := rcmgr.PartialLimitConfig{
 		System:    system,
 		Transient: transient,
@@ -83,13 +108,7 @@ func hubLimits(highWaterMark, conns, circuits int) rcmgr.ConcreteLimitConfig {
 		ServicePeer: map[string]rcmgr.ResourceLimits{
 			relay.ServiceName: perPeerCircuits,
 		},
-		Protocol: map[protocol.ID]rcmgr.ResourceLimits{
-			identify.ID:           streams(sysBase),
-			identify.IDPush:       streams(sysBase),
-			api.AuthProtocolID:    streams(sysBase),
-			circuit.ProtoIDv2Hop:  relayStreams,
-			circuit.ProtoIDv2Stop: relayStreams,
-		},
+		Protocol: protocols,
 		ProtocolPeer: map[protocol.ID]rcmgr.ResourceLimits{
 			circuit.ProtoIDv2Hop:  perPeerCircuits,
 			circuit.ProtoIDv2Stop: perPeerCircuits,

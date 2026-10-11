@@ -33,9 +33,20 @@ var inboundRefusedTotal = promauto.NewCounterVec(
 	[]string{"reason"},
 )
 
+var streamsRefusedTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "agentmesh_router_streams_refused_total",
+		Help: "Streams the resource manager refused, by scope and protocol (or service); a member whose DHT or gossip stream is refused drops out of discovery",
+	},
+	[]string{"scope", "protocol"},
+)
+
 func init() {
 	for _, v := range p2plimits.Reasons {
 		inboundRefusedTotal.WithLabelValues(v)
+	}
+	for _, p := range memberProtocols {
+		streamsRefusedTotal.WithLabelValues(p2plimits.StreamScopeProtocol, string(p))
 	}
 }
 
@@ -43,6 +54,12 @@ func init() {
 // inboundRefusedTotal and logs them, once per source per minute.
 func observeResourceManager(inner network.ResourceManager) *p2plimits.Observed {
 	return p2plimits.Observe(inner, inboundRefusedTotal, logger.Warnf)
+}
+
+// countStreamRefusals is the reporter the resource manager is built with;
+// it counts refused streams in streamsRefusedTotal by protocol.
+func countStreamRefusals() *p2plimits.StreamRefusals {
+	return p2plimits.CountStreamRefusals(streamsRefusedTotal, logger.Warnf)
 }
 
 // connsPerSourceIPDesc exports the cap in force, so a dashboard can read the

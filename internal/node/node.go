@@ -689,7 +689,7 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 	// Initialize Rendezvous (DHT Client)
 	dhtOpts := []dht.Option{
 		dht.Mode(dht.ModeAuto),
-		dht.ProtocolPrefix("/mesh"),
+		dht.ProtocolPrefix(api.DHTProtocolPrefix),
 	}
 	providerTTL := n.config.DHTProviderAddrTTL
 	if providerTTL <= 0 {

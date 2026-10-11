@@ -71,8 +71,8 @@ const libp2pDefaultConnsPerIP = 8
 // connection rate limit scaled to it. Loopback is exempt from both, as in
 // libp2p's default, so a local mesh never meets them. A cap under one
 // would refuse every peer, so it is an error here rather than a silent
-// listener.
-func NewResourceManager(limits rcmgr.ConcreteLimitConfig, perIP int) (network.ResourceManager, error) {
+// listener. opts are passed on, for a MetricsReporter among others.
+func NewResourceManager(limits rcmgr.ConcreteLimitConfig, perIP int, opts ...rcmgr.Option) (network.ResourceManager, error) {
 	if perIP <= 0 {
 		return nil, fmt.Errorf("connections per source address must be at least 1, got %d", perIP)
 	}
@@ -94,11 +94,13 @@ func NewResourceManager(limits rcmgr.ConcreteLimitConfig, perIP int) (network.Re
 	}
 	return rcmgr.NewResourceManager(
 		rcmgr.NewFixedLimiter(limits),
-		rcmgr.WithLimitPerSubnet(
-			[]rcmgr.ConnLimitPerSubnet{{PrefixLength: 32, ConnCount: perIP}},
-			[]rcmgr.ConnLimitPerSubnet{{PrefixLength: 56, ConnCount: perIP}},
-		),
-		rcmgr.WithConnRateLimiters(connRateLimiter),
+		append([]rcmgr.Option{
+			rcmgr.WithLimitPerSubnet(
+				[]rcmgr.ConnLimitPerSubnet{{PrefixLength: 32, ConnCount: perIP}},
+				[]rcmgr.ConnLimitPerSubnet{{PrefixLength: 56, ConnCount: perIP}},
+			),
+			rcmgr.WithConnRateLimiters(connRateLimiter),
+		}, opts...)...,
 	)
 }
 

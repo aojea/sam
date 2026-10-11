@@ -120,6 +120,7 @@ The metrics address exposes, next to the Go runtime metrics:
 | `agentmesh_router_goaway_sent_total{reason,result}` | Members sent away, by reason (`DRAINING`, `OVERLOADED`) and outcome: `ok` when the member took the message, `unsupported` when it does not speak the protocol and was closed instead, `failed` when the stream broke. A rising `OVERLOADED` count on a router that is not draining is a fleet that has outgrown its routers. |
 | `agentmesh_router_unauthenticated_connections_closed_total` | Connections closed at `--auth-deadline` without a handshake. A steady rate is DHT traffic from members attached to other routers; a burst is a scanner. |
 | `agentmesh_router_inbound_connections_refused_total` | Inbound connections refused by the per-address cap. |
+| `agentmesh_router_streams_refused_total{scope,protocol}` | Streams the resource manager refused, by scope and protocol or service. A count on `/mesh/kad/1.0.0` or a `/meshsub/*` protocol is members the router keeps out of discovery; see the scalability guide. |
 | `libp2p_relaysvc_*` | The relay service's own counters: `reservations_total{type}` and `connections_total{type}` (`opened`, `closed`, `renewed`), requests by response status, rejections and bytes relayed. The difference between `opened` and `closed` is the number in use; read it against `agentmesh_router_relay_limit` to see how close the relay is to its budget. |
 
 A fleet is at capacity when `agentmesh_router_connections{direction="inbound"}`

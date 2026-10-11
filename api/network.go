@@ -44,6 +44,12 @@ const (
 	// it will no longer hold it; the stream carries one RouterGoAway.
 	GoAwayProtocolID protocol.ID = "/mesh/goaway/1.0.0"
 
+	// DHTProtocolPrefix namespaces the mesh's Kademlia DHT away from the
+	// public IPFS one; the protocol every member and router registers for
+	// it is DHTProtocolID.
+	DHTProtocolPrefix protocol.ID = "/mesh"
+	DHTProtocolID     protocol.ID = DHTProtocolPrefix + "/kad/1.0.0"
+
 	// GossipEvents is the GossipSub topic used to broadcast mesh event updates (e.g., node bans).
 	GossipEvents = "/mesh/events/v1"
 

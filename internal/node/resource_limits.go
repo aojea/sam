@@ -15,9 +15,12 @@
 package node
 
 import (
+	"slices"
+
 	"github.com/google/agentmesh/api"
 	"github.com/google/agentmesh/internal/p2plimits"
 	"github.com/libp2p/go-libp2p"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
@@ -91,19 +94,36 @@ func nodeLimits(conns int) rcmgr.ConcreteLimitConfig {
 		Service: map[string]rcmgr.ResourceLimits{
 			identify.ServiceName: p2plimits.Streams(conns),
 		},
-		Protocol: map[protocol.ID]rcmgr.ResourceLimits{
-			identify.ID:        p2plimits.Streams(conns),
-			identify.IDPush:    p2plimits.Streams(conns),
-			api.AuthProtocolID: p2plimits.Streams(conns),
-		},
+		Protocol: map[protocol.ID]rcmgr.ResourceLimits{},
 	}
+	// One stream per caller for as long as it is connected (its DHT request
+	// stream, gossip), or one when it arrives; libp2p's default for a
+	// protocol it was not told about scales from host memory. A caller holds
+	// one MCP stream per session, so that protocol gets the per-connection
+	// share of the system budget.
+	for _, p := range slices.Concat(
+		[]protocol.ID{identify.ID, identify.IDPush, api.AuthProtocolID, api.DHTProtocolID},
+		pubsub.GossipSubDefaultProtocols,
+	) {
+		overrides.Protocol[p] = p2plimits.Streams(conns)
+	}
+	overrides.Protocol[api.MCPProtocolID] = p2plimits.Streams(streamsPerConn * conns)
 	return overrides.Build(scaled)
 }
+
+var streamsRefusedTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "agentmesh_node_streams_refused_total",
+		Help: "Streams the resource manager refused, by scope and protocol (or service)",
+	},
+	[]string{"scope", "protocol"},
+)
 
 // newResourceManager is the resource manager the node's host runs with:
 // nodeLimits, the per-source cap, and every refusal counted and logged.
 func newResourceManager() (network.ResourceManager, error) {
-	mgr, err := p2plimits.NewResourceManager(nodeLimits(ConnHighWaterMark), ConnsPerSourceIP)
+	mgr, err := p2plimits.NewResourceManager(nodeLimits(ConnHighWaterMark), ConnsPerSourceIP,
+		rcmgr.WithMetrics(p2plimits.CountStreamRefusals(streamsRefusedTotal, logger.Warnf)))
 	if err != nil {
 		return nil, err
 	}

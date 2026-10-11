@@ -66,9 +66,11 @@ Authorization Server.
 listener without authentication, for scrapers that hold no token. Besides
 the gauges `/debug/mesh-info` answers on demand, `/metrics` carries
 `agentmesh_node_inbound_connections_refused_total{reason}`, the inbound
-connections the node turned away before the handshake, and
+connections the node turned away before the handshake,
 `agentmesh_node_conns_per_source_ip_limit`, the per-address cap they are
-read against; see the scalability guide.
+read against, and `agentmesh_node_streams_refused_total{scope,protocol}`,
+the streams it refused on an admitted connection; see the scalability
+guide.
 
 ## Token endpoint (`/oauth/token`) and revocation (`/oauth/revoke`)
 

@@ -15,10 +15,14 @@
 package router
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/google/agentmesh/api"
+	dht "github.com/libp2p/go-libp2p-kad-dht"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
+	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	circuit "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/proto"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
@@ -47,6 +51,13 @@ func TestHubLimitsFollowTheConnectionBudget(t *testing.T) {
 	want("identify service inbound streams", cfg.Service[identify.ServiceName].StreamsInbound, highWaterMark)
 	want("identify protocol inbound streams", cfg.Protocol[identify.ID].StreamsInbound, highWaterMark)
 	want("auth protocol inbound streams", cfg.Protocol[api.AuthProtocolID].StreamsInbound, highWaterMark)
+	// Every member holds one DHT stream and one gossip stream to its router
+	// for as long as it is connected; libp2p's default capped them at a few
+	// hundred in all and the rest of the fleet fell out of discovery.
+	want("dht protocol inbound streams", cfg.Protocol[api.DHTProtocolID].StreamsInbound, highWaterMark)
+	for _, p := range pubsub.GossipSubDefaultProtocols {
+		want("gossip protocol "+string(p)+" inbound streams", cfg.Protocol[p].StreamsInbound, highWaterMark)
+	}
 	want("relay service inbound streams", cfg.Service[relay.ServiceName].StreamsInbound, highWaterMark)
 	want("hop protocol inbound streams", cfg.Protocol[circuit.ProtoIDv2Hop].StreamsInbound, highWaterMark)
 	// A destination many members call holds one stop stream per caller.
@@ -59,4 +70,25 @@ func TestHubLimitsFollowTheConnectionBudget(t *testing.T) {
 	want("system inbound conns with a wide per-address cap", wide.System.ConnsInbound, connCapHeadroom*8000)
 	small := hubLimits(100, 8, circuits).ToPartialLimitConfig()
 	want("system inbound conns with a small watermark and cap", small.System.ConnsInbound, connCapHeadroom*DefaultHighWaterMark)
+}
+
+// The DHT protocol the limits budget for is the one a DHT built the way the
+// router builds it registers; a renamed prefix would silently fall back to
+// libp2p's default budget.
+func TestDHTProtocolIDIsWhatTheRouterServes(t *testing.T) {
+	h, err := mocknet.New().GenPeer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kad, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix(api.DHTProtocolPrefix))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = kad.Close() }()
+	if got := h.Mux().Protocols(); !slices.Contains(got, api.DHTProtocolID) {
+		t.Errorf("DHT server registers %v, not %s", got, api.DHTProtocolID)
+	}
+	if !slices.Contains(memberProtocols, api.DHTProtocolID) {
+		t.Error("the DHT protocol is not among the member protocols the limits budget for")
+	}
 }

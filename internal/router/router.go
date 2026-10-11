@@ -48,6 +48,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
@@ -435,7 +436,7 @@ func (r *Router) Start() (retErr error) {
 
 	// Every refusal the resource manager makes is counted and logged with
 	// its source; a refused dialer only sees its connection close before TLS.
-	mgr, err := p2plimits.NewResourceManager(hubLimits(r.config.HighWaterMark, r.config.ConnsPerSourceIP, r.config.RelayMaxCircuits), r.config.ConnsPerSourceIP)
+	mgr, err := p2plimits.NewResourceManager(hubLimits(r.config.HighWaterMark, r.config.ConnsPerSourceIP, r.config.RelayMaxCircuits), r.config.ConnsPerSourceIP, rcmgr.WithMetrics(countStreamRefusals()))
 	if err != nil {
 		return fmt.Errorf("failed to create resource manager: %w", err)
 	}
@@ -450,7 +451,7 @@ func (r *Router) Start() (retErr error) {
 	// Setup DHT
 	dhtOpts := []dht.Option{
 		dht.Mode(dht.ModeServer),
-		dht.ProtocolPrefix("/mesh"),
+		dht.ProtocolPrefix(api.DHTProtocolPrefix),
 	}
 	providerTTL := r.config.DHTProviderAddrTTL
 	if providerTTL <= 0 {

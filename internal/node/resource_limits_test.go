@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/google/agentmesh/api"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/connmgr"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
@@ -39,6 +40,12 @@ func TestNodeLimitsFollowTheConnectionBudget(t *testing.T) {
 	want("transient inbound conns", cfg.Transient.ConnsInbound, ConnHighWaterMark)
 	want("identify service inbound streams", cfg.Service[identify.ServiceName].StreamsInbound, ConnHighWaterMark)
 	want("auth protocol inbound streams", cfg.Protocol[api.AuthProtocolID].StreamsInbound, ConnHighWaterMark)
+	// A caller holds its MCP, DHT and gossip streams for as long as it stays.
+	want("mcp protocol inbound streams", cfg.Protocol[api.MCPProtocolID].StreamsInbound, 8*ConnHighWaterMark)
+	want("dht protocol inbound streams", cfg.Protocol[api.DHTProtocolID].StreamsInbound, ConnHighWaterMark)
+	for _, p := range pubsub.GossipSubDefaultProtocols {
+		want("gossip protocol "+string(p)+" inbound streams", cfg.Protocol[p].StreamsInbound, ConnHighWaterMark)
+	}
 
 	if ConnsPerSourceIP != ConnHighWaterMark/4 {
 		t.Errorf("ConnsPerSourceIP = %d, want a quarter of the high watermark, %d", ConnsPerSourceIP, ConnHighWaterMark/4)

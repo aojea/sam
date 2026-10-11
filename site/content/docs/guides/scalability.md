@@ -104,6 +104,16 @@ rising has more connections than two watermarks, which a rollout of a
 mesh at capacity produces when the stopped router's members land on the
 others; the fix is a router or a higher watermark.
 
+The stream budgets follow the watermark per protocol, because a member
+holds a stream open to its router for as long as it is connected on each
+of the DHT, GossipSub, and its relay reservation, and libp2p's default
+for a protocol it was not told about is a few hundred streams in all,
+scaled from host memory. A router that refuses a member's DHT stream
+drops out of that member's routing table, and the member out of
+discovery, with no error at the member; the router counts the refusal in
+`agentmesh_router_streams_refused_total{protocol}` and logs it once a
+minute per protocol.
+
 Routers connect to one another, every pair, to run the DHT and GossipSub
 across the mesh; a router never sheds those connections. That is N × (N − 1)
 / 2 connections for N routers, which is nothing at ten routers and a
@@ -229,6 +239,7 @@ The router and the control plane serve Prometheus metrics on
 | `libp2p_relaysvc_reservations_total{type="opened"}` minus `{type="closed"}`, against `agentmesh_router_relay_limit{limit="reservations"}` | Reservations in use against the budget. |
 | `libp2p_relaysvc_connection_rejections_total{reason="resource limit exceeded"}` | A service has more callers than `--relay-max-circuits`. |
 | `libp2p_rcmgr_blocked_resources` | libp2p refused a connection or stream on a scope. On a router this should stay flat. |
+| `agentmesh_router_streams_refused_total{scope,protocol}`, `agentmesh_node_streams_refused_total{scope,protocol}` | The streams behind that gauge, by protocol. `/mesh/kad/1.0.0` or `/meshsub/*` at the `protocol` scope on a router is members past the stream budget of a protocol, which keeps them out of discovery; `agentmesh_router_dht_routing_table_size` falls with it. |
 | `agentmesh_router_auth_handshakes_total{result="read_failed"}` | Members that timed out mid-handshake: the router is slow, usually CPU. |
 | `agentmesh_router_draining` | The router is stopping. Exclude it from capacity sums. |
 | `agentmesh_control_plane_http_requests_total{code="429"}` | Members turned away by the enrollment limiter; they retry. |
