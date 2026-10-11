@@ -96,9 +96,12 @@ spec:
           periodSeconds: 20
         resources:
           requests:
-            # A router at its watermark of 6000 members holds about 1 GiB; a
-            # request below that is the first pod evicted under pressure.
-            cpu: 500m
+            # hostPort 4501 pins one router per node, and the nodes with a
+            # free port have a few hundred millicores left: a larger request
+            # leaves a router Pending. A router at its watermark of 6000
+            # members holds about 1 GiB; a memory request below that is the
+            # first pod evicted under pressure.
+            cpu: 100m
             memory: 1Gi
         volumeMounts:
         - name: agentmesh-token
