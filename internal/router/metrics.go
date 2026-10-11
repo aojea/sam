@@ -113,6 +113,7 @@ type routerStateCollector struct {
 	readyDesc         *prometheus.Desc
 	drainingDesc      *prometheus.Desc
 	authenticatedDesc *prometheus.Desc
+	peerRoutersDesc   *prometheus.Desc
 	connectedDesc     *prometheus.Desc
 	connectionsDesc   *prometheus.Desc
 	watermarkDesc     *prometheus.Desc
@@ -141,6 +142,10 @@ func newRouterStateCollector(r *Router) *routerStateCollector {
 			"agentmesh_router_authenticated_peers",
 			"Connected peers that have completed the mesh authentication handshake",
 			nil, nil),
+		peerRoutersDesc: prometheus.NewDesc(
+			"agentmesh_router_peer_routers",
+			"Peer routers known, from the control plane's list or a handshake with the router role: all of them, and those currently authenticated",
+			[]string{"state"}, nil),
 		connectedDesc: prometheus.NewDesc(
 			"agentmesh_router_connected_peers",
 			"Peers with an open libp2p connection, authenticated or not",
@@ -174,7 +179,7 @@ func newRouterStateCollector(r *Router) *routerStateCollector {
 
 func (c *routerStateCollector) Describe(ch chan<- *prometheus.Desc) {
 	for _, d := range []*prometheus.Desc{
-		c.infoDesc, c.readyDesc, c.drainingDesc, c.authenticatedDesc, c.connectedDesc, c.connectionsDesc, c.watermarkDesc, c.relayLimitDesc,
+		c.infoDesc, c.readyDesc, c.drainingDesc, c.authenticatedDesc, c.peerRoutersDesc, c.connectedDesc, c.connectionsDesc, c.watermarkDesc, c.relayLimitDesc,
 		c.bannedDesc, c.dhtDesc, c.biscuitExpiryDesc, connsPerSourceIPDesc,
 	} {
 		ch <- d
@@ -203,6 +208,9 @@ func (c *routerStateCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.readyDesc, prometheus.GaugeValue, 1)
 	ch <- prometheus.MustNewConstMetric(c.infoDesc, prometheus.GaugeValue, 1, r.Host.ID().String())
 	ch <- prometheus.MustNewConstMetric(c.authenticatedDesc, prometheus.GaugeValue, float64(syncMapLen(&r.authenticatedPeers)))
+	listed, federated := r.peerRouterCounts()
+	ch <- prometheus.MustNewConstMetric(c.peerRoutersDesc, prometheus.GaugeValue, float64(listed), "listed")
+	ch <- prometheus.MustNewConstMetric(c.peerRoutersDesc, prometheus.GaugeValue, float64(federated), "authenticated")
 	ch <- prometheus.MustNewConstMetric(c.connectedDesc, prometheus.GaugeValue, float64(len(r.Host.Network().Peers())))
 	var inbound, outbound int
 	for _, conn := range r.Host.Network().Conns() {
@@ -234,7 +242,8 @@ func syncMapLen(m *sync.Map) int {
 	return n
 }
 
-// serveMetrics opens the operator listener: /metrics, /healthz and /readyz.
+// serveMetrics opens the operator listener: /metrics, /healthz, /readyz and
+// /debug/peer, the router's view of one peer.
 // It is off unless an address is configured, and never shares a port with the
 // libp2p listeners, so it can stay cluster-internal while the mesh port is
 // public. libp2p's own metrics land in the default registry, so exposing it
@@ -263,6 +272,7 @@ func (r *Router) serveMetrics(addr string) error {
 		}
 		w.WriteHeader(http.StatusOK)
 	})
+	mux.HandleFunc("GET /debug/peer", r.handleDebugPeer)
 
 	r.metricsServer = &http.Server{
 		Handler:           mux,

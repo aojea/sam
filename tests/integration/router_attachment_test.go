@@ -340,10 +340,24 @@ bindings:
 		"--insecure-skip-tls-verify",
 		"--mesh-reconnect-interval", "500ms",
 	)
+	cpLog := filepath.Join(m.tmpDir, "control-plane.log")
+	cpLogFile, err := os.Create(cpLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cpCmd.Stdout, cpCmd.Stderr = cpLogFile, cpLogFile
 	if err := cpCmd.Start(); err != nil {
 		t.Fatalf("start control plane: %v", err)
 	}
-	t.Cleanup(func() { _ = cpCmd.Process.Kill(); _ = cpCmd.Wait() })
+	t.Cleanup(func() {
+		_ = cpCmd.Process.Kill()
+		_ = cpCmd.Wait()
+		_ = cpLogFile.Close()
+		if t.Failed() {
+			out, _ := os.ReadFile(cpLog)
+			t.Logf("--- control plane ---\n%s", out)
+		}
+	})
 	waitForControlPlane(t, m.cpPort)
 	injectPolicyYAML(t, m.cpPort, testAdminToken, policyFile)
 	return m
@@ -526,9 +540,13 @@ func TestIdleNodesHoldOnlyTheirRouters(t *testing.T) {
 	for _, s := range sites {
 		routers[s] = m.startRouter(t, "router-"+s, "site="+s)
 	}
-	// Federation on the first pass: every router finds the ones before it.
-	waitForEqual(t, "routers connected to router c", func() []string { return routersConnectedTo(t, m.cpPort, routers["c"].peerID) },
-		peerIDStrings(routers["a"].peerID, routers["b"].peerID), 10*time.Second)
+	// Federation on the first pass: every router finds the ones before it,
+	// and authenticates them whether or not the DHT connected them first.
+	for _, s := range sites {
+		waitForEqual(t, "peer routers router "+s+" authenticated", func() []string {
+			return []string{fmt.Sprint(routers[s].gauge(t, `agentmesh_router_peer_routers{state="authenticated"}`))}
+		}, []string{"2"}, 10*time.Second)
+	}
 
 	nodes := map[string]*backgroundNode{}
 	for _, s := range sites {
@@ -574,6 +592,23 @@ func TestIdleNodesHoldOnlyTheirRouters(t *testing.T) {
 		}
 	}
 	if t.Failed() {
+		known := map[string]string{}
+		for _, s := range sites {
+			known[routers[s].peerID.String()] = "router " + s
+			known[nodes[s].peerID.String()] = "node " + s
+		}
+		for _, lease := range fetchAdminStatus(t, m.cpPort, testAdminToken).GetActiveRouters() {
+			var peers []string
+			for _, p := range lease.GetConnectedPeers() {
+				name := known[p]
+				if name == "" {
+					name = "other " + p[len(p)-6:]
+				}
+				peers = append(peers, name)
+			}
+			slices.Sort(peers)
+			t.Logf("%s leases %d address(es), connected to: %v", known[lease.GetPeerId()], len(lease.GetAddresses()), peers)
+		}
 		for _, s := range sites {
 			out := nodes[s].log()
 			if i := strings.LastIndex(out, "[AuthN] Successfully authenticated"); i > 0 {

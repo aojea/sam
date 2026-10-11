@@ -551,6 +551,13 @@ func VerifyBiscuitAndGetExpiry(biscuitData []byte, expectedPeer peer.ID, trusted
 	return expiry, err
 }
 
+// VerifyBiscuitAdmission is VerifyBiscuit that reports both the key that
+// verified the token and when it lapses, for a caller that caches the
+// admission and goes on to evaluate the token under that key.
+func VerifyBiscuitAdmission(biscuitData []byte, expectedPeer peer.ID, trustedPublicKeys []ed25519.PublicKey, timeout time.Duration) (*biscuit.Biscuit, ed25519.PublicKey, time.Time, error) {
+	return verifyBiscuit(biscuitData, expectedPeer, trustedPublicKeys, timeout)
+}
+
 func verifyBiscuit(biscuitData []byte, expectedPeer peer.ID, trustedPublicKeys []ed25519.PublicKey, timeout time.Duration) (*biscuit.Biscuit, ed25519.PublicKey, time.Time, error) {
 	b, rules, err := UnmarshalInbound(biscuitData)
 	if err != nil {

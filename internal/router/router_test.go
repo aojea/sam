@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -392,8 +393,8 @@ func TestRouterFederation(t *testing.T) {
 	// Wait for both routers to renew their lease so they are both in control plane DB
 	time.Sleep(3 * time.Second)
 
-	// Trigger connection sync manually to form the federation link
-	r1.connectBootstrapRouters()
+	// Router 2's pass alone forms the link: Router 1 learns Router 2 is a
+	// router from the handshake, not from a pass of its own.
 	r2.connectBootstrapRouters()
 
 	// Wait a moment for stream handshakes to complete
@@ -412,6 +413,15 @@ func TestRouterFederation(t *testing.T) {
 	// Assert that Router 2 mutually authenticated Router 1
 	if _, authenticated := r2.authenticatedPeers.Load(r1.Host.ID()); !authenticated {
 		t.Errorf("Router 1 is not authenticated in Router 2's peers")
+	}
+
+	for name, r := range map[string]*Router{"Router 1": r1, "Router 2": r2} {
+		if listed, authenticated := r.peerRouterCounts(); listed != 1 || authenticated != 1 {
+			t.Errorf("%s knows %d peer router(s), %d authenticated; want 1 and 1", name, listed, authenticated)
+		}
+		if members := r.members(); len(members) != 0 {
+			t.Errorf("%s counts %v as members; a peer router is not one", name, members)
+		}
 	}
 }
 
@@ -1040,6 +1050,76 @@ func TestPerformMutualAuth(t *testing.T) {
 				t.Fatal("rejected peer recorded as authenticated")
 			}
 		})
+	}
+}
+
+// A connection to a peer router is commonly open before the federation pass
+// reaches it (the DHT dials routers it learns of), and an admission expires.
+// Neither leaves the pair unauthenticated: the pass authenticates whenever
+// the peer is not currently admitted, over whatever connection is open.
+func TestFederationAuthenticatesListedRoutersNotCurrentlyAdmitted(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerRouter, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = peerRouter.Close() }()
+	peerBiscuit, err := identity.MintBootstrapBiscuitToken(priv, peerRouter.ID(), api.RoleRouter, time.Now().Add(time.Hour), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var handshakes atomic.Int32
+	peerRouter.SetStreamHandler(api.AuthProtocolID, func(s network.Stream) {
+		defer func() { _ = s.Close() }()
+		reader := msgio.NewVarintReaderSize(s, 1024*64)
+		msg, err := reader.ReadMsg()
+		if err != nil {
+			return
+		}
+		reader.ReleaseMsg(msg)
+		handshakes.Add(1)
+		respBytes, _ := proto.Marshal(&api.AuthResponse{Success: true, Biscuit: peerBiscuit})
+		_ = msgio.NewVarintWriter(s).WriteMsg(respBytes)
+	})
+
+	r := newGoAwayRouter(t, 100)
+	r.ctx = context.Background()
+	r.credential = credential{biscuit: []byte("router-biscuit")}
+	r.trustedPublicKeys = []ed25519.PublicKey{pub}
+	r.config.BiscuitTimeout = time.Second
+	r.config.RequiredRole = api.RoleRouter
+	pi := peer.AddrInfo{ID: peerRouter.ID(), Addrs: peerRouter.Addrs()}
+
+	// The DHT got there first.
+	if err := r.Host.Connect(context.Background(), pi); err != nil {
+		t.Fatal(err)
+	}
+	r.peerRouters.Store(pi.ID, true)
+	if listed, authenticated := r.peerRouterCounts(); listed != 1 || authenticated != 0 {
+		t.Fatalf("before the pass: listed %d, authenticated %d; want 1, 0", listed, authenticated)
+	}
+	r.authenticatePeerRouter(pi)
+	if !r.isPeerAuthenticated(pi.ID) {
+		t.Fatal("peer router connected by the DHT was not authenticated")
+	}
+	if listed, authenticated := r.peerRouterCounts(); listed != 1 || authenticated != 1 {
+		t.Fatalf("after the pass: listed %d, authenticated %d; want 1, 1", listed, authenticated)
+	}
+	if got := handshakes.Load(); got != 1 {
+		t.Fatalf("handshakes with the peer router: %d, want 1", got)
+	}
+
+	// The admission lapsed; it is renewed, not left to the connection.
+	r.authenticatedPeers.Store(pi.ID, time.Now().Add(-time.Second))
+	if _, authenticated := r.peerRouterCounts(); authenticated != 0 {
+		t.Fatal("an expired admission counts as authenticated")
+	}
+	r.authenticatePeerRouter(pi)
+	if !r.isPeerAuthenticated(pi.ID) || handshakes.Load() != 2 {
+		t.Fatalf("expired admission not renewed: authenticated %v, handshakes %d", r.isPeerAuthenticated(pi.ID), handshakes.Load())
 	}
 }
 

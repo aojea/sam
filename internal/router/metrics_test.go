@@ -16,6 +16,7 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strconv"
@@ -86,6 +87,9 @@ func TestRouterMetricsListener(t *testing.T) {
 	r.authenticatedPeers.Store(peer.ID("peer-a"), true)
 	r.authenticatedPeers.Store(peer.ID("peer-b"), true)
 	r.bannedPeers.Store(peer.ID("peer-x"), true)
+	// Two peer routers listed, of which one is authenticated.
+	r.peerRouters.Store(peer.ID("peer-a"), true)
+	r.peerRouters.Store(peer.ID("peer-r"), true)
 	expiry := time.Now().Add(time.Hour).Truncate(time.Second)
 	r.keysMu.Lock()
 	r.credential.expiration = expiry
@@ -110,6 +114,8 @@ func TestRouterMetricsListener(t *testing.T) {
 		`agentmesh_router_relay_limit{limit="circuits_per_peer"} 1024`,
 		"agentmesh_router_inbound_connections_refused_total",
 		"agentmesh_router_authenticated_peers 2",
+		`agentmesh_router_peer_routers{state="listed"} 2`,
+		`agentmesh_router_peer_routers{state="authenticated"} 1`,
 		"agentmesh_router_banned_peers 1",
 		"agentmesh_router_connected_peers 0",
 		"agentmesh_router_dht_routing_table_size 0",
@@ -124,6 +130,32 @@ func TestRouterMetricsListener(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("/metrics missing %q", want)
 		}
+	}
+
+	// /debug/peer is the router's view of one peer: its standing here and
+	// the addresses the router would hand out for it.
+	other, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Close() }()
+	if err := other.Connect(ctx, peer.AddrInfo{ID: host.ID(), Addrs: host.Addrs()}); err != nil {
+		t.Fatal(err)
+	}
+	r.authenticatedPeers.Store(other.ID(), time.Now().Add(time.Hour))
+	code, body = getBody(t, base+"/debug/peer?peer_id="+other.ID().String())
+	if code != http.StatusOK {
+		t.Fatalf("/debug/peer = %d: %s", code, body)
+	}
+	var view peerView
+	if err := json.Unmarshal([]byte(body), &view); err != nil {
+		t.Fatalf("/debug/peer: %v: %s", err, body)
+	}
+	if view.Connectedness != "Connected" || !view.Authenticated || view.PeerRouter || len(view.Connections) != 1 || len(view.Addrs) == 0 {
+		t.Errorf("/debug/peer for a connected, authenticated member: %+v", view)
+	}
+	if code, _ := getBody(t, base+"/debug/peer?peer_id=nonsense"); code != http.StatusBadRequest {
+		t.Errorf("/debug/peer with a bad peer id = %d, want 400", code)
 	}
 
 	if err := r.Close(); err != nil {

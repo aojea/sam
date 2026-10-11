@@ -311,7 +311,9 @@ type Router struct {
 
 	// identityLoggedAt is when the "Router Online" line was last written.
 	identityLoggedAt atomic.Pointer[time.Time]
-	authFailureLog   perPeerLogLimiter
+	// leasedAddrs is the address list of the last accepted lease, joined.
+	leasedAddrs    atomic.Pointer[string]
+	authFailureLog perPeerLogLimiter
 }
 
 // NewRouter initializes the router.
@@ -1151,10 +1153,27 @@ func (r *Router) sendLease(ctx context.Context, ttl *time.Duration, attempts int
 		} else {
 			logger.Debugf("Lease renewed successfully. Expires at: %s", leaseResp.GetExpireTime().AsTime().Format(time.RFC3339))
 			leaseRenewalsTotal.WithLabelValues(leaseOK).Inc()
+			r.logLeasedAddrs(addrs)
 			r.logIdentityPeriodically()
 		}
 		return
 	}
+}
+
+// logLeasedAddrs writes the addresses the control plane now lists for this
+// router each time they differ from the last lease: members and peer routers
+// reach the router only through these, and a lease without any leaves it
+// listed but unreachable.
+func (r *Router) logLeasedAddrs(addrs []string) {
+	joined := strings.Join(addrs, ",")
+	if last := r.leasedAddrs.Swap(&joined); last != nil && *last == joined {
+		return
+	}
+	if len(addrs) == 0 {
+		logger.Warn("Lease advertises no addresses: the control plane lists this router but nothing can reach it")
+		return
+	}
+	logger.Infof("Lease advertises %d address(es): %v", len(addrs), addrs)
 }
 
 // identityLogInterval is how often the router restates who it is. Container
@@ -1277,37 +1296,66 @@ func (r *Router) connectBootstrapRouters() {
 
 		for _, resolved := range resolvedAddrs {
 			pi, err := peer.AddrInfoFromP2pAddr(resolved)
-			if err != nil || pi.ID == r.Host.ID() {
+			if err != nil {
+				logger.Warnf("[Federation] Ignoring router address %s: %v", resolved, err)
+				continue
+			}
+			if pi.ID == r.Host.ID() {
 				continue
 			}
 			r.peerRouters.Store(pi.ID, true)
 			r.Host.ConnManager().Protect(pi.ID, federationTag)
-
-			if len(r.Host.Network().ConnsToPeer(pi.ID)) == 0 {
-				logger.Infof("[Federation] Connecting to peer router: %s via %s", pi.ID, resolved)
-				// Create a timeout context
-				connectCtx, cancel := context.WithTimeout(r.ctx, 10*time.Second)
-				if err := r.Host.Connect(connectCtx, *pi); err == nil {
-					// Initiate stream to perform mutual auth handshake
-					s, err := r.Host.NewStream(connectCtx, pi.ID, api.AuthProtocolID)
-					if err == nil {
-						if err := r.performMutualAuth(s); err != nil {
-							logger.Errorf("[Federation] Mutual auth handshake failed with %s: %v", pi.ID, err)
-							_ = s.Reset()
-						} else {
-							logger.Infof("[Federation] Mutually authenticated with peer router %s", pi.ID)
-							_ = s.Close()
-						}
-					} else {
-						logger.Errorf("[Federation] Failed to open auth stream to %s: %v", pi.ID, err)
-					}
-				} else {
-					logger.Errorf("[Federation] Failed to connect to %s: %v", pi.ID, err)
-				}
-				cancel()
+			if r.isPeerAuthenticated(pi.ID) {
+				continue
 			}
+			r.authenticatePeerRouter(*pi)
 		}
 	}
+}
+
+// authenticatePeerRouter runs the mutual handshake with a router the control
+// plane lists, over the connection to it if one is open (the DHT commonly
+// opens one first), dialling otherwise. Authentication is what decides, not
+// the connection: a connection the DHT made is not an authenticated one,
+// and an admission that expired is renewed on the next pass.
+func (r *Router) authenticatePeerRouter(pi peer.AddrInfo) {
+	ctx, cancel := context.WithTimeout(r.ctx, 10*time.Second)
+	defer cancel()
+	if len(r.Host.Network().ConnsToPeer(pi.ID)) == 0 {
+		logger.Infof("[Federation] Connecting to peer router: %s via %v", pi.ID, pi.Addrs)
+		if err := r.Host.Connect(ctx, pi); err != nil {
+			logger.Errorf("[Federation] Failed to connect to %s: %v", pi.ID, err)
+			return
+		}
+	} else {
+		logger.Infof("[Federation] Authenticating with peer router %s over its open connection", pi.ID)
+	}
+	s, err := r.Host.NewStream(ctx, pi.ID, api.AuthProtocolID)
+	if err != nil {
+		logger.Errorf("[Federation] Failed to open auth stream to %s: %v", pi.ID, err)
+		return
+	}
+	if err := r.performMutualAuth(s); err != nil {
+		logger.Errorf("[Federation] Mutual auth handshake failed with %s: %v", pi.ID, err)
+		_ = s.Reset()
+		return
+	}
+	logger.Infof("[Federation] Mutually authenticated with peer router %s", pi.ID)
+	_ = s.Close()
+}
+
+// peerRouterCounts is how many peer routers this router knows, from the
+// control plane's list or a handshake that proved the router role, and how
+// many of those hold a current authentication.
+func (r *Router) peerRouterCounts() (listed, authenticated int) {
+	r.peerRouters.Range(func(k, _ any) bool {
+		listed++
+		if r.isPeerAuthenticated(k.(peer.ID)) {
+			authenticated++
+		}
+		return true
+	})
+	return listed, authenticated
 }
 
 // recoverStreamHandler isolates a panic while processing untrusted peer bytes
@@ -1376,7 +1424,7 @@ func (r *Router) HandleAuthHandshake(s network.Stream) {
 	}
 
 	// Verify Biscuit and record its expiration so relayACL drops the session on time.
-	expiry, err := identity.VerifyBiscuitAndGetExpiry(exchange.Biscuit, remotePeer, r.getTrustedPublicKeys(), r.config.BiscuitTimeout)
+	b, verifyingKey, expiry, err := identity.VerifyBiscuitAdmission(exchange.Biscuit, remotePeer, r.getTrustedPublicKeys(), r.config.BiscuitTimeout)
 	if err != nil {
 		// A peer stuck on a bad credential retries every few seconds for
 		// days; one line a minute per peer keeps the log readable and the
@@ -1392,6 +1440,14 @@ func (r *Router) HandleAuthHandshake(s network.Stream) {
 	r.admitPeer(remotePeer, expiry)
 	authHandshakesTotal.WithLabelValues(handshakeOK).Inc()
 	logger.Infof("[AuthN] Successfully authenticated peer %s", remotePeer)
+	// A router that proves the router role is a peer router from here on,
+	// not from the next federation pass: it is never a member to shed.
+	if identity.RequireRole(b, verifyingKey, api.RoleRouter, r.config.BiscuitTimeout) == nil {
+		if _, known := r.peerRouters.LoadOrStore(remotePeer, true); !known {
+			logger.Infof("[Federation] Peer router %s authenticated with us", remotePeer)
+			r.Host.ConnManager().Protect(remotePeer, federationTag)
+		}
+	}
 
 	// Send mutual response (our biscuit)
 	r.keysMu.RLock()

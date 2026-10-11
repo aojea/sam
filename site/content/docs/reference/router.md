@@ -50,7 +50,7 @@ replica count.
 | `--relay-max-circuits` | `1024` | Relayed connections one peer may hold at once through this router, as caller or as destination. A service that many members call at once needs this many open circuits. |
 | `--shutdown-lease-ttl` | `30s` | Sent in the router's last lease when it stops: how long it expects to be away, which is how long the control plane keeps listing it. The default covers a pod that restarts in place. A router that is being removed for good can send `1s`. `0` sends nothing and the lease expires on the control plane's schedule. |
 | `--auth-deadline` | `1m` | How long an inbound connection may stay open without its peer passing the handshake. A member handshakes the moment it connects; a member attached elsewhere whose DHT client came to query is done in less, as is the control plane's event publisher, which presents a credential of its own. What is left at the deadline is closed, so the connections a router holds are its members' and the watermarks mean members. `0` keeps every connection. |
-| `--metrics-addr` | off | Serve `/metrics`, `/healthz` and `/readyz` without authentication on this address. `/readyz` returns `200` once the router is enrolled and the libp2p host is up. Keep this address separate from the libp2p ports and inside the cluster. |
+| `--metrics-addr` | off | Serve `/metrics`, `/healthz`, `/readyz` and `/debug/peer` without authentication on this address. `/readyz` returns `200` once the router is enrolled and the libp2p host is up. Keep this address separate from the libp2p ports and inside the cluster. |
 | `--log-level` | `info` | `debug`, `info`, `warn`, `error`. `LOG_FORMAT=json` selects JSON output. |
 
 ## What it does at run time
@@ -114,6 +114,7 @@ The metrics address exposes, next to the Go runtime metrics:
 | `agentmesh_router_conns_per_source_ip_limit` | The per-address cap in force. |
 | `agentmesh_router_relay_limit{limit}` | The relay budget in force: `reservations`, `reservations_per_ip` and `circuits_per_peer`. |
 | `agentmesh_router_connected_peers`, `agentmesh_router_authenticated_peers`, `agentmesh_router_banned_peers` | Peers in each state. |
+| `agentmesh_router_peer_routers{state}` | Other routers this one knows, from the control plane's list or a handshake that proved the router role: `listed`, and `authenticated` for those it currently holds a mutual authentication with. The two differ while a federation pass is pending or a peer router is down. |
 | `agentmesh_router_dht_routing_table_size` | DHT routing table size. |
 | `agentmesh_router_auth_handshakes_total{result}`, `agentmesh_router_lease_renewals_total{result}` | Handshakes and lease renewals by outcome. |
 | `agentmesh_router_goaway_sent_total{reason,result}` | Members sent away, by reason (`DRAINING`, `OVERLOADED`) and outcome: `ok` when the member took the message, `unsupported` when it does not speak the protocol and was closed instead, `failed` when the stream broke. A rising `OVERLOADED` count on a router that is not draining is a fleet that has outgrown its routers. |
@@ -126,3 +127,10 @@ approaches the `high` watermark or open relay reservations approach
 `agentmesh_router_relay_limit{limit="reservations"}` on every router that is not
 draining; both are the inputs for an autoscaler. `/healthz` and `/readyz`
 on the same address are the probes to use in a pod spec.
+
+`GET /debug/peer?peer_id=<id>` on the same address is the router's view of
+one peer: its connectedness, whether it is authenticated here and whether it
+is a peer router, its open connections, and the addresses the router holds
+for it, which are the ones it hands out in a DHT answer. It is a diagnostic
+for an operator reading why a member cannot reach another, and its shape is
+not versioned.

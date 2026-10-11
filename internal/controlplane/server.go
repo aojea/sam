@@ -1425,6 +1425,9 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid load: connections and connection_limit must not be negative", http.StatusBadRequest)
 		return
 	}
+	if len(req.Addresses) == 0 {
+		logger.Warnw("Router leased without addresses: it is listed but members cannot reach it", "peer_id", canonical)
+	}
 
 	// The lease lasts the control plane's duration unless the router asked
 	// for less: a router that is stopping says how long it expects to be
