@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"sort"
 	"testing"
 	"time"
 
@@ -159,7 +161,9 @@ func TestResolveRelayAddresses(t *testing.T) {
 
 // A peer named by ID alone, with no address anywhere (an SDK agent publishes
 // no record), is given a circuit through every router that admitted this
-// node, and through nothing else.
+// node, and through nothing else. A peer known by direct addresses only is
+// given the same circuits besides them: those addresses may be on a network
+// this node cannot reach. A peer that announced a circuit is not.
 func TestPreparePeerAddrsFallsBackToAuthenticatedRouters(t *testing.T) {
 	ctx := context.Background()
 	mn := mocknet.New()
@@ -195,15 +199,47 @@ func TestPreparePeerAddrsFallsBackToAuthenticatedRouters(t *testing.T) {
 		BiscuitTimeout:       500 * time.Millisecond,
 		authenticatedRouters: map[peer.ID]bool{admitted.ID(): true, stale.ID(): true},
 	}
-	node.preparePeerAddrs(ctx, unknown.ID())
-
-	var got []string
-	for _, a := range localHost.Peerstore().Addrs(unknown.ID()) {
-		got = append(got, a.String())
+	circuit := fmt.Sprintf("/p2p/%s/p2p-circuit", admitted.ID())
+	addrsOf := func(p peer.ID) []string {
+		var got []string
+		for _, a := range localHost.Peerstore().Addrs(p) {
+			got = append(got, a.String())
+		}
+		sort.Strings(got)
+		return got
 	}
-	want := []string{fmt.Sprintf("/p2p/%s/p2p-circuit", admitted.ID())}
-	if len(got) != 1 || got[0] != want[0] {
-		t.Fatalf("addresses for an unknown peer: got %v, want only a circuit through the connected router %v", got, want)
+
+	node.preparePeerAddrs(ctx, unknown.ID())
+	if got := addrsOf(unknown.ID()); len(got) != 1 || got[0] != circuit {
+		t.Fatalf("addresses for an unknown peer: got %v, want only a circuit through the connected router %v", got, circuit)
+	}
+
+	directOnly, err := mn.GenPeer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := multiaddr.StringCast("/ip4/172.18.0.6/tcp/5002")
+	localHost.Peerstore().AddAddr(directOnly.ID(), direct, peerstore.PermanentAddrTTL)
+	node.preparePeerAddrs(ctx, directOnly.ID())
+	want := []string{direct.String(), circuit}
+	sort.Strings(want)
+	if got := addrsOf(directOnly.ID()); !slices.Equal(got, want) {
+		t.Fatalf("addresses for a peer with direct addresses only: got %v, want %v", got, want)
+	}
+
+	announced, err := mn.GenPeer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := mn.GenPeer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownCircuit := multiaddr.StringCast(fmt.Sprintf("/ip4/10.0.0.2/tcp/4501/p2p/%s/p2p-circuit", other.ID()))
+	localHost.Peerstore().AddAddr(announced.ID(), ownCircuit, peerstore.PermanentAddrTTL)
+	node.preparePeerAddrs(ctx, announced.ID())
+	if got := addrsOf(announced.ID()); slices.Contains(got, circuit) {
+		t.Fatalf("a peer that announced a circuit was also given ours: %v", got)
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -477,7 +478,7 @@ func (n *AgentMeshNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID
 			}
 		}
 	}
-	logger.Debugf("[Discovery] preparePeerAddrs for %s: found %d addrs in peerstore", targetPeer, len(addrs))
+	logger.Debugf("[Discovery] preparePeerAddrs for %s: found %d addrs in peerstore: %v", targetPeer, len(addrs), addrs)
 
 	var validAddrs []multiaddr.Multiaddr
 	seen := make(map[string]struct{})
@@ -548,11 +549,12 @@ func (n *AgentMeshNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID
 		}
 	}
 
-	// A peer nothing announced an address for is still reachable through the
-	// routers that admitted both of us: an SDK agent publishes no service and
-	// no record, and is named by peer ID alone. Every router relays for the
-	// peers it authenticated, so each is a path worth trying.
-	if len(validAddrs) == 0 {
+	// A peer that announced no circuit is still reachable through the
+	// routers that admitted both of us: an SDK agent publishes no address at
+	// all, and a node's direct addresses may be on a network this one cannot
+	// reach. Every router relays for the peers it authenticated, so each is
+	// a path worth trying; libp2p dials direct addresses first and these after.
+	if !slices.ContainsFunc(validAddrs, func(ma multiaddr.Multiaddr) bool { return circuitRelay(ma) != "" }) {
 		for _, router := range n.authenticatedRouterIDs() {
 			circuitAddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p/%s/p2p-circuit", router.String()))
 			if err == nil && addUnique(circuitAddr) {
