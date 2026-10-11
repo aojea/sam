@@ -1,7 +1,7 @@
 ---
 title: "OpenShell sandboxes"
 linkTitle: "OpenShell sandboxes"
-weight: 4
+weight: 5
 ---
 
 This guide puts an agent that runs in an [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell)
