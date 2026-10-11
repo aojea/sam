@@ -263,10 +263,14 @@ instrumentation as much as in the logic.
    ID; a line about a lease names the addresses; a line about a router
    names the router. Flag lines that say what happened without saying to
    whom.
-5. **A flaky-test fix adds instrumentation.** A PR that makes a test
-   deterministic by waiting on a condition must expose that condition in
-   the binary (a gauge, a `/debug` view, a log line) and wait on it there,
-   not on a `time.Sleep`. Flag a fix whose only change is in the test.
+5. **A flaky-test fix adds instrumentation.** A flake is a race the
+   production code has too. A PR that makes a test deterministic by
+   waiting on a condition must expose that condition in the binary (a
+   gauge, a `/debug` view, a log line) and wait on it there, not on a
+   `time.Sleep`. Flag a fix whose only change is in the test, and flag a
+   retry loop, a widened timeout or a sleep added to a test that failed in
+   CI: ask for the reproduction (`stress` with `-race`, see `AGENTS.md`
+   §3) and the code change it led to.
 6. **Safe defaults, zero configuration.** A new flag or option needs a
    default that is secure without the operator reading the docs: deny, verify,
    short-lived, loopback-only, bounded. Flag a default that opens something
