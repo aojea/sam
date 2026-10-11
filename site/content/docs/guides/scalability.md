@@ -49,7 +49,8 @@ them.
 | Relay reservations per router | `agentmesh-router --relay-max-reservations` | the high mark (4000) | A member that cannot reserve is not reachable through that router. |
 | Relayed connections per peer | `agentmesh-router --relay-max-circuits` | 1024 | A service called through the relay holds one circuit per caller; the next caller is refused. |
 | Enrollments per second | control plane, fixed | 10 a second, burst 20 | The next enrollment is answered `429` with `Retry-After`; the node retries for up to three minutes. |
-| Connections per node | `agentmesh-node`, fixed | 400 high, 100 low | A node called by more peers than this at once closes connections down to 100. |
+| Connections per node | `agentmesh-node`, fixed | 400 high, 100 low | A node called by more peers than this at once closes connections down to 100; past 400 it refuses the next one. |
+| Connections per source address at a node | `agentmesh-node`, fixed | a quarter of the high mark (100) | The node refuses the next connection from that address, counted in `agentmesh_node_inbound_connections_refused_total`. A service called by a fleet behind one NAT or one cluster's egress sees them all from one address. |
 | Router lease | `agentmesh-control-plane --lease-duration`, `agentmesh-router --shutdown-lease-ttl` | 15m, 30s | A router that stops without the last lease stays listed for the lease duration. |
 
 The first two rows are the model. A fleet of F members on N routers, each
@@ -71,7 +72,9 @@ at its default of 2, and size for the day one router is down:
   a stopped router and for the connections members open in passing (a DHT
   query, a call to a peer on this router, two connections each while they
   enroll). 5000 members on four routers need 4000; 10,000 members need
-  six routers at 4800 or seven at 4000.
+  six routers at 4800 or seven at 4000. The testnets deploy with 6000
+  (`ROUTER_HIGH_WATERMARK` in the deploy workflow) on six routers
+  (`ROUTER_REPLICAS`), which holds 10,000 members with one router out.
 - `--low-watermark` at its default, 15% below the high mark. The gap is
   what one shedding moves to the other routers; a smaller gap sheds more
   often, a larger one moves more members at once. A router that sheds is
@@ -93,7 +96,13 @@ and no limit, as `charts/agentmesh` and the testnet manifests do; the
 testnet runs its routers on 2 vCPU without a limit. The router sizes its
 libp2p stream limits from the watermarks, so a small VM admits as many
 members as its watermarks say; what a small VM cannot do is handshake them
-quickly.
+quickly. Its libp2p connection cap is twice the high watermark: between
+the two, the connection manager trims and the router sheds, and the cap
+refuses only what neither has handled yet. A router that reads
+`agentmesh_router_inbound_connections_refused_total{reason="scope_limit"}`
+rising has more connections than two watermarks, which a rollout of a
+mesh at capacity produces when the stopped router's members land on the
+others; the fix is a router or a higher watermark.
 
 Routers connect to one another, every pair, to run the DHT and GossipSub
 across the mesh; a router never sheds those connections. That is N × (N − 1)
@@ -215,6 +224,7 @@ The router and the control plane serve Prometheus metrics on
 | `agentmesh_router_connections{direction="inbound"}` against `agentmesh_router_connection_watermark{level="high"}` | How full a router is. The gap, summed over the routers that are not draining, is the free capacity of the mesh. |
 | `agentmesh_router_goaway_sent_total{reason="OVERLOADED"}` | A router at its high mark sent members to the others. Rising on a router that is not draining, the fleet has outgrown its routers. |
 | `agentmesh_router_inbound_connections_refused_total` | Members behind one address have hit `--conns-per-source-ip`. |
+| `agentmesh_node_inbound_connections_refused_total{reason}` against `agentmesh_node_conns_per_source_ip_limit` | On a provider: callers it turned away before the handshake. `per_ip_limit` is a fleet behind one address, `scope_limit` more callers at once than the node's connection budget. The caller sees the connection close before TLS, or `CONNECTION_REFUSED` over QUIC, and nothing more. |
 | `libp2p_relaysvc_reservations_total{type="opened"}` minus `{type="closed"}`, against `agentmesh_router_relay_limit{limit="reservations"}` | Reservations in use against the budget. |
 | `libp2p_relaysvc_connection_rejections_total{reason="resource limit exceeded"}` | A service has more callers than `--relay-max-circuits`. |
 | `libp2p_rcmgr_blocked_resources` | libp2p refused a connection or stream on a scope. On a router this should stay flat. |

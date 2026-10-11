@@ -545,11 +545,15 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 	}
 	logger.Infof("Configured %d routers, attaching to %d: %v", len(staticRelays), n.wantRouters(), staticRelays)
 
-	cm, err := connmgr.NewConnManager(100, 400, connmgr.WithGracePeriod(time.Minute))
+	cm, err := connmgr.NewConnManager(ConnLowWaterMark, ConnHighWaterMark, connmgr.WithGracePeriod(time.Minute))
 	if err != nil {
 		return fmt.Errorf("failed to create connection manager: %w", err)
 	}
 	n.connMgr = cm
+	rm, err := newResourceManager()
+	if err != nil {
+		return fmt.Errorf("failed to create resource manager: %w", err)
+	}
 
 	// Layer 1: Transports & NAT Services. TLS first: Go peers and the
 	// Node/Python SDKs land on it. Noise is what a browser can speak, and a
@@ -567,6 +571,7 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 		libp2p.EnableRelay(),
 		libp2p.EnableHolePunching(),
 		libp2p.ConnectionManager(cm),
+		libp2p.ResourceManager(rm),
 		libp2p.SwarmOpts(swarm.WithDialTimeout(15 * time.Second)),
 		libp2p.AddrsFactory(n.announceFilter),
 	}

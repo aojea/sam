@@ -106,6 +106,8 @@ func TestNodeMetricsServer(t *testing.T) {
 		"agentmesh_node_connected_peers 0",
 		"agentmesh_node_authenticated_peers 2",
 		"agentmesh_node_dht_routing_table_size 0",
+		"agentmesh_node_conns_per_source_ip_limit 100",
+		`agentmesh_node_inbound_connections_refused_total{reason="per_ip_limit"} 0`,
 		"agentmesh_node_biscuit_expiry_timestamp_seconds " + strconv.FormatFloat(float64(expiry), 'g', -1, 64),
 		// The process-wide registry rides along: sidecar counters and libp2p.
 		"agentmesh_node_requests_in_flight",

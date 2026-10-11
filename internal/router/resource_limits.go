@@ -15,19 +15,19 @@
 package router
 
 import (
-	"net/netip"
-	"time"
-
 	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/p2plimits"
 	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	circuit "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/proto"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
-	xrate "github.com/libp2p/go-libp2p/x/rate"
 )
+
+// connCapHeadroom is the resource manager's connection cap as a multiple of
+// the high watermark.
+const connCapHeadroom = 2
 
 // hubLimits returns the libp2p resource limits for a router, sized from the
 // connection budget rather than from host memory. libp2p's defaults are for
@@ -40,27 +40,27 @@ import (
 // joins (identify, the auth handshake, DHT), and a service many members
 // call holds one relayed connection per caller.
 //
-// conns is the inbound connection budget per source address and circuits
-// the relayed connections one peer may hold; both come from Options.
-func hubLimits(conns, circuits int) rcmgr.ConcreteLimitConfig {
+// highWaterMark is the member count the router sheds at and conns the
+// inbound connection budget per source address, both from Options; circuits
+// is the relayed connections one peer may hold. The connection caps sit
+// above the watermark: the connection manager trims and the router sheds
+// members between the watermark and the cap, and the manager refuses only
+// what neither has handled yet. A cap at the watermark refused members
+// while the router still counted itself below it.
+func hubLimits(highWaterMark, conns, circuits int) rcmgr.ConcreteLimitConfig {
 	limits := rcmgr.DefaultLimits
 	libp2p.SetDefaultServiceLimits(&limits)
 	scaled := limits.AutoScale()
 
-	sysBase := max(conns, DefaultHighWaterMark)
+	sysBase := max(conns, highWaterMark, DefaultHighWaterMark)
+	connCap := connCapHeadroom * sysBase
 	// Streams per member on the scopes that see every member.
 	const streamsPerConn = 8
-	streams := func(n int) rcmgr.ResourceLimits {
-		return rcmgr.ResourceLimits{
-			Streams:         rcmgr.LimitVal(2 * n),
-			StreamsInbound:  rcmgr.LimitVal(n),
-			StreamsOutbound: rcmgr.LimitVal(n),
-		}
-	}
-	system := streams(streamsPerConn * sysBase)
-	system.Conns = rcmgr.LimitVal(2 * sysBase)
-	system.ConnsInbound = rcmgr.LimitVal(sysBase)
-	system.FD = rcmgr.LimitVal(2 * sysBase)
+	streams := p2plimits.Streams
+	system := streams(streamsPerConn * connCap)
+	system.Conns = rcmgr.LimitVal(2 * connCap)
+	system.ConnsInbound = rcmgr.LimitVal(connCap)
+	system.FD = rcmgr.LimitVal(2 * connCap)
 	transient := streams(sysBase)
 	transient.Conns = rcmgr.LimitVal(sysBase)
 	transient.ConnsInbound = rcmgr.LimitVal(sysBase)
@@ -96,42 +96,4 @@ func hubLimits(conns, circuits int) rcmgr.ConcreteLimitConfig {
 		},
 	}
 	return overrides.Build(scaled)
-}
-
-// perIPConnResourceManager is libp2p's resource manager with hubLimits, the
-// per-source-IP inbound connection cap and the per-subnet connection rate
-// limit scaled to it; see Options.ConnsPerSourceIP. All of these matter
-// behind a proxy or NAT: every peer shares a few source IPs, so libp2p's
-// per-IP cap (8), its per-IP rate (0.2 conns/s, burst 16) and the small
-// transient scope each take down the whole listener under normal reconnect
-// churn.
-func perIPConnResourceManager(limit, circuits int) (network.ResourceManager, error) {
-	// Same shape as the rcmgr default limiter (loopback exempt, no global
-	// cap), with the per-subnet budget scaled by limit relative to the
-	// default per-IP cap of 8.
-	scale := float64(limit) / 8
-	connRateLimiter := &xrate.Limiter{
-		NetworkPrefixLimits: []xrate.PrefixLimit{
-			{Prefix: netip.MustParsePrefix("127.0.0.0/8"), Limit: xrate.Limit{}},
-			{Prefix: netip.MustParsePrefix("::1/128"), Limit: xrate.Limit{}},
-		},
-		SubnetRateLimiter: xrate.SubnetLimiter{
-			IPv4SubnetLimits: []xrate.SubnetLimit{
-				{PrefixLength: 32, Limit: xrate.Limit{RPS: 0.2 * scale, Burst: 2 * limit}},
-			},
-			IPv6SubnetLimits: []xrate.SubnetLimit{
-				{PrefixLength: 56, Limit: xrate.Limit{RPS: 0.2 * scale, Burst: 2 * limit}},
-			},
-			GracePeriod: time.Minute,
-		},
-	}
-
-	return rcmgr.NewResourceManager(
-		rcmgr.NewFixedLimiter(hubLimits(limit, circuits)),
-		rcmgr.WithLimitPerSubnet(
-			[]rcmgr.ConnLimitPerSubnet{{PrefixLength: 32, ConnCount: limit}},
-			[]rcmgr.ConnLimitPerSubnet{{PrefixLength: 56, ConnCount: limit}},
-		),
-		rcmgr.WithConnRateLimiters(connRateLimiter),
-	)
 }

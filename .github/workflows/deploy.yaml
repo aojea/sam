@@ -386,6 +386,10 @@ jobs:
           # How many routers the environment runs; the member capacity of the
           # mesh is this times the high watermark over two. Unset is 3.
           VAR_ROUTER_REPLICAS: ${{ vars.ROUTER_REPLICAS }}
+          # Members one router holds before it sheds. Unset is 6000: with two
+          # routers per member, six routers hold 10,000 members with one
+          # router out for a rollout.
+          VAR_ROUTER_HIGH_WATERMARK: ${{ vars.ROUTER_HIGH_WATERMARK }}
         run: |
           print_rollout_diagnostics() {
             local namespace="$1"
@@ -419,13 +423,14 @@ jobs:
           export CLUSTER_REGION="${VAR_CLUSTER_REGION}"
           export CLUSTER_NAME="${VAR_CLUSTER_NAME}"
           export ROUTER_REPLICAS="${VAR_ROUTER_REPLICAS:-3}"
+          export ROUTER_HIGH_WATERMARK="${VAR_ROUTER_HIGH_WATERMARK:-6000}"
 
           # Remove legacy sam-router StatefulSet before applying agentmesh-router so
           # hostPort 4501 (TCP/UDP) on the cluster nodes is released for the new pods.
           kubectl delete statefulset/sam-router-${ENV_NAME} service/sam-router-${ENV_NAME} -n ${NAMESPACE} --ignore-not-found
 
           envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/agentmesh-control-plane-template.yaml | kubectl apply -f -
-          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG} ${ROUTER_REPLICAS}' < .github/k8s/agentmesh-router-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG} ${ROUTER_REPLICAS} ${ROUTER_HIGH_WATERMARK}' < .github/k8s/agentmesh-router-template.yaml | kubectl apply -f -
           envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/agentmesh-console-template.yaml | kubectl apply -f -
           envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID}' < .github/k8s/dns-sync-cronjob-template.yaml | kubectl apply -f -
           # Managed Prometheus ships with GKE; a cluster without it should not block the mesh rollout.

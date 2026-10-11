@@ -27,10 +27,11 @@ import (
 // TestHubLimitsFollowTheConnectionBudget pins the scopes that refused a
 // joining fleet on the testnet to the connection budget instead of the
 // host's memory: a router on a small VM must admit as many members as its
-// watermarks say.
+// watermarks say, and the connection cap sits above the watermark so the
+// router sheds members before the manager refuses them.
 func TestHubLimitsFollowTheConnectionBudget(t *testing.T) {
-	const conns, circuits = 6000, 1024
-	cfg := hubLimits(conns, circuits).ToPartialLimitConfig()
+	const highWaterMark, conns, circuits = 6000, 1500, 1024
+	cfg := hubLimits(highWaterMark, conns, circuits).ToPartialLimitConfig()
 
 	want := func(name string, got rcmgr.LimitVal, n int) {
 		t.Helper()
@@ -38,20 +39,24 @@ func TestHubLimitsFollowTheConnectionBudget(t *testing.T) {
 			t.Errorf("%s = %d, want %d", name, got, n)
 		}
 	}
-	want("system inbound conns", cfg.System.ConnsInbound, conns)
-	want("system inbound streams", cfg.System.StreamsInbound, 8*conns)
-	want("transient inbound streams", cfg.Transient.StreamsInbound, conns)
-	want("identify service inbound streams", cfg.Service[identify.ServiceName].StreamsInbound, conns)
-	want("identify protocol inbound streams", cfg.Protocol[identify.ID].StreamsInbound, conns)
-	want("auth protocol inbound streams", cfg.Protocol[api.AuthProtocolID].StreamsInbound, conns)
-	want("relay service inbound streams", cfg.Service[relay.ServiceName].StreamsInbound, conns)
-	want("hop protocol inbound streams", cfg.Protocol[circuit.ProtoIDv2Hop].StreamsInbound, conns)
+	want("system inbound conns", cfg.System.ConnsInbound, connCapHeadroom*highWaterMark)
+	want("system conns", cfg.System.Conns, 2*connCapHeadroom*highWaterMark)
+	want("system inbound streams", cfg.System.StreamsInbound, 8*connCapHeadroom*highWaterMark)
+	want("transient inbound conns", cfg.Transient.ConnsInbound, highWaterMark)
+	want("transient inbound streams", cfg.Transient.StreamsInbound, highWaterMark)
+	want("identify service inbound streams", cfg.Service[identify.ServiceName].StreamsInbound, highWaterMark)
+	want("identify protocol inbound streams", cfg.Protocol[identify.ID].StreamsInbound, highWaterMark)
+	want("auth protocol inbound streams", cfg.Protocol[api.AuthProtocolID].StreamsInbound, highWaterMark)
+	want("relay service inbound streams", cfg.Service[relay.ServiceName].StreamsInbound, highWaterMark)
+	want("hop protocol inbound streams", cfg.Protocol[circuit.ProtoIDv2Hop].StreamsInbound, highWaterMark)
 	// A destination many members call holds one stop stream per caller.
 	want("relay per-peer outbound streams", cfg.ServicePeer[relay.ServiceName].StreamsOutbound, circuits)
 	want("stop protocol per-peer outbound streams", cfg.ProtocolPeer[circuit.ProtoIDv2Stop].StreamsOutbound, circuits)
 
-	// Below the default high watermark the budget is the watermark, so a
-	// small per-address cap does not shrink the router.
-	small := hubLimits(8, circuits).ToPartialLimitConfig()
-	want("system inbound conns with a small per-address cap", small.System.ConnsInbound, DefaultHighWaterMark)
+	// A per-address cap above the watermark widens the budget to it; a small
+	// one or a small watermark does not shrink the router below the default.
+	wide := hubLimits(100, 8000, circuits).ToPartialLimitConfig()
+	want("system inbound conns with a wide per-address cap", wide.System.ConnsInbound, connCapHeadroom*8000)
+	small := hubLimits(100, 8, circuits).ToPartialLimitConfig()
+	want("system inbound conns with a small watermark and cap", small.System.ConnsInbound, connCapHeadroom*DefaultHighWaterMark)
 }

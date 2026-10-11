@@ -63,7 +63,12 @@ Authorization Server.
 | `GET /debug/*` | token | Operator diagnostics. These answer even when the mesh is unreachable. |
 
 `--metrics-addr` serves `/metrics`, `/healthz` and `/readyz` on a second
-listener without authentication, for scrapers that hold no token.
+listener without authentication, for scrapers that hold no token. Besides
+the gauges `/debug/mesh-info` answers on demand, `/metrics` carries
+`agentmesh_node_inbound_connections_refused_total{reason}`, the inbound
+connections the node turned away before the handshake, and
+`agentmesh_node_conns_per_source_ip_limit`, the per-address cap they are
+read against; see the scalability guide.
 
 ## Token endpoint (`/oauth/token`) and revocation (`/oauth/revoke`)
 

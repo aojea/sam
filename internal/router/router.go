@@ -35,6 +35,7 @@ import (
 	"github.com/google/agentmesh/api"
 	cpclient "github.com/google/agentmesh/internal/controlplane/client"
 	"github.com/google/agentmesh/internal/identity"
+	"github.com/google/agentmesh/internal/p2plimits"
 	"github.com/google/agentmesh/internal/ratelimit"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p"
@@ -434,7 +435,7 @@ func (r *Router) Start() (retErr error) {
 
 	// Every refusal the resource manager makes is counted and logged with
 	// its source; a refused dialer only sees its connection close before TLS.
-	mgr, err := perIPConnResourceManager(r.config.ConnsPerSourceIP, r.config.RelayMaxCircuits)
+	mgr, err := p2plimits.NewResourceManager(hubLimits(r.config.HighWaterMark, r.config.ConnsPerSourceIP, r.config.RelayMaxCircuits), r.config.ConnsPerSourceIP)
 	if err != nil {
 		return fmt.Errorf("failed to create resource manager: %w", err)
 	}

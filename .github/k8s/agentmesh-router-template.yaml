@@ -75,6 +75,7 @@ spec:
         - "--jwt-path=/var/run/secrets/tokens/agentmesh-token"
         - "--keys-path=/data/router.key"
         - "--metrics-addr=0.0.0.0:9090"
+        - "--high-watermark=${ROUTER_HIGH_WATERMARK}"
         # /healthz answers as soon as the process is up; /readyz once the
         # router has enrolled and its libp2p host is online.
         startupProbe:
@@ -95,8 +96,10 @@ spec:
           periodSeconds: 20
         resources:
           requests:
-            cpu: 100m
-            memory: 128Mi
+            # A router at its watermark of 6000 members holds about 1 GiB; a
+            # request below that is the first pod evicted under pressure.
+            cpu: 500m
+            memory: 1Gi
         volumeMounts:
         - name: agentmesh-token
           mountPath: /var/run/secrets/tokens

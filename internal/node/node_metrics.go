@@ -106,7 +106,7 @@ func newNodeStateCollector(n *AgentMeshNode) *nodeStateCollector {
 func (c *nodeStateCollector) Describe(ch chan<- *prometheus.Desc) {
 	for _, d := range []*prometheus.Desc{
 		c.readyDesc, c.meshConnectedDesc, c.connectedDesc, c.authenticatedDesc,
-		c.dhtDesc, c.biscuitExpiryDesc, c.servicesDesc, c.routersDesc, c.routerCandsDesc,
+		c.dhtDesc, c.biscuitExpiryDesc, c.servicesDesc, c.routersDesc, c.routerCandsDesc, connsPerSourceIPDesc,
 	} {
 		ch <- d
 	}
@@ -114,6 +114,7 @@ func (c *nodeStateCollector) Describe(ch chan<- *prometheus.Desc) {
 
 func (c *nodeStateCollector) Collect(ch chan<- prometheus.Metric) {
 	n := c.n
+	ch <- prometheus.MustNewConstMetric(connsPerSourceIPDesc, prometheus.GaugeValue, float64(ConnsPerSourceIP))
 	if n.debugReady() != nil {
 		ch <- prometheus.MustNewConstMetric(c.readyDesc, prometheus.GaugeValue, 0)
 		return
