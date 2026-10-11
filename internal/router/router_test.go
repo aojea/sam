@@ -1123,6 +1123,35 @@ func TestFederationAuthenticatesListedRoutersNotCurrentlyAdmitted(t *testing.T) 
 	}
 }
 
+// A router the control plane stopped listing is forgotten once its
+// admission here has lapsed, and its connection loses the federation
+// protection; one still admitted, listed or not, is kept.
+func TestFederationForgetsRoutersNoLongerListed(t *testing.T) {
+	r := newGoAwayRouter(t, 100)
+	listed, unlistedAdmitted, gone := peer.ID("router-listed"), peer.ID("router-unlisted-admitted"), peer.ID("router-gone")
+	for _, p := range []peer.ID{listed, unlistedAdmitted, gone} {
+		r.peerRouters.Store(p, true)
+		r.Host.ConnManager().Protect(p, federationTag)
+	}
+	r.authenticatedPeers.Store(listed, time.Now().Add(time.Hour))
+	r.authenticatedPeers.Store(unlistedAdmitted, time.Now().Add(time.Hour))
+	r.authenticatedPeers.Store(gone, time.Now().Add(-time.Minute))
+
+	r.forgetUnlistedRouters(map[peer.ID]bool{listed: true})
+
+	for _, p := range []peer.ID{listed, unlistedAdmitted} {
+		if _, ok := r.peerRouters.Load(p); !ok || !r.Host.ConnManager().IsProtected(p, federationTag) {
+			t.Errorf("%s was forgotten or unprotected; want kept", p)
+		}
+	}
+	if _, ok := r.peerRouters.Load(gone); ok || r.Host.ConnManager().IsProtected(gone, federationTag) {
+		t.Errorf("%s is still a protected peer router after leaving the list", gone)
+	}
+	if n, _ := r.peerRouterCounts(); n != 2 {
+		t.Errorf("peer routers listed: %d, want 2", n)
+	}
+}
+
 // The router's /mesh/auth handler is reachable by any internet peer. An idle
 // stream must be closed on the router's schedule, and a peer handshaking in a
 // tight loop must be cut off before every frame is verified.

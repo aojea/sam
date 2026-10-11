@@ -278,8 +278,8 @@ type Router struct {
 	EventTopic         *pubsub.Topic
 	authenticatedPeers sync.Map
 	bannedPeers        sync.Map
-	// peerRouters is the other routers of the mesh, as /info lists them:
-	// held whatever the load and never sent away.
+	// peerRouters is the other routers of the mesh, as /info lists them or as
+	// a handshake proved them: held whatever the load and never sent away.
 	peerRouters sync.Map
 	// handshakeLimiter bounds /mesh/auth attempts per peer; any internet peer
 	// can open those streams.
@@ -1283,9 +1283,11 @@ func (r *Router) connectBootstrapRouters() {
 	// restarted or missed a MeshEvent_BANNED catches up.
 	r.reconcileBannedPeers(info.GetBannedPeerIds(), fetchedAt)
 
+	listed := map[peer.ID]bool{}
 	for _, addrStr := range info.RouterAddresses {
 		ma, err := multiaddr.NewMultiaddr(addrStr)
 		if err != nil {
+			logger.Warnf("[Federation] Ignoring router address %q: %v", addrStr, err)
 			continue
 		}
 
@@ -1303,6 +1305,7 @@ func (r *Router) connectBootstrapRouters() {
 			if pi.ID == r.Host.ID() {
 				continue
 			}
+			listed[pi.ID] = true
 			r.peerRouters.Store(pi.ID, true)
 			r.Host.ConnManager().Protect(pi.ID, federationTag)
 			if r.isPeerAuthenticated(pi.ID) {
@@ -1311,6 +1314,26 @@ func (r *Router) connectBootstrapRouters() {
 			r.authenticatePeerRouter(*pi)
 		}
 	}
+	r.forgetUnlistedRouters(listed)
+}
+
+// forgetUnlistedRouters drops the peer routers the control plane no longer
+// lists: a router that was replaced keeps its lease until it expires and
+// nothing else would ever remove it, so it would stay listed and protected
+// here for the life of the process. A router that proved its role in a
+// handshake but is not listed is kept while that admission lasts; its
+// lease is normally visible before it handshakes.
+func (r *Router) forgetUnlistedRouters(listed map[peer.ID]bool) {
+	r.peerRouters.Range(func(k, _ any) bool {
+		p := k.(peer.ID)
+		if listed[p] || r.isPeerAuthenticated(p) {
+			return true
+		}
+		logger.Infof("[Federation] Peer router %s is no longer listed by the control plane, forgetting it", p)
+		r.peerRouters.Delete(p)
+		r.Host.ConnManager().Unprotect(p, federationTag)
+		return true
+	})
 }
 
 // authenticatePeerRouter runs the mutual handshake with a router the control
