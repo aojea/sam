@@ -35,6 +35,123 @@ verifies the member's credential and the member verifies the router's. A
 router pays a few milliseconds of CPU per member that joins, and a fleet
 that joins at once pays them all at once.
 
+## Connections, streams and roles
+
+This section is the network model the rest of the guide sizes: what a
+connection is, what travels on it, which component opens which, and what
+a firewall or NAT between them sees.
+
+### One connection per pair of peers
+
+libp2p keeps one connection between two peers and multiplexes every
+protocol over it as streams. A connection is one transport session with
+one security handshake:
+
+| Transport | Security | Streams | Who listens on it |
+|---|---|---|---|
+| TCP | TLS 1.3 or Noise, then yamux | yamux: no per-connection limit; the resource manager's budgets are the only ones | routers (`/tcp/4501` on the testnet), nodes (`/tcp/5002` by default) |
+| QUIC v1 (UDP) | TLS 1.3, built in | 256 opened by the far end per connection, fixed in go-libp2p; the 257th waits for one to close, with no error at either end | routers (`/udp/4501/quic-v1`), nodes (`/udp/5001/quic-v1`) |
+| WebSocket | TLS 1.3 or Noise, then yamux | as TCP | routers, on the API port, for browsers |
+| WebTransport, WebRTC | TLS 1.3 | as QUIC | routers, for browsers |
+
+A stream costs no flow: a NAT or a firewall holds one entry per
+connection, whatever runs on it. The entry is kept alive by the
+transport's keepalive, every 15 seconds on QUIC and every 30 seconds on
+yamux, so a connection that stays open stays reachable through a
+middlebox that times idle entries out.
+
+The node dials TCP first. When a peer offers TCP and QUIC, the node dials
+the TCP address at once and the QUIC address 250 ms later; once the TCP
+socket is connected the dialer holds the other attempts while the
+connection upgrades, so QUIC is dialled when the TCP SYN goes unanswered.
+A peer that offers no TCP is dialled with no delay. The reason is the
+stream limit in the table: the connection a member holds to a router
+carries one stream per peer relayed over it, and 256 is a small number
+for a service. Hole punching does not use this order; a simultaneous
+dial tries every address at once.
+
+### Roles
+
+| Role | What it is for the network | What it opens | What opens to it |
+|---|---|---|---|
+| Router | The dialable endpoint. Relay for members behind NAT, the DHT server every lookup reaches, the point of admission (credential handshake, relay ACL, bans), the hub GossipSub events pass through, and the record of which members hold a reservation on it. | Connections to the other routers (every pair), for the DHT and GossipSub. | Every member that holds it, every member's DHT client when it queries, the control plane's event publisher. |
+| Member (`agentmesh-node`, an SDK) | A client of the routers. It announces where it is reached, looks peers and services up, verifies the peers it talks to and carries the data plane. | K connections to the routers it holds (`--routers`, 2), one to each other router it queries, one to each peer it reaches directly. | Peers that call it: directly when they can, through a router otherwise. |
+| Provider | A member that publishes a service: the fan-in point of the mesh. | As a member. | One relayed connection per caller, each a stream on its connection to a router. |
+| Control plane | Enrollment, the router catalog, keys, policy and leases, over HTTP. Its event publisher is a member that holds every router. | HTTP only, and the publisher's connections to the routers. | Members and routers, over HTTP. |
+
+### What a connection carries
+
+| Protocol | Between | Streams | Lifetime |
+|---|---|---|---|
+| `/ipfs/id/1.0.0`, `/ipfs/id/push/1.0.0` | every pair, on connect; push when the peer's addresses change | 1, short | the exchange |
+| `/mesh/auth/1.0.0` | member and router on connect and at renewal; caller and provider before a call | 1, short | the handshake |
+| `/libp2p/circuit/relay/0.2.0/hop` | member to router | 1 per reservation, renewed; 1 per relayed connection the member opens | the reservation; the relayed connection |
+| `/libp2p/circuit/relay/0.2.0/stop` | router to the member a caller reaches | 1 per relayed caller | the relayed connection |
+| `/mesh/kad/1.0.0` | member to each router it queries | 1 request stream per router | while the member keeps the connection |
+| `/meshsub/1.3.0` | every pair that runs GossipSub | 1 per direction | the connection; heartbeat every second |
+| `/libp2p/dcutr`, autonat v2 | the two ends of a relayed connection | 1, short | the hole punch |
+| `/mesh/mcp/1.0.0`, libp2p-http, `/mesh/goaway/1.0.0`, ping | caller and provider; router and member | 1 per call or session | the call |
+
+The resource manager budgets every protocol a member holds a stream on
+for as long as it is connected (the DHT, GossipSub, the relay, and MCP on
+a node) from the connection budget, so a router or a provider admits as
+many such streams as it admits connections; libp2p's own default for a
+protocol it was not told about is a few hundred streams in all, scaled
+from host memory. A refused stream is counted in
+`agentmesh_router_streams_refused_total{protocol}` and
+`agentmesh_node_streams_refused_total{protocol}`.
+
+### Hub links and peer links
+
+A member's connection to a router is a hub link. It carries the member's
+own streams and one `stop` stream for every peer that reaches the member
+through that router, or one `hop` stream for every peer the member
+reaches through it. A connection between two members is a peer link; it
+carries one session.
+
+A relayed connection is therefore not a connection at the network level.
+It is one `hop` stream on the caller's hub link and one `stop` stream on
+the provider's hub link, two streams on two connections that exist
+already. Nothing new crosses a NAT. What it consumes is stream budget,
+on both hub links, and that is where fan-in is bounded:
+
+- the provider's connection to each router: no limit over TCP, 256 over
+  QUIC, and the node's relay `stop` budget, which equals its connection
+  budget (400) per router;
+- the router's `--relay-max-circuits` (1024) for the provider as a
+  destination;
+- the provider's connection manager: at 400 connections it closes down to
+  100, relayed ones included;
+- the provider's backend.
+
+Callers that reach a provider through K routers share the provider's
+connection budget, so the number of concurrent callers one provider
+serves is its connection budget, and a service that more callers reach at
+once is published by more providers. The relayed connection is also the
+start of a hole punch: a caller and a provider whose NATs allow it move
+to a direct peer link, which frees both hub-link streams and holds one
+NAT entry at each end.
+
+### What a middlebox sees per member
+
+A member holds K long-lived connections to its routers, kept alive by
+the transport, so K entries that do not churn. Its DHT client opens a
+connection to each other router it queries; the router closes that
+connection at `--auth-deadline` (a minute) since no session was opened on
+it, and the next query opens it again, so a mesh of R routers adds up to
+R − K entries per member that are created and torn down about once a
+minute while the member looks peers or services up. A member that
+reaches a peer directly holds one entry per such peer, at both ends. A
+relayed connection adds none.
+
+A firewall between a member and the routers needs TCP (and UDP for
+QUIC, when the member is allowed to fall back to it) to the routers'
+ports outbound; nothing inbound, since every connection to a member
+arrives through a hub link it opened. A conntrack table on that path is
+sized for the K long-lived entries per member plus the transient DHT
+connections, and a NAT that times idle UDP entries out in less than the
+QUIC keepalive (15 s) breaks a QUIC hub link; TCP first avoids it.
+
 ## What bounds the mesh
 
 The table lists each bound, the component that enforces it, its default and
@@ -48,6 +165,7 @@ them.
 | Connections per source address | `agentmesh-router --conns-per-source-ip` | a quarter of the high mark (1000) | The router refuses the next connection from that address. Members behind one NAT or one cluster's egress share an address. |
 | Relay reservations per router | `agentmesh-router --relay-max-reservations` | the high mark (4000) | A member that cannot reserve is not reachable through that router. |
 | Relayed connections per peer | `agentmesh-router --relay-max-circuits` | 1024 | A service called through the relay holds one circuit per caller; the next caller is refused. |
+| Streams per hub link | the transport | TCP: the resource manager's budgets; QUIC: 256 per connection | Every relayed caller is one stream on the provider's connection to the router. The node dials TCP first so the budget is the resource manager's; over QUIC the 257th caller through one router waits until one leaves, and both ends log the connection (see `agentmesh_node_busiest_connection_streams`). |
 | Enrollments per second | control plane, fixed | 10 a second, burst 20 | The next enrollment is answered `429` with `Retry-After`; the node retries for up to three minutes. |
 | Connections per node | `agentmesh-node`, fixed | 400 high, 100 low | A node called by more peers than this at once closes connections down to 100; past 400 it refuses the next one. |
 | Connections per source address at a node | `agentmesh-node`, fixed | a quarter of the high mark (100) | The node refuses the next direct connection from that address, counted in `agentmesh_node_inbound_connections_refused_total`. A service called by a fleet behind one NAT or one cluster's egress sees them all from one address. A caller that arrives through a router is not charged to the router's address: it is bounded by the node's connection budget and per-peer scope, and at the router by the relay's per-peer and per-address budgets. |
@@ -181,12 +299,19 @@ has confirmed the address, which takes it off the relay.
 
 A service is reachable through the node that publishes it, and callers that
 cannot dial that node directly reach it through a relay circuit on a router
-where it holds a reservation. Three things bound how many callers one node
-serves at once:
+where it holds a reservation. Each such caller is one stream on the node's
+connection to that router (see [Hub links and peer
+links](#hub-links-and-peer-links)). Four things bound how many callers one
+node serves at once:
 
+- The node's connection manager, 400 connections, relayed ones included.
+  A node that many callers reach at once closes connections above that
+  down to 100. The node's relay `stop` budget is the same figure per
+  router, so a provider that holds two routers can be reached by 400
+  callers at once through either.
+- The transport of the node's connection to each router: no stream limit
+  over TCP, which the node dials first; 256 streams over QUIC.
 - `--relay-max-circuits` on the router, 1024 by default.
-- The node's connection manager, 400 connections. A node that many callers
-  reach at once closes connections above that.
 - The backend behind the node. A `command` backend is one process that
   every caller shares; a URL backend is whatever the server behind it can
   take.

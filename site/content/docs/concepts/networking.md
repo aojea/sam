@@ -71,7 +71,12 @@ ones unless you pass `--announce-private=false`. Two nodes that can reach
 each other connect directly. When neither can accept an inbound connection,
 which is the common case, they use a **relay circuit** through a router.
 Hole punching is enabled, so a relayed connection is upgraded to a direct
-one when the NATs allow it.
+one when the NATs allow it. A node dials a peer's TCP address before its
+QUIC address: the connection to a router carries one stream per peer
+relayed over it, and a QUIC connection admits 256 streams while TCP with
+yamux has no such limit. The scalability guide's [Connections, streams
+and roles](../../guides/scalability/#connections-streams-and-roles) sets
+out what each connection carries and what a NAT or firewall sees.
 
 Routers are the fixed points. A node learns their addresses, labels and
 load from the control plane's `/info` at enrollment and again on a
