@@ -21,6 +21,7 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/connmgr"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
+	circuit "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/proto"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
 )
 
@@ -46,6 +47,9 @@ func TestNodeLimitsFollowTheConnectionBudget(t *testing.T) {
 	for _, p := range pubsub.GossipSubDefaultProtocols {
 		want("gossip protocol "+string(p)+" inbound streams", cfg.Protocol[p].StreamsInbound, ConnHighWaterMark)
 	}
+	// Every caller through one router is a stop stream from that one peer.
+	want("relay stop protocol inbound streams", cfg.Protocol[circuit.ProtoIDv2Stop].StreamsInbound, ConnHighWaterMark)
+	want("relay stop protocol per-peer inbound streams", cfg.ProtocolPeer[circuit.ProtoIDv2Stop].StreamsInbound, ConnHighWaterMark)
 
 	if ConnsPerSourceIP != ConnHighWaterMark/4 {
 		t.Errorf("ConnsPerSourceIP = %d, want a quarter of the high watermark, %d", ConnsPerSourceIP, ConnHighWaterMark/4)

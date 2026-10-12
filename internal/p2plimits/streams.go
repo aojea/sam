@@ -87,7 +87,11 @@ func (s *StreamRefusals) refusedStream(scope, name string) {
 	}
 	s.mu.Unlock()
 	if shouldLog {
-		s.warnf("[Stream] Refused %d stream(s) on %s at the %s scope since the last report; the peer sees its stream reset", n, name, scope)
+		what := "at the " + scope + " scope"
+		if name != "" {
+			what = "on " + name + " " + what
+		}
+		s.warnf("[Stream] Refused %d stream(s) %s since the last report; the peer sees its stream reset", n, what)
 	}
 }
 

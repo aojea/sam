@@ -42,6 +42,7 @@ import (
 	cpclient "github.com/google/agentmesh/internal/controlplane/client"
 	"github.com/google/agentmesh/internal/identity"
 	samdiscovery "github.com/google/agentmesh/internal/node/discovery"
+	"github.com/google/agentmesh/internal/p2plimits"
 	"github.com/google/agentmesh/internal/ratelimit"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ipfs/go-cid"
@@ -799,6 +800,7 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 
 	// Start connection monitor
 	n.startConnectionMonitor(ctx, n.config.MonitorBootstrap, n.config.MonitorInterval, 3)
+	go p2plimits.ObserveStreamPressure(n.Host.Network().Conns, busiestConnStreams, logger.Warnf).Run(ctx, streamPressureInterval)
 
 	// Periodically and on-demand reprovide registered services to the DHT
 	n.startReprovideLoop(ctx, ReprovideInterval)

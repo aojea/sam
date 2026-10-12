@@ -28,6 +28,7 @@ import (
 	"github.com/google/agentmesh/internal/identity"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	"github.com/libp2p/go-msgio"
 	"google.golang.org/protobuf/proto"
 )
@@ -97,6 +98,48 @@ const (
 // answered and its credential did not satisfy the requirement. The first
 // is the mesh's state and a caller may retry it; the second is a verdict.
 var ErrProviderUnreachable = errors.New("provider unreachable")
+
+// How reaching a provider for its credential went; the label values of
+// providerReachTotal. The caller sees one 502 for all of the failures, so
+// the counter tells them apart: the relay refusing the circuit, the dial
+// timing out (a relay's connection to the provider at its stream limit,
+// or a provider gone), no address to dial, the provider closing the
+// stream before answering.
+const (
+	reachOK            = "ok"
+	reachRelayRefused  = "relay_refused"
+	reachDialTimeout   = "dial_timeout"
+	reachNoAddress     = "no_address"
+	reachDialFailed    = "dial_failed"
+	reachNoAnswer      = "no_answer"
+	reachAuthRejected  = "auth_rejected"
+	reachOtherFailure  = "other"
+	relayRefusedMarker = "error opening relay circuit"
+)
+
+// reachFailure classifies why a provider was not reached.
+func reachFailure(err error) string {
+	var dialErr *swarm.DialError
+	switch {
+	case errors.As(err, &dialErr):
+		switch {
+		case dialErr.Timeout(), errors.Is(err, context.DeadlineExceeded):
+			return reachDialTimeout
+		case errors.Is(err, swarm.ErrNoAddresses), errors.Is(err, swarm.ErrNoGoodAddresses):
+			return reachNoAddress
+		case strings.Contains(err.Error(), relayRefusedMarker):
+			return reachRelayRefused
+		}
+		return reachDialFailed
+	case errors.Is(err, context.DeadlineExceeded):
+		return reachDialTimeout
+	case strings.Contains(err.Error(), "read auth response"):
+		return reachNoAnswer
+	case strings.Contains(err.Error(), "auth rejected"):
+		return reachAuthRejected
+	}
+	return reachOtherFailure
+}
 
 // labelGateStatus is the HTTP answer for a label-gate failure, in the
 // order http.Error takes it: 502 when the provider was never heard from, so
@@ -174,8 +217,10 @@ func (n *AgentMeshNode) VerifyPeerLabels(ctx context.Context, peerID peer.ID, re
 
 	providerBiscuit, err := n.fetchPeerBiscuit(ctx, peerID)
 	if err != nil {
+		providerReachTotal.WithLabelValues(reachFailure(err)).Inc()
 		return fmt.Errorf("provider %s labels unverifiable: %w: %w", peerID, ErrProviderUnreachable, err)
 	}
+	providerReachTotal.WithLabelValues(reachOK).Inc()
 	if err := n.checkPeerLabels(providerBiscuit, peerID, required); err != nil {
 		return err
 	}

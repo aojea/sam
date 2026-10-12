@@ -49,7 +49,20 @@ func init() {
 	for _, result := range []string{lookupFound, lookupNotFound, lookupFailed} {
 		peerLookupsTotal.WithLabelValues(result)
 	}
+	for _, result := range []string{reachOK, reachRelayRefused, reachDialTimeout, reachNoAddress, reachDialFailed, reachNoAnswer, reachAuthRejected, reachOtherFailure} {
+		providerReachTotal.WithLabelValues(result)
+	}
 }
+
+// providerReachTotal counts the attempts a call made to reach a provider
+// for its credential, by outcome; every failure is one 502 at the caller.
+var providerReachTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "agentmesh_node_provider_reach_total",
+		Help: "Attempts to reach a provider for its credential before a call, by outcome: ok, relay_refused, dial_timeout, no_address, dial_failed, no_answer, auth_rejected, other",
+	},
+	[]string{"result"},
+)
 
 // The outcome of a DHT lookup for a peer's addresses: found, found
 // nothing, or the lookup itself failed (an empty routing table, a timeout).

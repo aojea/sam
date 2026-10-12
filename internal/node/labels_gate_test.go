@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -27,6 +28,8 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/net/swarm"
+	"github.com/multiformats/go-multiaddr"
 )
 
 // The gate guards calls that ride relayed connections (egress proxy, MCP
@@ -326,6 +329,33 @@ func TestLabelGateKeyIsUnambiguousWithSeparatorsInValues(t *testing.T) {
 	for key, descs := range seen {
 		if len(descs) > 1 {
 			t.Errorf("these distinct inputs share cache key %q: %v", key, descs)
+		}
+	}
+}
+
+// A provider the caller did not reach is one 502 whatever happened; the
+// counter tells the cases apart from the error libp2p hands back.
+func TestReachFailureClassifiesWhatKeptTheProviderAway(t *testing.T) {
+	peerID := peer.ID("12D3KooWtest")
+	relayRefused := &swarm.DialError{Peer: peerID, Cause: swarm.ErrAllDialsFailed, DialErrors: []swarm.TransportError{
+		{Address: multiaddr.StringCast("/p2p-circuit"), Cause: errors.New("error opening relay circuit: PERMISSION_DENIED (202)")},
+	}}
+	timedOut := &swarm.DialError{Peer: peerID, Cause: context.DeadlineExceeded}
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{fmt.Errorf("failed to open auth stream: %w", relayRefused), reachRelayRefused},
+		{fmt.Errorf("failed to open auth stream: %w", timedOut), reachDialTimeout},
+		{fmt.Errorf("failed to open auth stream: %w", &swarm.DialError{Peer: peerID, Cause: swarm.ErrNoAddresses}), reachNoAddress},
+		{fmt.Errorf("failed to open auth stream: %w", &swarm.DialError{Peer: peerID, Cause: swarm.ErrAllDialsFailed, DialErrors: []swarm.TransportError{{Cause: errors.New("connection refused")}}}), reachDialFailed},
+		{fmt.Errorf("failed to open auth stream: %w", context.DeadlineExceeded), reachDialTimeout},
+		{errors.New("read auth response (peer may predate mutual auth): EOF"), reachNoAnswer},
+		{errors.New("auth rejected: expired"), reachAuthRejected},
+		{errors.New("something else"), reachOtherFailure},
+	} {
+		if got := reachFailure(tc.err); got != tc.want {
+			t.Errorf("reachFailure(%v) = %s, want %s", tc.err, got, tc.want)
 		}
 	}
 }

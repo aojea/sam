@@ -90,4 +90,9 @@ func TestStreamRefusalsLogOneProtocolOncePerInterval(t *testing.T) {
 	if len(lines) != 4 || lines[3] != "[Stream] Refused 3 stream(s) on /a at the protocol scope since the last report; the peer sees its stream reset" {
 		t.Errorf("after the interval: %q", lines[len(lines)-1])
 	}
+	// A scope with no protocol to name is said without one.
+	s.BlockPeer("")
+	if lines[len(lines)-1] != "[Stream] Refused 1 stream(s) at the peer scope since the last report; the peer sees its stream reset" {
+		t.Errorf("peer scope: %q", lines[len(lines)-1])
+	}
 }

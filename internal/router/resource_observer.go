@@ -40,6 +40,21 @@ var streamsRefusedTotal = promauto.NewCounterVec(
 	[]string{"scope", "protocol"},
 )
 
+// busiestConnStreams is the most streams any one connection carries. A
+// QUIC connection admits p2plimits.QUICStreamsPerConnection; the router's
+// connection to a service it relays for carries one stream per relayed
+// caller, so this reaching that figure is callers waiting on the relay.
+var busiestConnStreams = promauto.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "agentmesh_router_busiest_connection_streams",
+		Help: "Streams on the connection that carries the most, by transport; QUIC admits 256 per connection and a further stream waits",
+	},
+	[]string{"transport"},
+)
+
+// streamPressureInterval is how often connections are sampled for it.
+const streamPressureInterval = 15 * time.Second
+
 func init() {
 	for _, v := range p2plimits.Reasons {
 		inboundRefusedTotal.WithLabelValues(v)

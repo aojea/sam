@@ -16,6 +16,7 @@ package node
 
 import (
 	"slices"
+	"time"
 
 	"github.com/google/agentmesh/api"
 	"github.com/google/agentmesh/internal/p2plimits"
@@ -24,6 +25,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
+	circuit "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/proto"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -108,6 +110,16 @@ func nodeLimits(conns int) rcmgr.ConcreteLimitConfig {
 		overrides.Protocol[p] = p2plimits.Streams(conns)
 	}
 	overrides.Protocol[api.MCPProtocolID] = p2plimits.Streams(streamsPerConn * conns)
+
+	// A caller that arrives through a router is one relay stop stream, and
+	// every caller through the same router is a stream from that one peer.
+	// libp2p's default is 128 per peer, which capped a provider at 128
+	// callers through each of its routers, so the stop protocol gets the
+	// whole connection budget, per peer and in all.
+	stop := p2plimits.Streams(conns)
+	stop.Memory = rcmgr.LimitVal64(int64(conns) * 64 << 10)
+	overrides.Protocol[circuit.ProtoIDv2Stop] = stop
+	overrides.ProtocolPeer = map[protocol.ID]rcmgr.ResourceLimits{circuit.ProtoIDv2Stop: stop}
 	return overrides.Build(scaled)
 }
 
@@ -118,6 +130,21 @@ var streamsRefusedTotal = promauto.NewCounterVec(
 	},
 	[]string{"scope", "protocol"},
 )
+
+// busiestConnStreams is the most streams any one connection carries. On a
+// provider the connection to a router carries one stream per caller
+// relayed through it; a QUIC connection admits
+// p2plimits.QUICStreamsPerConnection and the next caller waits.
+var busiestConnStreams = promauto.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "agentmesh_node_busiest_connection_streams",
+		Help: "Streams on the connection that carries the most, by transport; QUIC admits 256 per connection and a further stream waits",
+	},
+	[]string{"transport"},
+)
+
+// streamPressureInterval is how often connections are sampled for it.
+const streamPressureInterval = 15 * time.Second
 
 // newResourceManager is the resource manager the node's host runs with:
 // nodeLimits, the per-source cap on direct callers, and every refusal

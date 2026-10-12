@@ -572,13 +572,17 @@ func (r *Router) Start() (retErr error) {
 	})
 
 	// 5. Start background routines
-	r.wg.Add(6)
+	r.wg.Add(7)
 	go r.runLeaseRenewalLoop()
 	go r.runKeysSyncLoop()
 	go r.runFederationLoop()
 	go r.runBiscuitRenewalLoop()
 	go r.runShedLoop()
 	go r.listenForControlPlaneEvents(r.ctx)
+	go func() {
+		defer r.wg.Done()
+		p2plimits.ObserveStreamPressure(hostNode.Network().Conns, busiestConnStreams, logger.Warnf).Run(r.ctx, streamPressureInterval)
+	}()
 
 	r.isReady.Store(true)
 	logger.Infof("Router Online. PeerID: %s, ListenAddrs: %v", r.Host.ID(), r.Host.Addrs())
