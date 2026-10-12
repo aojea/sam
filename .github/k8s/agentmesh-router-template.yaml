@@ -75,6 +75,9 @@ spec:
         - "--jwt-path=/var/run/secrets/tokens/agentmesh-token"
         - "--keys-path=/data/router.key"
         - "--metrics-addr=0.0.0.0:9090"
+        # Profiles on loopback only: `kubectl port-forward <pod> 6060` then
+        # `go tool pprof http://127.0.0.1:6060/debug/pprof/heap`.
+        - "--pprof-addr=127.0.0.1:6060"
         - "--high-watermark=${ROUTER_HIGH_WATERMARK}"
         # /healthz answers as soon as the process is up; /readyz once the
         # router has enrolled and its libp2p host is online.

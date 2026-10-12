@@ -25,6 +25,7 @@ agentmesh-control-plane admin unban --peer <id>     lift a ban
 | `--oidc-client-id` | first audience | OAuth client ID advertised on `/info`, for providers where it differs from the audience. |
 | `--insecure-skip-tls-verify` | `false` | Skip TLS verification when fetching issuer metadata and keys. For a cluster issuer served with the cluster CA, or a local development issuer. |
 | `--bind-address` | `0.0.0.0:8080` | HTTP listen address. |
+| `--pprof-addr` | off | Serve Go runtime profiles under `/debug/pprof/` on this address. Unauthenticated, and a heap profile is a dump of process memory, which holds the signing keys and the admin token: bind it to loopback, never to the API address. |
 | `--db-driver` | `sqlite` | `sqlite` or `postgres`. |
 | `--db-dsn` | `control-plane.db` | Database DSN. A PostgreSQL DSN contains a password, so the next two options are preferred for PostgreSQL. |
 | `--db-dsn-path` | | File containing the DSN. Overrides `--db-dsn`. Can also be set with `AGENTMESH_DB_DSN`. |

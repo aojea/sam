@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/pprofserver"
 	"github.com/google/agentmesh/internal/router"
 	"github.com/google/agentmesh/internal/version"
 	golog "github.com/ipfs/go-log/v2"
@@ -49,6 +50,7 @@ var (
 	lowWaterMark         int
 	highWaterMark        int
 	metricsAddr          string
+	pprofAddr            string
 	relayLimitDuration   time.Duration
 	relayLimitData       router.ByteSize
 	relayMaxReservations int
@@ -124,6 +126,14 @@ func main() {
 				_ = r.Close()
 				logger.Fatalf("Failed to start router: %v", err)
 			}
+			if pprofAddr != "" {
+				pprofSrv, err := pprofserver.Serve(pprofAddr)
+				if err != nil {
+					logger.Fatalf("Failed to serve profiles on %s: %v", pprofAddr, err)
+				}
+				defer func() { _ = pprofSrv.Close() }()
+				logger.Infof("Profiles at http://%s/debug/pprof/", pprofSrv.Addr)
+			}
 
 			<-cmd.Context().Done()
 		},
@@ -148,6 +158,7 @@ func main() {
 	rootCmd.Flags().IntVar(&lowWaterMark, "low-watermark", 0, "Connections the router trims down to once it is over --high-watermark; 0 is 15% below the high watermark, so a trim sheds that share and no more")
 	rootCmd.Flags().IntVar(&highWaterMark, "high-watermark", router.DefaultHighWaterMark, "Connections the router accepts before it trims; every member holds one, so this is the size of the mesh")
 	rootCmd.Flags().StringVar(&metricsAddr, "metrics-addr", "", "Serve Prometheus /metrics, /healthz and /readyz on this address (e.g. 0.0.0.0:9090); unauthenticated, off by default")
+	rootCmd.Flags().StringVar(&pprofAddr, "pprof-addr", "", "Serve Go runtime profiles under /debug/pprof/ on this address (e.g. 127.0.0.1:6060); unauthenticated and a heap profile is a memory dump, so bind it to loopback and reach it through a port-forward; off by default")
 	rootCmd.Flags().DurationVar(&relayLimitDuration, "relay-limit-duration", router.DefaultRelayLimitDuration, "Lifetime of each relayed connection (0 = no limit)")
 	rootCmd.Flags().Var(&relayLimitData, "relay-limit-data", "Bytes relayed per direction on each relayed connection, e.g. 512MiB (0 = no limit)")
 	rootCmd.Flags().IntVar(&relayMaxReservations, "relay-max-reservations", 0, "Members that may hold a relay reservation, which is what makes a member reachable through this router; 0 is --high-watermark")

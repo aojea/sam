@@ -25,6 +25,7 @@ import (
 
 	"github.com/google/agentmesh/api"
 	"github.com/google/agentmesh/internal/controlplane"
+	"github.com/google/agentmesh/internal/pprofserver"
 	"github.com/google/agentmesh/internal/secrets"
 	"github.com/google/agentmesh/internal/storage"
 	"github.com/google/agentmesh/internal/version"
@@ -35,6 +36,7 @@ import (
 
 var (
 	bindAddress           string
+	pprofAddr             string
 	dbDriver              string
 	dbDSN                 string
 	dbDSNPath             string
@@ -173,6 +175,14 @@ func main() {
 			if err := srv.Start(); err != nil {
 				logger.Fatalf("Failed to start control plane: %v", err)
 			}
+			if pprofAddr != "" {
+				pprofSrv, err := pprofserver.Serve(pprofAddr)
+				if err != nil {
+					logger.Fatalf("Failed to serve profiles on %s: %v", pprofAddr, err)
+				}
+				defer func() { _ = pprofSrv.Close() }()
+				logger.Infof("Profiles at http://%s/debug/pprof/", pprofSrv.Addr)
+			}
 
 			logger.Infof("Agent Mesh Control Plane Online on %s", bindAddress)
 			<-cmd.Context().Done()
@@ -180,6 +190,7 @@ func main() {
 	}
 
 	rootCmd.Flags().StringVar(&bindAddress, "bind-address", "0.0.0.0:8080", "Address to listen on for web API services")
+	rootCmd.Flags().StringVar(&pprofAddr, "pprof-addr", "", "Serve Go runtime profiles under /debug/pprof/ on this address (e.g. 127.0.0.1:6060); unauthenticated and a heap profile is a memory dump, so bind it to loopback and reach it through a port-forward; off by default")
 	rootCmd.PersistentFlags().StringVar(&dbDriver, "db-driver", "sqlite", "Database driver (sqlite or postgres)")
 	rootCmd.PersistentFlags().StringVar(&dbDSN, "db-dsn", "control-plane.db", "Database DSN/Connection URL (avoid for postgres: embeds a password; prefer --db-dsn-path or AGENTMESH_DB_DSN)")
 	rootCmd.PersistentFlags().StringVar(&dbDSNPath, "db-dsn-path", "", "Path to file containing the database DSN/Connection URL (overrides --db-dsn; or env AGENTMESH_DB_DSN)")

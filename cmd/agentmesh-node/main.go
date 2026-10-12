@@ -30,6 +30,7 @@ import (
 
 	"github.com/google/agentmesh/api"
 	"github.com/google/agentmesh/internal/node"
+	"github.com/google/agentmesh/internal/pprofserver"
 	"github.com/google/agentmesh/internal/secrets"
 	"github.com/google/agentmesh/internal/version"
 	golog "github.com/ipfs/go-log/v2"
@@ -65,6 +66,7 @@ var (
 	controlPlanePublicKeyFlag    string
 	bindAddrFlag                 string
 	metricsAddrFlag              string
+	pprofAddrFlag                string
 	socketPathFlag               string
 	discoveryIntervalFlag        string
 	listenAddrs                  []string
@@ -663,6 +665,14 @@ func main() {
 					_ = metricsSrv.Shutdown(shutdownCtx)
 				}()
 			}
+			if pprofAddrFlag != "" {
+				pprofSrv, err := pprofserver.Serve(pprofAddrFlag)
+				if err != nil {
+					logger.Fatalf("Failed to serve profiles on %s: %v", pprofAddrFlag, err)
+				}
+				defer func() { _ = pprofSrv.Close() }()
+				logger.Infof("Profiles at http://%s/debug/pprof/", pprofSrv.Addr)
+			}
 
 			fmt.Printf("Agent Mesh Node Online.\nPeerID: %s\nListening on: %v\n", meshNode.Host.ID(), meshNode.Host.Addrs())
 
@@ -862,6 +872,7 @@ func main() {
 	runCmd.Flags().StringVar(&bindAddrFlag, "bind-addr", "127.0.0.1:8080", "Local TCP address for the HTTP server (MCP and Sidecar API); pass an empty value to serve only on the Unix socket")
 	runCmd.Flags().StringVar(&socketPathFlag, "socket-path", "", "Unix socket serving the same API, where the socket's owner-only permissions replace the API token (defaults to <data-dir>/"+node.DefaultSocketName+"; pass an empty value to disable)")
 	runCmd.Flags().StringVar(&metricsAddrFlag, "metrics-addr", "", "Serve Prometheus /metrics, /healthz and /readyz on this address without authentication (e.g. 0.0.0.0:9090), for scrapers and probes that hold no API token; off by default")
+	runCmd.Flags().StringVar(&pprofAddrFlag, "pprof-addr", "", "Serve Go runtime profiles under /debug/pprof/ on this address (e.g. 127.0.0.1:6060); unauthenticated and a heap profile is a memory dump, so bind it to loopback and reach it through a port-forward; off by default")
 	runCmd.Flags().StringVar(&discoveryIntervalFlag, "discovery-interval", node.DefaultDiscoveryInterval, "Delay before the first announcement of this node's services to the DHT, capped at 5s; they are re-announced every 5 minutes after that")
 	runCmd.Flags().DurationVar(&monitorBootstrapFlag, "monitor-bootstrap", 2*time.Minute, "Initial wait before monitoring router connection")
 	runCmd.Flags().DurationVar(&monitorCheckIntervalFlag, "monitor-interval", 1*time.Minute, "Interval for checking router connection")

@@ -101,6 +101,7 @@ explains how to enroll.
 | `--tls-cert`, `--tls-key` | | Serve the TCP listener over TLS. |
 | `--tls-ca` | | Require client certificates signed by this CA (mTLS). Callers with a verified certificate need no token. |
 | `--metrics-addr` | off | Serve `/metrics`, `/healthz` and `/readyz` without authentication on this address, for scrapers. Do not expose it on shared networks. |
+| `--pprof-addr` | off | Serve Go runtime profiles under `/debug/pprof/` on this address. Unauthenticated, and a heap profile is a dump of process memory, which holds the node's key and the credentials it has seen: bind it to loopback. |
 | `--daemonize` | `false` | Start detached, wait for the API to answer, print the endpoint, token file and log path, and exit. Safe to run repeatedly. Generates `api-token` if no token is configured. Refuses to run on a node that has never enrolled. |
 
 ### Mesh
