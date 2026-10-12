@@ -19,7 +19,7 @@ extensions are deferred on purpose.
 
 ## 1. Current security posture: a courier network for tasks
 
-![The Agent Mesh as a courier network](../../../images/agent-mesh-courier.svg)
+![Agent Mesh Architecture Flow](../../../images/agent-mesh-flow.svg)
 
 Agent Mesh moves tasks between environments that trust nothing on arrival, the way a
 courier network moves parcels between post offices:

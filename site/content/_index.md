@@ -1,6 +1,6 @@
 ---
 title: Agent Mesh
-description: A private, zero-trust network for AI agents to publish, discover and call tools and models across machines.
+description: A zero-trust peer-to-peer network for AI agents to publish, discover, and call MCP tools, A2A agents, models, and APIs across laptops, isolated sandboxes, and Kubernetes.
 ---
 Agent Mesh is a private network for AI agents. A node runs beside an agent, publishes
 the tools and models it offers, finds what other nodes offer, and calls them
