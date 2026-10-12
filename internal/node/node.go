@@ -576,7 +576,7 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 		libp2p.EnableHolePunching(),
 		libp2p.ConnectionManager(cm),
 		libp2p.ResourceManager(rm),
-		libp2p.SwarmOpts(swarm.WithDialTimeout(15 * time.Second)),
+		libp2p.SwarmOpts(swarm.WithDialTimeout(15*time.Second), swarm.WithDialRanker(tcpFirstDialRanker)),
 		libp2p.AddrsFactory(n.announceFilter),
 	}
 	// Private: the node holds a relay reservation whatever AutoNAT finds, so
