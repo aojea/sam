@@ -49,15 +49,17 @@ func TestHubLimitsFollowTheConnectionBudget(t *testing.T) {
 	want("system inbound streams", cfg.System.StreamsInbound, 8*connCapHeadroom*highWaterMark)
 	want("transient inbound conns", cfg.Transient.ConnsInbound, highWaterMark)
 	want("transient inbound streams", cfg.Transient.StreamsInbound, highWaterMark)
-	want("identify service inbound streams", cfg.Service[identify.ServiceName].StreamsInbound, highWaterMark)
-	want("identify protocol inbound streams", cfg.Protocol[identify.ID].StreamsInbound, highWaterMark)
-	want("auth protocol inbound streams", cfg.Protocol[api.AuthProtocolID].StreamsInbound, highWaterMark)
-	// Every member holds one DHT stream and one gossip stream to its router
-	// for as long as it is connected; libp2p's default capped them at a few
-	// hundred in all and the rest of the fleet fell out of discovery.
-	want("dht protocol inbound streams", cfg.Protocol[api.DHTProtocolID].StreamsInbound, highWaterMark)
+	want("identify service inbound streams", cfg.Service[identify.ServiceName].StreamsInbound, connCapHeadroom*highWaterMark)
+	want("identify protocol inbound streams", cfg.Protocol[identify.ID].StreamsInbound, connCapHeadroom*highWaterMark)
+	want("auth protocol inbound streams", cfg.Protocol[api.AuthProtocolID].StreamsInbound, connCapHeadroom*highWaterMark)
+	// Every connection holds one DHT stream and one gossip stream for as
+	// long as it lasts, and a router carries connections from members
+	// attached elsewhere as well as its own, so these follow the connection
+	// cap; libp2p's default capped them at a few hundred in all and the rest
+	// of the fleet fell out of discovery.
+	want("dht protocol inbound streams", cfg.Protocol[api.DHTProtocolID].StreamsInbound, connCapHeadroom*highWaterMark)
 	for _, p := range pubsub.GossipSubDefaultProtocols {
-		want("gossip protocol "+string(p)+" inbound streams", cfg.Protocol[p].StreamsInbound, highWaterMark)
+		want("gossip protocol "+string(p)+" inbound streams", cfg.Protocol[p].StreamsInbound, connCapHeadroom*highWaterMark)
 	}
 	want("relay service inbound streams", cfg.Service[relay.ServiceName].StreamsInbound, highWaterMark)
 	// yamux reserves one window per open stream through the manager, so

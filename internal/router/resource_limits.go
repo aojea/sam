@@ -94,8 +94,13 @@ func hubLimits(highWaterMark, conns, circuits int) rcmgr.ConcreteLimitConfig {
 		circuit.ProtoIDv2Hop:  relayStreams,
 		circuit.ProtoIDv2Stop: relayStreams,
 	}
+	// Every connection, not every member: a member attached elsewhere holds
+	// a connection here for its DHT queries, with a DHT stream and gossip
+	// streams on it, and at 10,000 members the testnet's routers carried
+	// 9,000 connections each for 3,600 members. The connection cap is what
+	// bounds those streams.
 	for _, p := range memberProtocols {
-		protocols[p] = streams(sysBase)
+		protocols[p] = streams(connCap)
 	}
 
 	overrides := rcmgr.PartialLimitConfig{
@@ -105,7 +110,7 @@ func hubLimits(highWaterMark, conns, circuits int) rcmgr.ConcreteLimitConfig {
 		// stream per relayed caller, up to the per-peer circuit budget.
 		PeerDefault: perPeerCircuits,
 		Service: map[string]rcmgr.ResourceLimits{
-			identify.ServiceName: streams(sysBase),
+			identify.ServiceName: streams(connCap),
 			relay.ServiceName:    relayStreams,
 		},
 		ServicePeer: map[string]rcmgr.ResourceLimits{
