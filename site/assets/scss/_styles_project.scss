@@ -150,7 +150,7 @@
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
-    gap: 4rem;
+    gap: 2.5rem;
     padding: 4.5rem 2rem 3.5rem;
     max-width: 1200px;
     margin: 0 auto;
@@ -166,6 +166,7 @@
 
   .hero-brand-col {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     align-items: flex-start;
@@ -177,6 +178,7 @@
 
   .hero-terminal-col {
     flex: 1.1;
+    min-width: 0;
     display: flex;
     justify-content: center;
     width: 100%;
@@ -199,9 +201,10 @@
   .logo-container {
     position: relative;
     display: inline-block;
+    flex-shrink: 0;
 
     .agentmesh-hero-logo {
-      width: 88px;
+      width: 84px;
       height: auto;
       display: block;
       position: relative;
@@ -214,8 +217,8 @@
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      width: 96px;
-      height: 96px;
+      width: 84px;
+      height: 84px;
       background: radial-gradient(circle, rgba(0, 240, 255, 0.28) 0%, rgba(246, 195, 68, 0.12) 50%, rgba(0, 0, 0, 0) 70%);
       filter: blur(12px);
       z-index: 1;
@@ -226,9 +229,10 @@
 
   // Typography
   .landing-title {
-    font-size: 3.1rem;
+    font-size: clamp(2rem, 3vw, 2.75rem);
     font-weight: 800;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.12em;
+    white-space: nowrap;
     margin: 0;
     text-transform: uppercase;
     background: linear-gradient(135deg, #ffffff 30%, #a5f3fc 100%);
@@ -239,7 +243,8 @@
     line-height: 1.1;
 
     @media (max-width: 576px) {
-      font-size: 2.3rem;
+      font-size: 2.1rem;
+      white-space: normal;
     }
   }
 
@@ -326,8 +331,8 @@
 
   .btn-sleek {
     display: inline-block;
-    padding: 0.8rem 1.8rem;
-    font-size: 0.95rem;
+    padding: 0.75rem 1.45rem;
+    font-size: 0.92rem;
     font-weight: 600;
     letter-spacing: 0.04em;
     text-decoration: none !important;
@@ -378,7 +383,7 @@
     width: 100%;
     max-width: 620px;
     box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55), 0 0 30px rgba(0, 240, 255, 0.06);
-    font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+    font-family: ui-monospace, 'JetBrains Mono', 'Fira Code', 'SFMono-Regular', Menlo, Consolas, monospace;
     overflow: hidden;
   }
 
@@ -432,16 +437,16 @@
   }
 
   .terminal-body {
-    padding: 1.2rem 1.35rem;
-    font-size: 0.82rem;
+    padding: 1.1rem 1.2rem;
+    font-size: 0.78rem;
     line-height: 1.65;
     text-align: left;
     overflow-x: auto;
   }
 
   .terminal-line {
-    margin-bottom: 0.4rem;
-    white-space: nowrap;
+    margin-bottom: 0.35rem;
+    white-space: pre;
 
     &:last-child {
       margin-bottom: 0;
@@ -696,6 +701,10 @@
     border: 1px solid rgba(0, 240, 255, 0.18);
     border-radius: 12px;
     padding: 1.75rem;
+
+    > * {
+      min-width: 0;
+    }
 
     &.active {
       display: grid;

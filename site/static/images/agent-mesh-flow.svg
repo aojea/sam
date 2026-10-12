@@ -5,13 +5,13 @@
   <title>Agent Mesh Architecture</title>
 
   <defs>
-    <!-- Reusable agentmesh-node sidecar pill (92x46) -->
+    <!-- Reusable agentmesh-node sidecar pill (102x46) -->
     <g id="node-pill">
-      <rect x="0" y="0" width="92" height="46" rx="10" fill="#0b192c" stroke="#00f0ff" stroke-opacity="0.7" stroke-width="1.6"/>
-      <circle cx="15" cy="16" r="6" fill="#00f0ff" opacity="0.25"/>
-      <circle cx="15" cy="16" r="3.5" fill="#00f0ff"/>
-      <text x="26" y="19.5" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#ffffff">node</text>
-      <text x="12" y="35" font-family="JetBrains Mono, monospace" font-size="9" font-weight="600" fill="#00f0ff" opacity="0.9">Biscuit PEP</text>
+      <rect x="0" y="0" width="102" height="46" rx="10" fill="#0b192c" stroke="#00f0ff" stroke-opacity="0.7" stroke-width="1.6"/>
+      <circle cx="26" cy="16" r="6" fill="#00f0ff" opacity="0.25"/>
+      <circle cx="26" cy="16" r="3.5" fill="#00f0ff"/>
+      <text x="38" y="19.5" font-family="ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace" font-size="11" font-weight="700" fill="#ffffff">node</text>
+      <text x="51" y="35" text-anchor="middle" font-family="ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace" font-size="9" font-weight="600" fill="#00f0ff" opacity="0.9">Biscuit PEP</text>
     </g>
 
     <!-- Reusable Hexagonal Router Node (centered at 0,0) -->
@@ -44,16 +44,16 @@
   <rect x="1" y="1" width="1158" height="468" rx="16" fill="#060d18" stroke="#00f0ff" stroke-opacity="0.28" stroke-width="1.5"/>
 
   <!-- Column Section Headers -->
-  <text x="170" y="38" text-anchor="middle" font-size="10.5" font-weight="700" letter-spacing="1.8" fill="#94a3b8">WORKLOADS &amp; LOCAL NODES</text>
-  <text x="980" y="38" text-anchor="middle" font-size="10.5" font-weight="700" letter-spacing="1.8" fill="#94a3b8">NAMED MESH SERVICES</text>
+  <text x="178" y="38" text-anchor="middle" font-size="10.5" font-weight="700" letter-spacing="1.8" fill="#94a3b8">WORKLOADS &amp; LOCAL NODES</text>
+  <text x="984" y="38" text-anchor="middle" font-size="10.5" font-weight="700" letter-spacing="1.8" fill="#94a3b8">NAMED MESH SERVICES</text>
 
   <!-- =====================================================================
        TOP CENTER: CONTROL PLANE CARD
        ===================================================================== -->
   <!-- Control Plane Sync Lines (Off the hot path) -->
-  <path d="M430,56 C330,56 268,95 268,136" fill="none" stroke="#f6c344" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.55"/>
-  <path d="M430,56 C350,68 268,180 268,234" fill="none" stroke="#f6c344" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.45"/>
-  <path d="M720,56 C830,56 890,95 890,116" fill="none" stroke="#f6c344" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.55"/>
+  <path d="M415,56 C335,56 285,95 285,136" fill="none" stroke="#f6c344" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.55"/>
+  <path d="M415,56 C355,68 285,180 285,234" fill="none" stroke="#f6c344" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.45"/>
+  <path d="M735,56 C830,56 890,95 890,116" fill="none" stroke="#f6c344" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.55"/>
 
   <!-- Subtle Broadcast Ring from Control Plane -->
   <circle cx="575" cy="56" r="24" fill="none" stroke="#f6c344" stroke-width="1.2" stroke-dasharray="3 6" opacity="0">
@@ -61,56 +61,56 @@
     <animate attributeName="opacity" values="0.45;0" dur="7s" repeatCount="indefinite"/>
   </circle>
 
-  <g transform="translate(430, 22)">
-    <rect x="0" y="0" width="290" height="66" rx="12" fill="#0c192c" stroke="#f6c344" stroke-opacity="0.75" stroke-width="1.6"/>
+  <g transform="translate(415, 22)">
+    <rect x="0" y="0" width="320" height="66" rx="12" fill="#0c192c" stroke="#f6c344" stroke-opacity="0.75" stroke-width="1.6"/>
     <!-- Duotone Shield-Check Icon -->
     <rect x="14" y="13" width="40" height="40" rx="10" fill="#132238" stroke="#f6c344" stroke-opacity="0.65" stroke-width="1.4"/>
     <polygon points="34,19 45,23.5 45,33.5 34,43 23,33.5 23,23.5" fill="#f6c344" opacity="0.22"/>
     <polygon points="34,21 43,24.8 43,33 34,41 25,33 25,24.8" fill="#f6c344"/>
     <polygon points="32.5,35.5 28.5,31.5 30.3,29.7 32.5,31.9 37.7,26.7 39.5,28.5" fill="#060d18"/>
-    <text x="66" y="29" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="#f6c344">agentmesh-control-plane</text>
+    <text x="66" y="29" font-family="ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace" font-size="12" font-weight="700" fill="#f6c344">agentmesh-control-plane</text>
     <text x="66" y="47" font-size="11" font-weight="500" fill="#cbd5e1">Identity · Biscuit Authority · Datalog</text>
   </g>
 
   <!-- =====================================================================
        CENTER: ROUTER MESH OVERLAY (P2P RELAY & KADEMLIA DHT)
        ===================================================================== -->
-  <rect x="352" y="114" width="446" height="284" rx="18" fill="#081322" stroke="#00f0ff" stroke-opacity="0.28" stroke-width="1.5"/>
-  <rect x="445" y="103" width="260" height="22" rx="11" fill="#0c1d33" stroke="#00f0ff" stroke-opacity="0.5" stroke-width="1.3"/>
-  <text x="575" y="118" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#00f0ff" letter-spacing="1.2">AGENTMESH-ROUTER · P2P DHT</text>
+  <rect x="364" y="114" width="422" height="284" rx="18" fill="#081322" stroke="#00f0ff" stroke-opacity="0.28" stroke-width="1.5"/>
+  <rect x="433" y="103" width="284" height="22" rx="11" fill="#0c1d33" stroke="#00f0ff" stroke-opacity="0.5" stroke-width="1.3"/>
+  <text x="575" y="118" text-anchor="middle" font-family="ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace" font-size="10" font-weight="700" fill="#00f0ff" letter-spacing="1.2">AGENTMESH-ROUTER · P2P DHT</text>
   <text x="575" y="382" text-anchor="middle" font-size="11" font-weight="500" fill="#94a3b8">QUIC / TLS 1.3 · End-to-End Encrypted · Zero Plaintext Access</text>
 
   <!-- Curved Data-Plane Routes (Smooth Cubic Beziers) -->
-  <path d="M314,159 C360,159 390,195 435,195 C525,195 625,195 715,195 C765,195 795,145 836,145" fill="none" stroke="#00f0ff" stroke-width="1.6" stroke-opacity="0.35"/>
-  <path d="M314,257 C390,257 490,257 575,257 C635,257 670,195 715,195 C765,195 795,219 836,219" fill="none" stroke="#00f0ff" stroke-width="1.6" stroke-opacity="0.35"/>
-  <path d="M314,257 C360,257 390,319 435,319 C525,319 625,319 715,319 C765,319 795,293 836,293" fill="none" stroke="#00f0ff" stroke-width="1.6" stroke-opacity="0.35"/>
-  <path d="M314,355 C360,355 390,319 435,319 C490,319 525,257 575,257 C625,257 665,319 715,319 C765,319 795,367 836,367" fill="none" stroke="#00f0ff" stroke-width="1.6" stroke-opacity="0.35"/>
+  <path d="M336,159 C375,159 400,195 440,195 C525,195 625,195 710,195 C760,195 795,145 836,145" fill="none" stroke="#00f0ff" stroke-width="1.6" stroke-opacity="0.35"/>
+  <path d="M336,257 C400,257 490,257 575,257 C635,257 670,195 710,195 C760,195 795,219 836,219" fill="none" stroke="#00f0ff" stroke-width="1.6" stroke-opacity="0.35"/>
+  <path d="M336,257 C375,257 400,319 440,319 C525,319 625,319 710,319 C760,319 795,293 836,293" fill="none" stroke="#00f0ff" stroke-width="1.6" stroke-opacity="0.35"/>
+  <path d="M336,355 C375,355 400,319 440,319 C495,319 525,257 575,257 C625,257 665,319 710,319 C760,319 795,367 836,367" fill="none" stroke="#00f0ff" stroke-width="1.6" stroke-opacity="0.35"/>
 
   <!-- Internal Mesh Cross-Links -->
-  <line x1="435" y1="195" x2="435" y2="319" stroke="#00f0ff" stroke-width="1.4" stroke-dasharray="3 4" stroke-opacity="0.28"/>
-  <line x1="715" y1="195" x2="715" y2="319" stroke="#00f0ff" stroke-width="1.4" stroke-dasharray="3 4" stroke-opacity="0.28"/>
-  <line x1="435" y1="195" x2="575" y2="257" stroke="#00f0ff" stroke-width="1.4" stroke-opacity="0.28"/>
-  <line x1="575" y1="257" x2="715" y2="319" stroke="#00f0ff" stroke-width="1.4" stroke-opacity="0.28"/>
+  <line x1="440" y1="195" x2="440" y2="319" stroke="#00f0ff" stroke-width="1.4" stroke-dasharray="3 4" stroke-opacity="0.28"/>
+  <line x1="710" y1="195" x2="710" y2="319" stroke="#00f0ff" stroke-width="1.4" stroke-dasharray="3 4" stroke-opacity="0.28"/>
+  <line x1="440" y1="195" x2="575" y2="257" stroke="#00f0ff" stroke-width="1.4" stroke-opacity="0.28"/>
+  <line x1="575" y1="257" x2="710" y2="319" stroke="#00f0ff" stroke-width="1.4" stroke-opacity="0.28"/>
 
   <!-- 5 Hexagonal Router Relay Nodes -->
-  <g transform="translate(435,195)">
+  <g transform="translate(440,195)">
     <circle r="22" fill="#00f0ff" opacity="0.08"><animate attributeName="r" values="18;26;18" dur="3s" repeatCount="indefinite"/></circle>
     <use href="#router-hex" xlink:href="#router-hex"/>
   </g>
-  <g transform="translate(435,319)">
+  <g transform="translate(440,319)">
     <circle r="22" fill="#00f0ff" opacity="0.08"><animate attributeName="r" values="18;26;18" dur="3.4s" repeatCount="indefinite"/></circle>
     <use href="#router-hex" xlink:href="#router-hex"/>
   </g>
   <g transform="translate(575,257)">
     <circle r="25" fill="#00f0ff" opacity="0.12"><animate attributeName="r" values="20;30;20" dur="2.6s" repeatCount="indefinite"/></circle>
     <use href="#router-hex" xlink:href="#router-hex"/>
-    <text x="0" y="34" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" fill="#94a3b8">relay</text>
+    <text x="0" y="34" text-anchor="middle" font-family="ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace" font-size="9.5" font-weight="600" fill="#94a3b8">relay</text>
   </g>
-  <g transform="translate(715,195)">
+  <g transform="translate(710,195)">
     <circle r="22" fill="#00f0ff" opacity="0.08"><animate attributeName="r" values="18;26;18" dur="2.9s" repeatCount="indefinite"/></circle>
     <use href="#router-hex" xlink:href="#router-hex"/>
   </g>
-  <g transform="translate(715,319)">
+  <g transform="translate(710,319)">
     <circle r="22" fill="#00f0ff" opacity="0.08"><animate attributeName="r" values="18;26;18" dur="2.4s" repeatCount="indefinite"/></circle>
     <use href="#router-hex" xlink:href="#router-hex"/>
   </g>
@@ -119,8 +119,8 @@
        LEFT COLUMN: 3 CALLER ENVIRONMENTS + LOCAL AGENTMESH-NODES
        ===================================================================== -->
   <!-- 1. Laptop & CLI -->
-  <g transform="translate(26, 126)">
-    <rect x="0" y="0" width="174" height="66" rx="12" fill="#0b192c" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.6"/>
+  <g transform="translate(20, 126)">
+    <rect x="0" y="0" width="196" height="66" rx="12" fill="#0b192c" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.6"/>
     <rect x="12" y="13" width="40" height="40" rx="10" fill="#132a44" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.3"/>
     <!-- High-Contrast Duotone Terminal Icon (`>_`) -->
     <rect x="19" y="21" width="26" height="24" rx="4" fill="#00f0ff" opacity="0.18"/>
@@ -129,12 +129,12 @@
     <text x="62" y="29" font-size="13.5" font-weight="700" fill="#ffffff">Laptop &amp; CLI</text>
     <text x="62" y="46" font-size="10.5" font-weight="500" fill="#94a3b8">SKILL.md · Local MCP</text>
   </g>
-  <line x1="200" y1="159" x2="222" y2="159" stroke="#00f0ff" stroke-width="2"/>
-  <use href="#node-pill" xlink:href="#node-pill" x="222" y="136"/>
+  <line x1="216" y1="159" x2="234" y2="159" stroke="#00f0ff" stroke-width="2"/>
+  <use href="#node-pill" xlink:href="#node-pill" x="234" y="136"/>
 
   <!-- 2. Kubernetes -->
-  <g transform="translate(26, 224)">
-    <rect x="0" y="0" width="174" height="66" rx="12" fill="#0b192c" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.6"/>
+  <g transform="translate(20, 224)">
+    <rect x="0" y="0" width="196" height="66" rx="12" fill="#0b192c" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.6"/>
     <rect x="12" y="13" width="40" height="40" rx="10" fill="#132a44" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.3"/>
     <!-- High-Contrast Duotone Kubernetes Wheel Icon -->
     <polygon points="32,19 42,24 44,35 37.5,43 26.5,43 20,35 22,24" fill="#00f0ff" opacity="0.22"/>
@@ -148,12 +148,12 @@
     <text x="62" y="29" font-size="13.5" font-weight="700" fill="#ffffff">Kubernetes</text>
     <text x="62" y="46" font-size="10.5" font-weight="500" fill="#94a3b8">Pods · Envoy ext_proc</text>
   </g>
-  <line x1="200" y1="257" x2="222" y2="257" stroke="#00f0ff" stroke-width="2"/>
-  <use href="#node-pill" xlink:href="#node-pill" x="222" y="234"/>
+  <line x1="216" y1="257" x2="234" y2="257" stroke="#00f0ff" stroke-width="2"/>
+  <use href="#node-pill" xlink:href="#node-pill" x="234" y="234"/>
 
   <!-- 3. Isolated Sandbox -->
-  <g transform="translate(26, 322)">
-    <rect x="0" y="0" width="174" height="66" rx="12" fill="#0b192c" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.6"/>
+  <g transform="translate(20, 322)">
+    <rect x="0" y="0" width="196" height="66" rx="12" fill="#0b192c" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.6"/>
     <rect x="12" y="13" width="40" height="40" rx="10" fill="#132a44" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.3"/>
     <!-- High-Contrast Isometric 3D Cube Icon -->
     <polygon points="32,20 43,26 32,32 21,26" fill="#00f0ff"/>
@@ -162,44 +162,44 @@
     <text x="62" y="29" font-size="13.5" font-weight="700" fill="#ffffff">Sandbox</text>
     <text x="62" y="46" font-size="10.5" font-weight="500" fill="#94a3b8">Zero Keys in RAM</text>
   </g>
-  <line x1="200" y1="355" x2="222" y2="355" stroke="#00f0ff" stroke-width="2"/>
-  <use href="#node-pill" xlink:href="#node-pill" x="222" y="332"/>
+  <line x1="216" y1="355" x2="234" y2="355" stroke="#00f0ff" stroke-width="2"/>
+  <use href="#node-pill" xlink:href="#node-pill" x="234" y="332"/>
 
   <!-- =====================================================================
        RIGHT COLUMN: 4 PUBLISHED NAMED SERVICES
        ===================================================================== -->
   <!-- 1. mcp://tools -->
   <g transform="translate(836, 116)">
-    <rect x="0" y="0" width="296" height="58" rx="12" fill="#0b192c" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.6"/>
+    <rect x="0" y="0" width="304" height="58" rx="12" fill="#0b192c" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.6"/>
     <rect x="12" y="10" width="38" height="38" rx="9" fill="#132a44" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.3"/>
     <!-- High-Contrast Modular Blocks Icon -->
     <rect x="20" y="18" width="9.5" height="9.5" rx="2" fill="#00f0ff"/>
     <rect x="32.5" y="18" width="9.5" height="9.5" rx="2" fill="#f6c344"/>
     <rect x="20" y="30.5" width="9.5" height="9.5" rx="2" fill="#00f0ff" opacity="0.65"/>
     <rect x="32.5" y="30.5" width="9.5" height="9.5" rx="2" fill="#00f0ff"/>
-    <text x="62" y="26" font-family="JetBrains Mono, monospace" font-size="13.5" font-weight="700" fill="#00f0ff">mcp://tools</text>
+    <text x="62" y="26" font-family="ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace" font-size="13.5" font-weight="700" fill="#00f0ff">mcp://tools</text>
     <text x="62" y="43" font-size="11" font-weight="500" fill="#94a3b8">MCP Tool Servers</text>
-    <rect x="234" y="19" width="48" height="20" rx="5" fill="#132a44" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.2"/>
-    <text x="258" y="32.5" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="700" fill="#00f0ff">node</text>
+    <rect x="242" y="19" width="48" height="20" rx="5" fill="#132a44" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.2"/>
+    <text x="266" y="32.5" text-anchor="middle" font-family="ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#00f0ff">node</text>
   </g>
 
   <!-- 2. inference://models -->
   <g transform="translate(836, 190)">
-    <rect x="0" y="0" width="296" height="58" rx="12" fill="#0b192c" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.6"/>
+    <rect x="0" y="0" width="304" height="58" rx="12" fill="#0b192c" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.6"/>
     <rect x="12" y="10" width="38" height="38" rx="9" fill="#132a44" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.3"/>
     <!-- High-Contrast AI Chip / Spark Icon -->
     <rect x="22" y="20" width="18" height="18" rx="3" fill="#00f0ff" opacity="0.25"/>
     <polygon points="31,18 33.8,26.2 42,29 33.8,31.8 31,40 28.2,31.8 20,29 28.2,26.2" fill="#00f0ff"/>
     <circle cx="31" cy="29" r="3.2" fill="#f6c344"/>
-    <text x="62" y="26" font-family="JetBrains Mono, monospace" font-size="13.5" font-weight="700" fill="#00f0ff">inference://models</text>
+    <text x="62" y="26" font-family="ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace" font-size="13.5" font-weight="700" fill="#00f0ff">inference://models</text>
     <text x="62" y="43" font-size="11" font-weight="500" fill="#94a3b8">OpenAI-Compatible LLMs</text>
-    <rect x="234" y="19" width="48" height="20" rx="5" fill="#132a44" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.2"/>
-    <text x="258" y="32.5" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="700" fill="#00f0ff">node</text>
+    <rect x="242" y="19" width="48" height="20" rx="5" fill="#132a44" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.2"/>
+    <text x="266" y="32.5" text-anchor="middle" font-family="ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#00f0ff">node</text>
   </g>
 
   <!-- 3. a2a://agents -->
   <g transform="translate(836, 264)">
-    <rect x="0" y="0" width="296" height="58" rx="12" fill="#0b192c" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.6"/>
+    <rect x="0" y="0" width="304" height="58" rx="12" fill="#0b192c" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.6"/>
     <rect x="12" y="10" width="38" height="38" rx="9" fill="#132a44" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.3"/>
     <!-- High-Contrast Connected Agent Nodes Icon -->
     <polygon points="31,20 33,20 24,36 22,36" fill="#00f0ff" opacity="0.7"/>
@@ -208,15 +208,15 @@
     <circle cx="31" cy="21" r="4.2" fill="#f6c344"/>
     <circle cx="23" cy="35" r="4.2" fill="#00f0ff"/>
     <circle cx="39" cy="35" r="4.2" fill="#00f0ff"/>
-    <text x="62" y="26" font-family="JetBrains Mono, monospace" font-size="13.5" font-weight="700" fill="#00f0ff">a2a://agents</text>
+    <text x="62" y="26" font-family="ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace" font-size="13.5" font-weight="700" fill="#00f0ff">a2a://agents</text>
     <text x="62" y="43" font-size="11" font-weight="500" fill="#94a3b8">Peer-to-Peer Agents</text>
-    <rect x="234" y="19" width="48" height="20" rx="5" fill="#132a44" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.2"/>
-    <text x="258" y="32.5" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="700" fill="#00f0ff">node</text>
+    <rect x="242" y="19" width="48" height="20" rx="5" fill="#132a44" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.2"/>
+    <text x="266" y="32.5" text-anchor="middle" font-family="ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#00f0ff">node</text>
   </g>
 
   <!-- 4. egress://apis -->
   <g transform="translate(836, 338)">
-    <rect x="0" y="0" width="296" height="58" rx="12" fill="#0b192c" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.6"/>
+    <rect x="0" y="0" width="304" height="58" rx="12" fill="#0b192c" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.6"/>
     <rect x="12" y="10" width="38" height="38" rx="9" fill="#132a44" stroke="#00f0ff" stroke-opacity="0.55" stroke-width="1.3"/>
     <!-- High-Contrast Globe + Egress Arrow Icon -->
     <circle cx="29" cy="31" r="8.5" fill="#00f0ff" opacity="0.25"/>
@@ -224,10 +224,10 @@
     <rect x="21" y="30" width="16" height="2" fill="#132a44"/>
     <rect x="28" y="23" width="2" height="16" fill="#132a44"/>
     <polygon points="35,18 43,18 43,26 40.5,26 40.5,20.5 35,20.5" fill="#f6c344"/>
-    <text x="62" y="26" font-family="JetBrains Mono, monospace" font-size="13.5" font-weight="700" fill="#00f0ff">egress://apis</text>
+    <text x="62" y="26" font-family="ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace" font-size="13.5" font-weight="700" fill="#00f0ff">egress://apis</text>
     <text x="62" y="43" font-size="11" font-weight="500" fill="#94a3b8">Secret-Brokered Egress</text>
-    <rect x="234" y="19" width="48" height="20" rx="5" fill="#182638" stroke="#f6c344" stroke-opacity="0.65" stroke-width="1.2"/>
-    <text x="258" y="32.5" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="700" fill="#f6c344">STS</text>
+    <rect x="242" y="19" width="48" height="20" rx="5" fill="#182638" stroke="#f6c344" stroke-opacity="0.65" stroke-width="1.2"/>
+    <text x="266" y="32.5" text-anchor="middle" font-family="ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace" font-size="9.5" font-weight="700" fill="#f6c344">STS</text>
   </g>
 
   <!-- =====================================================================
@@ -236,46 +236,46 @@
   <!-- Packet 1: Laptop -> mcp:// -->
   <g opacity="0">
     <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.05;0.95;1" dur="5s" begin="0s" repeatCount="indefinite"/>
-    <animateMotion dur="5s" begin="0s" repeatCount="indefinite" path="M314,159 C360,159 390,195 435,195 C525,195 625,195 715,195 C765,195 795,145 836,145"/>
+    <animateMotion dur="5s" begin="0s" repeatCount="indefinite" path="M336,159 C375,159 400,195 440,195 C525,195 625,195 710,195 C760,195 795,145 836,145"/>
     <use href="#packet-cyan" xlink:href="#packet-cyan"/>
   </g>
 
   <!-- Packet 2: Kubernetes -> inference:// -->
   <g opacity="0">
     <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.05;0.95;1" dur="5s" begin="1.25s" repeatCount="indefinite"/>
-    <animateMotion dur="5s" begin="1.25s" repeatCount="indefinite" path="M314,257 C390,257 490,257 575,257 C635,257 670,195 715,195 C765,195 795,219 836,219"/>
+    <animateMotion dur="5s" begin="1.25s" repeatCount="indefinite" path="M336,257 C400,257 490,257 575,257 C635,257 670,195 710,195 C760,195 795,219 836,219"/>
     <use href="#packet-cyan" xlink:href="#packet-cyan"/>
   </g>
 
   <!-- Packet 3: Kubernetes -> a2a:// (Attenuated task) -->
   <g opacity="0">
     <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.05;0.95;1" dur="5s" begin="2.5s" repeatCount="indefinite"/>
-    <animateMotion dur="5s" begin="2.5s" repeatCount="indefinite" path="M314,257 C360,257 390,319 435,319 C525,319 625,319 715,319 C765,319 795,293 836,293"/>
+    <animateMotion dur="5s" begin="2.5s" repeatCount="indefinite" path="M336,257 C375,257 400,319 440,319 C525,319 625,319 710,319 C760,319 795,293 836,293"/>
     <use href="#packet-gold" xlink:href="#packet-gold"/>
   </g>
 
   <!-- Packet 4: Sandbox -> egress:// -->
   <g opacity="0">
     <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.05;0.95;1" dur="5s" begin="3.75s" repeatCount="indefinite"/>
-    <animateMotion dur="5s" begin="3.75s" repeatCount="indefinite" path="M314,355 C360,355 390,319 435,319 C490,319 525,257 575,257 C625,257 665,319 715,319 C765,319 795,367 836,367"/>
+    <animateMotion dur="5s" begin="3.75s" repeatCount="indefinite" path="M336,355 C375,355 400,319 440,319 C495,319 525,257 575,257 C625,257 665,319 710,319 C760,319 795,367 836,367"/>
     <use href="#packet-gold" xlink:href="#packet-gold"/>
   </g>
 
   <!-- =====================================================================
        BOTTOM VISUAL KEY BAR
        ===================================================================== -->
-  <rect x="155" y="418" width="850" height="34" rx="17" fill="#091526" stroke="#00f0ff" stroke-opacity="0.18" stroke-width="1"/>
-  <g transform="translate(190, 439)" font-size="11" font-weight="600" fill="#cbd5e1">
+  <rect x="80" y="418" width="1000" height="34" rx="17" fill="#091526" stroke="#00f0ff" stroke-opacity="0.18" stroke-width="1"/>
+  <g transform="translate(135, 439)" font-size="11" font-weight="600" fill="#cbd5e1">
     <use href="#packet-cyan" xlink:href="#packet-cyan" x="14" y="-4"/>
     <text x="36" y="0">Biscuit-Authenticated Call</text>
 
     <use href="#packet-gold" xlink:href="#packet-gold" x="235" y="-4"/>
     <text x="257" y="0">Task-Attenuated Call (tar_block)</text>
 
-    <line x1="475" y1="-4" x2="505" y2="-4" stroke="#f6c344" stroke-width="2" stroke-dasharray="4 4"/>
-    <text x="515" y="0">Policy &amp; Identity Sync</text>
+    <line x1="490" y1="-4" x2="520" y2="-4" stroke="#f6c344" stroke-width="2" stroke-dasharray="4 4"/>
+    <text x="530" y="0">Policy &amp; Identity Sync</text>
 
-    <circle cx="678" cy="-4" r="4" fill="#00f0ff"/>
-    <text x="690" y="0">Verify by Name (No Open IPs)</text>
+    <circle cx="700" cy="-4" r="4" fill="#00f0ff"/>
+    <text x="712" y="0">Verify by Name (No Open IPs)</text>
   </g>
 </svg>
