@@ -63,16 +63,19 @@ func fakeNode(args []string) int {
 	}
 
 	readyAfter, _ := time.ParseDuration(os.Getenv("FAKE_NODE_READY_AFTER"))
-	flapAt, _ := time.ParseDuration(os.Getenv("FAKE_NODE_FLAP_AT"))
-	flapFor, _ := time.ParseDuration(os.Getenv("FAKE_NODE_FLAP_FOR"))
+	downFile := os.Getenv("FAKE_NODE_DOWN_FILE")
 	providers := strings.Split(os.Getenv("FAKE_NODE_PROVIDERS"), ",")
 	start := time.Now()
 	ready := func() bool {
-		elapsed := time.Since(start)
-		if elapsed < readyAfter {
+		if time.Since(start) < readyAfter {
 			return false
 		}
-		return flapAt == 0 || elapsed < flapAt || elapsed >= flapAt+flapFor
+		if downFile != "" {
+			if _, err := os.Stat(downFile); err == nil {
+				return false
+			}
+		}
+		return true
 	}
 
 	metrics := http.NewServeMux()
@@ -128,7 +131,7 @@ func fakeFleet(t *testing.T, count int, env map[string]string) JoinOptions {
 	if _, ok := env["FAKE_NODE_PROVIDERS"]; !ok {
 		env["FAKE_NODE_PROVIDERS"] = "alive"
 	}
-	for _, k := range []string{"FAKE_NODE_EXIT", "FAKE_NODE_READY_AFTER", "FAKE_NODE_FLAP_AT", "FAKE_NODE_FLAP_FOR", "FAKE_NODE_PROVIDERS"} {
+	for _, k := range []string{"FAKE_NODE_EXIT", "FAKE_NODE_READY_AFTER", "FAKE_NODE_DOWN_FILE", "FAKE_NODE_PROVIDERS"} {
 		t.Setenv(k, env[k])
 	}
 	token := filepath.Join(t.TempDir(), "token")
@@ -277,15 +280,23 @@ func TestRunJoinHoldTurnsFlapsIntoOutageWindows(t *testing.T) {
 	// What a resident fleet is for: a router that goes away for a while
 	// shows up as one outage per member with a length, and a fleet that is
 	// whole again at the end says so.
+	downFile := filepath.Join(t.TempDir(), "router-down")
 	opts := fakeFleet(t, 2, map[string]string{
-		"FAKE_NODE_FLAP_AT":  "1200ms",
-		"FAKE_NODE_FLAP_FOR": "400ms",
+		"FAKE_NODE_DOWN_FILE": downFile,
 	})
 	opts.Hold = 2 * time.Second
 	opts.SampleInterval = 100 * time.Millisecond
 	var residentCompleted int
 	var residentHadHold bool
-	opts.OnResident = func(r *JoinReport) { residentCompleted, residentHadHold = r.Completed, r.Hold != nil }
+	opts.OnResident = func(r *JoinReport) {
+		residentCompleted, residentHadHold = r.Completed, r.Hold != nil
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			_ = os.WriteFile(downFile, nil, 0o600)
+			time.Sleep(450 * time.Millisecond)
+			_ = os.Remove(downFile)
+		}()
+	}
 
 	report, err := RunJoin(context.Background(), opts)
 	if err != nil {
