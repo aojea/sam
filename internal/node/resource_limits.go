@@ -120,12 +120,10 @@ var streamsRefusedTotal = promauto.NewCounterVec(
 )
 
 // newResourceManager is the resource manager the node's host runs with:
-// nodeLimits, the per-source cap, and every refusal counted and logged.
+// nodeLimits, the per-source cap on direct callers, and every refusal
+// counted and logged. A caller that arrives through a router is not
+// charged to the router's address; see p2plimits.Observed.
 func newResourceManager() (network.ResourceManager, error) {
-	mgr, err := p2plimits.NewResourceManager(nodeLimits(ConnHighWaterMark), ConnsPerSourceIP,
+	return p2plimits.New(nodeLimits(ConnHighWaterMark), ConnsPerSourceIP, inboundRefusedTotal, logger.Warnf,
 		rcmgr.WithMetrics(p2plimits.CountStreamRefusals(streamsRefusedTotal, logger.Warnf)))
-	if err != nil {
-		return nil, err
-	}
-	return p2plimits.Observe(mgr, inboundRefusedTotal, logger.Warnf), nil
 }

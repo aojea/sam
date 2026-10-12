@@ -38,7 +38,7 @@ func TestStreamRefusalsCountTheProtocol(t *testing.T) {
 		Protocol: map[protocol.ID]rcmgr.ResourceLimits{proto: Streams(1)},
 	}.Build(rcmgr.InfiniteLimits)
 	refused := newStreamsRefusedCounter()
-	m, err := NewResourceManager(limits, 8, rcmgr.WithMetrics(CountStreamRefusals(refused, nil)))
+	m, err := NewResourceManager(limits, rcmgr.WithMetrics(CountStreamRefusals(refused, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

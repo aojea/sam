@@ -490,11 +490,11 @@ func (r *Router) Start() (retErr error) {
 
 	// Every refusal the resource manager makes is counted and logged with
 	// its source; a refused dialer only sees its connection close before TLS.
-	mgr, err := p2plimits.NewResourceManager(hubLimits(r.config.HighWaterMark, r.config.ConnsPerSourceIP, r.config.RelayMaxCircuits), r.config.ConnsPerSourceIP, rcmgr.WithMetrics(countStreamRefusals()))
+	mgr, err := p2plimits.New(hubLimits(r.config.HighWaterMark, r.config.ConnsPerSourceIP, r.config.RelayMaxCircuits), r.config.ConnsPerSourceIP, inboundRefusedTotal, logger.Warnf, rcmgr.WithMetrics(countStreamRefusals()))
 	if err != nil {
 		return fmt.Errorf("failed to create resource manager: %w", err)
 	}
-	p2pOpts = append(p2pOpts, libp2p.ResourceManager(observeResourceManager(mgr)))
+	p2pOpts = append(p2pOpts, libp2p.ResourceManager(mgr))
 
 	hostNode, err := libp2p.New(p2pOpts...)
 	if err != nil {

@@ -17,10 +17,12 @@ package p2plimits
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"testing"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/test"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/prometheus/client_golang/prometheus"
@@ -70,7 +72,7 @@ func TestObservedCountsAndClassifiesRefusals(t *testing.T) {
 		{errors.New("something else"), RefusedOther},
 	} {
 		before := counterValue(t, refused.WithLabelValues(tc.reason))
-		m := Observe(&refusingResourceManager{err: tc.err}, refused, quiet)
+		m := Observe(&refusingResourceManager{err: tc.err}, 100, refused, quiet)
 		if _, err := m.OpenConnection(network.DirInbound, true, endpoint); err == nil {
 			t.Fatalf("%s: refusal not returned", tc.reason)
 		}
@@ -81,14 +83,14 @@ func TestObservedCountsAndClassifiesRefusals(t *testing.T) {
 
 	// An outbound failure is not an inbound refusal.
 	before := counterValue(t, refused.WithLabelValues(RefusedOther))
-	m := Observe(&refusingResourceManager{err: errors.New("dial side")}, refused, quiet)
+	m := Observe(&refusingResourceManager{err: errors.New("dial side")}, 100, refused, quiet)
 	_, _ = m.OpenConnection(network.DirOutbound, true, endpoint)
 	if got := counterValue(t, refused.WithLabelValues(RefusedOther)); got != before {
 		t.Errorf("outbound failure counted as an inbound refusal")
 	}
 
 	// A granted connection is passed through and not counted.
-	ok := Observe(&refusingResourceManager{limit: 42}, refused, quiet)
+	ok := Observe(&refusingResourceManager{limit: 42}, 100, refused, quiet)
 	if _, err := ok.OpenConnection(network.DirInbound, true, endpoint); err != nil {
 		t.Fatalf("granted connection refused: %v", err)
 	}
@@ -99,7 +101,7 @@ func TestObservedCountsAndClassifiesRefusals(t *testing.T) {
 	// The QUIC transport passes no address when it could not build one, and
 	// a caller may pass no logger; both are counted and nothing more.
 	before = counterValue(t, refused.WithLabelValues(RefusedOther))
-	bare := Observe(&refusingResourceManager{err: errors.New("no address")}, refused, nil)
+	bare := Observe(&refusingResourceManager{err: errors.New("no address")}, 100, refused, nil)
 	if _, err := bare.OpenConnection(network.DirInbound, true, nil); err == nil {
 		t.Fatal("refusal with no endpoint not returned")
 	}
@@ -114,7 +116,7 @@ func TestObservedCountsAndClassifiesRefusals(t *testing.T) {
 func TestObservedLogsOneSourceOncePerInterval(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	var lines []string
-	m := Observe(&refusingResourceManager{err: errors.New("rate limit exceeded")}, newRefusedCounter(),
+	m := Observe(&refusingResourceManager{err: errors.New("rate limit exceeded")}, 100, newRefusedCounter(),
 		func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) })
 	m.SetClock(func() time.Time { return now })
 	a := multiaddr.StringCast("/ip4/10.0.0.1/tcp/1")
@@ -145,40 +147,126 @@ func TestObservedLogsOneSourceOncePerInterval(t *testing.T) {
 	}
 }
 
-// The per-source cap is what the manager enforces, and loopback is exempt.
-// A cap under one would refuse every peer and is refused itself.
-func TestNewResourceManagerCapsOneSourceAddress(t *testing.T) {
-	limits := rcmgr.InfiniteLimits
-	if _, err := NewResourceManager(limits, 0); err == nil {
+// The per-source cap is applied to the address a connection comes from:
+// a third direct connection from one address is refused and counted, the
+// place comes back when a connection is done, and loopback is exempt. A
+// connection that comes through a relay carries the relay's address and is
+// not charged to it: a service called by many members through one router
+// saw them all as one address. A cap under one would refuse every peer and
+// is refused itself.
+func TestObservedCapsOneSourceAddressNotItsRelay(t *testing.T) {
+	refused := newRefusedCounter()
+	if _, err := New(rcmgr.InfiniteLimits, 0, refused, nil); err == nil {
 		t.Fatal("a cap of 0 was accepted")
 	}
-	m, err := NewResourceManager(limits, 2)
+	m, err := New(rcmgr.InfiniteLimits, 2, refused, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = m.Close() }()
+	direct := multiaddr.StringCast("/ip4/203.0.113.7/tcp/1")
+	open := func(ma multiaddr.Multiaddr) (network.ConnManagementScope, error) {
+		return m.OpenConnection(network.DirInbound, true, ma)
+	}
+
 	var scopes []network.ConnManagementScope
 	for i := 0; i < 2; i++ {
-		s, err := m.OpenConnection(network.DirInbound, true, multiaddr.StringCast("/ip4/203.0.113.7/tcp/1"))
+		s, err := open(direct)
 		if err != nil {
 			t.Fatalf("connection %d from one address refused: %v", i+1, err)
 		}
 		scopes = append(scopes, s)
 	}
-	_, err = m.OpenConnection(network.DirInbound, true, multiaddr.StringCast("/ip4/203.0.113.7/tcp/1"))
-	if err == nil || RefusalReason(err) != RefusedPerIP {
+	before := counterValue(t, refused.WithLabelValues(RefusedPerIP))
+	if _, err := open(direct); err == nil || RefusalReason(err) != RefusedPerIP {
 		t.Fatalf("third connection from one address: err = %v, want the per-IP refusal", err)
 	}
-	for _, s := range scopes {
-		s.Done()
+	if got := counterValue(t, refused.WithLabelValues(RefusedPerIP)); got != before+1 {
+		t.Errorf("per-IP refusals counted: %v, want %v", got, before+1)
+	}
+	if got := m.SourceConns(netip.MustParseAddr("203.0.113.7")); got != 2 {
+		t.Errorf("connections held for the address = %d, want 2", got)
+	}
+	scopes[0].Done()
+	scopes[0].Done() // a second Done gives nothing back twice
+	if got := m.SourceConns(netip.MustParseAddr("203.0.113.7")); got != 1 {
+		t.Errorf("connections held after one is done = %d, want 1", got)
+	}
+	s, err := open(direct)
+	if err != nil {
+		t.Fatalf("connection after one was done refused: %v", err)
+	}
+	s.Done()
+	scopes[1].Done()
+
+	// Through a relay: five callers, each more than the cap, and none refused.
+	relayed := multiaddr.StringCast("/ip4/203.0.113.7/tcp/1/p2p/" + test.RandPeerIDFatal(t).String() + "/p2p-circuit")
+	for i := 0; i < 5; i++ {
+		s, err := open(relayed)
+		if err != nil {
+			t.Fatalf("relayed connection %d refused: %v", i+1, err)
+		}
+		defer s.Done()
+	}
+	if got := m.SourceConns(netip.MustParseAddr("203.0.113.7")); got != 0 {
+		t.Errorf("relayed connections charged to the relay's address: %d", got)
 	}
 	for i := 0; i < 5; i++ {
-		s, err := m.OpenConnection(network.DirInbound, true, multiaddr.StringCast("/ip4/127.0.0.1/tcp/1"))
+		s, err := open(multiaddr.StringCast("/ip4/127.0.0.1/tcp/1"))
 		if err != nil {
 			t.Fatalf("loopback connection %d refused: %v", i+1, err)
 		}
 		defer s.Done()
 	}
+	// Outbound connections are this host's own; the cap is on what arrives.
+	for i := 0; i < 5; i++ {
+		s, err := m.OpenConnection(network.DirOutbound, true, direct)
+		if err != nil {
+			t.Fatalf("outbound connection %d refused: %v", i+1, err)
+		}
+		defer s.Done()
+	}
+}
+
+// The per-source rate follows the cap: a burst of twice the cap from one
+// address passes, the next connection in the same instant is refused as a
+// rate refusal, and the inner manager is never asked for a connection the
+// source rules refused.
+func TestObservedRateLimitsOneSourceAddress(t *testing.T) {
+	refused := newRefusedCounter()
+	inner := &countingResourceManager{}
+	m := Observe(inner, 4, refused, nil)
+	direct := multiaddr.StringCast("/ip4/198.51.100.9/udp/1/quic-v1")
+	var opened int
+	for i := 0; i < 8; i++ {
+		s, err := m.OpenConnection(network.DirInbound, true, direct)
+		if err != nil {
+			t.Fatalf("connection %d within the burst refused: %v", i+1, err)
+		}
+		s.Done()
+		opened++
+	}
+	_, err := m.OpenConnection(network.DirInbound, true, direct)
+	if err == nil || RefusalReason(err) != RefusedRateLimit {
+		t.Fatalf("connection past the burst: err = %v, want the rate refusal", err)
+	}
+	if inner.opened != opened {
+		t.Errorf("inner manager asked for %d connections, want %d: a source refusal must not reach it", inner.opened, opened)
+	}
+	if got := counterValue(t, refused.WithLabelValues(RefusedRateLimit)); got != 1 {
+		t.Errorf("rate refusals counted: %v, want 1", got)
+	}
+}
+
+// countingResourceManager grants every connection and counts them.
+type countingResourceManager struct {
+	network.NullResourceManager
+	opened int
+}
+
+func (m *countingResourceManager) OpenConnection(network.Direction, bool, multiaddr.Multiaddr) (network.ConnManagementScope, error) {
+	m.opened++
+	return &network.NullScope{}, nil
 }
 
 func TestDefaultConnsPerSourceIP(t *testing.T) {

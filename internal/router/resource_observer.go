@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/google/agentmesh/internal/p2plimits"
-	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -48,12 +47,6 @@ func init() {
 	for _, p := range memberProtocols {
 		streamsRefusedTotal.WithLabelValues(p2plimits.StreamScopeProtocol, string(p))
 	}
-}
-
-// observeResourceManager counts the wrapped manager's refusals in
-// inboundRefusedTotal and logs them, once per source per minute.
-func observeResourceManager(inner network.ResourceManager) *p2plimits.Observed {
-	return p2plimits.Observe(inner, inboundRefusedTotal, logger.Warnf)
 }
 
 // countStreamRefusals is the reporter the resource manager is built with;
