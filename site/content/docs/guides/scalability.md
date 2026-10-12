@@ -101,6 +101,22 @@ from host memory. A refused stream is counted in
 `agentmesh_router_streams_refused_total{protocol}` and
 `agentmesh_node_streams_refused_total{protocol}`.
 
+A stream over TCP also reserves memory. yamux reserves one receive window
+(256 KiB) per stream it opens, through the resource manager, and releases
+it when the stream closes; the memory is allocated only as data arrives
+and waits to be read, so an idle stream holds a reservation and no bytes.
+The memory budget therefore follows the stream budget, one window per
+stream the budget admits, on the system scope and on the scope of each
+peer. libp2p's own default for the system scope is scaled from host
+memory and was 1.1 GiB on the testnet's routers, full at 1500 members
+over TCP, at which point the relay refused every circuit with
+`RESOURCE_LIMIT_EXCEEDED` and no stream counter moved. A refused
+reservation is counted in
+`agentmesh_router_memory_reservations_refused_total` and
+`agentmesh_node_memory_reservations_refused_total`, and the scope that is
+full reads from `libp2p_rcmgr_memory{scope}` against
+`libp2p_rcmgr_limit{resource="memory",scope}`.
+
 ### Hub links and peer links
 
 A member's connection to a router is a hub link. It carries the member's
@@ -367,6 +383,7 @@ The router and the control plane serve Prometheus metrics on
 | `libp2p_relaysvc_reservations_total{type="opened"}` minus `{type="closed"}`, against `agentmesh_router_relay_limit{limit="reservations"}` | Reservations in use against the budget. |
 | `libp2p_relaysvc_connection_rejections_total{reason="resource limit exceeded"}` | A service has more callers than `--relay-max-circuits`. |
 | `libp2p_rcmgr_blocked_resources` | libp2p refused a connection or stream on a scope. On a router this should stay flat. |
+| `agentmesh_router_memory_reservations_refused_total`, `agentmesh_node_memory_reservations_refused_total`, with `libp2p_rcmgr_memory{scope}` against `libp2p_rcmgr_limit{resource="memory",scope}` | The resource manager's memory budget on some scope is full. Over TCP every open stream holds a 256 KiB reservation, so this is the stream budget met from the other side: new streams and relayed connections are refused, with `RESOURCE_LIMIT_EXCEEDED` at the relay and nothing in the stream counters. The scope whose `libp2p_rcmgr_memory` is at its limit names the budget. |
 | `agentmesh_router_streams_refused_total{scope,protocol}`, `agentmesh_node_streams_refused_total{scope,protocol}` | The streams behind that gauge, by protocol. `/mesh/kad/1.0.0` or `/meshsub/*` at the `protocol` scope on a router is members past the stream budget of a protocol, which keeps them out of discovery; `agentmesh_router_dht_routing_table_size` falls with it. |
 | `agentmesh_router_auth_handshakes_total{result="read_failed"}` | Members that timed out mid-handshake: the router is slow, usually CPU. |
 | `agentmesh_router_draining` | The router is stopping. Exclude it from capacity sums. |

@@ -85,9 +85,9 @@ func hubLimits(highWaterMark, conns, circuits int) rcmgr.ConcreteLimitConfig {
 
 	// A relayed connection is one hop stream from the caller and one stop
 	// stream to the destination, both held while it lasts; the memory the
-	// relay reserves per connection is a few KiB on each.
+	// relay reserves per connection is a few KiB on each, on top of the
+	// streams' windows.
 	relayStreams := streams(sysBase)
-	relayStreams.Memory = rcmgr.LimitVal64(int64(sysBase) * 64 << 10)
 	perPeerCircuits := streams(circuits)
 
 	protocols := map[protocol.ID]rcmgr.ResourceLimits{
@@ -101,6 +101,9 @@ func hubLimits(highWaterMark, conns, circuits int) rcmgr.ConcreteLimitConfig {
 	overrides := rcmgr.PartialLimitConfig{
 		System:    system,
 		Transient: transient,
+		// The peer scope for a service many members call carries one stop
+		// stream per relayed caller, up to the per-peer circuit budget.
+		PeerDefault: perPeerCircuits,
 		Service: map[string]rcmgr.ResourceLimits{
 			identify.ServiceName: streams(sysBase),
 			relay.ServiceName:    relayStreams,

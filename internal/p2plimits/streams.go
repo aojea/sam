@@ -15,6 +15,7 @@
 package p2plimits
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -40,32 +41,37 @@ const (
 )
 
 // StreamRefusals counts the streams the resource manager refused, by scope
-// and protocol (or service), and logs each scope and name once per
-// RefusalLogInterval. It is libp2p's MetricsReporter; the Allow side is a
-// no-op.
+// and protocol (or service), and the memory reservations it refused, and
+// logs each once per RefusalLogInterval. It is libp2p's MetricsReporter;
+// the Allow side is a no-op.
 type StreamRefusals struct {
-	refused   *prometheus.CounterVec
-	warnf     func(format string, args ...any)
-	mu        sync.Mutex
-	since     map[string]uint64
-	lastLogAt map[string]time.Time
-	now       func() time.Time
+	refused       *prometheus.CounterVec
+	memoryRefused prometheus.Counter
+	warnf         func(format string, args ...any)
+	mu            sync.Mutex
+	since         map[string]uint64
+	lastLogAt     map[string]time.Time
+	now           func() time.Time
 }
 
 var _ rcmgr.MetricsReporter = (*StreamRefusals)(nil)
 
 // CountStreamRefusals returns a reporter for rcmgr.WithMetrics. refused
-// carries the labels scope and protocol; a nil warnf only counts.
-func CountStreamRefusals(refused *prometheus.CounterVec, warnf func(format string, args ...any)) *StreamRefusals {
+// carries the labels scope and protocol; memoryRefused counts the memory
+// reservations refused, which the stream muxer makes one of per stream it
+// opens and the relay one of per connection it relays; a nil warnf only
+// counts.
+func CountStreamRefusals(refused *prometheus.CounterVec, memoryRefused prometheus.Counter, warnf func(format string, args ...any)) *StreamRefusals {
 	if warnf == nil {
 		warnf = func(string, ...any) {}
 	}
 	return &StreamRefusals{
-		refused:   refused,
-		warnf:     warnf,
-		since:     map[string]uint64{},
-		lastLogAt: map[string]time.Time{},
-		now:       time.Now,
+		refused:       refused,
+		memoryRefused: memoryRefused,
+		warnf:         warnf,
+		since:         map[string]uint64{},
+		lastLogAt:     map[string]time.Time{},
+		now:           time.Now,
 	}
 }
 
@@ -74,7 +80,31 @@ func (s *StreamRefusals) SetClock(now func() time.Time) { s.now = now }
 
 func (s *StreamRefusals) refusedStream(scope, name string) {
 	s.refused.WithLabelValues(scope, name).Inc()
-	key := scope + " " + name
+	s.report(scope+" "+name, func(n uint64) string {
+		what := "at the " + scope + " scope"
+		if name != "" {
+			what = "on " + name + " " + what
+		}
+		return fmt.Sprintf("[Stream] Refused %d stream(s) %s since the last report; the peer sees its stream reset", n, what)
+	})
+}
+
+// BlockMemory is a memory reservation the manager refused: the muxer's
+// window for a new stream, or the relay's buffers for a connection it
+// would relay. The budget it ran into is libp2p_rcmgr_limit{resource=
+// "memory"} on the scope libp2p_rcmgr_memory shows full.
+func (s *StreamRefusals) BlockMemory(size int) {
+	if s.memoryRefused != nil {
+		s.memoryRefused.Inc()
+	}
+	s.report("memory", func(n uint64) string {
+		return fmt.Sprintf("[Memory] Refused %d memory reservation(s) since the last report, the last for %d bytes: the resource manager's memory budget is full (libp2p_rcmgr_memory against libp2p_rcmgr_limit{resource=\"memory\"}); a new stream or a relayed connection that needs it is refused", n, size)
+	})
+}
+
+// report counts one refusal under key and, once per RefusalLogInterval,
+// logs the line for the count since the last report.
+func (s *StreamRefusals) report(key string, line func(n uint64) string) {
 	s.mu.Lock()
 	s.since[key]++
 	n := s.since[key]
@@ -87,11 +117,7 @@ func (s *StreamRefusals) refusedStream(scope, name string) {
 	}
 	s.mu.Unlock()
 	if shouldLog {
-		what := "at the " + scope + " scope"
-		if name != "" {
-			what = "on " + name + " " + what
-		}
-		s.warnf("[Stream] Refused %d stream(s) %s since the last report; the peer sees its stream reset", n, what)
+		s.warnf("%s", line(n))
 	}
 }
 
@@ -124,4 +150,3 @@ func (s *StreamRefusals) AllowPeer(peer.ID)                      {}
 func (s *StreamRefusals) AllowProtocol(protocol.ID)              {}
 func (s *StreamRefusals) AllowService(string)                    {}
 func (s *StreamRefusals) AllowMemory(int)                        {}
-func (s *StreamRefusals) BlockMemory(int)                        {}

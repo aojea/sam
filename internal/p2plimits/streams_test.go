@@ -16,6 +16,7 @@ package p2plimits
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/test"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
+	"github.com/multiformats/go-multiaddr"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -38,7 +40,7 @@ func TestStreamRefusalsCountTheProtocol(t *testing.T) {
 		Protocol: map[protocol.ID]rcmgr.ResourceLimits{proto: Streams(1)},
 	}.Build(rcmgr.InfiniteLimits)
 	refused := newStreamsRefusedCounter()
-	m, err := NewResourceManager(limits, rcmgr.WithMetrics(CountStreamRefusals(refused, nil)))
+	m, err := NewResourceManager(limits, rcmgr.WithMetrics(CountStreamRefusals(refused, nil, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +72,7 @@ func TestStreamRefusalsCountTheProtocol(t *testing.T) {
 func TestStreamRefusalsLogOneProtocolOncePerInterval(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	var lines []string
-	s := CountStreamRefusals(newStreamsRefusedCounter(), func(format string, args ...any) {
+	s := CountStreamRefusals(newStreamsRefusedCounter(), nil, func(format string, args ...any) {
 		lines = append(lines, fmt.Sprintf(format, args...))
 	})
 	s.SetClock(func() time.Time { return now })
@@ -94,5 +96,63 @@ func TestStreamRefusalsLogOneProtocolOncePerInterval(t *testing.T) {
 	s.BlockPeer("")
 	if lines[len(lines)-1] != "[Stream] Refused 1 stream(s) at the peer scope since the last report; the peer sees its stream reset" {
 		t.Errorf("peer scope: %q", lines[len(lines)-1])
+	}
+}
+
+// A refused memory reservation is counted and said once per interval; the
+// muxer makes one per stream it opens, so a full memory budget is a stream
+// the peer never gets, with nothing in the stream counters.
+func TestStreamRefusalsCountRefusedMemory(t *testing.T) {
+	memory := prometheus.NewCounter(prometheus.CounterOpts{Name: "test_memory_refused_total"})
+	var lines []string
+	now := time.Unix(1_700_000_000, 0)
+	s := CountStreamRefusals(newStreamsRefusedCounter(), memory, func(format string, args ...any) {
+		lines = append(lines, fmt.Sprintf(format, args...))
+	})
+	s.SetClock(func() time.Time { return now })
+	for i := 0; i < 3; i++ {
+		s.BlockMemory(256 << 10)
+	}
+	if got := counterValue(t, memory); got != 3 {
+		t.Errorf("memory refusals counted = %v, want 3", got)
+	}
+	if len(lines) != 1 || !strings.Contains(lines[0], "Refused 1 memory reservation(s)") || !strings.Contains(lines[0], "262144 bytes") {
+		t.Fatalf("lines = %q", lines)
+	}
+	now = now.Add(RefusalLogInterval)
+	s.BlockMemory(4096)
+	if len(lines) != 2 || !strings.Contains(lines[1], "Refused 3 memory reservation(s)") {
+		t.Errorf("after the interval: %q", lines)
+	}
+}
+
+// The memory a stream budget carries admits the streams it admits: a
+// manager built from Streams(n) opens n streams on one yamux-sized
+// reservation each, and refuses the reservation past the budget.
+func TestStreamsBudgetCarriesTheMuxerWindows(t *testing.T) {
+	const n = 4
+	limits := rcmgr.PartialLimitConfig{System: Streams(n), Transient: Streams(n), PeerDefault: Streams(n)}.Build(rcmgr.InfiniteLimits)
+	m, err := NewResourceManager(limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = m.Close() }()
+	p := test.RandPeerIDFatal(t)
+	conn, err := m.OpenConnection(network.DirInbound, true, multiaddr.StringCast("/ip4/203.0.113.9/tcp/1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.SetPeer(p); err != nil {
+		t.Fatal(err)
+	}
+	// Streams(n) admits 2n streams in all; each takes one window, as yamux
+	// reserves it, so the 2n+1-th window is refused.
+	for i := 0; i < 2*n; i++ {
+		if err := conn.ReserveMemory(StreamWindow, network.ReservationPriorityAlways); err != nil {
+			t.Fatalf("window %d refused: %v", i+1, err)
+		}
+	}
+	if err := conn.ReserveMemory(StreamWindow, network.ReservationPriorityAlways); err == nil {
+		t.Fatal("a window past the stream budget was admitted")
 	}
 }

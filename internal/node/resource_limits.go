@@ -93,6 +93,9 @@ func nodeLimits(conns int) rcmgr.ConcreteLimitConfig {
 	overrides := rcmgr.PartialLimitConfig{
 		System:    system,
 		Transient: transient,
+		// The peer scope for a router carries one relay stop stream per
+		// caller it relays, as many as the connection budget admits.
+		PeerDefault: p2plimits.Streams(conns),
 		Service: map[string]rcmgr.ResourceLimits{
 			identify.ServiceName: p2plimits.Streams(conns),
 		},
@@ -131,6 +134,13 @@ var streamsRefusedTotal = promauto.NewCounterVec(
 	[]string{"scope", "protocol"},
 )
 
+// memoryRefusedTotal counts the memory reservations the resource manager
+// refused: the muxer's window for a new stream, among others.
+var memoryRefusedTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "agentmesh_node_memory_reservations_refused_total",
+	Help: "Memory reservations the resource manager refused; a new stream that needed one was refused with it",
+})
+
 // busiestConnStreams is the most streams any one connection carries. On a
 // provider the connection to a router carries one stream per caller
 // relayed through it; a QUIC connection admits
@@ -152,5 +162,5 @@ const streamPressureInterval = 15 * time.Second
 // charged to the router's address; see p2plimits.Observed.
 func newResourceManager() (network.ResourceManager, error) {
 	return p2plimits.New(nodeLimits(ConnHighWaterMark), ConnsPerSourceIP, inboundRefusedTotal, logger.Warnf,
-		rcmgr.WithMetrics(p2plimits.CountStreamRefusals(streamsRefusedTotal, logger.Warnf)))
+		rcmgr.WithMetrics(p2plimits.CountStreamRefusals(streamsRefusedTotal, memoryRefusedTotal, logger.Warnf)))
 }

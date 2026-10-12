@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/p2plimits"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
@@ -59,6 +60,18 @@ func TestHubLimitsFollowTheConnectionBudget(t *testing.T) {
 		want("gossip protocol "+string(p)+" inbound streams", cfg.Protocol[p].StreamsInbound, highWaterMark)
 	}
 	want("relay service inbound streams", cfg.Service[relay.ServiceName].StreamsInbound, highWaterMark)
+	// yamux reserves one window per open stream through the manager, so
+	// the memory budget follows the stream budget; libp2p's default is
+	// scaled from host memory and was full at 1500 members over TCP.
+	if got, min := int64(cfg.System.Memory), int64(cfg.System.Streams)*p2plimits.StreamWindow; got < min {
+		t.Errorf("system memory = %d, want at least a window per stream, %d", got, min)
+	}
+	if got, min := int64(cfg.PeerDefault.Memory), int64(circuits)*p2plimits.StreamWindow; got < min {
+		t.Errorf("peer memory = %d, want at least a window per circuit, %d", got, min)
+	}
+	// A service many members call holds one stop stream per caller on the
+	// router's peer scope for it.
+	want("peer outbound streams", cfg.PeerDefault.StreamsOutbound, circuits)
 	want("hop protocol inbound streams", cfg.Protocol[circuit.ProtoIDv2Hop].StreamsInbound, highWaterMark)
 	// A destination many members call holds one stop stream per caller.
 	want("relay per-peer outbound streams", cfg.ServicePeer[relay.ServiceName].StreamsOutbound, circuits)

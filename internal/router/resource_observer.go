@@ -40,6 +40,14 @@ var streamsRefusedTotal = promauto.NewCounterVec(
 	[]string{"scope", "protocol"},
 )
 
+// memoryRefusedTotal counts the memory reservations the resource manager
+// refused: the muxer's window for a new stream, the relay's buffers for a
+// connection. The budget follows the stream budget (see p2plimits.Streams).
+var memoryRefusedTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "agentmesh_router_memory_reservations_refused_total",
+	Help: "Memory reservations the resource manager refused; a new stream or a relayed connection that needed one was refused with it",
+})
+
 // busiestConnStreams is the most streams any one connection carries. A
 // QUIC connection admits p2plimits.QUICStreamsPerConnection; the router's
 // connection to a service it relays for carries one stream per relayed
@@ -67,7 +75,7 @@ func init() {
 // countStreamRefusals is the reporter the resource manager is built with;
 // it counts refused streams in streamsRefusedTotal by protocol.
 func countStreamRefusals() *p2plimits.StreamRefusals {
-	return p2plimits.CountStreamRefusals(streamsRefusedTotal, logger.Warnf)
+	return p2plimits.CountStreamRefusals(streamsRefusedTotal, memoryRefusedTotal, logger.Warnf)
 }
 
 // connsPerSourceIPDesc exports the cap in force, so a dashboard can read the

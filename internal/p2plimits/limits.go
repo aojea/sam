@@ -122,14 +122,26 @@ func sourceRateLimiter(perIP int) *xrate.Limiter {
 	}
 }
 
-// Streams is a stream budget of n each way.
+// Streams is a stream budget of n each way, with the memory the streams
+// reserve: yamux reserves one receive window per open stream through the
+// resource manager, so a budget of streams is a budget of memory, and
+// libp2p's default for the latter is scaled from host memory, which on the
+// testnet's routers was 1.1 GiB and full at 1500 members over TCP. The
+// memory is a reservation, released with the stream, and allocated only
+// as data arrives and waits to be read.
 func Streams(n int) rcmgr.ResourceLimits {
 	return rcmgr.ResourceLimits{
 		Streams:         rcmgr.LimitVal(2 * n),
 		StreamsInbound:  rcmgr.LimitVal(n),
 		StreamsOutbound: rcmgr.LimitVal(n),
+		Memory:          rcmgr.LimitVal64(int64(2*n) * StreamWindow),
 	}
 }
+
+// StreamWindow is the receive window yamux reserves for a stream when it
+// opens (go-yamux's initialStreamWindow); a stream that carries a fast
+// transfer to a slow reader may grow it, up to the muxer's maximum.
+const StreamWindow = 256 << 10
 
 // RefusalLogInterval bounds how often one source IP's refusals are logged;
 // the counter carries the rate.

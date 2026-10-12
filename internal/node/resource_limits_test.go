@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/p2plimits"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/connmgr"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
@@ -50,6 +51,15 @@ func TestNodeLimitsFollowTheConnectionBudget(t *testing.T) {
 	// Every caller through one router is a stop stream from that one peer.
 	want("relay stop protocol inbound streams", cfg.Protocol[circuit.ProtoIDv2Stop].StreamsInbound, ConnHighWaterMark)
 	want("relay stop protocol per-peer inbound streams", cfg.ProtocolPeer[circuit.ProtoIDv2Stop].StreamsInbound, ConnHighWaterMark)
+	// A router peer carries one stop stream per relayed caller; yamux
+	// reserves one window per open stream, so memory follows the streams.
+	want("peer inbound streams", cfg.PeerDefault.StreamsInbound, ConnHighWaterMark)
+	if got, min := int64(cfg.System.Memory), int64(cfg.System.Streams)*p2plimits.StreamWindow; got < min {
+		t.Errorf("system memory = %d, want at least a window per stream, %d", got, min)
+	}
+	if got, min := int64(cfg.PeerDefault.Memory), int64(ConnHighWaterMark)*p2plimits.StreamWindow; got < min {
+		t.Errorf("peer memory = %d, want at least a window per stop stream, %d", got, min)
+	}
 
 	if ConnsPerSourceIP != ConnHighWaterMark/4 {
 		t.Errorf("ConnsPerSourceIP = %d, want a quarter of the high watermark, %d", ConnsPerSourceIP, ConnHighWaterMark/4)
