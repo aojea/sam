@@ -338,6 +338,9 @@ type Router struct {
 	// peerRouters is the other routers of the mesh, as /info lists them or as
 	// a handshake proved them: held whatever the load and never sent away.
 	peerRouters sync.Map
+	// gated is the host the DHT, gossip and the directory run on: it serves
+	// and reaches authenticated peers only (authGate).
+	gated *authGate
 	// handshakeLimiter bounds /mesh/auth attempts per peer; any internet peer
 	// can open those streams.
 	handshakeLimiter *ratelimit.PeerRateLimiter
@@ -505,8 +508,10 @@ func (r *Router) Start() (retErr error) {
 		return err
 	}
 	r.Host = hostNode
-	// The DHT and gossip serve, and are served by, authenticated peers only.
+	// The DHT, gossip and the directory serve, and are served by,
+	// authenticated peers only.
 	gated := &authGate{Host: hostNode, r: r}
+	r.gated = gated
 
 	// Setup DHT
 	kadDHT, err := dht.New(gated, r.dhtOptions()...)
@@ -551,6 +556,9 @@ func (r *Router) Start() (retErr error) {
 
 	// Setup authentication stream handler
 	hostNode.SetStreamHandler(api.AuthProtocolID, recoverStreamHandler("AuthHandshake", r.HandleAuthHandshake))
+	// The directory a member asks this router for, and routers place
+	// records on each other through.
+	gated.SetStreamHandler(api.DirectoryProtocolID, recoverStreamHandler("Directory", r.handleDirectory))
 
 	// Clean authenticated status on peer disconnection
 	hostNode.Network().Notify(&network.NotifyBundle{

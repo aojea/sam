@@ -38,7 +38,7 @@ import (
 // discovery (libp2p_rcmgr_blocked_resources{scope="protocol"} counted them,
 // without saying which protocol).
 var memberProtocols = slices.Concat(
-	[]protocol.ID{identify.ID, identify.IDPush, api.AuthProtocolID, api.DHTProtocolID},
+	[]protocol.ID{identify.ID, identify.IDPush, api.AuthProtocolID, api.DHTProtocolID, api.DirectoryProtocolID},
 	pubsub.GossipSubDefaultProtocols,
 )
 
