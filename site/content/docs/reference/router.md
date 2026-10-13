@@ -64,6 +64,13 @@ replica count.
    router on `/info` while the lease is live.
 4. Runs the mutual credential handshake on every inbound connection and
    refuses peers whose credential does not verify and peers on the ban list.
+   Until a peer passes it, the router serves it nothing but the handshake:
+   a DHT or gossip stream it opens waits, unread, and is served once the
+   peer is authenticated, or reset when the connection closes at
+   `--auth-deadline` first. A member's streams open on connect, a moment
+   before its handshake completes, which is why they wait instead of being
+   refused outright. The routing table admits authenticated peer routers and
+   nothing else, and the router queries no one else either.
 5. Refreshes its own credential before it expires, like a node.
 6. Every 5 seconds, compares the members it holds, the peers that passed
    the handshake, with `--high-watermark`. At the mark it picks members at
@@ -120,7 +127,7 @@ The metrics address exposes, next to the Go runtime metrics:
 | `agentmesh_router_goaway_sent_total{reason,result}` | Members sent away, by reason (`DRAINING`, `OVERLOADED`) and outcome: `ok` when the member took the message, `unsupported` when it does not speak the protocol and was closed instead, `failed` when the stream broke. A rising `OVERLOADED` count on a router that is not draining is a fleet that has outgrown its routers. |
 | `agentmesh_router_unauthenticated_connections_closed_total` | Connections closed at `--auth-deadline` without a handshake. Members handshake with every router they connect to, so a steady rate is members running a node release that predates that, and a burst is a scanner. |
 | `agentmesh_router_inbound_connections_refused_total` | Inbound connections refused by the per-address cap. |
-| `agentmesh_router_streams_refused_total{scope,protocol}` | Streams the resource manager refused, by scope and protocol or service. A count on `/mesh/kad/1.0.0` or a `/meshsub/*` protocol is members the router keeps out of discovery; see the scalability guide. |
+| `agentmesh_router_streams_refused_total{scope,protocol}` | Streams refused, by scope and protocol or service. `scope="unauthenticated"` is a stream from a peer that never passed the handshake, reset when its connection closed; a steady rate is a scanner, or a member whose handshake fails. The other scopes are the resource manager's: a count on `/mesh/kad/1.0.0` or a `/meshsub/*` protocol there is members the router keeps out of discovery; see the scalability guide. |
 | `agentmesh_router_busiest_connection_streams{transport}` | The most streams any one connection carries. The connection to a service the router relays for holds one stream per relayed caller, and QUIC admits 256 per connection; see the scalability guide. |
 | `libp2p_relaysvc_*` | The relay service's own counters: `reservations_total{type}` and `connections_total{type}` (`opened`, `closed`, `renewed`), requests by response status, rejections and bytes relayed. The difference between `opened` and `closed` is the number in use; read it against `agentmesh_router_relay_limit` to see how close the relay is to its budget. |
 

@@ -594,3 +594,14 @@ response directly).
    members on charset grounds and quotes wildcard string literals with
    `strconv.Quote` before rendering `.starts_with(...)` or `.ends_with(...)`
    Datalog rules.
+7. Nothing interacts with the mesh unauthenticated. A router or a member
+   serves a mesh protocol (the DHT, gossip, the relay, the data plane) only to
+   a peer that completed the credential handshake on that connection and whose
+   credential has not lapsed. The protocols open to a peer before that are the
+   ones the handshake needs: the transport security handshake, identify and
+   `/mesh/auth`. The DHT and gossipsub are built on a host wrapper that holds a
+   stream until its peer is authenticated and resets it when the connection
+   closes first, counted in `*_streams_refused_total{scope="unauthenticated"}`;
+   a router's routing table admits authenticated peer routers only. A
+   directory lookup and a gossip subscription are mesh data, so this covers
+   reads as much as writes.
