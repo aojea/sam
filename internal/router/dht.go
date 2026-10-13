@@ -20,6 +20,7 @@ import (
 
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/records"
+	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/google/agentmesh/api"
 )
@@ -40,12 +41,46 @@ const dhtTableBucketSize = 64
 // node that is gone drops out of discovery within it and two missed
 // announcements do not unlist one that is not. The library default (48h)
 // would keep every past identity listed.
-func dhtOptions(directory api.DirectorySettings) []dht.Option {
+//
+// Its table holds, and its lookups ask, authenticated peer routers only: a
+// peer in server mode that never authenticated would otherwise be handed
+// queries and records. A router enters the table when it authenticates
+// (admitPeerRouter), not when the DHT first hears of it.
+func (r *Router) dhtOptions() []dht.Option {
 	return []dht.Option{
 		dht.Mode(dht.ModeServer),
 		dht.ProtocolPrefix(api.DHTProtocolPrefix),
 		dht.BucketSize(dhtTableBucketSize),
-		dht.ProviderManagerOpts(records.ProviderAddrTTL(directory.RecordTTL), records.ProvideValidity(directory.RecordTTL)),
+		dht.ProviderManagerOpts(records.ProviderAddrTTL(r.directory.RecordTTL), records.ProvideValidity(r.directory.RecordTTL)),
+		dht.RoutingTableFilter(func(_ interface{}, p peer.ID) bool { return r.isAuthenticatedPeerRouter(p) }),
+		dht.QueryFilter(func(_ interface{}, ai peer.AddrInfo) bool { return r.isAuthenticatedPeerRouter(ai.ID) }),
+	}
+}
+
+// isAuthenticatedPeerRouter reports whether p is a peer router that holds a
+// current authentication with this router.
+func (r *Router) isAuthenticatedPeerRouter(p peer.ID) bool {
+	if _, isRouter := r.peerRouters.Load(p); !isRouter {
+		return false
+	}
+	return r.isPeerAuthenticated(p)
+}
+
+// admitPeerRouter records p as a peer router that authenticated and puts it
+// in the DHT's table: the table's filter kept it out until now, and the
+// DHT itself only adds a peer when it first hears of it.
+func (r *Router) admitPeerRouter(p peer.ID) {
+	if _, known := r.peerRouters.LoadOrStore(p, true); !known {
+		logger.Infof("[Federation] Peer router %s authenticated with us", p)
+		r.Host.ConnManager().Protect(p, federationTag)
+	}
+	if r.DHT == nil {
+		return
+	}
+	if added, err := r.DHT.RoutingTable().TryAddPeer(p, true, false); err != nil {
+		logger.Warnf("[DHT] Peer router %s not added to the routing table: %v", p, err)
+	} else if added {
+		logger.Infof("[DHT] Peer router %s added to the routing table (%d routers)", p, r.DHT.RoutingTable().Size())
 	}
 }
 

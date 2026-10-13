@@ -252,6 +252,9 @@ func (r *Router) forgetPeer(p peer.ID) {
 		r.Host.ConnManager().UntagPeer(p, memberTag)
 		r.Host.Peerstore().UpdateAddrs(p, r.reservationTTL(), 0)
 	}
+	if r.DHT != nil {
+		r.DHT.RoutingTable().RemovePeer(p)
+	}
 }
 
 // AdmittedUntil reports when this router's admission of p lapses: the
@@ -502,9 +505,11 @@ func (r *Router) Start() (retErr error) {
 		return err
 	}
 	r.Host = hostNode
+	// The DHT and gossip serve, and are served by, authenticated peers only.
+	gated := &authGate{Host: hostNode, r: r}
 
 	// Setup DHT
-	kadDHT, err := dht.New(hostNode, dhtOptions(r.directory)...)
+	kadDHT, err := dht.New(gated, r.dhtOptions()...)
 	if err != nil {
 		return err
 	}
@@ -526,7 +531,7 @@ func (r *Router) Start() (retErr error) {
 
 	// Setup PubSub. StrictSign is the default; pinned because the event
 	// validator trusts msg.GetFrom().
-	ps, err := pubsub.NewGossipSub(r.ctx, hostNode, pubsub.WithMessageSignaturePolicy(pubsub.StrictSign))
+	ps, err := pubsub.NewGossipSub(r.ctx, gated, pubsub.WithMessageSignaturePolicy(pubsub.StrictSign))
 	if err != nil {
 		return err
 	}
@@ -1509,10 +1514,7 @@ func (r *Router) HandleAuthHandshake(s network.Stream) {
 	// A router that proves the router role is a peer router from here on,
 	// not from the next federation pass: it is never a member to shed.
 	if identity.RequireRole(b, verifyingKey, api.RoleRouter, r.config.BiscuitTimeout) == nil {
-		if _, known := r.peerRouters.LoadOrStore(remotePeer, true); !known {
-			logger.Infof("[Federation] Peer router %s authenticated with us", remotePeer)
-			r.Host.ConnManager().Protect(remotePeer, federationTag)
-		}
+		r.admitPeerRouter(remotePeer)
 	}
 
 	// Send mutual response (our biscuit)
@@ -1589,6 +1591,7 @@ func (r *Router) performMutualAuth(s network.Stream) error {
 	}
 
 	r.admitPeer(remotePeer, expiry)
+	r.admitPeerRouter(remotePeer)
 	return nil
 }
 

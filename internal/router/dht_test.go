@@ -32,7 +32,8 @@ func TestRouterDHTTableHoldsEveryRouter(t *testing.T) {
 		t.Fatalf("libp2p.New: %v", err)
 	}
 	t.Cleanup(func() { _ = h.Close() })
-	kdht, err := dht.New(h, dhtOptions(api.DefaultDirectorySettings())...)
+	r := &Router{Host: h, directory: api.DefaultDirectorySettings()}
+	kdht, err := dht.New(h, r.dhtOptions()...)
 	if err != nil {
 		t.Fatalf("dht.New: %v", err)
 	}
@@ -43,13 +44,19 @@ func TestRouterDHTTableHoldsEveryRouter(t *testing.T) {
 
 	rt := kdht.RoutingTable()
 	const routers = 40
-	for i := 0; i < routers; i++ {
+	for added := 0; added < routers; {
 		p, err := rt.GenRandPeerID(0)
 		if err != nil {
 			t.Fatalf("GenRandPeerID: %v", err)
 		}
-		if ok, err := rt.TryAddPeer(p, true, false); !ok {
-			t.Fatalf("router #%d refused from the table: %v; a bucket must hold at least %d", i+1, err, routers)
+		// GenRandPeerID draws from a 16-bit prefix table, so it repeats a
+		// peer now and then; a repeat is not a refusal.
+		if rt.Find(p) != "" {
+			continue
 		}
+		if ok, err := rt.TryAddPeer(p, true, false); !ok {
+			t.Fatalf("router #%d refused from the table: %v; a bucket must hold at least %d", added+1, err, routers)
+		}
+		added++
 	}
 }
