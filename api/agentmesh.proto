@@ -227,9 +227,9 @@ message ControlPlaneInfoResponse {
 // once per mesh on the control plane (agentmesh-control-plane
 // --dht-replication, --dht-reprovide-interval) and published on /info.
 message DirectoryParameters {
-  // How many routers hold each record a member publishes and answer each
-  // lookup it makes: the routers closest to the key. A member holds a
-  // session with each of them besides the routers it is attached to.
+  // How many routers each record a member announces is placed on, the
+  // closest to its key, besides the router that took the announcement.
+  // Routers read it; a member asks the routers it holds.
   int32 replication = 1;
   // How often a member re-announces each service it publishes.
   google.protobuf.Duration reprovide_interval = 2;

@@ -62,11 +62,11 @@ covers all of that.
 
 ## Routers
 
-`agentmesh-router` is a libp2p peer with a stable address. It runs the mesh's
-Kademlia DHT (a distributed hash table), where nodes advertise their services
-and look up who provides what. It also relays traffic for nodes that cannot
-accept inbound
-connections. A router has no policy of its own. It verifies every peer's
+`agentmesh-router` is a libp2p peer with a stable address. It serves the
+mesh's directory, where nodes advertise their services and look up who
+provides what; the routers keep it as a Kademlia DHT (a distributed hash
+table) among themselves. It also relays traffic for nodes that cannot
+accept inbound connections. A router has no policy of its own. It verifies every peer's
 credential and refuses peers it cannot verify and peers that have been
 banned.
 
@@ -88,7 +88,7 @@ component refers to the node by that ID.
 Towards the mesh, a node:
 
 - publishes the services declared in its configuration file (MCP servers,
-  OpenAI-compatible inference backends, A2A agents) to the DHT and, on
+  OpenAI-compatible inference backends, A2A agents) to the directory and, on
   request, to the control plane's catalog
 - accepts connections from other nodes, verifies their credential, evaluates
   policy for the requested service, and proxies the request to the local

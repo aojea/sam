@@ -684,9 +684,9 @@ export const ControlPlaneInfoResponseSchema: GenMessage<ControlPlaneInfoResponse
  */
 export type DirectoryParameters = Message<"agentmesh.v1.DirectoryParameters"> & {
   /**
-   * How many routers hold each record a member publishes and answer each
-   * lookup it makes: the routers closest to the key. A member holds a
-   * session with each of them besides the routers it is attached to.
+   * How many routers each record a member announces is placed on, the
+   * closest to its key, besides the router that took the announcement.
+   * Routers read it; a member asks the routers it holds.
    *
    * @generated from field: int32 replication = 1;
    */

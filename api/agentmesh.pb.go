@@ -1561,9 +1561,9 @@ func (x *ControlPlaneInfoResponse) GetDirectory() *DirectoryParameters {
 // --dht-replication, --dht-reprovide-interval) and published on /info.
 type DirectoryParameters struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// How many routers hold each record a member publishes and answer each
-	// lookup it makes: the routers closest to the key. A member holds a
-	// session with each of them besides the routers it is attached to.
+	// How many routers each record a member announces is placed on, the
+	// closest to its key, besides the router that took the announcement.
+	// Routers read it; a member asks the routers it holds.
 	Replication int32 `protobuf:"varint,1,opt,name=replication,proto3" json:"replication,omitempty"`
 	// How often a member re-announces each service it publishes.
 	ReprovideInterval *durationpb.Duration `protobuf:"bytes,2,opt,name=reprovide_interval,json=reprovideInterval,proto3" json:"reprovide_interval,omitempty"`

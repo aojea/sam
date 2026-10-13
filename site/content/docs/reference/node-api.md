@@ -147,10 +147,11 @@ tools fit together. The tools are:
 
 ### `get_mesh_info`
 
-No parameters. Returns `router_peer_id`, `connected_peers`, `dht_size` and
-`local_api_socket`. `connected_peers` and `dht_size` count different things
-(transport connections and routing-table entries), so a small `dht_size`
-next to a long peer list is normal.
+No parameters. Returns `router_peer_id`, `connected_peers`,
+`attached_routers` and `local_api_socket`. `attached_routers` are the
+routers the node holds, which answer its directory requests;
+`connected_peers` is every peer it has a connection with, the routers
+among them.
 
 ### `list_local_services`
 
@@ -377,6 +378,6 @@ material is meant for the node's owner and for auditors, not for agents.
 and `POST /debug/connect-peer` report and probe the node's view of the mesh
 for troubleshooting, and answer even while the mesh is unreachable.
 `mesh-info` lists the routers the node holds (`attached_routers`) next to
-every peer it is connected to; `peer-addrs` is the DHT record of a peer as
-this node reads it, looked up and not dialed. `agentmesh-node debug` on the
+every peer it is connected to; `peer-addrs` is where the directory says a
+peer is reached, looked up and not dialed. `agentmesh-node debug` on the
 command line wraps them. Their output is not stable across releases.

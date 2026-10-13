@@ -5,7 +5,7 @@ weight: 3
 ---
 
 `agentmesh-router` is a libp2p peer with a stable identity that new nodes connect
-to first. It hosts the DHT, relays traffic between nodes that cannot reach
+to first. It serves the directory, relays traffic between nodes that cannot reach
 each other, and forwards the control plane's signed events. It has no policy
 of its own.
 
@@ -42,12 +42,12 @@ replica count.
 | `--lease-renew-interval` | `300s` | How often the lease is renewed. Must be well below the control plane's `--lease-duration`. |
 | `--allow-loopback` | `false` | Announce and accept loopback and link-local addresses. For a router and nodes on one host. |
 | `--conns-per-source-ip` | a quarter of `--high-watermark` (`1000`) | Inbound connections accepted per source address. One address can hold at most this share of the router's connection budget, so filling a router takes at least four addresses. Members behind a NAT or a cluster's SNAT share one address and each holds one connection per router, two while enrolling. |
-| `--low-watermark`, `--high-watermark` | 15% below the high mark (`3400`), `4000` | How many members the router holds: peers that passed the handshake, other routers aside. At the high mark the router sends members away (see below) until it is back at the low mark, so the gap between the two is what one shedding moves; the default moves 15%. The same numbers bound connections: above the high mark the connection manager closes connections, oldest first among those that carry no session, then members; connections to the other routers are never closed. A connection without a session lasts at most `--auth-deadline`; a member attached elsewhere opens one to this router when it looks a peer or service up or re-announces a service, so those come and go with the mesh's activity; the connection manager leaves them alone while they are younger than its grace period, and libp2p's connection cap, twice the high mark, is what bounds the total (see the [scalability guide](../../guides/scalability/#what-bounds-the-mesh)). |
+| `--low-watermark`, `--high-watermark` | 15% below the high mark (`3400`), `4000` | How many members the router holds: peers that passed the handshake, other routers aside. At the high mark the router sends members away (see below) until it is back at the low mark, so the gap between the two is what one shedding moves; the default moves 15%. The same numbers bound connections: above the high mark the connection manager closes connections, oldest first among those that carry no session, then members; connections to the other routers are never closed. A connection without a session lasts at most `--auth-deadline`; the connection manager leaves a connection alone while it is younger than its grace period, and libp2p's connection cap, twice the high mark, is what bounds the total (see the [scalability guide](../../guides/scalability/#what-bounds-the-mesh)). |
 | `--relay-limit-duration`, `--relay-limit-data` | `1h`, `0` | Caps on each relayed connection: lifetime, and bytes per direction (`512MiB`, `1GB`). The relay cuts the connection when either is reached. `0` means no limit. |
 | `--relay-max-reservations` | `--high-watermark` (`4000`) | Members that may hold a relay reservation on this router at once, which is how many members it can reach on behalf of callers. Per source address the cap is `--conns-per-source-ip`. |
 | `--relay-max-circuits` | `1024` | Relayed connections one peer may hold at once through this router, as caller or as destination. A service that many members call at once needs this many open circuits. |
 | `--shutdown-lease-ttl` | `30s` | Sent in the router's last lease when it stops: how long it expects to be away, which is how long the control plane keeps listing it. The default covers a pod that restarts in place. A router that is being removed for good can send `1s`. `0` sends nothing and the lease expires on the control plane's schedule. |
-| `--auth-deadline` | `1m` | How long an inbound connection may stay open without its peer passing the handshake. A member handshakes the moment it connects; a member attached elsewhere whose DHT client came to query is done in less, as is the control plane's event publisher, which presents a credential of its own. What is left at the deadline is closed, so a connection without a session costs the router a minute, and the watermarks mean members. `0` keeps every connection. |
+| `--auth-deadline` | `1m` | How long an inbound connection may stay open without its peer passing the handshake. A member handshakes the moment it connects, as does the control plane's event publisher, which presents a credential of its own. What is left at the deadline is closed, so a connection without a session costs the router a minute, and the watermarks mean members. `0` keeps every connection. |
 | `--metrics-addr` | off | Serve `/metrics`, `/healthz`, `/readyz` and `/debug/peer` without authentication on this address. `/readyz` returns `200` once the router is enrolled and the libp2p host is up. Keep this address separate from the libp2p ports and inside the cluster. |
 | `--pprof-addr` | off | Serve Go runtime profiles under `/debug/pprof/` on this address, for attributing memory or goroutines the metrics show as held. Unauthenticated, and a heap profile is a dump of process memory, which holds the router's key: bind it to loopback and reach it with `kubectl port-forward`. |
 | `--log-level` | `info` | `debug`, `info`, `warn`, `error`. |
@@ -57,22 +57,29 @@ replica count.
 
 1. Fetches `/keys` and enrolls. The credential carries
    `role("mesh:role:router")` and the relay right.
-2. Starts the libp2p host, the DHT in server mode, the relay service and
-   GossipSub.
+2. Starts the libp2p host, the DHT it shares with the other routers, the
+   directory it serves to its members, the relay service and GossipSub.
 3. Registers a lease at `POST /routers/lease` with its announced addresses
    and renews it every `--lease-renew-interval`. The control plane lists the
    router on `/info` while the lease is live.
 4. Runs the mutual credential handshake on every inbound connection and
    refuses peers whose credential does not verify and peers on the ban list.
    Until a peer passes it, the router serves it nothing but the handshake:
-   a DHT or gossip stream it opens waits, unread, and is served once the
-   peer is authenticated, or reset when the connection closes at
-   `--auth-deadline` first. A member's streams open on connect, a moment
-   before its handshake completes, which is why they wait instead of being
-   refused outright. The routing table admits authenticated peer routers and
-   nothing else, and the router queries no one else either.
-5. Refreshes its own credential before it expires, like a node.
-6. Every 5 seconds, compares the members it holds, the peers that passed
+   a directory, DHT or gossip stream it opens waits, unread, and is served
+   once the peer is authenticated, or reset when the connection closes at
+   `--auth-deadline` first. A member's gossip stream opens on connect, a
+   moment before its handshake completes, which is why it waits instead of
+   being refused outright. The DHT's routing table admits authenticated
+   peer routers and nothing else, and the router queries no one else.
+5. Serves the directory on `/mesh/directory/1.0.0` to the members it
+   holds. A member announces each service it publishes and where it is
+   reached; the router keeps the record and places it on the routers
+   closest to the key, as many as the mesh's replication (`/info`). A
+   member asks for providers of a key or for a peer; the router runs the
+   lookup across the routers' DHT and answers. A member keeps no DHT and
+   connects to no router it does not hold.
+6. Refreshes its own credential before it expires, like a node.
+7. Every 5 seconds, compares the members it holds, the peers that passed
    the handshake, with `--high-watermark`. At the mark it picks members at
    random, as many as take it back to `--low-watermark`, and sends each a
    go-away on `/mesh/goaway/1.0.0` with the reason `OVERLOADED` and a
@@ -80,7 +87,7 @@ replica count.
    another router at once and stays off this one for that time; one that
    does not is closed after a 5 second grace, like any other. Connections
    to the other routers are never shed: the DHT runs over them.
-7. On `SIGTERM` or `SIGINT`, sends a last lease with `--shutdown-lease-ttl`,
+8. On `SIGTERM` or `SIGINT`, sends a last lease with `--shutdown-lease-ttl`,
    sends every member a go-away with the reason `DRAINING` and that ttl as
    the retry time, and after the same grace closes its connections. The
    control plane lists the router for that long and no longer, so a router
@@ -122,10 +129,12 @@ The metrics address exposes, next to the Go runtime metrics:
 | `agentmesh_router_relay_limit{limit}` | The relay budget in force: `reservations`, `reservations_per_ip` and `circuits_per_peer`. |
 | `agentmesh_router_connected_peers`, `agentmesh_router_authenticated_peers`, `agentmesh_router_banned_peers` | Peers in each state. |
 | `agentmesh_router_peer_routers{state}` | Other routers this one knows, from the control plane's list or a handshake that proved the router role: `listed`, and `authenticated` for those it currently holds a mutual authentication with. The two differ while a federation pass is pending or a peer router is down. |
-| `agentmesh_router_dht_routing_table_size` | DHT routing table size. |
+| `agentmesh_router_dht_routing_table_size` | Peer routers in the DHT's routing table: the authenticated peer routers, since nothing else enters it. |
+| `agentmesh_router_directory_requests_total{op,result}`, `agentmesh_router_directory_request_seconds{op}` | Directory requests served, by operation (`provide`, `find_providers`, `find_peer`, and `place` for a record another router put here) and result (`ok`, `empty`, `invalid`, `error`), with the time each took. |
+| `agentmesh_router_directory_placements_total{result}` | Copies of a member's record this router placed on the routers closest to the key. |
 | `agentmesh_router_auth_handshakes_total{result}`, `agentmesh_router_lease_renewals_total{result}` | Handshakes and lease renewals by outcome. |
 | `agentmesh_router_goaway_sent_total{reason,result}` | Members sent away, by reason (`DRAINING`, `OVERLOADED`) and outcome: `ok` when the member took the message, `unsupported` when it does not speak the protocol and was closed instead, `failed` when the stream broke. A rising `OVERLOADED` count on a router that is not draining is a fleet that has outgrown its routers. |
-| `agentmesh_router_unauthenticated_connections_closed_total` | Connections closed at `--auth-deadline` without a handshake. Members handshake with every router they connect to, so a steady rate is members running a node release that predates that, and a burst is a scanner. |
+| `agentmesh_router_unauthenticated_connections_closed_total` | Connections closed at `--auth-deadline` without a handshake. A member handshakes with a router the moment it connects, so a steady rate is members that cannot complete the handshake, and a burst is a scanner. |
 | `agentmesh_router_inbound_connections_refused_total` | Inbound connections refused by the per-address cap. |
 | `agentmesh_router_streams_refused_total{scope,protocol}` | Streams refused, by scope and protocol or service. `scope="unauthenticated"` is a stream from a peer that never passed the handshake, reset when its connection closed; a steady rate is a scanner, or a member whose handshake fails. The other scopes are the resource manager's: a count on `/mesh/kad/1.0.0` or a `/meshsub/*` protocol there is members the router keeps out of discovery; see the scalability guide. |
 | `agentmesh_router_busiest_connection_streams{transport}` | The most streams any one connection carries. The connection to a service the router relays for holds one stream per relayed caller, and QUIC admits 256 per connection; see the scalability guide. |
@@ -140,6 +149,6 @@ on the same address are the probes to use in a pod spec.
 `GET /debug/peer?peer_id=<id>` on the same address is the router's view of
 one peer: its connectedness, whether it is authenticated here and whether it
 is a peer router, its open connections, and the addresses the router holds
-for it, which are the ones it hands out in a DHT answer. It is a diagnostic
+for it, which are the ones it hands out in a directory answer. It is a diagnostic
 for an operator reading why a member cannot reach another, and its shape is
 not versioned.

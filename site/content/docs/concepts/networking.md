@@ -43,11 +43,16 @@ The [node API reference](../../reference/node-api/) lists every route.
 
 ## Discovery
 
-A node that publishes a service does two things. It records itself in the
-Kademlia DHT, hosted by the routers, as a provider of that service name. It
-also announces the service over GossipSub to nodes that have asked about that
-name. A node that looks for a service asks the DHT for providers, and for
-names it asked about before it already has the gossip announcements.
+The routers keep the mesh's directory: a Kademlia DHT among themselves,
+served to members over `/mesh/directory/1.0.0`. A node that publishes a
+service announces itself to a router it holds as a provider of that
+service name, and where it is reached; the router keeps the record and
+places it on the routers closest to the key. A node that looks for a
+service, or for a peer, asks a router it holds, and the router runs the
+lookup across the routers' DHT. A node keeps no DHT of its own and
+connects to no router it does not hold. It re-announces every reprovide
+interval of the mesh (`/info`), and a record a provider stopped
+announcing leaves the directory after three of them.
 
 Before a node advertises a backend, it probes the backend
 (`--backend-probe-timeout`, 2 seconds by default). A backend that does not
@@ -82,12 +87,14 @@ Routers are the fixed points. A node learns their addresses, labels and
 load from the control plane's `/info` at enrollment and again on a
 schedule, holds two of them with a relay reservation on each, and replaces
 one that drops or that sends it away. A router that grants a reservation
-records the member's address through itself, so a DHT lookup for the
-member that reaches that router learns where it is reached; an SDK member
-listens on nothing else. A call to a peer reached through a
+records the member's address through itself, so a directory lookup for
+the member learns where it is reached; an SDK member listens on nothing
+else. A call to a peer reached through a
 third router goes through that router: the caller runs the credential
 handshake there first, since a router relays only between peers it has
-verified. The DHT and the relay are closed to anyone who is not enrolled.
+verified. The directory, the gossip and the relay are closed to anyone who
+is not enrolled: a router serves nothing but the handshake to a peer that
+has not passed it.
 
 When a node opens a stream to another node for a service request, the first
 message is an authentication frame with the caller's credential and the
@@ -110,7 +117,9 @@ request.
 
 Traffic to the control plane is protobuf over HTTPS. Traffic between nodes is
 HTTP over libp2p streams for service requests, and protobuf frames for the
-authentication handshake, the DHT and gossip.
+authentication handshake, the directory and gossip. Members take the
+control plane's events as leaves of the gossip, over floodsub: the routers
+deliver every event to them, and run the gossip mesh among themselves.
 
 ## Inference routing
 

@@ -17,21 +17,21 @@ rollout of every router and both control plane replicas.
 
 A member is one `agentmesh-node` process. It holds a session with two
 routers (`--routers`), chosen from those the control plane lists, and a
-relay reservation on each. Through those sessions it keeps a GossipSub
-subscription for control plane events. Its DHT client reaches the
-routers kademlia puts closest to each key it publishes or looks up,
-three of them (the mesh's replication, `agentmesh-control-plane
---dht-replication`), named in one answer by a router it is attached to,
-and runs the credential handshake with each, so those connections are
-sessions as well: the router keeps them, and the next lookup or
-announcement (every 5 minutes, the mesh's `--dht-reprovide-interval`)
-reuses them. The client keeps no table maintenance of its own. A router
-therefore carries sessions of two kinds, both counted by the watermarks:
-the members attached to it, and the members whose keys land on it.
-A member connects to another member only to call it, through that
-member's router, where it runs the credential handshake before asking for
-the circuit. At rest it uses about 55 MiB of memory, 300 goroutines and
-20 file descriptors, and almost no CPU.
+relay reservation on each. Those two sessions are everything the member
+opens to the mesh at rest. Through them it receives the control plane's
+events as a leaf of the gossip (floodsub: the routers deliver every
+event to it, and it takes no part in the routers' gossip mesh), and it
+uses the directory: it announces each service it publishes, and where it
+is reached, to a router it holds, and asks a router it holds for
+providers and peers. The router keeps the member's records, places each
+on the routers closest to its key (three, the mesh's replication,
+`agentmesh-control-plane --dht-replication`), and runs each lookup across
+the routers' own DHT. The member keeps no DHT and connects to no router
+it does not hold. It re-announces every 5 minutes (the mesh's
+`--dht-reprovide-interval`). A member connects to another member only to
+call it, through that member's router, where it runs the credential
+handshake before asking for the circuit. At rest it uses about 55 MiB of
+memory, 300 goroutines and 20 file descriptors, and almost no CPU.
 
 Joining is the expensive moment. The member enrolls at the control plane
 (one signed request, one database write, one credential minted), reads the
@@ -81,8 +81,8 @@ dial tries every address at once.
 
 | Role | What it is for the network | What it opens | What opens to it |
 |---|---|---|---|
-| Router | The dialable endpoint. Relay for members behind NAT, the DHT server every lookup reaches, the point of admission (credential handshake, relay ACL, bans), the hub GossipSub events pass through, and the record of which members hold a reservation on it. | Connections to the other routers (every pair), for the DHT and GossipSub. | Every member that holds it, every member's DHT client when it queries, the control plane's event publisher. |
-| Member (`agentmesh-node`, an SDK) | A client of the routers. It announces where it is reached, looks peers and services up, verifies the peers it talks to and carries the data plane. It is a DHT client whatever its reachability: a public member is dialled directly, and still serves no lookups for others. | K connections to the routers it holds (`--routers`, 2), one to each other router it queries, one to each peer it reaches directly. | Peers that call it: directly when they can, through a router otherwise. |
+| Router | The dialable endpoint. Relay for members behind NAT, the directory its members announce to and ask (served from the DHT the routers keep among themselves), the point of admission (credential handshake, relay ACL, bans), the hub GossipSub events pass through, and the record of which members hold a reservation on it. | Connections to the other routers (every pair), for the DHT and GossipSub. | Every member that holds it, the control plane's event publisher. |
+| Member (`agentmesh-node`, an SDK) | A client of the routers. It announces where it is reached, looks peers and services up, verifies the peers it talks to and carries the data plane. It keeps no DHT and serves no lookups: the routers it holds answer for it. | K connections to the routers it holds (`--routers`, 2), one to each peer it reaches directly. | Peers that call it: directly when they can, through a router otherwise. |
 | Provider | A member that publishes a service: the fan-in point of the mesh. | As a member. | One relayed connection per caller, each a stream on its connection to a router. |
 | Control plane | Enrollment, the router catalog, keys, policy and leases, over HTTP. Its event publisher is a member that holds every router. | HTTP only, and the publisher's connections to the routers. | Members and routers, over HTTP. |
 
@@ -94,14 +94,16 @@ dial tries every address at once.
 | `/mesh/auth/1.0.0` | member and router on connect and at renewal; caller and provider before a call | 1, short | the handshake |
 | `/libp2p/circuit/relay/0.2.0/hop` | member to router | 1 per reservation, renewed; 1 per relayed connection the member opens | the reservation; the relayed connection |
 | `/libp2p/circuit/relay/0.2.0/stop` | router to the member a caller reaches | 1 per relayed caller | the relayed connection |
-| `/mesh/kad/1.0.0` | member to each router it queries | 1 request stream per router | while the member keeps the connection |
-| `/meshsub/1.3.0` | every pair that runs GossipSub | 1 per direction | the connection; heartbeat every second |
+| `/mesh/directory/1.0.0` | member to a router it holds | 1 per request, short | the request |
+| `/mesh/kad/1.0.0` | router to router | 1 request stream per router | the connection |
+| `/meshsub/1.3.0` | router to router | 1 per direction | the connection; heartbeat every second |
+| `/floodsub/1.0.0` | member and router | 1 per direction | the connection |
 | `/libp2p/dcutr`, autonat v2 | the two ends of a relayed connection | 1, short | the hole punch |
 | `/mesh/mcp/1.0.0`, libp2p-http, `/mesh/goaway/1.0.0`, ping | caller and provider; router and member | 1 per call or session | the call |
 
 The resource manager budgets every protocol a member holds a stream on
-for as long as it is connected (the DHT, GossipSub, the relay, and MCP on
-a node) from the connection budget, so a router or a provider admits as
+for as long as it is connected (gossip, the relay, and MCP on a node) or
+opens per request (the directory) from the connection budget, so a router or a provider admits as
 many such streams as it admits connections; libp2p's own default for a
 protocol it was not told about is a few hundred streams in all, scaled
 from host memory. A refused stream is counted in
@@ -158,19 +160,17 @@ NAT entry at each end.
 ### What a middlebox sees per member
 
 A member holds K long-lived connections to its routers, kept alive by
-the transport, plus one to each router its keys land on, up to
-the mesh's replication per key, opened at the first lookup or announcement
-and kept: entries that do not churn, K + D of them for the D directory
-routers the member uses. A member that reaches a peer directly holds one
-entry per such peer, at both ends. A relayed connection adds none.
+the transport, and no other to the mesh: entries that do not churn, K of
+them. A member that reaches a peer directly holds one entry per such
+peer, at both ends. A relayed connection adds none.
 
 A firewall between a member and the routers needs TCP (and UDP for
 QUIC, when the member is allowed to fall back to it) to the routers'
 ports outbound; nothing inbound, since every connection to a member
 arrives through a hub link it opened. A conntrack table on that path is
-sized for the K long-lived entries per member plus the transient DHT
-connections, and a NAT that times idle UDP entries out in less than the
-QUIC keepalive (15 s) breaks a QUIC hub link; TCP first avoids it.
+sized for the K long-lived entries per member, and a NAT that times idle
+UDP entries out in less than the QUIC keepalive (15 s) breaks a QUIC hub
+link; TCP first avoids it.
 
 ## What bounds the mesh
 
@@ -181,7 +181,7 @@ them.
 | Bound | Where | Default | At the bound |
 |---|---|---|---|
 | Routers per member | `agentmesh-node --routers` | 2 | A member holds this many routers; one is enough to be on the mesh, the second covers a router restart. |
-| Routers per key | `agentmesh-control-plane --dht-replication` | 3 | A record a member publishes lives on this many routers, the closest to its key, and a lookup asks them; the member holds a session with each. Published on `/info`, so every member of the mesh runs the same value. |
+| Routers per key | `agentmesh-control-plane --dht-replication` | 3 | A record a member announces is kept by the router it announced to and placed on this many routers, the closest to its key, which is what survives routers going down. Published on `/info`, so every router of the mesh runs the same value. |
 | Connections per router | `agentmesh-router --high-watermark`, `--low-watermark` | 4000, 15% below (3400) | At the high mark of members the router sends members away, at random, down to the low mark; they attach to another router and stay off this one for five minutes. A mesh of N routers holds about N × 4000 / 2 members. |
 | Connections per source address | `agentmesh-router --conns-per-source-ip` | a quarter of the high mark (1000) | The router refuses the next connection from that address. Members behind one NAT or one cluster's egress share an address. |
 | Relay reservations per router | `agentmesh-router --relay-max-reservations` | the high mark (4000) | A member that cannot reserve is not reachable through that router. |
@@ -192,29 +192,34 @@ them.
 | Connections per source address at a node | `agentmesh-node`, fixed | a quarter of the high mark (100) | The node refuses the next direct connection from that address, counted in `agentmesh_node_inbound_connections_refused_total`. A service called by a fleet behind one NAT or one cluster's egress sees them all from one address. A caller that arrives through a router is not charged to the router's address: it is bounded by the node's connection budget and per-peer scope, and at the router by the relay's per-peer and per-address budgets. |
 | Router lease | `agentmesh-control-plane --lease-duration`, `agentmesh-router --shutdown-lease-ttl` | 15m, 30s | A router that stops without the last lease stays listed for the lease duration. |
 
-The first three rows are the model. A fleet of F members on N routers,
-each member holding K of them, puts about F × K / N attached sessions on
-each router, so adding a router adds members: the fleet a mesh holds is
-N × H / K for a high watermark H. A member picks the routers with the
-most room when it joins, so a new router fills from the members that
-join after it and from those the full routers send away; the members
-already placed do not move on their own. When a router stops, its
-members spread over the N − 1 others, which is where the headroom in the
-next section goes.
+The first two rows are the model. The formulas below use these letters:
 
-The directory adds sessions of its own. A member also holds a session
-with each router its keys land on: at most r (the mesh's replication) per
-key it publishes or looks up, overlapping across keys, never more than
-N − K in all. Call that D. On few routers D reaches N − K and every
-member holds every router; on many, a member that publishes one service
-and calls a few holds D of about r to 2r whatever N is. The keys are
-spread over the routers by hash, so a router holds about F × (K + D) / N
-sessions in all, and that is the figure the watermarks see: with 10,000
-members, K = 2 and D = 4, about 10,000 per router on six routers, 5000
-on twelve, 2000 on thirty. Adding routers divides both terms. A key that
-every member publishes, such as a service type, lands on the same r
-routers for all of them, and those r routers see a session from every
-publisher.
+- F, the members in the fleet.
+- N, the routers in the mesh.
+- K, the routers a member holds (`--routers`, 2 by default).
+- H, a router's high watermark (`--high-watermark`).
+- r, the mesh's replication: the routers each record is placed on
+  (`--dht-replication` on the control plane, 3 by default).
+
+A fleet of F members on N routers, each member holding K of them, puts
+about F × K / N sessions on each router, and that is the figure the
+watermarks see: with 10,000 members and K = 2, about 3300 per router on
+six routers, 1700 on twelve. Adding a router adds members: the fleet a
+mesh holds is N × H / K. A member picks the routers with the most room
+when it joins, so a new router fills from the members that join after it
+and from those the full routers send away; the members already placed do
+not move on their own. When a router stops, its members spread over the
+N − 1 others, which is where the headroom in the next section goes.
+
+The directory costs a router no sessions. A member's announcements and
+lookups travel on the sessions it already holds, and a router answers a
+lookup from the DHT the routers keep among themselves, over the
+connections they already hold to each other. What the directory costs
+is records and requests: a router keeps the records of its own members
+and r copies of records whose keys land on it, and runs one lookup
+across the routers per request. A key that every member publishes, such
+as a service type, lands on the same r routers for all of them; those r
+routers hold a record per publisher and answer every lookup of it.
 
 What bounds the total is the router's libp2p connection cap, twice the
 high watermark: a router past it refuses the next connection, session or
@@ -225,35 +230,28 @@ watermark and the cap.
 ## Sizing the routers
 
 Start from the fleet you expect, F members on N routers with `--routers`
-at its default of 2 and the mesh's replication at its default of 3, and
-size for the day
-one router is down:
+at its default of 2, and size for the day one router is down:
 
-- `--high-watermark` at least 1.2 × F × (K + D) / (N − 1), with D the
-  directory sessions a member holds: N − K on few routers, 3 to 6 on
-  many. Each router then holds F × (K + D) / N sessions in normal
-  running, with room for the members of a stopped router, and the
-  connection cap at twice the high mark holds what members open in
-  passing. 5000 members on four routers (D = 2) need 8000; 10,000
-  members on twelve routers (D = 4) need 6600, on twenty (D = 5) need
-  4500. The testnets deploy with 6000 (`ROUTER_HIGH_WATERMARK` in the
-  deploy workflow) on six routers (`ROUTER_REPLICAS`), which holds about
-  4000 members that use the directory with one router out; 10,000 take
-  twelve routers.
+- `--high-watermark` at least 1.2 × F × K / (N − 1). Each router then
+  holds F × K / N sessions in normal running, with room for the members
+  of a stopped router, and the connection cap at twice the high mark
+  holds what members open in passing. 5000 members on four routers need
+  4000; 10,000 members on six routers need 4800, on twelve 2200. The
+  testnets deploy with 6000 (`ROUTER_HIGH_WATERMARK` in the deploy
+  workflow) on six routers (`ROUTER_REPLICAS`), which holds 10,000
+  members with one router out.
 - The three knobs, and what each buys. One is a member's own: `--routers`
-  (K) is what a router restart costs it; a member with two attached
-  routers stays on the mesh through one, and each one more is a session
-  more per member on some router. Two are the mesh's, set on the control
-  plane and read by every member and router from `/info`:
-  `--dht-replication` (r) is what losing routers costs the directory, a
-  record on three routers survives two of them down at once, and each
-  one more is a session more per key per member on the router the key
-  lands on; `--dht-reprovide-interval` is how soon a provider that
-  stopped without unpublishing leaves the directory, three intervals,
-  which is also how long routers keep a record, against the
-  announcements a minute the routers absorb, providers divided by the
-  interval. None of the three adds capacity: routers do, by dividing
-  every term above by N.
+  (K) is what a router restart costs it; a member with two routers stays
+  on the mesh through one, and each one more is a session more per member
+  on some router. Two are the mesh's, set on the control plane and read
+  by every router from `/info`: `--dht-replication` (r) is what losing
+  routers costs the directory, a record on three routers survives two of
+  them down at once, and each one more is a copy more of every record;
+  `--dht-reprovide-interval` is how soon a provider that stopped without
+  unpublishing leaves the directory, three intervals, which is also how
+  long routers keep a record, against the announcements a minute the
+  routers absorb, providers divided by the interval. None of the three
+  adds capacity: routers do, by dividing F × K by N.
 - `--low-watermark` at its default, 15% below the high mark. The gap is
   what one shedding moves to the other routers; a smaller gap sheds more
   often, a larger one moves more members at once. A router that sheds is
@@ -293,13 +291,14 @@ others; the fix is a router or a higher watermark.
 
 The stream budgets follow the watermark per protocol, because a member
 holds a stream open to its router for as long as it is connected on each
-of the DHT, GossipSub, and its relay reservation, and libp2p's default
-for a protocol it was not told about is a few hundred streams in all,
-scaled from host memory. A router that refuses a member's DHT stream
-drops out of that member's routing table, and the member out of
-discovery, with no error at the member; the router counts the refusal in
-`agentmesh_router_streams_refused_total{protocol}` and logs it once a
-minute per protocol.
+of gossip and its relay reservation, and opens one per directory request,
+and libp2p's default for a protocol it was not told about is a few
+hundred streams in all, scaled from host memory. A router that refuses a
+member's gossip stream leaves that member without the control plane's
+events, and one that refuses its directory stream fails the member's
+lookup, which the member retries on its other router; the router counts
+the refusal in `agentmesh_router_streams_refused_total{protocol}` and
+logs it once a minute per protocol.
 
 Routers connect to one another, every pair, to run the DHT and GossipSub
 across the mesh; a router never sheds those connections. That is N × (N − 1)
@@ -370,8 +369,8 @@ from where it runs. Behind a NAT it is reached through a relay, which costs
 a reservation on the router and nothing else; a member with a public
 address may run `--reachability auto` and be dialled directly once AutoNAT
 has confirmed the address, which takes it off the relay. Reachability
-decides how a member is reached and nothing else: it stays a DHT client,
-so it never enters other members' routing tables or serves their lookups.
+decides how a member is reached and nothing else: it keeps no DHT either
+way, and serves no lookups.
 
 ## Sizing a service
 
@@ -442,21 +441,22 @@ The router and the control plane serve Prometheus metrics on
 | `agentmesh_router_inbound_connections_refused_total` | Members behind one address have hit `--conns-per-source-ip`. |
 | `agentmesh_node_inbound_connections_refused_total{reason}` against `agentmesh_node_conns_per_source_ip_limit` | On a provider: direct callers it turned away before the handshake. `per_ip_limit` is a fleet behind one address, `rate_limit` a burst from one address, `scope_limit` more callers at once than the node's connection budget, relayed ones included. The caller sees the connection close before TLS, or `CONNECTION_REFUSED` over QUIC, and nothing more. |
 | `agentmesh_node_transit_handshakes_total{router,result}` | On a caller: handshakes with routers it did not hold, run to reach a peer through them. `router="unlisted"` is a router the node's catalog missed, which a member that started during a router rollout produces until its next sync; `result="failed"` rising is a router that refuses the node or is gone while peers still announce circuits through it. |
-| `agentmesh_node_peer_lookups_total{result}` | On a caller: DHT lookups for a peer it held no address for. `not_found` is a peer the DHT does not carry, and the call falls back to circuits through the caller's own routers, which reach the peer only if it holds one of them; `failed` rising is the caller cut off from the DHT (`agentmesh_node_dht_routing_table_size` at 0). |
+| `agentmesh_node_peer_lookups_total{result}` | On a caller: directory lookups for a peer it held no address for. `not_found` is a peer the directory does not carry, and the call falls back to circuits through the caller's own routers, which reach the peer only if it holds one of them; `failed` rising is no held router answering (`agentmesh_node_directory_requests_total{result="failed"}` rises with it). |
 | `agentmesh_node_provider_reach_total{result}` | On a caller: attempts to reach a provider for its credential before a call; every failure is one 502 at the caller. `relay_refused` is a router that has not admitted the caller or the provider, `dial_timeout` a provider gone or a relay connection at its stream limit (below), `no_address` a provider the directory does not carry. |
 | `agentmesh_router_busiest_connection_streams{transport}`, `agentmesh_node_busiest_connection_streams{transport}` | The most streams any one connection carries. Every relayed connection is one stream on the relay's connection to each end, and a QUIC connection admits 256 streams: a provider reached through one router over QUIC has at most 256 callers through it at once, and the 257th waits until one leaves, which it sees as a dial that times out. Both ends log the connection once a minute while it is within a tenth of the limit. A provider that expects more callers than that listens on TCP as well, or holds more routers. |
 | `libp2p_relaysvc_reservations_total{type="opened"}` minus `{type="closed"}`, against `agentmesh_router_relay_limit{limit="reservations"}` | Reservations in use against the budget. |
 | `libp2p_relaysvc_connection_rejections_total{reason="resource limit exceeded"}` | A service has more callers than `--relay-max-circuits`. |
 | `libp2p_rcmgr_blocked_resources` | libp2p refused a connection or stream on a scope. On a router this should stay flat. |
 | `agentmesh_router_memory_reservations_refused_total`, `agentmesh_node_memory_reservations_refused_total`, with `libp2p_rcmgr_memory{scope}` against `libp2p_rcmgr_limit{resource="memory",scope}` | The resource manager's memory budget on some scope is full. Over TCP every open stream holds a 256 KiB reservation, so this is the stream budget met from the other side: new streams and relayed connections are refused, with `RESOURCE_LIMIT_EXCEEDED` at the relay and nothing in the stream counters. The scope whose `libp2p_rcmgr_memory` is at its limit names the budget. |
-| `agentmesh_router_streams_refused_total{scope,protocol}`, `agentmesh_node_streams_refused_total{scope,protocol}` | The streams behind that gauge, by protocol. `/mesh/kad/1.0.0` or `/meshsub/*` at the `protocol` scope on a router is members past the stream budget of a protocol, which keeps them out of discovery; `agentmesh_router_dht_routing_table_size` falls with it. |
+| `agentmesh_router_streams_refused_total{scope,protocol}`, `agentmesh_node_streams_refused_total{scope,protocol}` | The streams behind that gauge, by protocol. `/mesh/directory/1.0.0` or `/floodsub/1.0.0` at the `protocol` scope on a router is members past the stream budget of a protocol: their lookups fail over to their other router, their events stop. `scope="unauthenticated"` is a stream from a peer that never passed the handshake. |
 | `agentmesh_router_auth_handshakes_total{result="read_failed"}` | Members that timed out mid-handshake: the router is slow, usually CPU. |
 | `agentmesh_router_draining` | The router is stopping. Exclude it from capacity sums. |
 | `agentmesh_control_plane_http_requests_total{code="429"}` | Members turned away by the enrollment limiter; they retry. |
 | `agentmesh_control_plane_http_request_duration_seconds` | The control plane's own latency; p99 above a second under a join burst means the database is the bound. |
 | `agentmesh_node_mesh_connected` | On every node: `0` for five minutes is a member off the mesh. |
 | `agentmesh_node_routers{state="attached"}` against `{state="wanted"}` | On every node: fewer attached than wanted for long is a member that cannot find a router with room, or one whose selector too few routers carry. `agentmesh_node_router_candidates{match="selector"}` is how many it could choose from. |
-| `agentmesh_node_routers{state="directory"}` | On every node: the routers it holds a session with for its keys alone, the D of the model above. Summed over a fleet and divided by the routers, it is the share of each router's sessions that the directory costs; `agentmesh_node_directory_handshakes_total{result="failed"}` rising is a router that refuses members it is not attached to. |
+| `agentmesh_router_directory_requests_total{op,result}`, `agentmesh_router_directory_request_seconds{op}` | On every router: the directory requests its members made, by operation (`provide`, `find_providers`, `find_peer`; `place` is a record another router put here) and result. `error` rising is a lookup across the routers failing, a peer router down or slow; the histogram is what a member waits for a lookup. `agentmesh_router_directory_placements_total{result="error"}` rising is a router that does not take the records placed on it. |
+| `agentmesh_node_directory_requests_total{op,result}`, `agentmesh_node_directory_request_seconds{op}` | On every node: the same from the member's side. `failed` is a request no held router answered; `empty` a lookup nobody had a record for, which on a fresh mesh is ordinary. |
 
 An autoscaler for the routers has its inputs in the first two rows: scale
 out when the free capacity of the mesh is below what one router holds, so

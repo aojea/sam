@@ -40,7 +40,7 @@ Six tools:
 
 | Tool | Purpose |
 |---|---|
-| `get_mesh_info` | Router, connected peers, DHT size, the local socket path. A quick health check. |
+| `get_mesh_info` | The routers the node holds, its connected peers, the local socket path. A quick health check. |
 | `list_local_services` | The services this node publishes. |
 | `discover_remote_services` | The services other nodes publish, by type (`mcp`, `inference`, `a2a`) and optionally by name. Returns the hosting peer ID for each. |
 | `find_remote_tools` | The tools behind MCP services, across the mesh or limited to a peer, a service, or a tool name. |
@@ -244,7 +244,7 @@ trust should not be able to reach the node's API at all. The
   the node to an address the host can reach (`--bind-addr 0.0.0.0:8080`) or
   forward the port.
 - **No remote tools**: check `get_mesh_info` first. An empty
-  `connected_peers` means the node has not reached a router. A `dht_size` of
-  zero means it has not found the mesh yet.
+  `attached_routers` means the node has not been admitted by a router yet,
+  and it has nobody to ask.
 - **A tool is listed with an `error`**: the provider's backend is not
   answering. Another peer that offers the same service name may work.
