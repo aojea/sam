@@ -220,6 +220,20 @@ class CredentialBroker(_message.Message):
     static_secret: str
     def __init__(self, static_secret: _Optional[str] = ..., oidc_federation: _Optional[_Union[OIDCFederation, _Mapping]] = ..., aws_assume_role: _Optional[_Union[AWSAssumeRole, _Mapping]] = ..., platform_identity: _Optional[_Union[PlatformIdentity, _Mapping]] = ...) -> None: ...
 
+class DirectoryFindPeer(_message.Message):
+    __slots__ = ["peer_id"]
+    PEER_ID_FIELD_NUMBER: _ClassVar[int]
+    peer_id: str
+    def __init__(self, peer_id: _Optional[str] = ...) -> None: ...
+
+class DirectoryFindProviders(_message.Message):
+    __slots__ = ["key", "limit"]
+    KEY_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    key: bytes
+    limit: int
+    def __init__(self, key: _Optional[bytes] = ..., limit: _Optional[int] = ...) -> None: ...
+
 class DirectoryParameters(_message.Message):
     __slots__ = ["record_ttl", "replication", "reprovide_interval"]
     RECORD_TTL_FIELD_NUMBER: _ClassVar[int]
@@ -229,6 +243,36 @@ class DirectoryParameters(_message.Message):
     replication: int
     reprovide_interval: _duration_pb2.Duration
     def __init__(self, replication: _Optional[int] = ..., reprovide_interval: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ..., record_ttl: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ...) -> None: ...
+
+class DirectoryProvide(_message.Message):
+    __slots__ = ["addrs", "key", "provider"]
+    ADDRS_FIELD_NUMBER: _ClassVar[int]
+    KEY_FIELD_NUMBER: _ClassVar[int]
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    addrs: _containers.RepeatedScalarFieldContainer[str]
+    key: bytes
+    provider: str
+    def __init__(self, key: _Optional[bytes] = ..., addrs: _Optional[_Iterable[str]] = ..., provider: _Optional[str] = ...) -> None: ...
+
+class DirectoryRequest(_message.Message):
+    __slots__ = ["find_peer", "find_providers", "provide"]
+    FIND_PEER_FIELD_NUMBER: _ClassVar[int]
+    FIND_PROVIDERS_FIELD_NUMBER: _ClassVar[int]
+    PROVIDE_FIELD_NUMBER: _ClassVar[int]
+    find_peer: DirectoryFindPeer
+    find_providers: DirectoryFindProviders
+    provide: DirectoryProvide
+    def __init__(self, provide: _Optional[_Union[DirectoryProvide, _Mapping]] = ..., find_providers: _Optional[_Union[DirectoryFindProviders, _Mapping]] = ..., find_peer: _Optional[_Union[DirectoryFindPeer, _Mapping]] = ...) -> None: ...
+
+class DirectoryResponse(_message.Message):
+    __slots__ = ["error", "peer", "providers"]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    PEER_FIELD_NUMBER: _ClassVar[int]
+    PROVIDERS_FIELD_NUMBER: _ClassVar[int]
+    error: str
+    peer: PeerRecord
+    providers: _containers.RepeatedCompositeFieldContainer[PeerRecord]
+    def __init__(self, providers: _Optional[_Iterable[_Union[PeerRecord, _Mapping]]] = ..., peer: _Optional[_Union[PeerRecord, _Mapping]] = ..., error: _Optional[str] = ...) -> None: ...
 
 class DiscoveredProvider(_message.Message):
     __slots__ = ["local_proxy_url", "peer_id", "srv_description", "srv_name"]
@@ -590,6 +634,14 @@ class PeerEvidenceResponse(_message.Message):
     roles: _containers.RepeatedScalarFieldContainer[str]
     verifying_key: bytes
     def __init__(self, peer_id: _Optional[str] = ..., biscuit: _Optional[bytes] = ..., verifying_key: _Optional[bytes] = ..., roles: _Optional[_Iterable[str]] = ..., labels: _Optional[_Mapping[str, str]] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., revocation_ids: _Optional[_Iterable[str]] = ..., check_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class PeerRecord(_message.Message):
+    __slots__ = ["addrs", "peer_id"]
+    ADDRS_FIELD_NUMBER: _ClassVar[int]
+    PEER_ID_FIELD_NUMBER: _ClassVar[int]
+    addrs: _containers.RepeatedScalarFieldContainer[str]
+    peer_id: str
+    def __init__(self, peer_id: _Optional[str] = ..., addrs: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class PlatformIdentity(_message.Message):
     __slots__ = ["scopes"]
