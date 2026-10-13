@@ -82,7 +82,7 @@ dial tries every address at once.
 | Role | What it is for the network | What it opens | What opens to it |
 |---|---|---|---|
 | Router | The dialable endpoint. Relay for members behind NAT, the DHT server every lookup reaches, the point of admission (credential handshake, relay ACL, bans), the hub GossipSub events pass through, and the record of which members hold a reservation on it. | Connections to the other routers (every pair), for the DHT and GossipSub. | Every member that holds it, every member's DHT client when it queries, the control plane's event publisher. |
-| Member (`agentmesh-node`, an SDK) | A client of the routers. It announces where it is reached, looks peers and services up, verifies the peers it talks to and carries the data plane. | K connections to the routers it holds (`--routers`, 2), one to each other router it queries, one to each peer it reaches directly. | Peers that call it: directly when they can, through a router otherwise. |
+| Member (`agentmesh-node`, an SDK) | A client of the routers. It announces where it is reached, looks peers and services up, verifies the peers it talks to and carries the data plane. It is a DHT client whatever its reachability: a public member is dialled directly, and still serves no lookups for others. | K connections to the routers it holds (`--routers`, 2), one to each other router it queries, one to each peer it reaches directly. | Peers that call it: directly when they can, through a router otherwise. |
 | Provider | A member that publishes a service: the fan-in point of the mesh. | As a member. | One relayed connection per caller, each a stream on its connection to a router. |
 | Control plane | Enrollment, the router catalog, keys, policy and leases, over HTTP. Its event publisher is a member that holds every router. | HTTP only, and the publisher's connections to the routers. | Members and routers, over HTTP. |
 
@@ -347,7 +347,9 @@ A member that enrolls needs its control plane and its routers reachable
 from where it runs. Behind a NAT it is reached through a relay, which costs
 a reservation on the router and nothing else; a member with a public
 address may run `--reachability auto` and be dialled directly once AutoNAT
-has confirmed the address, which takes it off the relay.
+has confirmed the address, which takes it off the relay. Reachability
+decides how a member is reached and nothing else: it stays a DHT client,
+so it never enters other members' routing tables or serves their lookups.
 
 ## Sizing a service
 

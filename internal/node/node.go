@@ -50,7 +50,6 @@ import (
 	"github.com/libp2p/go-libp2p"
 	gostream "github.com/libp2p/go-libp2p-gostream"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	records "github.com/libp2p/go-libp2p-kad-dht/records"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/event"
@@ -688,19 +687,7 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 	}
 
 	// Initialize Rendezvous (DHT Client)
-	dhtOpts := []dht.Option{
-		dht.Mode(dht.ModeAuto),
-		dht.ProtocolPrefix(api.DHTProtocolPrefix),
-	}
-	providerTTL := n.config.DHTProviderAddrTTL
-	if providerTTL <= 0 {
-		providerTTL = DefaultDHTProviderAddrTTL
-	}
-	dhtOpts = append(dhtOpts, dht.ProviderManagerOpts(records.ProviderAddrTTL(providerTTL), records.ProvideValidity(providerTTL)))
-	if n.config.DHTMaxRecordAge > 0 {
-		dhtOpts = append(dhtOpts, dht.MaxRecordAge(n.config.DHTMaxRecordAge))
-	}
-	kdht, err := dht.New(h, dhtOpts...)
+	kdht, err := dht.New(h, dhtOptions(n.config)...)
 	if err != nil {
 		return err
 	}
