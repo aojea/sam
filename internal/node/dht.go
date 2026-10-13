@@ -38,14 +38,27 @@ import (
 // and a router that leaves the catalog leaves the table (setRouterCatalog).
 // Bootstrap still fills the table once at start.
 //
-// The record TTL is the mesh's (ControlPlaneInfoResponse.directory): the
-// same figure the routers keep a record for, so a record the member's own
-// store holds and one a router holds expire alike.
+// The record TTL and the replication factor are the mesh's
+// (ControlPlaneInfoResponse.directory). The TTL is the same figure the
+// routers keep a record for, so a record the member's own store holds and
+// one a router holds expire alike. The replication factor r is kademlia's
+// k on the member: a record is stored on the r routers closest to its key,
+// a lookup asks those r, r at a time. The routers keep every router in
+// their own tables (router.dhtOptions) and answer FIND_NODE with the
+// closest routers to the key in order, so a member learns the r closest
+// from one answer of a router it is attached to and reaches them in one
+// hop. A member therefore holds sessions with its K attached routers plus
+// the r closest to each key it publishes or looks up, whatever the number
+// of routers; with the library's k of 20 that would be every router of a
+// mesh with fewer than 20.
 func dhtOptions(directory api.DirectorySettings) []dht.Option {
 	return []dht.Option{
 		dht.Mode(dht.ModeClient),
 		dht.DisableAutoRefresh(),
 		dht.ProtocolPrefix(api.DHTProtocolPrefix),
+		dht.BucketSize(directory.Replication),
+		dht.Concurrency(directory.Replication),
+		dht.Resiliency(directory.Replication),
 		dht.ProviderManagerOpts(records.ProviderAddrTTL(directory.RecordTTL), records.ProvideValidity(directory.RecordTTL)),
 	}
 }

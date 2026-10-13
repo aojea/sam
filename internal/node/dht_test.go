@@ -16,6 +16,7 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -117,5 +118,44 @@ func TestSetRouterCatalogPrunesDHTTable(t *testing.T) {
 	n.setRouterCatalog(nil)
 	if got := kdht.RoutingTable().ListPeers(); len(got) != 1 {
 		t.Fatalf("routing table after an empty catalog = %v, want [%s]", got, listed)
+	}
+}
+
+// TestMemberDHTBucketHoldsTheReplicationFactor: the mesh's replication
+// factor is kademlia's k on the member, and a bucket of its table holds
+// that many.
+func TestMemberDHTBucketHoldsTheReplicationFactor(t *testing.T) {
+	for _, r := range []int{2, api.DefaultDHTReplication, 5} {
+		t.Run(fmt.Sprintf("replication=%d", r), func(t *testing.T) {
+			h, err := libp2p.New(libp2p.NoListenAddrs)
+			if err != nil {
+				t.Fatalf("libp2p.New: %v", err)
+			}
+			t.Cleanup(func() { _ = h.Close() })
+			settings := api.DefaultDirectorySettings()
+			settings.Replication = r
+			kdht, err := dht.New(h, dhtOptions(settings)...)
+			if err != nil {
+				t.Fatalf("dht.New: %v", err)
+			}
+			t.Cleanup(func() { _ = kdht.Close() })
+			rt := kdht.RoutingTable()
+			added := 0
+			for i := 0; i < r+1; i++ {
+				p, err := rt.GenRandPeerID(0)
+				if err != nil {
+					t.Fatalf("GenRandPeerID: %v", err)
+				}
+				// The last one is refused for capacity; any other refusal is a test bug.
+				if ok, err := rt.TryAddPeer(p, true, false); ok {
+					added++
+				} else if added < r {
+					t.Fatalf("TryAddPeer #%d refused before the bucket was full: %v", i, err)
+				}
+			}
+			if added != r {
+				t.Fatalf("a bucket took %d peers, want %d", added, r)
+			}
+		})
 	}
 }
