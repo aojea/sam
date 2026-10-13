@@ -18,14 +18,16 @@ rollout of every router and both control plane replicas.
 A member is one `agentmesh-node` process. It holds a session with two
 routers (`--routers`), chosen from those the control plane lists, and a
 relay reservation on each. Through those sessions it keeps a GossipSub
-subscription for control plane events. Its DHT client connects to a
-router it is not attached to only to look a peer or a service up, or to
-re-announce a service it publishes (every 5 minutes); a router closes such a connection a minute later
-(`--auth-deadline`), since no session was opened on it, and the client
-keeps no table maintenance of its own that would open it again. A
-router therefore carries the sessions of its own members, which the
-watermarks count, plus the lookups and announcements of the last minute
-from members attached elsewhere.
+subscription for control plane events. Its DHT client reaches the
+routers kademlia puts closest to each key it publishes or looks up,
+three of them (the mesh's replication, `agentmesh-control-plane
+--dht-replication`), named in one answer by a router it is attached to,
+and runs the credential handshake with each, so those connections are
+sessions as well: the router keeps them, and the next lookup or
+announcement (every 5 minutes, the mesh's `--dht-reprovide-interval`)
+reuses them. The client keeps no table maintenance of its own. A router
+therefore carries sessions of two kinds, both counted by the watermarks:
+the members attached to it, and the members whose keys land on it.
 A member connects to another member only to call it, through that
 member's router, where it runs the credential handshake before asking for
 the circuit. At rest it uses about 55 MiB of memory, 300 goroutines and
@@ -156,15 +158,11 @@ NAT entry at each end.
 ### What a middlebox sees per member
 
 A member holds K long-lived connections to its routers, kept alive by
-the transport, so K entries that do not churn. A lookup, and every
-re-announcement of a service it publishes, opens a connection to each
-other router, which the router closes at `--auth-deadline` (a minute)
-since no session was opened on it: R − K short-lived entries per lookup
-or announcement. A member that publishes a service adds them every 5 minutes; one
-that publishes
-nothing adds them only when it looks something up. A member that
-reaches a peer directly holds one entry per such peer, at both ends. A
-relayed connection adds none.
+the transport, plus one to each router its keys land on, up to
+the mesh's replication per key, opened at the first lookup or announcement
+and kept: entries that do not churn, K + D of them for the D directory
+routers the member uses. A member that reaches a peer directly holds one
+entry per such peer, at both ends. A relayed connection adds none.
 
 A firewall between a member and the routers needs TCP (and UDP for
 QUIC, when the member is allowed to fall back to it) to the routers'
@@ -183,6 +181,7 @@ them.
 | Bound | Where | Default | At the bound |
 |---|---|---|---|
 | Routers per member | `agentmesh-node --routers` | 2 | A member holds this many routers; one is enough to be on the mesh, the second covers a router restart. |
+| Routers per key | `agentmesh-control-plane --dht-replication` | 3 | A record a member publishes lives on this many routers, the closest to its key, and a lookup asks them; the member holds a session with each. Published on `/info`, so every member of the mesh runs the same value. |
 | Connections per router | `agentmesh-router --high-watermark`, `--low-watermark` | 4000, 15% below (3400) | At the high mark of members the router sends members away, at random, down to the low mark; they attach to another router and stay off this one for five minutes. A mesh of N routers holds about N × 4000 / 2 members. |
 | Connections per source address | `agentmesh-router --conns-per-source-ip` | a quarter of the high mark (1000) | The router refuses the next connection from that address. Members behind one NAT or one cluster's egress share an address. |
 | Relay reservations per router | `agentmesh-router --relay-max-reservations` | the high mark (4000) | A member that cannot reserve is not reachable through that router. |
@@ -193,40 +192,68 @@ them.
 | Connections per source address at a node | `agentmesh-node`, fixed | a quarter of the high mark (100) | The node refuses the next direct connection from that address, counted in `agentmesh_node_inbound_connections_refused_total`. A service called by a fleet behind one NAT or one cluster's egress sees them all from one address. A caller that arrives through a router is not charged to the router's address: it is bounded by the node's connection budget and per-peer scope, and at the router by the relay's per-peer and per-address budgets. |
 | Router lease | `agentmesh-control-plane --lease-duration`, `agentmesh-router --shutdown-lease-ttl` | 15m, 30s | A router that stops without the last lease stays listed for the lease duration. |
 
-The first two rows are the model. A fleet of F members on N routers, each
-member holding K of them, puts about F × K / N sessions on each router, so
-adding a router adds members: the fleet a mesh holds is N × H / K for a
-high watermark H. A member picks the routers with the most room when it
-joins, so a new router fills from the members that join after it and from
-those the full routers send away; the members already placed do not move
-on their own. When a router stops, its members spread over the N − 1
-others, which is where the headroom in the next section goes.
+The first three rows are the model. A fleet of F members on N routers,
+each member holding K of them, puts about F × K / N attached sessions on
+each router, so adding a router adds members: the fleet a mesh holds is
+N × H / K for a high watermark H. A member picks the routers with the
+most room when it joins, so a new router fills from the members that
+join after it and from those the full routers send away; the members
+already placed do not move on their own. When a router stops, its
+members spread over the N − 1 others, which is where the headroom in the
+next section goes.
 
-Connections are sessions plus what is in passing. A lookup or an
-announcement from a member attached elsewhere is a connection to this
-router for at most a minute, so a router holds about F × K / N sessions
-plus, for P providers re-announcing every I minutes, P × (N − K) / N / I
-announcement connections, plus one per router per lookup of the last
-minute. With every one of 10,000 members a provider on six routers at the
-default interval that is about 1300 on top of 3300 sessions. What bounds
-the total is the router's libp2p connection cap, twice the high
-watermark: a router past it refuses the next connection, session or not.
+The directory adds sessions of its own. A member also holds a session
+with each router its keys land on: at most r (the mesh's replication) per
+key it publishes or looks up, overlapping across keys, never more than
+N − K in all. Call that D. On few routers D reaches N − K and every
+member holds every router; on many, a member that publishes one service
+and calls a few holds D of about r to 2r whatever N is. The keys are
+spread over the routers by hash, so a router holds about F × (K + D) / N
+sessions in all, and that is the figure the watermarks see: with 10,000
+members, K = 2 and D = 4, about 10,000 per router on six routers, 5000
+on twelve, 2000 on thirty. Adding routers divides both terms. A key that
+every member publishes, such as a service type, lands on the same r
+routers for all of them, and those r routers see a session from every
+publisher.
+
+What bounds the total is the router's libp2p connection cap, twice the
+high watermark: a router past it refuses the next connection, session or
+not. What is left in passing, a call to a peer on this router, two
+connections each while members enroll, fits in the gap between the
+watermark and the cap.
 
 ## Sizing the routers
 
 Start from the fleet you expect, F members on N routers with `--routers`
-at its default of 2, and size for the day one router is down:
+at its default of 2 and the mesh's replication at its default of 3, and
+size for the day
+one router is down:
 
-- `--high-watermark` at least 1.2 × F × 2 / (N − 1). Each router then
-  holds F × 2 / N sessions in normal running, with room for the members
-  of a stopped router, and the connection cap at twice the high mark
-  holds the connections members open in passing: lookups, service
-  announcements, a call to a peer on this router, two connections each
-  while they enroll. 5000 members on four routers need 4000; 10,000
-  members need six routers at 4800 or seven at 4000. The testnets deploy
-  with 6000 (`ROUTER_HIGH_WATERMARK` in the deploy workflow) on six
-  routers (`ROUTER_REPLICAS`), which holds 10,000 members with one
-  router out.
+- `--high-watermark` at least 1.2 × F × (K + D) / (N − 1), with D the
+  directory sessions a member holds: N − K on few routers, 3 to 6 on
+  many. Each router then holds F × (K + D) / N sessions in normal
+  running, with room for the members of a stopped router, and the
+  connection cap at twice the high mark holds what members open in
+  passing. 5000 members on four routers (D = 2) need 8000; 10,000
+  members on twelve routers (D = 4) need 6600, on twenty (D = 5) need
+  4500. The testnets deploy with 6000 (`ROUTER_HIGH_WATERMARK` in the
+  deploy workflow) on six routers (`ROUTER_REPLICAS`), which holds about
+  4000 members that use the directory with one router out; 10,000 take
+  twelve routers.
+- The three knobs, and what each buys. One is a member's own: `--routers`
+  (K) is what a router restart costs it; a member with two attached
+  routers stays on the mesh through one, and each one more is a session
+  more per member on some router. Two are the mesh's, set on the control
+  plane and read by every member and router from `/info`:
+  `--dht-replication` (r) is what losing routers costs the directory, a
+  record on three routers survives two of them down at once, and each
+  one more is a session more per key per member on the router the key
+  lands on; `--dht-reprovide-interval` is how soon a provider that
+  stopped without unpublishing leaves the directory, three intervals,
+  which is also how long routers keep a record, against the
+  announcements a minute the routers absorb, providers divided by the
+  interval. None of the three adds capacity: routers do, by dividing
+  every term above by N.
 - `--low-watermark` at its default, 15% below the high mark. The gap is
   what one shedding moves to the other routers; a smaller gap sheds more
   often, a larger one moves more members at once. A router that sheds is
@@ -429,6 +456,7 @@ The router and the control plane serve Prometheus metrics on
 | `agentmesh_control_plane_http_request_duration_seconds` | The control plane's own latency; p99 above a second under a join burst means the database is the bound. |
 | `agentmesh_node_mesh_connected` | On every node: `0` for five minutes is a member off the mesh. |
 | `agentmesh_node_routers{state="attached"}` against `{state="wanted"}` | On every node: fewer attached than wanted for long is a member that cannot find a router with room, or one whose selector too few routers carry. `agentmesh_node_router_candidates{match="selector"}` is how many it could choose from. |
+| `agentmesh_node_routers{state="directory"}` | On every node: the routers it holds a session with for its keys alone, the D of the model above. Summed over a fleet and divided by the routers, it is the share of each router's sessions that the directory costs; `agentmesh_node_directory_handshakes_total{result="failed"}` rising is a router that refuses members it is not attached to. |
 
 An autoscaler for the routers has its inputs in the first two rows: scale
 out when the free capacity of the mesh is below what one router holds, so
