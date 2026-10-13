@@ -254,3 +254,29 @@ def test_read_bounded_varint_prefixed_bytes_rejects_oversized_prefix_before_read
 
     trio.run(main)
 
+
+
+def test_the_walk_follows_only_the_replication_closest_routers():
+    """A router names the routers closest to the key in order, as many as it
+    knows; a record lives on the mesh's replication of them, so only that
+    many are followed. With the default of three the fourth is never dialed;
+    with a replication of one, only the first."""
+
+    def knows_nothing(req):
+        return kad.Message(
+            type=req.type,
+            closerPeers=[
+                _peer(GONE_POD, "/ip4/10.84.1.7/tcp/5002"),
+                _peer(GONE_POD_2, "/ip4/10.84.2.9/tcp/5002"),
+                _peer(DARK_ROUTER, "/ip4/203.0.113.7/tcp/4501"),
+                _peer(TARGET, "/ip4/10.0.0.9/tcp/4001"),
+            ],
+        )
+
+    async def main(replication, want):
+        host = _Host({ROUTER: knows_nothing, ROUTER_B: knows_nothing})
+        assert await find_providers(host, b"key", [ROUTER, ROUTER_B], replication=replication) == []
+        assert sorted(map(str, host.dials)) == sorted(map(str, want))
+
+    trio.run(main, 3, [GONE_POD, GONE_POD_2, DARK_ROUTER], clock=trio.testing.MockClock(autojump_threshold=0))
+    trio.run(main, 1, [GONE_POD], clock=trio.testing.MockClock(autojump_threshold=0))

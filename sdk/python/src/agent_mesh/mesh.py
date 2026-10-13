@@ -24,6 +24,7 @@ from typing import Callable, Mapping, Optional
 from ._proto import agentmesh_pb2 as pb
 from .controlplane import ROLE_NODE, ControlPlaneClient, Enrollment, KeysNotTrustedError, Transport
 from .credential import MeshCredential, encode_auth_frame
+from .discovery import DEFAULT_DHT_REPLICATION
 from .identity import Identity
 
 _IDENTITY_FILE = "identity.key"
@@ -98,6 +99,7 @@ class AgentMesh:
         self.control_plane = control_plane
         self._credential = credential
         self._routers: list[pb.RouterInfo] = []
+        self._dht_replication = DEFAULT_DHT_REPLICATION
         self._state_dir = state_dir
         self._jwt_source = jwt_source
         # refresh() and sync_control_plane() run in worker threads of the
@@ -117,6 +119,14 @@ class AgentMesh:
     def routers(self) -> list[pb.RouterInfo]:
         """The router catalog (ControlPlaneInfoResponse.routers) from the most recent /info pull."""
         return list(self._routers)
+
+    @property
+    def dht_replication(self) -> int:
+        """How many routers hold each record and answer each lookup on this mesh,
+        as /info last published it (ControlPlaneInfoResponse.directory);
+        DEFAULT_DHT_REPLICATION until the control plane has answered or when it
+        publishes none."""
+        return self._dht_replication
 
     def attenuate(self, rule: pb.TaskAuthorizationRule) -> MeshCredential:
         """Returns a new MeshCredential with a tar_block appended offline in memory."""
@@ -316,6 +326,8 @@ class AgentMesh:
             info = self.control_plane.info()
             routers = list(info.routers)
             self._routers = routers
+            if info.HasField("directory") and info.directory.replication >= 1:
+                self._dht_replication = info.directory.replication
             if info.router_addresses:
                 self._credential = replace(self._credential, router_addresses=list(info.router_addresses))
             elif routers:

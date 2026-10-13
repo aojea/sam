@@ -50,6 +50,13 @@ _MAX_ROUNDS = 3
 _MAX_PEERS_PER_ROUND = 8
 MAX_DHT_MESSAGE_BYTES = 256 * 1024
 
+# How many routers hold each record and answer each lookup when the control
+# plane publishes no directory parameters on /info: api.DefaultDHTReplication.
+# A member reads the mesh's value from /info (Mesh.dht_replication) and
+# follows that many of the closer routers an answer names, as agentmesh-node
+# asks that many at a time.
+DEFAULT_DHT_REPLICATION = 3
+
 
 @dataclass
 class DiscoveredProvider:
@@ -109,7 +116,7 @@ async def _query(host: IHost, peer_id: ID, req: kad.Message) -> kad.Message | No
     return resp if resp.type == req.type else None
 
 
-async def find_peer(host: IHost, target: ID, seeds: Iterable[ID]) -> list[multiaddr.Multiaddr]:
+async def find_peer(host: IHost, target: ID, seeds: Iterable[ID], replication: int = DEFAULT_DHT_REPLICATION) -> list[multiaddr.Multiaddr]:
     """The addresses the DHT knows for a peer, as go-libp2p-kad-dht's FindPeer
     learns them: a router answers FIND_NODE for a peer it is connected to with
     that peer and its addresses, its relayed one included, and names the
@@ -123,11 +130,11 @@ async def find_peer(host: IHost, target: ID, seeds: Iterable[ID]) -> list[multia
                 return True
         return False
 
-    await _walk(host, kad.Message(type=kad.Message.FIND_NODE, key=target.to_bytes()), seeds, take, skip={target})
+    await _walk(host, kad.Message(type=kad.Message.FIND_NODE, key=target.to_bytes()), seeds, take, skip={target}, replication=replication)
     return found
 
 
-async def find_providers(host: IHost, key: bytes, seeds: Iterable[ID], limit: int = 20) -> list[DiscoveredProvider]:
+async def find_providers(host: IHost, key: bytes, seeds: Iterable[ID], limit: int = 20, replication: int = DEFAULT_DHT_REPLICATION) -> list[DiscoveredProvider]:
     """Asks the seed peers (the routers we are connected to) for providers of
     key and follows the closer peers they name for a few rounds."""
     found: dict[str, DiscoveredProvider] = {}
@@ -143,21 +150,31 @@ async def find_providers(host: IHost, key: bytes, seeds: Iterable[ID], limit: in
                     entry.addrs.append(str(ma))
         return bool(found)
 
-    await _walk(host, kad.Message(type=kad.Message.GET_PROVIDERS, key=key), seeds, take)
+    await _walk(host, kad.Message(type=kad.Message.GET_PROVIDERS, key=key), seeds, take, replication=replication)
     return list(found.values())[:limit]
 
 
-async def _walk(host: IHost, req: kad.Message, seeds: Iterable[ID], take: Callable[[kad.Message], bool], skip: frozenset[ID] | set[ID] = frozenset()) -> None:
+async def _walk(
+    host: IHost,
+    req: kad.Message,
+    seeds: Iterable[ID],
+    take: Callable[[kad.Message], bool],
+    skip: frozenset[ID] | set[ID] = frozenset(),
+    replication: int = DEFAULT_DHT_REPLICATION,
+) -> None:
     """The Kademlia walk both lookups share. A round asks its peers at once
     and ends when an answer satisfies `take`; only otherwise are the closer
     peers the answers named dialed, at once as well. A round thus costs one
     query and one dial timeout, not one per peer: right after a rollout the
     routers' tables still name the pods it replaced, and the control plane
     may list a router this member cannot reach. A peer that did not answer
-    its dial is not dialed again."""
+    its dial is not dialed again. A router names the routers closest to the
+    key in order, and a record lives on the `replication` closest, so only
+    that many of them are followed from one round to the next."""
     self_id = host.get_id()
     asked: set[ID] = set()
     frontier: list[ID] = list(seeds)
+    fanout = min(max(replication, 1), _MAX_PEERS_PER_ROUND)
     for _ in range(_MAX_ROUNDS):
         batch = [p for p in frontier if p not in asked and p != self_id][:_MAX_PEERS_PER_ROUND]
         if not batch:
@@ -183,6 +200,8 @@ async def _walk(host: IHost, req: kad.Message, seeds: Iterable[ID], take: Callab
         closer: dict[ID, PeerInfo] = {}
         for resp in answers:
             for info in _peer_infos(resp.closerPeers):
+                if len(closer) >= fanout:
+                    break
                 if info.peer_id not in asked and info.peer_id != self_id and info.peer_id not in skip:
                     closer.setdefault(info.peer_id, info)
         connected = set(host.get_connected_peers())
