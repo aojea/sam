@@ -41,7 +41,6 @@ import (
 	"github.com/google/agentmesh/api"
 	cpclient "github.com/google/agentmesh/internal/controlplane/client"
 	"github.com/google/agentmesh/internal/identity"
-	samdiscovery "github.com/google/agentmesh/internal/node/discovery"
 	"github.com/google/agentmesh/internal/p2plimits"
 	"github.com/google/agentmesh/internal/ratelimit"
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -149,7 +148,6 @@ type AgentMeshNode struct {
 	Host                 host.Host
 	Directory            Directory
 	PubSub               *pubsub.PubSub
-	Discovery            *samdiscovery.Discovery
 	Store                *Store
 	RouterPeerID         peer.ID
 	authenticatedRouters map[peer.ID]bool
@@ -698,16 +696,19 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Initialize Gossipsub for control plane events. StrictSign is the
+	// Initialize pubsub for control plane events. StrictSign is the
 	// library default; it is pinned because the event validator and the
 	// per-author rate limit key on msg.GetFrom(), which only the signature
 	// makes trustworthy.
-	ps, err := pubsub.NewGossipSub(ctx, gated, pubsub.WithMessageSignaturePolicy(pubsub.StrictSign))
+	// A member is a leaf of the gossip: it speaks floodsub, so a router
+	// delivers every event to it outright and it takes no part in the
+	// routers' gossipsub mesh, its heartbeats, grafts and peer exchange.
+	ps, err := pubsub.NewFloodSub(ctx, gated, pubsub.WithMessageSignaturePolicy(pubsub.StrictSign))
 	if err != nil {
 		return err
 	}
 	n.PubSub = ps
-	// Validate control-plane events before GossipSub accepts or re-forwards
+	// Validate control-plane events before pubsub accepts or re-forwards
 	// them: one ed25519 verify per message, so a peer flooding the topic with
 	// junk costs itself the verify and never reaches the subscriber or the
 	// next hop. Without this the rate limit ran first, keyed on the
@@ -716,10 +717,6 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 	if err := ps.RegisterTopicValidator(api.GossipEvents, n.validateMeshEvent); err != nil {
 		return fmt.Errorf("register mesh event validator: %w", err)
 	}
-
-	// Interest-scoped service announcements (provider + consumer roles).
-	n.Discovery = samdiscovery.New(ps, h.ID())
-	n.Discovery.Start(ctx, n.discoverySource)
 
 	// Subscribe to local address updates to reprovide services and log
 	sub, err := h.EventBus().Subscribe(new(event.EvtLocalAddressesUpdated))

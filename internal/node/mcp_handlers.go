@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/google/agentmesh/api"
-	samdiscovery "github.com/google/agentmesh/internal/node/discovery"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -233,19 +232,6 @@ func (n *AgentMeshNode) handleFindRemoteTools(ctx context.Context, req *mcp.Call
 
 	var rows []remoteToolRow
 
-	// Exact-name lookup: gossip fast path, avoiding the catalog fan-out
-	// when interested announcements are already flowing.
-	if params.ToolName != "" && params.PeerID == "" && n.Discovery != nil {
-		n.Discovery.Ensure(api.ServiceType_SERVICE_TYPE_MCP, params.ToolName)
-		if provs := n.Discovery.Providers(api.ServiceType_SERVICE_TYPE_MCP, params.ToolName); len(provs) > 0 {
-			candidates := gossipToolRows(provs, params.ToolName, serviceFilter)
-			rows = n.verifyGossipToolRows(ctx, candidates)
-			if len(rows) > 0 {
-				return marshalToolRows(rows)
-			}
-		}
-	}
-
 	if params.PeerID != "" {
 		pid, err := peer.Decode(params.PeerID)
 		if err != nil {
@@ -281,7 +267,6 @@ func (n *AgentMeshNode) handleFindRemoteTools(ctx context.Context, req *mcp.Call
 	if params.ToolName != "" {
 		rows = filterRowsByToolName(rows, params.ToolName)
 	}
-	n.annotateToolLabels(rows)
 	return marshalToolRows(rows)
 }
 
@@ -319,119 +304,6 @@ func normalizeServiceFilter(name string) (string, error) {
 	}
 }
 
-// gossipToolRows builds result rows from gossip-observed providers of a tool.
-// serviceNameFilter must already be canonical; see normalizeServiceFilter.
-func gossipToolRows(provs []samdiscovery.Provider, toolName, serviceNameFilter string) []remoteToolRow {
-	var rows []remoteToolRow
-	for _, p := range provs {
-		name := p.Service
-		if !strings.Contains(name, "://") {
-			name = api.MCPServicePrefix + name
-		}
-		if serviceNameFilter != "" && name != serviceNameFilter {
-			continue
-		}
-		rows = append(rows, remoteToolRow{
-			PeerID:   p.PeerID,
-			ToolName: name + "/" + toolName,
-			Labels:   p.Labels,
-		})
-	}
-	return rows
-}
-
-// verifyGossipToolRows treats unsolicited announcements as routing hints, not
-// authorization evidence. Each candidate is confirmed through the existing
-// authenticated MCP session and exact tools/list response before it is exposed.
-func (n *AgentMeshNode) verifyGossipToolRows(ctx context.Context, candidates []remoteToolRow) []remoteToolRow {
-	return verifyGossipToolRowsWithFetcher(ctx, candidates, n.fetchRemoteToolDescription)
-}
-
-const (
-	gossipVerificationMaxConcurrent = 8
-	gossipVerificationTimeout       = 5 * time.Second
-)
-
-func verifyGossipToolRowsWithFetcher(
-	ctx context.Context,
-	candidates []remoteToolRow,
-	fetchDescription func(context.Context, peer.ID, string) (*remoteToolDescription, error),
-) []remoteToolRow {
-	if len(candidates) == 0 {
-		return nil
-	}
-
-	type verificationResult struct {
-		row remoteToolRow
-		ok  bool
-	}
-	results := make([]verificationResult, len(candidates))
-	jobs := make(chan int)
-	workerCount := len(candidates)
-	if workerCount > gossipVerificationMaxConcurrent {
-		workerCount = gossipVerificationMaxConcurrent
-	}
-
-	var wg sync.WaitGroup
-	for range workerCount {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case index, ok := <-jobs:
-					if !ok {
-						return
-					}
-					candidate := candidates[index]
-					pid, err := peer.Decode(candidate.PeerID)
-					if err != nil {
-						logger.Debugf("[find_remote_tools] invalid gossip peer %q skipped: %v", candidate.PeerID, err)
-						continue
-					}
-					requestCtx, cancel := context.WithTimeout(ctx, gossipVerificationTimeout)
-					description, err := fetchDescription(requestCtx, pid, candidate.ToolName)
-					cancel()
-					if err != nil {
-						logger.Debugf("[find_remote_tools] unverified gossip candidate %s on %s skipped: %v", candidate.ToolName, pid, err)
-						continue
-					}
-					results[index] = verificationResult{
-						ok: true,
-						row: remoteToolRow{
-							PeerID:      description.PeerID,
-							ToolName:    description.ToolName,
-							Description: description.Description,
-							Labels:      candidate.Labels,
-						},
-					}
-				}
-			}
-		}()
-	}
-
-sendCandidates:
-	for index := range candidates {
-		select {
-		case jobs <- index:
-		case <-ctx.Done():
-			break sendCandidates
-		}
-	}
-	close(jobs)
-	wg.Wait()
-
-	rows := make([]remoteToolRow, 0, len(results))
-	for _, result := range results {
-		if result.ok {
-			rows = append(rows, result.row)
-		}
-	}
-	return rows
-}
-
 // filterRowsByToolName keeps rows whose namespaced tool name ends in the
 // bare tool name; error rows (no tool listing) are dropped from targeted
 // lookups.
@@ -446,22 +318,6 @@ func filterRowsByToolName(rows []remoteToolRow, toolName string) []remoteToolRow
 		}
 	}
 	return out
-}
-
-// annotateToolLabels fills in the operator-declared labels for peers the
-// gossip view knows, when not already known from a fresher source.
-func (n *AgentMeshNode) annotateToolLabels(rows []remoteToolRow) {
-	if n.Discovery == nil {
-		return
-	}
-	for i := range rows {
-		if len(rows[i].Labels) != 0 {
-			continue
-		}
-		if labels := n.Discovery.PeerLabels(rows[i].PeerID); labels != nil {
-			rows[i].Labels = labels
-		}
-	}
 }
 
 // fetchRemoteToolCatalogue gets the remote node's service catalogue,

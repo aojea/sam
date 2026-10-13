@@ -123,37 +123,11 @@ func newOpenAIFacade(node *AgentMeshNode, egress http.Handler) *openAIFacade {
 		remoteModels: func(ctx context.Context, peerID, srvName string) ([]string, error) {
 			return fetchRemoteModels(ctx, node, client, peerID, srvName)
 		},
-		viewProviders: func(model string) []modelProvider {
-			if node.Discovery == nil {
-				return nil
-			}
-			var out []modelProvider
-			for _, p := range node.Discovery.Providers(api.ServiceType_SERVICE_TYPE_INFERENCE, model) {
-				out = append(out, modelProvider{
-					peerID:  p.PeerID,
-					service: p.Service,
-					labels:  p.Labels,
-					active:  p.Load.ActiveRequests,
-				})
-			}
-			return out
-		},
-		ensureInterest: func(model string) {
-			if node.Discovery != nil {
-				node.Discovery.Ensure(api.ServiceType_SERVICE_TYPE_INFERENCE, model)
-			}
-		},
 		isRevoked: func(peerID string) bool {
 			return node.revokedPeers != nil && node.revokedPeers.Contains(peerID)
 		},
 		localLabels: node.labels,
 		egressFloor: node.egressFloor,
-		peerLabels: func(peerID string) map[string]string {
-			if node.Discovery == nil {
-				return nil
-			}
-			return node.Discovery.PeerLabels(peerID)
-		},
 		verifyPeerLabels: func(ctx context.Context, peerID string, required map[string]string) error {
 			pid, err := peer.Decode(peerID)
 			if err != nil {

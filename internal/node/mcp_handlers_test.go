@@ -19,13 +19,10 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -528,140 +525,6 @@ func TestFetchRemoteToolCatalogue_AuthRejectedHidden(t *testing.T) {
 
 	if len(rows) != 0 {
 		t.Fatalf("expected unauthorized service to be hidden (0 rows), got %d: %+v", len(rows), rows)
-	}
-}
-
-func TestVerifyGossipToolRows_AuthenticatesEachServiceOnSamePeer(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	allowedSrv := httptest.NewServer(newFakeMCPHandler(t, []*mcp.Tool{
-		{Name: "review_pr", Description: "authorized review", InputSchema: map[string]any{"type": "object"}},
-	}))
-	defer allowedSrv.Close()
-	deniedSrv := httptest.NewServer(newFakeMCPHandler(t, []*mcp.Tool{
-		{Name: "review_pr", Description: "unauthorized review", InputSchema: map[string]any{"type": "object"}},
-	}))
-	defer deniedSrv.Close()
-
-	nodeA, cleanupA := startBareNode(t, ctx)
-	defer cleanupA()
-	nodeB, cleanupB := startBareNode(t, ctx)
-	defer cleanupB()
-
-	_, rootPriv := enrollUnderRoot(t, nodeA, nodeB)
-	if err := buildAndSaveCustomBiscuit(nodeA, rootPriv, []string{"mcp://allowed-reviewer"}); err != nil {
-		t.Fatalf("buildAndSaveCustomBiscuit: %v", err)
-	}
-	if err := nodeA.Host.Connect(ctx, peer.AddrInfo{ID: nodeB.Host.ID(), Addrs: nodeB.Host.Addrs()}); err != nil {
-		t.Fatal(err)
-	}
-
-	for name, targetURL := range map[string]string{
-		"allowed-reviewer": allowedSrv.URL,
-		"denied-reviewer":  deniedSrv.URL,
-	} {
-		if err := nodeB.RegisterService(ctx, &api.RegisterServiceRequest{
-			Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: name},
-			Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: targetURL},
-		}); err != nil {
-			t.Fatalf("RegisterService %s: %v", name, err)
-		}
-	}
-
-	peerID := nodeB.Host.ID().String()
-	rows := nodeA.verifyGossipToolRows(ctx, []remoteToolRow{
-		{PeerID: peerID, ToolName: "mcp://allowed-reviewer/review_pr", Labels: map[string]string{"region": "us"}},
-		{PeerID: peerID, ToolName: "mcp://denied-reviewer/review_pr", Labels: map[string]string{"region": "us"}},
-	})
-
-	if len(rows) != 1 {
-		t.Fatalf("expected one authorized row, got %d: %+v", len(rows), rows)
-	}
-	if rows[0].ToolName != "mcp://allowed-reviewer/review_pr" {
-		t.Fatalf("unexpected verified tool: %+v", rows[0])
-	}
-	if rows[0].Description != "authorized review" {
-		t.Errorf("Description = %q, want authorized review", rows[0].Description)
-	}
-	if rows[0].Labels["region"] != "us" {
-		t.Errorf("gossip routing labels were not preserved: %+v", rows[0].Labels)
-	}
-}
-
-func TestVerifyGossipToolRows_UsesIndependentRequestTimeouts(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	_, publicKey, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	peerID, err := peer.IDFromPublicKey(publicKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	candidates := make([]remoteToolRow, 0, gossipVerificationMaxConcurrent+1)
-	for i := range gossipVerificationMaxConcurrent {
-		candidates = append(candidates, remoteToolRow{
-			PeerID:   peerID.String(),
-			ToolName: fmt.Sprintf("mcp://slow-%d/review_pr", i),
-		})
-	}
-	candidates = append(candidates, remoteToolRow{
-		PeerID:   peerID.String(),
-		ToolName: "mcp://fast/review_pr",
-	})
-
-	allSlowRequestsStarted := make(chan struct{})
-	releaseSlowRequests := make(chan struct{})
-	var slowRequestsStarted atomic.Int32
-	go func() {
-		select {
-		case <-allSlowRequestsStarted:
-		case <-ctx.Done():
-			return
-		}
-		select {
-		case <-time.After(500 * time.Millisecond):
-			close(releaseSlowRequests)
-		case <-ctx.Done():
-		}
-	}()
-
-	var fastRequestBudget time.Duration
-	fetchDescription := func(ctx context.Context, pid peer.ID, toolName string) (*remoteToolDescription, error) {
-		if toolName == "mcp://fast/review_pr" {
-			deadline, ok := ctx.Deadline()
-			if !ok {
-				return nil, errors.New("fast request has no deadline")
-			}
-			fastRequestBudget = time.Until(deadline)
-			return &remoteToolDescription{
-				PeerID:      pid.String(),
-				ToolName:    toolName,
-				Description: "verified after delayed candidates",
-			}, nil
-		}
-
-		if slowRequestsStarted.Add(1) == gossipVerificationMaxConcurrent {
-			close(allSlowRequestsStarted)
-		}
-		select {
-		case <-releaseSlowRequests:
-			return nil, errors.New("delayed candidate rejected")
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
-
-	rows := verifyGossipToolRowsWithFetcher(ctx, candidates, fetchDescription)
-	if len(rows) != 1 || rows[0].ToolName != "mcp://fast/review_pr" {
-		t.Fatalf("expected only the final candidate to verify, got %+v", rows)
-	}
-	if minimumBudget := gossipVerificationTimeout - 250*time.Millisecond; fastRequestBudget < minimumBudget {
-		t.Fatalf("final candidate inherited an exhausted timeout: got %v, want at least %v", fastRequestBudget, minimumBudget)
 	}
 }
 
