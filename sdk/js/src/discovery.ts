@@ -22,6 +22,14 @@ import { sha256 } from "multiformats/hashes/sha2";
 /** The DHT protocol, go-libp2p-kad-dht with dht.ProtocolPrefix("/mesh"). */
 export const DHT_PROTOCOL = "/mesh/kad/1.0.0";
 
+/**
+ * How many routers hold each record and answer each lookup when the control
+ * plane publishes no directory parameters on /info: api.DefaultDHTReplication.
+ * A member reads the mesh's value from /info (AgentMesh.dhtReplication) and
+ * runs its DHT client on it (createMeshHost), as agentmesh-node does.
+ */
+export const DEFAULT_DHT_REPLICATION = 3;
+
 export type ServiceType = "mcp" | "inference" | "a2a" | "egress";
 
 export function isServiceType(value: unknown): value is ServiceType {

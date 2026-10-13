@@ -15,6 +15,7 @@
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import { toHex } from "./bytes.ts";
 import { ControlPlaneClient, KeysNotTrustedError, ROLE_NODE, type Enrollment } from "./controlplane.ts";
+import { DEFAULT_DHT_REPLICATION } from "./discovery.ts";
 import {
   attenuateCredential,
   credentialFromJSON,
@@ -144,6 +145,7 @@ export class AgentMesh {
   readonly controlPlane: ControlPlaneClient;
   #credential: MeshCredential;
   #routers: RouterInfo[] = [];
+  #dhtReplication = DEFAULT_DHT_REPLICATION;
   readonly #state: StateStore | undefined;
   readonly #jwtSource: (() => Promise<string>) | undefined;
   // Refreshes run one after another, as agentmesh-node's refreshMu: the control
@@ -176,6 +178,16 @@ export class AgentMesh {
   /** The router catalog last returned by /info; empty when the control plane only listed router_addresses. */
   get routers(): RouterInfo[] {
     return this.#routers;
+  }
+
+  /**
+   * How many routers hold each record and answer each lookup on this mesh,
+   * as /info last published it (ControlPlaneInfoResponse.directory);
+   * DEFAULT_DHT_REPLICATION until the control plane has answered or when it
+   * publishes none.
+   */
+  get dhtReplication(): number {
+    return this.#dhtReplication;
   }
 
   /** Returns a new MeshCredential with a tar_block appended offline in memory. */
@@ -407,6 +419,9 @@ export class AgentMesh {
       const info = await this.controlPlane.info();
       routers = info.routers;
       this.#routers = info.routers;
+      if (info.directory !== undefined && info.directory.replication >= 1) {
+        this.#dhtReplication = info.directory.replication;
+      }
       const discovered =
         info.routerAddresses.length > 0
           ? info.routerAddresses

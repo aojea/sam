@@ -1360,7 +1360,7 @@ export async function joinMesh(mesh: AgentMesh, options: JoinOptions = {}): Prom
   }
 
   const banned = new BanSet();
-  const node = await createMeshHost(mesh.identity, { ...options, banned });
+  const node = await createMeshHost(mesh.identity, { ...options, banned, dhtReplication: mesh.dhtReplication });
   const authenticatedPeers = new Map<string, Date>();
   let session: MeshSession | undefined;
   try {
