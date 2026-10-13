@@ -585,7 +585,7 @@ class MeshSession:
         relays: list[multiaddr.Multiaddr] = []
         seeds = [ID.from_base58(r.peer_id) for r in self.routers]
         suffix = f"/p2p/{target}"
-        for ma in await find_peer(self.host, target, seeds, self.mesh.dht_replication):
+        for ma in await find_peer(self.host, target, seeds, self.mesh.dht_replication, admit=self._admit_for_lookup):
             text = str(ma)
             if "/p2p-circuit" not in text:
                 try:
@@ -602,6 +602,15 @@ class MeshSession:
                 continue
             relays.append(relay_addr)
         return direct, relays
+
+    async def _admit_for_lookup(self, peer_id: ID) -> None:
+        """Runs the handshake with a router a lookup is about to query. A
+        router this member holds is authenticated already; any other serves
+        the query only once this member authenticated on the connection the
+        walk just opened, and the walk closes that connection when it ends."""
+        if any(r.peer_id == str(peer_id) for r in self.routers):
+            return
+        await _authenticate_router(self.host, self.mesh, peer_id)
 
     async def _admit_router(self, addr: multiaddr.Multiaddr) -> AdmittedRouter:
         """Dials a router, runs the handshake and, its role verified, adds it
@@ -649,7 +658,7 @@ class MeshSession:
         if service_type not in ("mcp", "inference", "a2a", "egress"):
             raise ValueError(f"service type must be mcp, inference, a2a or egress, got {service_type!r}")
         seeds = [ID.from_base58(r.peer_id) for r in self.routers]
-        return await find_providers(self.host, service_key(service_type, service_name), seeds, limit, self.mesh.dht_replication)
+        return await find_providers(self.host, service_key(service_type, service_name), seeds, limit, self.mesh.dht_replication, admit=self._admit_for_lookup)
 
     def open_mcp(
         self,

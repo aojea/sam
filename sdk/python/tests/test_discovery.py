@@ -280,3 +280,51 @@ def test_the_walk_follows_only_the_replication_closest_routers():
 
     trio.run(main, 3, [GONE_POD, GONE_POD_2, DARK_ROUTER], clock=trio.testing.MockClock(autojump_threshold=0))
     trio.run(main, 1, [GONE_POD], clock=trio.testing.MockClock(autojump_threshold=0))
+
+
+def test_the_walk_authenticates_before_each_query_and_releases_what_it_connected():
+    """A router serves a query only from a member that authenticated with it,
+    so `admit` runs for a router before it is queried: the held router and
+    the closer one the walk connects to for the record. That connection is
+    the walk's alone and is closed when the walk ends; the held router's
+    stays."""
+
+    class ReachableHost(_Host):
+        async def connect(self, info):
+            self.dials.append(info.peer_id)
+            self.connected.add(info.peer_id)
+            self._answers[info.peer_id] = lambda req: kad.Message(type=req.type, providerPeers=[_peer(PROVIDER, "/ip4/10.0.0.9/tcp/4001")])
+
+    def names_router_b(req):
+        return kad.Message(type=req.type, closerPeers=[_peer(ROUTER_B, "/ip4/10.0.0.2/tcp/4501")])
+
+    host = ReachableHost({ROUTER: names_router_b})
+    admitted = []
+
+    async def admit(peer_id):
+        assert peer_id in host.connected, "admit runs on an open connection"
+        admitted.append(peer_id)
+
+    async def main():
+        found = await find_providers(host, b"key", [ROUTER], admit=admit)
+        assert [p.peer_id for p in found] == [str(PROVIDER)]
+        assert admitted == [ROUTER, ROUTER_B], "every router is admitted before it is queried, in walk order"
+        assert host.connected == {ROUTER}, "the router the walk connected to is released; the held one is kept"
+
+    trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
+
+
+def test_a_router_that_refuses_the_handshake_is_skipped():
+    """A router that does not admit this member answers nothing; the walk
+    takes the other answers and moves on."""
+    host = _Host({ROUTER: _after_a_rollout, ROUTER_B: _after_a_rollout})
+
+    async def admit(peer_id):
+        if peer_id == ROUTER_B:
+            raise RuntimeError("not admitted")
+
+    async def main():
+        found = await find_providers(host, b"key", [ROUTER, ROUTER_B], admit=admit)
+        assert [p.peer_id for p in found] == [str(PROVIDER)]
+
+    trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))

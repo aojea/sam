@@ -24,7 +24,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from typing import Callable, Iterable, Literal
+from typing import Awaitable, Callable, Iterable, Literal
 
 import multiaddr
 import trio
@@ -116,7 +116,18 @@ async def _query(host: IHost, peer_id: ID, req: kad.Message) -> kad.Message | No
     return resp if resp.type == req.type else None
 
 
-async def find_peer(host: IHost, target: ID, seeds: Iterable[ID], replication: int = DEFAULT_DHT_REPLICATION) -> list[multiaddr.Multiaddr]:
+Admit = Callable[[ID], Awaitable[None]]
+"""Authenticates this member with a router before it is queried: a router
+serves its DHT to a peer only once that peer passed the handshake."""
+
+
+async def find_peer(
+    host: IHost,
+    target: ID,
+    seeds: Iterable[ID],
+    replication: int = DEFAULT_DHT_REPLICATION,
+    admit: Admit | None = None,
+) -> list[multiaddr.Multiaddr]:
     """The addresses the DHT knows for a peer, as go-libp2p-kad-dht's FindPeer
     learns them: a router answers FIND_NODE for a peer it is connected to with
     that peer and its addresses, its relayed one included, and names the
@@ -130,11 +141,18 @@ async def find_peer(host: IHost, target: ID, seeds: Iterable[ID], replication: i
                 return True
         return False
 
-    await _walk(host, kad.Message(type=kad.Message.FIND_NODE, key=target.to_bytes()), seeds, take, skip={target}, replication=replication)
+    await _walk(host, kad.Message(type=kad.Message.FIND_NODE, key=target.to_bytes()), seeds, take, skip={target}, replication=replication, admit=admit)
     return found
 
 
-async def find_providers(host: IHost, key: bytes, seeds: Iterable[ID], limit: int = 20, replication: int = DEFAULT_DHT_REPLICATION) -> list[DiscoveredProvider]:
+async def find_providers(
+    host: IHost,
+    key: bytes,
+    seeds: Iterable[ID],
+    limit: int = 20,
+    replication: int = DEFAULT_DHT_REPLICATION,
+    admit: Admit | None = None,
+) -> list[DiscoveredProvider]:
     """Asks the seed peers (the routers we are connected to) for providers of
     key and follows the closer peers they name for a few rounds."""
     found: dict[str, DiscoveredProvider] = {}
@@ -150,7 +168,7 @@ async def find_providers(host: IHost, key: bytes, seeds: Iterable[ID], limit: in
                     entry.addrs.append(str(ma))
         return bool(found)
 
-    await _walk(host, kad.Message(type=kad.Message.GET_PROVIDERS, key=key), seeds, take, replication=replication)
+    await _walk(host, kad.Message(type=kad.Message.GET_PROVIDERS, key=key), seeds, take, replication=replication, admit=admit)
     return list(found.values())[:limit]
 
 
@@ -161,6 +179,7 @@ async def _walk(
     take: Callable[[kad.Message], bool],
     skip: frozenset[ID] | set[ID] = frozenset(),
     replication: int = DEFAULT_DHT_REPLICATION,
+    admit: Admit | None = None,
 ) -> None:
     """The Kademlia walk both lookups share. A round asks its peers at once
     and ends when an answer satisfies `take`; only otherwise are the closer
@@ -170,8 +189,34 @@ async def _walk(
     may list a router this member cannot reach. A peer that did not answer
     its dial is not dialed again. A router names the routers closest to the
     key in order, and a record lives on the `replication` closest, so only
-    that many of them are followed from one round to the next."""
+    that many of them are followed from one round to the next.
+
+    A router serves a query only from a member that authenticated with it,
+    so `admit` runs before each query. A router the walk connected to for
+    the query is disconnected when the walk ends: the member keeps sessions
+    with the routers it holds and with no other."""
     self_id = host.get_id()
+    held = set(host.get_connected_peers())
+    try:
+        await _walk_rounds(host, req, seeds, take, skip, replication, admit, self_id)
+    finally:
+        for peer_id in set(host.get_connected_peers()) - held - {self_id}:
+            try:
+                await host.disconnect(peer_id)
+            except Exception as err:  # noqa: BLE001 - already gone
+                logger.debug("dht: disconnect from %s after the walk: %s", peer_id, err)
+
+
+async def _walk_rounds(
+    host: IHost,
+    req: kad.Message,
+    seeds: Iterable[ID],
+    take: Callable[[kad.Message], bool],
+    skip: frozenset[ID] | set[ID],
+    replication: int,
+    admit: Admit | None,
+    self_id: ID,
+) -> None:
     asked: set[ID] = set()
     frontier: list[ID] = list(seeds)
     fanout = min(max(replication, 1), _MAX_PEERS_PER_ROUND)
@@ -183,6 +228,12 @@ async def _walk(
         answers: list[kad.Message] = []
 
         async def ask(peer_id: ID) -> None:
+            if admit is not None:
+                try:
+                    await admit(peer_id)
+                except Exception as err:  # noqa: BLE001 - a router that refuses us is skipped
+                    logger.debug("dht: %s did not admit this member: %s", peer_id, err)
+                    return
             resp = await _query(host, peer_id, req)
             if resp is not None:
                 answers.append(resp)
