@@ -51,10 +51,6 @@ type Options struct {
 	AllowLoopback      bool
 	BiscuitTimeout     time.Duration
 	LogVerbose         bool
-	// DHTProviderAddrTTL is how long a provider record lives after its last
-	// announcement; 0 is DefaultDHTProviderAddrTTL.
-	DHTProviderAddrTTL time.Duration
-	DHTMaxRecordAge    time.Duration
 	LowWaterMark       int
 	HighWaterMark      int
 	// RelayLimitDuration / RelayLimitData cap each relayed connection; 0 is

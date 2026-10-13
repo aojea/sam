@@ -106,8 +106,6 @@ var (
 	tlsCertFlag                  string
 	tlsKeyFlag                   string
 	tlsCAFlag                    string
-	dhtProviderAddrTTLFlag       time.Duration
-	dhtMaxRecordAgeFlag          time.Duration
 	dhtLookupLimitFlag           int
 	discoveryConcurrencyFlag     int
 	backendProbeTimeoutFlag      time.Duration
@@ -465,8 +463,6 @@ func main() {
 					RouterConnectTimeout:     routerConnectTimeoutFlag,
 					RequiredRole:             api.RoleNode,
 					ControlPlaneSyncInterval: controlPlaneSyncIntervalFlag,
-					DHTProviderAddrTTL:       dhtProviderAddrTTLFlag,
-					DHTMaxRecordAge:          dhtMaxRecordAgeFlag,
 					DHTLookupLimit:           dhtLookupLimitFlag,
 					DiscoveryConcurrency:     discoveryConcurrencyFlag,
 					BackendProbeTimeout:      backendProbeTimeoutFlag,
@@ -860,7 +856,7 @@ func main() {
 	runCmd.Flags().StringVar(&socketPathFlag, "socket-path", "", "Unix socket serving the same API, where the socket's owner-only permissions replace the API token (defaults to <data-dir>/"+node.DefaultSocketName+"; pass an empty value to disable)")
 	runCmd.Flags().StringVar(&metricsAddrFlag, "metrics-addr", "", "Serve Prometheus /metrics, /healthz and /readyz on this address without authentication (e.g. 0.0.0.0:9090), for scrapers and probes that hold no API token; off by default")
 	runCmd.Flags().StringVar(&pprofAddrFlag, "pprof-addr", "", "Serve Go runtime profiles under /debug/pprof/ on this address (e.g. 127.0.0.1:6060); unauthenticated and a heap profile is a memory dump, so bind it to loopback and reach it through a port-forward; off by default")
-	runCmd.Flags().StringVar(&discoveryIntervalFlag, "discovery-interval", node.DefaultDiscoveryInterval, "Delay before the first announcement of this node's services to the DHT, capped at 5s; they are re-announced every 5 minutes after that")
+	runCmd.Flags().StringVar(&discoveryIntervalFlag, "discovery-interval", node.DefaultDiscoveryInterval, "Delay before the first announcement of this node's services to the DHT, capped at 5s; they are re-announced every reprovide interval of the mesh after that (agentmesh-control-plane --dht-reprovide-interval)")
 	runCmd.Flags().DurationVar(&monitorBootstrapFlag, "monitor-bootstrap", 2*time.Minute, "Initial wait before monitoring router connection")
 	runCmd.Flags().DurationVar(&monitorCheckIntervalFlag, "monitor-interval", 1*time.Minute, "Interval for checking router connection")
 	runCmd.Flags().DurationVar(&autoRelayMinIntervalFlag, "autorelay-min-interval", 30*time.Second, "AutoRelay Min Interval")
@@ -889,8 +885,6 @@ func main() {
 	runCmd.Flags().StringVar(&tlsCertFlag, "tls-cert", "", "Path to TLS certificate for sidecar API")
 	runCmd.Flags().StringVar(&tlsKeyFlag, "tls-key", "", "Path to TLS key for sidecar API")
 	runCmd.Flags().StringVar(&tlsCAFlag, "tls-ca", "", "Path to TLS CA for sidecar API mTLS")
-	runCmd.Flags().DurationVar(&dhtProviderAddrTTLFlag, "dht-provider-addr-ttl", node.DefaultDHTProviderAddrTTL, "How long a DHT provider record this node stores lives after its last announcement; longer than the 5m between announcements, three times it by default")
-	runCmd.Flags().DurationVar(&dhtMaxRecordAgeFlag, "dht-max-record-age", 0, "Maximum age for DHT records (0s uses library default)")
 	runCmd.Flags().IntVar(&dhtLookupLimitFlag, "dht-lookup-limit", 0, "Maximum number of providers to query from the DHT (0 uses default 20)")
 	runCmd.Flags().IntVar(&discoveryConcurrencyFlag, "discovery-concurrency", 0, "Max concurrent catalog fetches during discovery (0 uses default 10)")
 	runCmd.Flags().DurationVar(&controlPlaneSyncIntervalFlag, "control-plane-sync-interval", node.DefaultControlPlaneSyncInterval, "How often signing keys, bans, router addresses and mesh policy are pulled from the control plane. Keep it well below the control plane's --key-grace-period; raise it on large meshes.")

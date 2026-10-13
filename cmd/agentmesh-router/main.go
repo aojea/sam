@@ -47,8 +47,6 @@ var (
 	connsPerSourceIP     int
 	logLevel             string
 	logFormat            string
-	dhtProviderAddrTTL   time.Duration
-	dhtMaxRecordAge      time.Duration
 	lowWaterMark         int
 	highWaterMark        int
 	metricsAddr          string
@@ -86,8 +84,6 @@ func main() {
 				KeysDBPath:                keysPath,
 				AllowLoopback:             allowLoopback,
 				ConnsPerSourceIP:          connsPerSourceIP,
-				DHTProviderAddrTTL:        dhtProviderAddrTTL,
-				DHTMaxRecordAge:           dhtMaxRecordAge,
 				LowWaterMark:              lowWaterMark,
 				HighWaterMark:             highWaterMark,
 				MetricsAddr:               metricsAddr,
@@ -146,8 +142,6 @@ func main() {
 	rootCmd.Flags().IntVar(&connsPerSourceIP, "conns-per-source-ip", 0, "Max inbound connections per source IP; 0 is a quarter of --high-watermark, so filling the router takes at least four addresses. Raise it where more members share one address")
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	rootCmd.Flags().StringVar(&logFormat, "log-format", "text", "Log format (text, json)")
-	rootCmd.Flags().DurationVar(&dhtProviderAddrTTL, "dht-provider-addr-ttl", router.DefaultDHTProviderAddrTTL, "How long a DHT provider record lives after its last announcement")
-	rootCmd.Flags().DurationVar(&dhtMaxRecordAge, "dht-max-record-age", 0, "Maximum age for DHT records (0s uses library default)")
 	rootCmd.Flags().IntVar(&lowWaterMark, "low-watermark", 0, "Connections the router trims down to once it is over --high-watermark; 0 is 15% below the high watermark, so a trim sheds that share and no more")
 	rootCmd.Flags().IntVar(&highWaterMark, "high-watermark", router.DefaultHighWaterMark, "Connections the router accepts before it trims; every member holds one, so this is the size of the mesh")
 	rootCmd.Flags().StringVar(&metricsAddr, "metrics-addr", "", "Serve Prometheus /metrics, /healthz and /readyz on this address (e.g. 0.0.0.0:9090); unauthenticated, off by default")

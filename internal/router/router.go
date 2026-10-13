@@ -40,7 +40,6 @@ import (
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	records "github.com/libp2p/go-libp2p-kad-dht/records"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	coreconnmgr "github.com/libp2p/go-libp2p/core/connmgr"
 	"github.com/libp2p/go-libp2p/core/control"
@@ -90,10 +89,6 @@ const (
 	// orders by tag value, lowest first, so the untagged go before members.
 	memberTag      = "agentmesh-member"
 	memberTagValue = 100
-	// DefaultDHTProviderAddrTTL is three of a node's 5-minute reprovides: a
-	// node that is gone drops out of discovery within it, one late reprovide
-	// does not. The library default (48h) keeps every past identity listed.
-	DefaultDHTProviderAddrTTL = 15 * time.Minute
 )
 
 var _ coreconnmgr.ConnectionGater = (*routerConnGate)(nil)
@@ -334,6 +329,9 @@ type Router struct {
 	EventTopic         *pubsub.Topic
 	authenticatedPeers sync.Map
 	bannedPeers        sync.Map
+	// directory is how the mesh keeps its DHT, read from /info at start
+	// (syncDirectory).
+	directory api.DirectorySettings
 	// peerRouters is the other routers of the mesh, as /info lists them or as
 	// a handshake proved them: held whatever the load and never sent away.
 	peerRouters sync.Map
@@ -454,6 +452,9 @@ func (r *Router) Start() (retErr error) {
 	if err := r.syncKeys(); err != nil {
 		return fmt.Errorf("failed initial keys sync: %w", err)
 	}
+	if err := r.syncDirectory(); err != nil {
+		return err
+	}
 
 	// 4. Initialize libp2p host
 	cm, err := connmgr.NewConnManager(r.config.LowWaterMark, r.config.HighWaterMark, connmgr.WithGracePeriod(ConnGracePeriod))
@@ -503,19 +504,7 @@ func (r *Router) Start() (retErr error) {
 	r.Host = hostNode
 
 	// Setup DHT
-	dhtOpts := []dht.Option{
-		dht.Mode(dht.ModeServer),
-		dht.ProtocolPrefix(api.DHTProtocolPrefix),
-	}
-	providerTTL := r.config.DHTProviderAddrTTL
-	if providerTTL <= 0 {
-		providerTTL = DefaultDHTProviderAddrTTL
-	}
-	dhtOpts = append(dhtOpts, dht.ProviderManagerOpts(records.ProviderAddrTTL(providerTTL), records.ProvideValidity(providerTTL)))
-	if r.config.DHTMaxRecordAge > 0 {
-		dhtOpts = append(dhtOpts, dht.MaxRecordAge(r.config.DHTMaxRecordAge))
-	}
-	kadDHT, err := dht.New(hostNode, dhtOpts...)
+	kadDHT, err := dht.New(hostNode, dhtOptions(r.directory)...)
 	if err != nil {
 		return err
 	}

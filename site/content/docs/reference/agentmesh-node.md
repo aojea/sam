@@ -115,11 +115,9 @@ explains how to enroll.
 | `--router-selector` | none | Attach only to routers whose credential attests this `key=value` label, repeatable, every pair required: `--router-selector region=eu`. The labels are the ones the control plane lists on `/info`, attested at the router's enrollment. A selector no router attests leaves the node retrying as if no router answered, with a warning naming the selector and the labels it saw. |
 | `--router-prefer` | none | Attach to routers attesting this `key=value` label before others, repeatable; a router attesting more of the pairs comes earlier, and among equals the one with the most room. `--router-prefer zone=eu-a` keeps a node on its zone's routers while they have capacity and lets it fall to the others. |
 | `--enable-relay` | `false` | Relay traffic for other peers. |
-| `--discovery-interval` | `30s` | Delay before the first announcement of this node's services to the DHT, capped at 5 s; services are re-announced every 5 minutes after that. |
+| `--discovery-interval` | `30s` | Delay before the first announcement of this node's services to the DHT, capped at 5 s; services are re-announced every reprovide interval of the mesh after that (`agentmesh-control-plane --dht-reprovide-interval`, 5 minutes by default). |
 | `--dht-lookup-limit` | `20` | Providers to query per DHT lookup. |
 | `--discovery-concurrency` | `10` | Concurrent catalog fetches during discovery. |
-| `--dht-provider-addr-ttl` | `15m` | How long a service announcement this node stores lives after the announcing node last made it. Nodes re-announce every 5 minutes, so a node that is gone drops out of discovery within this time. A value of 5 minutes or less is refused at startup: the record would expire between two announcements. `0` keeps the default. |
-| `--dht-max-record-age` | library default | DHT value record lifetime. |
 | `--backend-probe-timeout` | `2s` | How long a service backend may take to answer before the node declines to advertise it. Raise it for subprocesses that start slowly. |
 | `--secrets-dir` | `/etc/agentmesh/secrets` | Directory holding the credentials that the control plane's [egress destinations](../policy/#egress-destinations) name, one file per credential name. The platform puts the files there; the node reads a file on every request to the destination. |
 | `--control-plane-sync-interval` | `15m` | How often signing keys, the ban set, router addresses and the mesh policy are pulled from the control plane. Keep it well below the control plane's `--key-grace-period`; raise it on large meshes. |

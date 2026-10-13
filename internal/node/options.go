@@ -128,10 +128,6 @@ type Options struct {
 	// BiscuitTimeout bounds Datalog evaluation when verifying biscuit tokens.
 	BiscuitTimeout time.Duration
 	// DHT Options
-	// DHTProviderAddrTTL is how long a provider record lives after its last
-	// announcement; 0 is DefaultDHTProviderAddrTTL.
-	DHTProviderAddrTTL   time.Duration
-	DHTMaxRecordAge      time.Duration
 	DHTLookupLimit       int
 	DiscoveryConcurrency int
 	// RequiredRole restricts enrollment and startup to only accept tokens containing this role.
@@ -282,11 +278,6 @@ func (o *Options) Validate() error {
 	// from a flag or FFI config.
 	if len(o.ControlPlanePubKey) > 0 && len(o.ControlPlanePubKey) != ed25519.PublicKeySize {
 		return fmt.Errorf("control plane public key must be %d bytes, got %d", ed25519.PublicKeySize, len(o.ControlPlanePubKey))
-	}
-	// A record that expires between two announcements is absent most of the
-	// time; the node refuses the configuration rather than announcing faster.
-	if o.DHTProviderAddrTTL != 0 && o.DHTProviderAddrTTL <= ReprovideInterval {
-		return fmt.Errorf("DHTProviderAddrTTL %s must be strictly longer than the %s between announcements; %s is used by default", o.DHTProviderAddrTTL, ReprovideInterval, DefaultDHTProviderAddrTTL)
 	}
 	return nil
 }

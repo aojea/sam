@@ -37,19 +37,15 @@ import (
 // the control plane lists, learned on attach and from closer-peer answers,
 // and a router that leaves the catalog leaves the table (setRouterCatalog).
 // Bootstrap still fills the table once at start.
-func dhtOptions(cfg Options) []dht.Option {
-	providerTTL := cfg.DHTProviderAddrTTL
-	if providerTTL <= 0 {
-		providerTTL = DefaultDHTProviderAddrTTL
-	}
-	opts := []dht.Option{
+//
+// The record TTL is the mesh's (ControlPlaneInfoResponse.directory): the
+// same figure the routers keep a record for, so a record the member's own
+// store holds and one a router holds expire alike.
+func dhtOptions(directory api.DirectorySettings) []dht.Option {
+	return []dht.Option{
 		dht.Mode(dht.ModeClient),
 		dht.DisableAutoRefresh(),
 		dht.ProtocolPrefix(api.DHTProtocolPrefix),
-		dht.ProviderManagerOpts(records.ProviderAddrTTL(providerTTL), records.ProvideValidity(providerTTL)),
+		dht.ProviderManagerOpts(records.ProviderAddrTTL(directory.RecordTTL), records.ProvideValidity(directory.RecordTTL)),
 	}
-	if cfg.DHTMaxRecordAge > 0 {
-		opts = append(opts, dht.MaxRecordAge(cfg.DHTMaxRecordAge))
-	}
-	return opts
 }

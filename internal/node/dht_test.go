@@ -59,7 +59,7 @@ func TestMemberDHTStaysClientWhenPublic(t *testing.T) {
 	t.Cleanup(func() { _ = controlDHT.Close() })
 
 	member := newHost()
-	memberDHT, err := dht.New(member, dhtOptions(Options{})...)
+	memberDHT, err := dht.New(member, dhtOptions(api.DefaultDirectorySettings())...)
 	if err != nil {
 		t.Fatalf("member dht.New: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestSetRouterCatalogPrunesDHTTable(t *testing.T) {
 		t.Fatalf("libp2p.New: %v", err)
 	}
 	t.Cleanup(func() { _ = h.Close() })
-	kdht, err := dht.New(h, dhtOptions(Options{})...)
+	kdht, err := dht.New(h, dhtOptions(api.DefaultDirectorySettings())...)
 	if err != nil {
 		t.Fatalf("dht.New: %v", err)
 	}

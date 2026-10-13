@@ -95,18 +95,10 @@ const (
 	// meshes, where an operator raising the grace period can raise this too.
 	DefaultControlPlaneSyncInterval = 15 * time.Minute
 
-	// Reprovide interval
-	ReprovideInterval = 5 * time.Minute
-
-	// DefaultDHTProviderAddrTTL is three of a node's 5-minute reprovides: when
-	// ModeAuto promotes a dialable node to a DHT server, a peer that is gone
-	// drops out of its provider store within this window while one late
-	// reprovide does not.
-	DefaultDHTProviderAddrTTL = 3 * ReprovideInterval
-
 	// reprovideRetryInterval is the first retry after a backend was withheld,
-	// doubling up to ReprovideInterval. Backends commonly start after the node
-	// does, and the full interval is far too long to wait for one of those.
+	// doubling up to the mesh's reprovide interval. Backends commonly start
+	// after the node does, and the full interval is far too long to wait for
+	// one of those.
 	reprovideRetryInterval = 5 * time.Second
 )
 
@@ -175,20 +167,23 @@ type AgentMeshNode struct {
 	transitCatalogRefreshedAt time.Time
 	attached                  map[peer.ID]bool
 	shunned                   map[peer.ID]time.Time
-	connMgr                   *connmgr.BasicConnMgr
-	peerLastEventTime         map[string]int64
-	mu                        sync.Mutex
-	nodeConfig                *NodeConfigComplete
-	revokedPeers              *lru.Cache[string, int64]
-	revokedTokens             *lru.Cache[string, time.Time]
-	delegatedBiscuitCache     *lru.Cache[string, *api.TokenExchangeResponse]
-	stsTokenCache             *lru.Cache[string, *api.STSTokenResponse]
-	peerLabelGate             *lru.Cache[string, time.Time]
-	authPeers                 sync.Map
-	trustedKeys               []TrustedKey
-	keysMu                    sync.RWMutex
-	MeshPolicyRules           []biscuit.Rule
-	MeshPolicyMu              sync.RWMutex
+	// directory is how the mesh keeps its DHT, as the control plane publishes
+	// it on /info (syncMeshInfo); the api defaults until it has answered.
+	directory             api.DirectorySettings
+	connMgr               *connmgr.BasicConnMgr
+	peerLastEventTime     map[string]int64
+	mu                    sync.Mutex
+	nodeConfig            *NodeConfigComplete
+	revokedPeers          *lru.Cache[string, int64]
+	revokedTokens         *lru.Cache[string, time.Time]
+	delegatedBiscuitCache *lru.Cache[string, *api.TokenExchangeResponse]
+	stsTokenCache         *lru.Cache[string, *api.STSTokenResponse]
+	peerLabelGate         *lru.Cache[string, time.Time]
+	authPeers             sync.Map
+	trustedKeys           []TrustedKey
+	keysMu                sync.RWMutex
+	MeshPolicyRules       []biscuit.Rule
+	MeshPolicyMu          sync.RWMutex
 	// pendingEgress holds assignments that arrived before Start created the
 	// service registry (SyncControlPlane runs first); Start applies them.
 	pendingEgress   []*api.EgressDestination
@@ -430,6 +425,7 @@ func NewAgentMeshNode(cfg Options) (*AgentMeshNode, error) {
 		trustedKeys:             trustedKeys,
 		peerLastEventTime:       make(map[string]int64),
 		authenticatedRouters:    make(map[peer.ID]bool),
+		directory:               api.DefaultDirectorySettings(),
 		nodeConfig:              cfg.NodeConfig,
 		AllowLoopback:           cfg.AllowLoopback,
 		authSuccess:             make(chan struct{}),
@@ -687,7 +683,7 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 	}
 
 	// Initialize Rendezvous (DHT Client)
-	kdht, err := dht.New(h, dhtOptions(n.config)...)
+	kdht, err := dht.New(h, dhtOptions(n.directorySettings())...)
 	if err != nil {
 		return err
 	}
@@ -790,7 +786,7 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 	go p2plimits.ObserveStreamPressure(n.Host.Network().Conns, busiestConnStreams, logger.Warnf).Run(ctx, streamPressureInterval)
 
 	// Periodically and on-demand reprovide registered services to the DHT
-	n.startReprovideLoop(ctx, ReprovideInterval)
+	n.startReprovideLoop(ctx)
 
 	// Everything read from the control plane (keys, bans, router addresses,
 	// policy) in one loop; gossip events only bring the next pull forward.
@@ -812,7 +808,10 @@ func (n *AgentMeshNode) triggerReprovide() {
 	}
 }
 
-func (n *AgentMeshNode) startReprovideLoop(ctx context.Context, interval time.Duration) {
+// startReprovideLoop re-announces the node's services every reprovide
+// interval of the mesh, read at each cycle so a control plane that changed
+// it is followed at the next one.
+func (n *AgentMeshNode) startReprovideLoop(ctx context.Context) {
 	go func() {
 		initialDelay := 5 * time.Second
 		if n.config.DiscoveryInterval != "" {
@@ -839,6 +838,7 @@ func (n *AgentMeshNode) startReprovideLoop(ctx context.Context, interval time.Du
 				}
 			}
 
+			interval := n.directorySettings().Reprovide
 			next := interval
 			if n.services.ReprovideAll(ctx) > 0 {
 				// A backend that is not answering yet is usually one that is
@@ -852,6 +852,28 @@ func (n *AgentMeshNode) startReprovideLoop(ctx context.Context, interval time.Du
 			timer.Reset(next)
 		}
 	}()
+}
+
+// directorySettings is how the mesh keeps its DHT, as last read from the
+// control plane.
+func (n *AgentMeshNode) directorySettings() api.DirectorySettings {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.directory
+}
+
+// adoptDirectory takes the directory parameters /info published. The
+// reprovide interval applies from the next cycle; the record TTL is set
+// when the DHT is built, so a change to it applies at the next start.
+func (n *AgentMeshNode) adoptDirectory(p *api.DirectoryParameters) {
+	settings := api.DirectorySettingsFrom(p)
+	n.mu.Lock()
+	changed := settings != n.directory
+	n.directory = settings
+	n.mu.Unlock()
+	if changed {
+		logger.Infof("[DHT] Directory parameters from the control plane: replication %d, reprovide every %s, records kept %s", settings.Replication, settings.Reprovide, settings.RecordTTL)
+	}
 }
 
 func (n *AgentMeshNode) IsConnected() bool {

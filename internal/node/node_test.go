@@ -791,8 +791,6 @@ func TestNewAgentMeshNode_DHTOptions(t *testing.T) {
 		PrivKey:              priv,
 		Store:                store,
 		ListenAddrs:          []string{"/ip4/127.0.0.1/tcp/0"},
-		DHTProviderAddrTTL:   10 * time.Minute,
-		DHTMaxRecordAge:      15 * time.Second,
 		DHTLookupLimit:       50,
 		DiscoveryConcurrency: 5,
 	}
@@ -802,12 +800,6 @@ func TestNewAgentMeshNode_DHTOptions(t *testing.T) {
 		t.Fatalf("failed to create node with DHT options: %v", err)
 	}
 
-	if node.config.DHTProviderAddrTTL != 10*time.Minute {
-		t.Errorf("expected DHTProviderAddrTTL to be 10m, got %v", node.config.DHTProviderAddrTTL)
-	}
-	if node.config.DHTMaxRecordAge != 15*time.Second {
-		t.Errorf("expected DHTMaxRecordAge to be 15s, got %v", node.config.DHTMaxRecordAge)
-	}
 	if node.config.DHTLookupLimit != 50 {
 		t.Errorf("expected DHTLookupLimit to be 50, got %d", node.config.DHTLookupLimit)
 	}

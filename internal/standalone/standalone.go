@@ -155,9 +155,6 @@ type RouterTunables struct {
 	// the connection manager high watermark (proxied deployments share
 	// source IPs, so the global cap should be what binds).
 	ConnsPerSourceIP int
-	// DHTProviderAddrTTL / DHTMaxRecordAge tune DHT record lifetimes.
-	DHTProviderAddrTTL time.Duration
-	DHTMaxRecordAge    time.Duration
 	// RelayLimitDuration / RelayLimitData cap each relayed connection.
 	RelayLimitDuration time.Duration
 	RelayLimitData     router.ByteSize
@@ -380,8 +377,6 @@ func (s *Server) Start(ctx context.Context) (retErr error) {
 		LeaseRenewInterval: s.opts.Router.LeaseRenewInterval,
 		LowWaterMark:       s.opts.Router.LowWaterMark,
 		HighWaterMark:      s.opts.Router.HighWaterMark,
-		DHTProviderAddrTTL: s.opts.Router.DHTProviderAddrTTL,
-		DHTMaxRecordAge:    s.opts.Router.DHTMaxRecordAge,
 		RelayLimitDuration: s.opts.Router.RelayLimitDuration,
 		RelayLimitData:     int64(s.opts.Router.RelayLimitData),
 		ShutdownLeaseTTL:   s.opts.Router.ShutdownLeaseTTL,

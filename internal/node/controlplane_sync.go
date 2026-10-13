@@ -212,6 +212,7 @@ func (n *AgentMeshNode) syncMeshInfo(ctx context.Context, controlPlaneURL string
 		// the stored addresses do not carry.
 		n.setRouterCatalog(candidatesFromInfo(ctx, info))
 	}
+	n.adoptDirectory(info.GetDirectory())
 	n.reconcileBannedPeers(info.GetBannedPeerIds(), fetchedAt)
 	return nil
 }
