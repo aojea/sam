@@ -101,6 +101,17 @@ var transitHandshakesTotal = promauto.NewCounterVec(
 	[]string{"router", "result"},
 )
 
+// directoryHandshakesTotal counts the handshakes run with a router this node
+// connected to for its DHT without being attached to it, so the router
+// keeps the connection as a session; see authDirectoryRouter.
+var directoryHandshakesTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "agentmesh_node_directory_handshakes_total",
+		Help: "Handshakes with a router this node connected to for a DHT lookup or announcement without being attached to it, by result",
+	},
+	[]string{"result"},
+)
+
 // nodeStateCollector exports the node's own view of its mesh membership: the
 // same figures GET /debug/mesh-info and /debug/token-info answer on demand,
 // as gauges a scraper can keep. A node that runs unattended, such as a
@@ -152,7 +163,7 @@ func newNodeStateCollector(n *AgentMeshNode) *nodeStateCollector {
 			[]string{"type"}, nil),
 		routersDesc: prometheus.NewDesc(
 			"agentmesh_node_routers",
-			"Routers this node keeps a session with: attached now, and wanted (--routers, or every router listed when fewer)",
+			"Routers this node keeps a session with: attached now, wanted (--routers, or every router listed when fewer), and directory (authenticated for DHT lookups and announcements without being attached)",
 			[]string{"state"}, nil),
 		routerCandsDesc: prometheus.NewDesc(
 			"agentmesh_node_router_candidates",
@@ -188,6 +199,7 @@ func (c *nodeStateCollector) Collect(ch chan<- prometheus.Metric) {
 
 	ch <- prometheus.MustNewConstMetric(c.routersDesc, prometheus.GaugeValue, float64(n.AttachedRouters()), "attached")
 	ch <- prometheus.MustNewConstMetric(c.routersDesc, prometheus.GaugeValue, float64(n.wantRouters()), "wanted")
+	ch <- prometheus.MustNewConstMetric(c.routersDesc, prometheus.GaugeValue, float64(n.DirectoryRouters()), "directory")
 	cands := n.routerCandidates()
 	_, matching := selectRouters(cands, 0, n.config.RouterSelector, nil, nil)
 	ch <- prometheus.MustNewConstMetric(c.routerCandsDesc, prometheus.GaugeValue, float64(len(cands)), "any")

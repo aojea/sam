@@ -157,6 +157,9 @@ type AgentMeshNode struct {
 	authenticatedRouters map[peer.ID]bool
 	// redialing holds the routers a redialRouter goroutine is working on.
 	redialing map[peer.ID]bool
+	// handshaking holds the routers a handshake is in flight with; a second
+	// caller waits for that one (authRouter).
+	handshaking map[peer.ID]chan struct{}
 	// routerCatalog is every router the node knows of; attached are the
 	// Options.Routers of them it keeps a session with; shunned are the ones
 	// it stays off until the time given, having been sent away or having
@@ -636,7 +639,7 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 	n.Host = h
 
 	h.Network().Notify(&network.NotifyBundle{
-		ConnectedF: func(n network.Network, c network.Conn) {
+		ConnectedF: func(_ network.Network, c network.Conn) {
 			remotePeer := c.RemotePeer()
 			remoteAddr := c.RemoteMultiaddr()
 			if hasCircuit(remoteAddr) || !isPrivateIP(remoteAddr) {
@@ -644,6 +647,9 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 					logger.Errorf("[Discovery] Failed to put peerstore private IP failed key: %v", err)
 				}
 				logger.Debugf("[Discovery] Peer %s connected via relay/public IP (%s), marking private IP as failed", remotePeer, remoteAddr)
+			}
+			if c.Stat().Direction == network.DirOutbound {
+				n.authDirectoryRouter(ctx, remotePeer)
 			}
 		},
 		// The router drops us from its authenticated set the moment our last
@@ -1184,12 +1190,41 @@ func (n *AgentMeshNode) loadIdentityForAuth() ([]byte, error) {
 // and runs the handshake, unless a live authenticated session to it already
 // exists: Host.Connect is a no-op on an existing connection, but the
 // handshake is not, and repeating it trips the router's per-peer handshake
-// limiter. The dial is bounded by RouterConnectTimeout so a router that is
-// down does not hold its caller for long.
+// limiter. For the same reason two callers reaching for the same router at
+// once, as the attach path and the directory path do when its connection
+// comes up, run one handshake: the second waits for the first. The dial is
+// bounded by RouterConnectTimeout so a router that is down does not hold
+// its caller for long.
 func (n *AgentMeshNode) authRouter(ctx context.Context, router peer.AddrInfo, biscuitBytes []byte) error {
 	if n.isAuthenticatedAndConnected(router.ID) {
 		return nil
 	}
+	n.mu.Lock()
+	if done, inFlight := n.handshaking[router.ID]; inFlight {
+		n.mu.Unlock()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if n.isAuthenticatedAndConnected(router.ID) {
+			return nil
+		}
+		return fmt.Errorf("router %s: the handshake in flight did not admit this node", router.ID)
+	}
+	if n.handshaking == nil {
+		n.handshaking = map[peer.ID]chan struct{}{}
+	}
+	done := make(chan struct{})
+	n.handshaking[router.ID] = done
+	n.mu.Unlock()
+	defer func() {
+		n.mu.Lock()
+		delete(n.handshaking, router.ID)
+		n.mu.Unlock()
+		close(done)
+	}()
+
 	routerCtx, cancel := context.WithTimeout(ctx, n.config.RouterConnectTimeout)
 	defer cancel()
 	if err := n.Host.Connect(routerCtx, router); err != nil {

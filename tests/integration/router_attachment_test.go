@@ -26,6 +26,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -152,16 +153,42 @@ func routersConnectedTo(t *testing.T, cpPort int, peerID peer.ID) []string {
 // it has a connection with.
 func meshInfo(t *testing.T, n *backgroundNode) (attached, connected []string) {
 	t.Helper()
+	attached, _, connected = meshView(t, n)
+	return attached, connected
+}
+
+// meshView is meshInfo with the directory routers as well: the routers the
+// node holds a session with for its DHT alone.
+func meshView(t *testing.T, n *backgroundNode) (attached, directory, connected []string) {
+	t.Helper()
 	var info struct {
-		AttachedRouters []string `json:"attached_routers"`
-		ConnectedPeers  []string `json:"connected_peers"`
+		AttachedRouters  []string `json:"attached_routers"`
+		DirectoryRouters []string `json:"directory_routers"`
+		ConnectedPeers   []string `json:"connected_peers"`
 	}
 	if err := json.Unmarshal([]byte(debugGetWithToken(t, n.apiAddr, n.token, "/debug/mesh-info")), &info); err != nil {
 		t.Fatalf("decode mesh-info: %v", err)
 	}
 	slices.Sort(info.AttachedRouters)
+	slices.Sort(info.DirectoryRouters)
 	slices.Sort(info.ConnectedPeers)
-	return info.AttachedRouters, info.ConnectedPeers
+	return info.AttachedRouters, info.DirectoryRouters, info.ConnectedPeers
+}
+
+// nodeCounter reads one counter series from the node's /metrics, 0 when it
+// has not been emitted.
+func nodeCounter(t *testing.T, n *backgroundNode, series string) float64 {
+	t.Helper()
+	for _, line := range strings.Split(debugGetWithToken(t, n.apiAddr, n.token, "/metrics"), "\n") {
+		if strings.HasPrefix(line, series+" ") {
+			v, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimPrefix(line, series)), 64)
+			if err != nil {
+				t.Fatalf("parse %s: %v", line, err)
+			}
+			return v
+		}
+	}
+	return 0
 }
 
 // attachedRouters reads the routers the node holds as relays from its own
@@ -585,11 +612,25 @@ func TestIdleNodesHoldOnlyTheirRouters(t *testing.T) {
 			}
 		}
 	}
+	// A router's sessions are its own node, the two peer routers, the
+	// control plane's event publisher, and the nodes whose keys landed on
+	// it: the directory routers each node reports, which are routers and
+	// nothing else.
 	for _, s := range sites {
-		// Its own node, the two peer routers and the control plane's
-		// event publisher.
-		if got := routers[s].gauge(t, "agentmesh_router_authenticated_peers"); got != 4 {
-			t.Errorf("router %s authenticated %v peers, want 4 (its node, two routers, the control plane)", s, got)
+		want := 4.0
+		for _, other := range sites {
+			_, directory, _ := meshView(t, nodes[other])
+			for _, r := range directory {
+				if !slices.Contains(peerIDStrings(routers["a"].peerID, routers["b"].peerID, routers["c"].peerID), r) {
+					t.Errorf("node %s holds a directory session with %s, which is not a router", other, r)
+				}
+				if r == routers[s].peerID.String() {
+					want++
+				}
+			}
+		}
+		if got := routers[s].gauge(t, "agentmesh_router_authenticated_peers"); got != want {
+			t.Errorf("router %s authenticated %v peers, want %v (its node, two routers, the control plane, and the nodes that hold it for their keys)", s, got, want)
 		}
 	}
 	if t.Failed() {
@@ -706,13 +747,20 @@ func TestCallerTransitsTheRouterItShares(t *testing.T) {
 
 	callAcrossMesh(t, caller, "token-c", provider, "shared-tool")
 
-	// Router a authenticated the provider, the two routers and the control
-	// plane's publisher; the caller never came. Router b has both nodes.
-	if got := routerA.gauge(t, "agentmesh_router_authenticated_peers"); got != 4 {
-		t.Errorf("router a authenticated %v peers, want 4: the caller must transit router b, which it holds", got)
+	// The caller holds router b, which the provider's record names, so the
+	// call went through it and no handshake was run for transit. Router a
+	// may still hold the caller for its DHT: the provider's key lands on
+	// the closest routers, which on a mesh of three is all of them.
+	for _, kind := range []string{"listed", "unlisted"} {
+		for _, result := range []string{"ok", "failed"} {
+			series := fmt.Sprintf(`agentmesh_node_transit_handshakes_total{result="%s",router="%s"}`, result, kind)
+			if got := nodeCounter(t, caller, series); got != 0 {
+				t.Errorf("%s = %v, want 0: the caller must transit router b, which it holds", series, got)
+			}
+		}
 	}
-	if got := routerB.gauge(t, "agentmesh_router_authenticated_peers"); got != 5 {
-		t.Errorf("router b authenticated %v peers, want 5", got)
+	if got := routerB.gauge(t, "agentmesh_router_authenticated_peers"); got < 5 {
+		t.Errorf("router b authenticated %v peers, want at least 5: both nodes, two routers, the control plane", got)
 	}
 	if t.Failed() {
 		t.Logf("--- caller ---\n%s", caller.log())

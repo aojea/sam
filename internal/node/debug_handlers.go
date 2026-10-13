@@ -132,9 +132,12 @@ type meshInfoResponse struct {
 	PeerID          string   `json:"peer_id"`
 	ConnectedPeers  []string `json:"connected_peers"`
 	AttachedRouters []string `json:"attached_routers"`
-	DHTSize         int      `json:"dht_size"`
-	RouterPeerID    string   `json:"router_peer_id"`
-	LocalAPISocket  string   `json:"local_api_socket,omitempty"`
+	// DirectoryRouters are the routers the node holds a session with for
+	// its DHT alone: the ones its keys landed on, not attached.
+	DirectoryRouters []string `json:"directory_routers"`
+	DHTSize          int      `json:"dht_size"`
+	RouterPeerID     string   `json:"router_peer_id"`
+	LocalAPISocket   string   `json:"local_api_socket,omitempty"`
 }
 
 type connectivityResponse struct {
@@ -191,14 +194,21 @@ func (n *AgentMeshNode) meshInfo() (*meshInfoResponse, error) {
 		attachedRouters = append(attachedRouters, p.String())
 	}
 	slices.Sort(attachedRouters)
+	directory := n.directoryRouters()
+	directoryRouters := make([]string, 0, len(directory))
+	for _, p := range directory {
+		directoryRouters = append(directoryRouters, p.String())
+	}
+	slices.Sort(directoryRouters)
 
 	return &meshInfoResponse{
-		PeerID:          n.Host.ID().String(),
-		ConnectedPeers:  connectedPeers,
-		AttachedRouters: attachedRouters,
-		DHTSize:         n.DHT.RoutingTable().Size(),
-		RouterPeerID:    n.RouterPeerID.String(),
-		LocalAPISocket:  n.BoundSocketPath,
+		PeerID:           n.Host.ID().String(),
+		ConnectedPeers:   connectedPeers,
+		AttachedRouters:  attachedRouters,
+		DirectoryRouters: directoryRouters,
+		DHTSize:          n.DHT.RoutingTable().Size(),
+		RouterPeerID:     n.RouterPeerID.String(),
+		LocalAPISocket:   n.BoundSocketPath,
 	}, nil
 }
 
