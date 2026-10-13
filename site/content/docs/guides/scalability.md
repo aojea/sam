@@ -8,19 +8,26 @@ This guide is for the operator of a mesh that grows past a few hundred
 members. It explains what each component spends per member, which setting
 bounds what, how to size a deployment for the fleet you expect, how to
 place members on routers with labels, and which metrics tell you that a
-bound is near. The numbers come from the public testnet, where routers on
-2 vCPU held 3200 to 3500 connections each and a fleet of 3200 members
-stayed through a rollout of every router and both control plane replicas.
+bound is near. The numbers come from the public testnet: six routers on
+2 vCPU held 10,000 members, each router at 8800 to 9250 connections, and
+every member stayed on the mesh for the 40 minutes the fleet was held;
+an earlier fleet of 3200 stayed through a rollout of every router and
+both control plane replicas.
 
 ## What a member costs
 
 A member is one `agentmesh-node` process. It holds a session with two
 routers (`--routers`), chosen from those the control plane lists, and a
 relay reservation on each. Through those sessions it keeps a GossipSub
-subscription for control plane events. Its DHT client connects to the
-other routers when it queries; a router closes such a connection a minute
-later (`--auth-deadline`), since no session was opened on it, so a
-router's connections are its members' and the watermarks count members.
+subscription for control plane events. Its DHT client also connects to
+the other routers: a router closes such a connection a minute later
+(`--auth-deadline`), since no session was opened on it, and the DHT
+client opens it again at its next lookup or at its next table refresh,
+which runs every two minutes and queries every router. A router
+therefore carries two kinds of connection: the sessions of its own
+members, which the watermarks count, and a connection from most of the
+other members most of the time. On the testnet at 10,000 members each
+router held 3200 to 5100 sessions and about 9000 connections.
 A member connects to another member only to call it, through that
 member's router, where it runs the credential handshake before asking for
 the circuit. At rest it uses about 55 MiB of memory, 300 goroutines and
@@ -151,14 +158,15 @@ NAT entry at each end.
 ### What a middlebox sees per member
 
 A member holds K long-lived connections to its routers, kept alive by
-the transport, so K entries that do not churn. Its DHT client opens a
-connection to each other router it queries; the router closes that
-connection at `--auth-deadline` (a minute) since no session was opened on
-it, and the next query opens it again, so a mesh of R routers adds up to
-R − K entries per member that are created and torn down about once a
-minute while the member looks peers or services up. A member that
-reaches a peer directly holds one entry per such peer, at both ends. A
-relayed connection adds none.
+the transport, so K entries that do not churn. Its DHT client holds a
+connection to each other router; the router closes that connection at
+`--auth-deadline` (a minute) since no session was opened on it, and the
+DHT client's next lookup or table refresh, every two minutes, opens it
+again, so a mesh of R routers adds R − K entries per member that are
+created and torn down about once a minute. At 10,000 members on six
+routers that is about 3700 new connections a minute arriving at each
+router. A member that reaches a peer directly holds one entry per such
+peer, at both ends. A relayed connection adds none.
 
 A firewall between a member and the routers needs TCP (and UDP for
 QUIC, when the member is allowed to fall back to it) to the routers'
@@ -196,19 +204,34 @@ those the full routers send away; the members already placed do not move
 on their own. When a router stops, its members spread over the N − 1
 others, which is where the headroom in the next section goes.
 
+Connections are more than sessions. The members on the other routers
+keep a DHT connection to this one about four fifths of the time, so a
+router holds about F × K / N + 0.8 × F × (N − K) / N connections, which
+at six routers is 0.9 × F: adding a router divides the sessions, and
+leaves the connections where they were. What bounds the connections is
+the router's libp2p connection cap, twice the high watermark, and the
+watermarks do not move it: a router past the cap refuses the next
+connection, session or not. A fleet is therefore also bounded by
+2 × H members on any one router, whatever N.
+
 ## Sizing the routers
 
 Start from the fleet you expect, F members on N routers with `--routers`
 at its default of 2, and size for the day one router is down:
 
-- `--high-watermark` at least 1.2 × F × 2 / (N − 1). Each router then
-  holds F × 2 / N sessions in normal running, with room for the members of
-  a stopped router and for the connections members open in passing (a DHT
-  query, a call to a peer on this router, two connections each while they
-  enroll). 5000 members on four routers need 4000; 10,000 members need
-  six routers at 4800 or seven at 4000. The testnets deploy with 6000
-  (`ROUTER_HIGH_WATERMARK` in the deploy workflow) on six routers
-  (`ROUTER_REPLICAS`), which holds 10,000 members with one router out.
+- `--high-watermark` at least 1.2 × F × 2 / (N − 1), and at least
+  0.55 × F so that the connection cap, twice the high mark, holds the
+  sessions and the DHT connections of the whole fleet with a router out.
+  Each router then holds F × 2 / N sessions in normal running, with room
+  for the members of a stopped router and for the connections members
+  open in passing (a call to a peer on this router, two connections each
+  while they enroll). 5000 members on four routers need 4000; 10,000
+  members need six routers at 6000, where the second rule is the one
+  that binds. The testnets deploy with 6000 (`ROUTER_HIGH_WATERMARK` in
+  the deploy workflow) on six routers (`ROUTER_REPLICAS`), which held
+  10,000 members at about 9000 connections per router; with one router
+  out the five others carry about the same, since the DHT connections
+  are most of the count, of a cap of 12,000.
 - `--low-watermark` at its default, 15% below the high mark. The gap is
   what one shedding moves to the other routers; a smaller gap sheds more
   often, a larger one moves more members at once. A router that sheds is
@@ -221,8 +244,16 @@ at its default of 2, and size for the day one router is down:
   is the number of callers one service may have at once through one router;
   raise it for a service the whole mesh calls.
 
-Memory follows connections: about 150 KiB each, so a router at 3500
-connections uses about 550 MiB, with 20,000 goroutines. CPU follows joins
+Memory follows connections: about 190 KiB and six goroutines each, so a
+router at 9000 connections uses about 1.7 GiB, with 45,000 to 65,000
+goroutines. Part of it stays when the members leave: a router that had
+held 10,000 members sat at 720 MiB with 16 connections hours later. Two
+libp2p bugs account for most of that, one context per GossipSub peer
+ever seen ([go-libp2p-pubsub#735](https://github.com/libp2p/go-libp2p-pubsub/pull/735))
+and the addresses and signed records of every peer ever connected
+([go-libp2p#3559](https://github.com/libp2p/go-libp2p/pull/3559));
+until a release carries the fixes, size a router's memory for the
+largest fleet it has held since it started. CPU follows joins
 and relayed traffic, and a router needs a core it can use. Under a CPU
 limit a router answers handshakes late, members time out and retry, and
 the retries cost more than the handshakes did. On Kubernetes set a request
@@ -301,9 +332,16 @@ of the build.
 The routers set the other half of the join rate. A fleet of 500 joining at
 20 a second was admitted in under a minute by routers on 2 vCPU. Against
 the same routers under a 500m CPU limit, more than a third of the members
-on one host exited at the handshake timeout. The node now retries a router
+on one host exited at the handshake timeout. The node retries a router
 that did not admit it in time (after 2 s, 4 s and 8 s), so a slow router
 costs the fleet time first; it costs members when the retries run out.
+
+The mesh a member joins sets the rest. On the testnet, 1000 members
+joining at 5 a second were all ready in 0.4 s at the median and 0.7 s at
+the 95th percentile on an empty mesh, and in 3.5 s and 5.5 s on a mesh
+already holding 9000, with the 95th percentile reaching 15 s on some of
+the steps between; the control plane's 99th percentile went from 25 ms
+to 2.5 s over the same steps, and no step lost a member.
 
 A member that enrolls needs its control plane and its routers reachable
 from where it runs. Behind a NAT it is reached through a relay, which costs
@@ -336,10 +374,13 @@ A service that the whole mesh calls is published by several nodes. Callers
 discover every provider of a name and pick one, so capacity grows with
 providers. A provider that does not answer costs its caller one attempt:
 the caller is answered `502 Bad Gateway` and may try another provider. On
-the testnet, 500 members calling a service published by two nodes in the
-same second completed 55 first calls within two minutes; the rest were
-answered 502 and retried. Size the number of providers to the number of
-callers you expect in one moment.
+the testnet, 1000 members joining over 200 s and each calling a service
+published by two nodes as soon as it was ready all completed their first
+call, in 1.0 to 1.4 attempts per member, at every size of the mesh up to
+10,000; the attempts that failed were callers the two providers had
+trimmed at 400 connections, answered 502 and served seconds later. Size
+the number of providers to the number of callers you expect in one
+moment.
 
 ## Running many nodes on one host
 
