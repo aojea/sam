@@ -405,6 +405,48 @@ test("a member on one router reaches a member on another", async () => {
   }
 });
 
+test("a connection to a listed router is authenticated, and released after a lookup", async () => {
+  // The DHT client connects to whichever listed router kademlia puts closest
+  // to a key. A router serves its DHT only to a member that authenticated
+  // on the connection, so the handshake runs on connection:open for any
+  // listed router, held or not; a router met this way is not held, and the
+  // connection is closed once the lookup ends.
+  const routerB = await createLibp2p({
+    addresses: { listen: ["/ip4/127.0.0.1/tcp/0"] },
+    transports: [tcp()],
+    connectionEncrypters: [tls()],
+    streamMuxers: [yamux()],
+    services: { identify: identify(), relay: circuitRelayServer() },
+  });
+  try {
+    const handshakesB: string[] = [];
+    await routerB.handle(AUTH_PROTOCOL, authStreamHandler({ ownBiscuit: () => mint(routerB.peerId.toString(), ROLE_ROUTER), trustedKeys: () => [cpKey], onAuthenticated: (p) => handshakesB.push(p) }));
+    const routerBAddr = (routerB.getMultiaddrs()[0] as ReturnType<typeof multiaddr>).toString();
+    const mesh = await AgentMesh.enroll({ controlPlaneUrl: "http://127.0.0.1:1", bootstrapToken: "sbt", fetch: fakeControlPlane([routerAddr, routerBAddr]) });
+    const session = await mesh.join({ refreshLeadMs: 0, routerAddresses: [routerAddr], reserveRelay: false });
+    try {
+      assert.deepEqual(session.routers.map((r) => r.peerId), [router.peerId.toString()]);
+
+      await session.node.dial(multiaddr(routerBAddr));
+      const deadline = Date.now() + 10_000;
+      while (handshakesB.length === 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      assert.deepEqual(handshakesB, [mesh.peerId], "the member authenticated on connecting to a listed router");
+      assert.deepEqual(session.routers.map((r) => r.peerId), [router.peerId.toString()], "a router met for a lookup is not held");
+
+      await session.discover("mcp", undefined, { timeoutMs: 500 }).catch(() => {});
+      const connected = session.node.getConnections().map((c) => c.remotePeer.toString());
+      assert.ok(!connected.includes(routerB.peerId.toString()), "the lookup's connection to the router it does not hold is released");
+      assert.ok(connected.includes(router.peerId.toString()), "the held router's connection stays");
+    } finally {
+      await session.close();
+    }
+  } finally {
+    await routerB.stop();
+  }
+});
+
 test("a resumed member adopts a rotated key before admitting routers", async () => {
   // The control plane rotated its signing key while this member was not
   // running: the routers already hold credentials under the new key, and

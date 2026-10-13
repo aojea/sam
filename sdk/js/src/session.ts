@@ -499,16 +499,62 @@ export class MeshSession {
    * A router forgets the admission with the connection it came on, and
    * js-libp2p reconnects to a relay on its own, so every new connection to a
    * router runs the handshake again: the relay's own renewal of the
-   * reservation then still passes the router's check.
+   * reservation then still passes the router's check. A router serves its
+   * DHT and gossip only to a member that authenticated on the connection,
+   * so a connection the DHT client opens to any router the control plane
+   * lists is authenticated the same way; the router holds the streams the
+   * client opened meanwhile and serves them once the handshake is done.
    */
   #keepRouterAdmissions(): void {
     this.node.addEventListener("connection:open", (evt) => {
       const conn = evt.detail;
-      if (this.#closed || !this.routers.some((r) => r.peerId === conn.remotePeer.toString())) {
+      if (this.#closed || !this.#isRouter(conn.remotePeer.toString())) {
         return;
       }
-      void authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys).catch(() => {});
+      void this.#authenticateRouter(conn).catch(() => {});
     });
+  }
+
+  /** Handshakes in flight by connection id: one per connection, whoever asks first. */
+  readonly #routerHandshakes = new Map<string, Promise<VerifiedBiscuit>>();
+
+  /**
+   * Runs the handshake on a router connection once: the connection:open
+   * listener and an explicit admission both call this, and the second waits
+   * for the first instead of running a second handshake.
+   */
+  #authenticateRouter(conn: Connection): Promise<VerifiedBiscuit> {
+    const pending = this.#routerHandshakes.get(conn.id);
+    if (pending !== undefined) {
+      return pending;
+    }
+    const run = authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys).finally(() => {
+      this.#routerHandshakes.delete(conn.id);
+    });
+    this.#routerHandshakes.set(conn.id, run);
+    return run;
+  }
+
+  /** Whether peerId is a router this member holds or one the mesh lists for it. */
+  #isRouter(peerId: string): boolean {
+    return (
+      this.routers.some((r) => r.peerId === peerId) ||
+      candidatesFromRouterInfos(this.mesh.routers, this.mesh.credential.routerAddresses).some((c) => c.peerId === peerId)
+    );
+  }
+
+  /**
+   * Closes the connections a lookup opened to routers this member does not
+   * hold: the member keeps sessions with the routers it holds and with no
+   * other, and the next lookup connects and authenticates again.
+   */
+  async #releaseLookupRouters(): Promise<void> {
+    for (const conn of this.node.getConnections()) {
+      const peerId = conn.remotePeer.toString();
+      if (this.#isRouter(peerId) && !this.routers.some((r) => r.peerId === peerId)) {
+        await this.node.hangUp(conn.remotePeer).catch(() => {});
+      }
+    }
   }
 
   /**
@@ -574,7 +620,7 @@ export class MeshSession {
           continue;
         }
         try {
-          const credential = await authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys);
+          const credential = await this.#authenticateRouter(conn);
           requireRole(credential, ROLE_ROUTER);
           const addr = connectedAddress(conn, r.peerId);
           if (this.#reserveRelay) {
@@ -625,7 +671,7 @@ export class MeshSession {
         tried.add(cand.peerId);
         try {
           const conn = await this.node.dial(cand.addresses, signal !== undefined ? { signal } : {});
-          const credential = await authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys);
+          const credential = await this.#authenticateRouter(conn);
           requireRole(credential, ROLE_ROUTER);
           const addr = connectedAddress(conn, cand.peerId);
           if (this.#reserveRelay) {
@@ -724,6 +770,8 @@ export class MeshSession {
       found = await this.node.peerRouting.findPeer(peerIdFromString(peerId), { signal: lookup });
     } catch {
       return [];
+    } finally {
+      await this.#releaseLookupRouters();
     }
     const out: Multiaddr[] = [];
     for (const ma of found.multiaddrs) {
@@ -753,7 +801,7 @@ export class MeshSession {
   /** Dials a router, runs the handshake and, its role verified, adds it to the admitted set. */
   async #admitRouter(addr: Multiaddr, signal?: AbortSignal): Promise<AdmittedRouter> {
     const conn = await this.node.dial(addr, signal !== undefined ? { signal } : {});
-    const credential = await authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys);
+    const credential = await this.#authenticateRouter(conn);
     requireRole(credential, ROLE_ROUTER);
     const peerId = conn.remotePeer.toString();
     const router = { peerId, addr: connectedAddress(conn, peerId), credential };
@@ -837,6 +885,7 @@ export class MeshSession {
       }
     } finally {
       clearTimeout(settleTimer);
+      await this.#releaseLookupRouters();
     }
     return [...found.values()];
   }
@@ -909,7 +958,7 @@ export class MeshSession {
           return;
         }
         try {
-          await authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys);
+          await this.#authenticateRouter(conn);
         } catch {
           // The router keeps the admission it has until the old credential lapses.
         }
