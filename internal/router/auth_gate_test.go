@@ -236,9 +236,15 @@ func TestRouterDHTServesAuthenticatedMembersAndTablesPeerRouters(t *testing.T) {
 		t.Fatal("a server-mode peer that never authenticated entered the routing table")
 	}
 	r.authenticatedPeers.Store(other.ID(), time.Now().Add(time.Hour))
-	r.admitPeerRouter(other.ID())
-	if kdht.RoutingTable().Find(other.ID()) == "" {
-		t.Fatal("an authenticated peer router is not in the routing table")
+	// kad-dht handles the identify event on its own schedule and drops a
+	// peer its filter refused at that instant; the federation pass admits
+	// an authenticated router again on every tick, which this stands in for.
+	deadline := time.Now().Add(5 * time.Second)
+	for r.admitPeerRouter(other.ID()); kdht.RoutingTable().Find(other.ID()) == ""; r.admitPeerRouter(other.ID()) {
+		if time.Now().After(deadline) {
+			t.Fatal("an authenticated peer router is not in the routing table")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	r.forgetPeer(other.ID())
 	if kdht.RoutingTable().Find(other.ID()) != "" {

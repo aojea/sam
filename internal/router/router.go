@@ -1365,6 +1365,12 @@ func (r *Router) connectBootstrapRouters() {
 			r.peerRouters.Store(pi.ID, true)
 			r.Host.ConnManager().Protect(pi.ID, federationTag)
 			if r.isPeerAuthenticated(pi.ID) {
+				// Already admitted; make sure the table has it. kad-dht
+				// drops a peer its filter refused, and a router that
+				// authenticated while that was being decided would
+				// otherwise stay out of the table until it authenticated
+				// again.
+				r.admitPeerRouter(pi.ID)
 				continue
 			}
 			r.authenticatePeerRouter(*pi)
