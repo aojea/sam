@@ -33,7 +33,7 @@ import { z } from "zod";
 import { AuthRejectedError, MAX_AUTH_FRAME_BYTES, MCP_PROTOCOL } from "./auth.ts";
 import { ROLE_ROUTER, loadBiscuit, verifyPeerBiscuit } from "./biscuit.ts";
 import { ROLE_NODE } from "./controlplane.ts";
-import { parseServiceTarget, serviceCID } from "./discovery.ts";
+import { parseServiceTarget, serviceKey } from "./discovery.ts";
 import { AuthFrameSchema, AuthResponseSchema } from "./gen/agentmesh_pb.ts";
 import { Identity } from "./identity.ts";
 import { LabelsNotSatisfiedError, StreamTransport, openMCPSession, requireEgressLabels, requireLabels } from "./mcp.ts";
@@ -119,14 +119,12 @@ function frame(target: string, biscuit = callerBiscuit): Uint8Array {
   return toBinary(AuthFrameSchema, create(AuthFrameSchema, { biscuit, targetService: target }));
 }
 
-test("service keys match internal/node/service.go", async () => {
+test("service keys match api.ServiceKey", async () => {
   const fixture = JSON.parse(readFileSync(new URL("../../testdata/service_keys.json", import.meta.url), "utf8")) as {
     services: Array<{ type: "mcp" | "inference" | "a2a"; name: string; cid: string; multihash: string }>;
   };
   for (const s of fixture.services) {
-    const cid = await serviceCID(s.type, s.name);
-    assert.equal(cid.toString(), s.cid, `${s.type}:${s.name}`);
-    assert.equal(Buffer.from(cid.multihash.bytes).toString("hex"), s.multihash);
+    assert.equal(Buffer.from(await serviceKey(s.type, s.name)).toString("hex"), s.multihash, `${s.type}:${s.name}`);
   }
   assert.deepEqual(parseServiceTarget("mcp://calc"), { type: "mcp", name: "calc" });
   assert.deepEqual(parseServiceTarget("egress://api.github.com"), { type: "egress", name: "api.github.com" });

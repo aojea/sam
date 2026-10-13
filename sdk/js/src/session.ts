@@ -32,8 +32,8 @@ import { ROLE_ROUTER, attenuateBiscuit, requireRole, sealBiscuit, type VerifiedB
 import { ROLE_NODE } from "./controlplane.ts";
 import { encodeAuthFrame } from "./credential.ts";
 import { canonicalPeerId } from "./identity.ts";
-import { isServiceType, parseServiceTarget, serviceCID } from "./discovery.ts";
-import type { RouterGoAway, RouterInfo, TaskAuthorizationRuleSchema } from "./gen/agentmesh_pb.ts";
+import { findPeer, findProviders, isServiceType, parseServiceTarget, serviceKey, type DirectoryRouter } from "./discovery.ts";
+import type { PeerRecord, RouterGoAway, RouterInfo, TaskAuthorizationRuleSchema } from "./gen/agentmesh_pb.ts";
 import { createMeshHost, listenThroughRelay, type MeshHost, type MeshHostOptions, type RelayListener } from "./host.ts";
 import { openMCPSession, requireEgressLabels, type MCPSession, type MCPSessionOptions } from "./mcp.ts";
 import type { AgentMesh, ControlPlaneSync } from "./mesh.ts";
@@ -499,16 +499,12 @@ export class MeshSession {
    * A router forgets the admission with the connection it came on, and
    * js-libp2p reconnects to a relay on its own, so every new connection to a
    * router runs the handshake again: the relay's own renewal of the
-   * reservation then still passes the router's check. A router serves its
-   * DHT and gossip only to a member that authenticated on the connection,
-   * so a connection the DHT client opens to any router the control plane
-   * lists is authenticated the same way; the router holds the streams the
-   * client opened meanwhile and serves them once the handshake is done.
+   * reservation then still passes the router's check.
    */
   #keepRouterAdmissions(): void {
     this.node.addEventListener("connection:open", (evt) => {
       const conn = evt.detail;
-      if (this.#closed || !this.#isRouter(conn.remotePeer.toString())) {
+      if (this.#closed || !this.routers.some((r) => r.peerId === conn.remotePeer.toString())) {
         return;
       }
       void this.#authenticateRouter(conn).catch(() => {});
@@ -535,26 +531,12 @@ export class MeshSession {
     return run;
   }
 
-  /** Whether peerId is a router this member holds or one the mesh lists for it. */
-  #isRouter(peerId: string): boolean {
-    return (
-      this.routers.some((r) => r.peerId === peerId) ||
-      candidatesFromRouterInfos(this.mesh.routers, this.mesh.credential.routerAddresses).some((c) => c.peerId === peerId)
-    );
-  }
-
-  /**
-   * Closes the connections a lookup opened to routers this member does not
-   * hold: the member keeps sessions with the routers it holds and with no
-   * other, and the next lookup connects and authenticates again.
-   */
-  async #releaseLookupRouters(): Promise<void> {
-    for (const conn of this.node.getConnections()) {
-      const peerId = conn.remotePeer.toString();
-      if (this.#isRouter(peerId) && !this.routers.some((r) => r.peerId === peerId)) {
-        await this.node.hangUp(conn.remotePeer).catch(() => {});
-      }
-    }
+  /** The held routers as the directory client asks them, each with its open connection. */
+  #directoryRouters(): DirectoryRouter[] {
+    return this.routers.map((r) => ({
+      peerId: r.peerId,
+      connection: () => this.node.getConnections(peerIdFromString(r.peerId)).find((c) => c.status === "open"),
+    }));
   }
 
   /**
@@ -758,24 +740,25 @@ export class MeshSession {
   }
 
   /**
-   * The addresses the routers' DHT knows for a peer, its relayed ones
-   * through routers this member has admitted by then: a relay opens a
-   * circuit only for a source it authenticated, so a router met this way is
-   * dialed and passed the handshake first, and joins the admitted set.
+   * The addresses the directory knows for a peer, its relayed ones through
+   * routers this member has admitted by then: a relay opens a circuit only
+   * for a source it authenticated, so a router met this way is dialed and
+   * passed the handshake first, and joins the admitted set.
    */
   async #routedAddresses(peerId: string, signal?: AbortSignal): Promise<Multiaddr[]> {
     const lookup = signal ?? AbortSignal.timeout(PEER_ROUTING_TIMEOUT_MS);
-    let found: { multiaddrs: Multiaddr[] };
+    let found: PeerRecord | undefined;
     try {
-      found = await this.node.peerRouting.findPeer(peerIdFromString(peerId), { signal: lookup });
+      found = await findPeer(this.#directoryRouters(), peerId, lookup);
     } catch {
       return [];
-    } finally {
-      await this.#releaseLookupRouters();
+    }
+    if (found === undefined) {
+      return [];
     }
     const out: Multiaddr[] = [];
-    for (const ma of found.multiaddrs) {
-      const text = ma.toString();
+    for (const text of found.addrs) {
+      const ma = multiaddr(text);
       const circuit = text.indexOf("/p2p-circuit");
       if (circuit === -1) {
         out.push(targetPeerOf(ma) === undefined ? ma.encapsulate(`/p2p/${peerId}`) : ma);
@@ -841,53 +824,33 @@ export class MeshSession {
   }
 
   /**
-   * Looks the DHT up for peers offering a service: `"mcp://calc"`, the
+   * Asks the directory for peers offering a service: `"mcp://calc"`, the
    * same string callTool and request take, or a type alone (`"mcp"`) for
-   * every service of that type, or (type, name). Bounded by the timeout;
-   * the DHT walk itself is what agentmesh-node's discover does.
+   * every service of that type, or (type, name). A router this member holds
+   * answers; bounded by the timeout.
    */
   async discover(service: string, name?: string, options: { timeoutMs?: number; limit?: number } = {}): Promise<DiscoveredProvider[]> {
     const target = service.includes("://") ? parseServiceTarget(service) : { type: service, name };
     if (!isServiceType(target.type)) {
       throw new Error(`service type must be mcp, inference, a2a or egress, got ${JSON.stringify(target.type)}`);
     }
-    const cid = await serviceCID(target.type, target.name);
-    const ac = new AbortController();
-    const signal = AbortSignal.any([ac.signal, AbortSignal.timeout(options.timeoutMs ?? DISCOVERY_TIMEOUT_MS)]);
-    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+    const key = await serviceKey(target.type, target.name);
+    const signal = AbortSignal.timeout(options.timeoutMs ?? DISCOVERY_TIMEOUT_MS);
+    const limit = options.limit ?? 20;
     const found = new Map<string, DiscoveredProvider>();
-    try {
-      for await (const provider of this.node.contentRouting.findProviders(cid, { signal })) {
-        const peerId = provider.id.toString();
-        if (peerId === this.peerId) {
-          continue;
-        }
-        const entry = found.get(peerId) ?? { peerId, addrs: [] };
-        for (const ma of provider.multiaddrs) {
-          const text = ma.toString();
-          if (!entry.addrs.includes(text)) {
-            entry.addrs.push(text);
-          }
-        }
-        found.set(peerId, entry);
-        if (found.size >= (options.limit ?? 20)) {
-          break;
-        }
-        if (settleTimer === undefined) {
-          settleTimer = setTimeout(() => ac.abort(), 200);
-          settleTimer.unref?.();
+    for (const record of await findProviders(this.#directoryRouters(), key, limit, signal)) {
+      if (record.peerId === this.peerId) {
+        continue;
+      }
+      const entry = found.get(record.peerId) ?? { peerId: record.peerId, addrs: [] };
+      for (const text of record.addrs) {
+        if (!entry.addrs.includes(text)) {
+          entry.addrs.push(text);
         }
       }
-    } catch (err) {
-      // The lookup ended on its deadline; what was found so far is the answer.
-      if (!(err instanceof Error && err.name === "TimeoutError") && !signal.aborted) {
-        throw err;
-      }
-    } finally {
-      clearTimeout(settleTimer);
-      await this.#releaseLookupRouters();
+      found.set(record.peerId, entry);
     }
-    return [...found.values()];
+    return [...found.values()].slice(0, limit);
   }
 
   /**
@@ -1409,7 +1372,7 @@ export async function joinMesh(mesh: AgentMesh, options: JoinOptions = {}): Prom
   }
 
   const banned = new BanSet();
-  const node = await createMeshHost(mesh.identity, { ...options, banned, dhtReplication: mesh.dhtReplication });
+  const node = await createMeshHost(mesh.identity, { ...options, banned });
   const authenticatedPeers = new Map<string, Date>();
   let session: MeshSession | undefined;
   try {

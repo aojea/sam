@@ -35,7 +35,6 @@ import { AUTH_PROTOCOL, authenticateWithPeer, authStreamHandler } from "./auth.t
 import { ROLE_ROUTER, loadBiscuit, verifyPeerBiscuit } from "./biscuit.ts";
 import { ROLE_NODE } from "./controlplane.ts";
 import { credentialPredatesRotation } from "./credential.ts";
-import { DEFAULT_DHT_REPLICATION } from "./discovery.ts";
 import {
   AuthFrameSchema,
   BootstrapEnrollRequestSchema,
@@ -81,8 +80,6 @@ class SigningKey {
 class FakeControlPlane {
   keys: SigningKey[];
   banned: string[] = [];
-  /** The replication /info publishes; undefined is a control plane that predates the field. */
-  replication: number | undefined;
   refreshes = 0;
   constructor(initial: SigningKey) {
     this.keys = [initial];
@@ -124,7 +121,6 @@ class FakeControlPlane {
             create(ControlPlaneInfoResponseSchema, {
               routerAddresses: [routerAddr],
               bannedPeerIds: this.banned,
-              ...(this.replication !== undefined ? { directory: { replication: this.replication } } : {}),
             }),
           ),
         );
@@ -222,25 +218,6 @@ test("a mesh event verifies only under a trusted key and only when fresh", () =>
   assert.equal(verifyMeshEvent(bannedByCID, [key.pub], now)?.peerId, target);
   const bannedNobody = sign(create(MeshEventSchema, { type: MeshEvent_Type.BANNED, peerId: "not-a-peer", eventTime: timestampFromMs(now.getTime()) }));
   assert.equal(verifyMeshEvent(bannedNobody, [key.pub], now), undefined, "not a peer id");
-});
-
-test("a pull takes the mesh's replication from /info, and the default when it publishes none", async () => {
-  const mesh = await AgentMesh.enroll({ controlPlaneUrl: "http://127.0.0.1:1", bootstrapToken: "sbt", fetch: cp.fetch });
-  assert.equal(mesh.dhtReplication, DEFAULT_DHT_REPLICATION, "before any pull");
-  cp.replication = 5;
-  try {
-    await mesh.syncControlPlane();
-    assert.equal(mesh.dhtReplication, 5);
-    // A control plane that stops publishing it, or publishes nothing usable, leaves the last value.
-    cp.replication = 0;
-    await mesh.syncControlPlane();
-    assert.equal(mesh.dhtReplication, 5);
-    cp.replication = undefined;
-    await mesh.syncControlPlane();
-    assert.equal(mesh.dhtReplication, 5);
-  } finally {
-    cp.replication = undefined;
-  }
 });
 
 test("a pull learns a key rotation and refreshes the credential under the new key", async () => {

@@ -21,14 +21,12 @@
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { circuitRelayTransport } from "@libp2p/circuit-relay-v2";
 import { privateKeyFromProtobuf } from "@libp2p/crypto/keys";
-import { gossipsub, type GossipSub } from "@libp2p/gossipsub";
+import { gossipsub, type GossipSub, type GossipSubComponents } from "@libp2p/gossipsub";
 import { identify, identifyPush } from "@libp2p/identify";
 import type { Libp2p, PeerId } from "@libp2p/interface";
-import { kadDHT, passthroughMapper } from "@libp2p/kad-dht";
 import { ping } from "@libp2p/ping";
 import type { Multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p, type Libp2pOptions } from "libp2p";
-import { DEFAULT_DHT_REPLICATION, DHT_PROTOCOL } from "./discovery.ts";
 import type { Identity } from "./identity.ts";
 import { connectionEncrypters, transports } from "./platform/transports.ts";
 
@@ -47,14 +45,27 @@ export interface MeshHostOptions {
   banned?: { has(peerId: string): boolean };
   /** The resolver for `/dnsaddr` and `/dns*` addresses; the system's by default. */
   dns?: Libp2pOptions["dns"];
-  /**
-   * The mesh's replication factor, from /info (AgentMesh.dhtReplication):
-   * kademlia's k on this member. A record lives on that many routers, the
-   * closest to its key, and a lookup asks those, that many at a time. The
-   * same figure on every member of a mesh, which is why it comes from the
-   * control plane; DEFAULT_DHT_REPLICATION when it published none.
-   */
-  dhtReplication?: number;
+}
+
+/** The floodsub protocol, the one a member speaks (see leafPubsub). */
+const FLOODSUB_PROTOCOL = "/floodsub/1.0.0";
+
+/**
+ * A member is a leaf of the gossip: it speaks floodsub only, so a router
+ * delivers every control plane event to it outright and it takes no part
+ * in the routers' gossipsub mesh, its heartbeats, grafts and peer exchange.
+ * The gossipsub implementation serves as the floodsub one, told to register
+ * that protocol alone; the message envelope is the same.
+ */
+function leafPubsub(): (components: GossipSubComponents) => GossipSub {
+  // StrictSign, as every Go component pins it: the pubsub envelope is
+  // signed by the author, and the event inside by the control plane.
+  const build = gossipsub({ globalSignaturePolicy: "StrictSign", allowPublishToZeroTopicPeers: true, emitSelf: false });
+  return (components) => {
+    const ps = build(components);
+    ps.protocols = [FLOODSUB_PROTOCOL];
+    return ps;
+  };
 }
 
 /** The services a mesh host runs; `services.pubsub` carries the control plane's events. */
@@ -63,7 +74,6 @@ export type MeshHost = Libp2p<{ pubsub: GossipSub }>;
 export async function createMeshHost(identity: Identity, options: MeshHostOptions = {}): Promise<MeshHost> {
   const banned = options.banned ?? { has: () => false };
   const denyBanned = (peerId: PeerId) => banned.has(peerId.toString());
-  const replication = options.dhtReplication !== undefined && options.dhtReplication >= 1 ? Math.floor(options.dhtReplication) : DEFAULT_DHT_REPLICATION;
   return createLibp2p({
     privateKey: privateKeyFromProtobuf(identity.toLibp2pPrivateKey()),
     addresses: { listen: options.listenAddrs ?? [] },
@@ -95,14 +105,8 @@ export async function createMeshHost(identity: Identity, options: MeshHostOption
       // them, where the member is reached now, as agentmesh-node does.
       identifyPush: identifyPush(),
       ping: ping(),
-      // A client of the mesh DHT: it looks providers up and does not hold
-      // records. Peers keep their private addresses; a mesh member often
-      // is one, and the router relays to it.
-      dht: kadDHT({ protocol: DHT_PROTOCOL, clientMode: true, peerInfoMapper: passthroughMapper, initialQuerySelfInterval: 20, kBucketSize: replication, alpha: replication }),
       // The control plane's events reach members through the routers.
-      // StrictSign, as every Go component pins it: the pubsub envelope is
-      // signed by the author, and the event inside by the control plane.
-      pubsub: gossipsub({ globalSignaturePolicy: "StrictSign", allowPublishToZeroTopicPeers: true, emitSelf: false }),
+      pubsub: leafPubsub(),
     },
   });
 }

@@ -28,6 +28,7 @@ import type { Libp2p } from "@libp2p/interface";
 import { tcp } from "@libp2p/tcp";
 import { tls } from "@libp2p/tls";
 import { lpStream } from "@libp2p/utils";
+import { DIRECTORY_PROTOCOL } from "./discovery.ts";
 import { multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p } from "libp2p";
 import assert from "node:assert/strict";
@@ -38,7 +39,7 @@ import { after, before, test } from "node:test";
 import { AUTH_HANDLER_OPTIONS, AUTH_PROTOCOL, AuthRejectedError, GOAWAY_MAX_RETRY_AFTER_MS, GOAWAY_PROTOCOL, ROUTER_SHUN_DURATION_MS, authenticateWithPeer, authStreamHandler, clampGoAwayRetryAfterMs } from "./auth.ts";
 import { BiscuitVerificationError, ROLE_ROUTER, loadBiscuit, verifyPeerBiscuit } from "./biscuit.ts";
 import { ROLE_NODE } from "./controlplane.ts";
-import { BootstrapEnrollRequestSchema, BootstrapEnrollResponseSchema, ControlPlaneInfoResponseSchema, EnrollmentStatus, KeysResponseSchema, AuthFrameSchema, RouterGoAwaySchema, RouterGoAway_Reason, RouterInfoSchema, TokenRefreshRequestSchema, TokenRefreshResponseSchema, type RouterInfo } from "./gen/agentmesh_pb.ts";
+import { BootstrapEnrollRequestSchema, BootstrapEnrollResponseSchema, ControlPlaneInfoResponseSchema, EnrollmentStatus, KeysResponseSchema, AuthFrameSchema, DirectoryRequestSchema, DirectoryResponseSchema, PeerRecordSchema, RouterGoAwaySchema, RouterGoAway_Reason, RouterInfoSchema, TokenRefreshRequestSchema, TokenRefreshResponseSchema, type RouterInfo } from "./gen/agentmesh_pb.ts";
 import { Identity } from "./identity.ts";
 import { HTTP_HANDLER_OPTIONS, HTTP_PROTOCOL, a2aEndpoint, httpIngressHandler } from "./libp2p-http.ts";
 import { LabelsNotSatisfiedError } from "./mcp.ts";
@@ -405,13 +406,11 @@ test("a member on one router reaches a member on another", async () => {
   }
 });
 
-test("a connection to a listed router is authenticated, and released after a lookup", async () => {
-  // The DHT client connects to whichever listed router kademlia puts closest
-  // to a key. A router serves its DHT only to a member that authenticated
-  // on the connection, so the handshake runs on connection:open for any
-  // listed router, held or not; a router met this way is not held, and the
-  // connection is closed once the lookup ends.
-  const routerB = await createLibp2p({
+test("discovery asks a held router over the directory protocol and connects to no other", async () => {
+  // A member keeps no DHT: a lookup is one request to a router it holds,
+  // which answers from the routers' directory. A second listed router is
+  // never connected to for it.
+  const otherRouter = await createLibp2p({
     addresses: { listen: ["/ip4/127.0.0.1/tcp/0"] },
     transports: [tcp()],
     connectionEncrypters: [tls()],
@@ -419,31 +418,39 @@ test("a connection to a listed router is authenticated, and released after a loo
     services: { identify: identify(), relay: circuitRelayServer() },
   });
   try {
-    const handshakesB: string[] = [];
-    await routerB.handle(AUTH_PROTOCOL, authStreamHandler({ ownBiscuit: () => mint(routerB.peerId.toString(), ROLE_ROUTER), trustedKeys: () => [cpKey], onAuthenticated: (p) => handshakesB.push(p) }));
-    const routerBAddr = (routerB.getMultiaddrs()[0] as ReturnType<typeof multiaddr>).toString();
-    const mesh = await AgentMesh.enroll({ controlPlaneUrl: "http://127.0.0.1:1", bootstrapToken: "sbt", fetch: fakeControlPlane([routerAddr, routerBAddr]) });
+    const otherAddr = (otherRouter.getMultiaddrs()[0] as ReturnType<typeof multiaddr>).toString();
+    const provider = "12D3KooWA4Xop1JaT3MHxwYMkCepYsv4iPVopMXwCz5iHYdBfeSB";
+    const asked: string[] = [];
+    await router.handle(DIRECTORY_PROTOCOL, (stream) => {
+      void (async () => {
+        const lp = lpStream(stream, { maxDataLength: 64 * 1024 });
+        const req = fromBinary(DirectoryRequestSchema, (await lp.read()).subarray());
+        asked.push(req.request.case ?? "");
+        const resp = create(DirectoryResponseSchema, {});
+        if (req.request.case === "findProviders") {
+          resp.providers = [create(PeerRecordSchema, { peerId: provider, addrs: [`${routerAddr}/p2p-circuit/p2p/${provider}`] })];
+        } else if (req.request.case === "findPeer" && req.request.value.peerId === provider) {
+          resp.peer = create(PeerRecordSchema, { peerId: provider, addrs: [`${routerAddr}/p2p-circuit/p2p/${provider}`] });
+        }
+        await lp.write(toBinary(DirectoryResponseSchema, resp));
+        await stream.close();
+      })();
+    });
+    const mesh = await AgentMesh.enroll({ controlPlaneUrl: "http://127.0.0.1:1", bootstrapToken: "sbt", fetch: fakeControlPlane([routerAddr, otherAddr]) });
     const session = await mesh.join({ refreshLeadMs: 0, routerAddresses: [routerAddr], reserveRelay: false });
     try {
-      assert.deepEqual(session.routers.map((r) => r.peerId), [router.peerId.toString()]);
-
-      await session.node.dial(multiaddr(routerBAddr));
-      const deadline = Date.now() + 10_000;
-      while (handshakesB.length === 0 && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 20));
-      }
-      assert.deepEqual(handshakesB, [mesh.peerId], "the member authenticated on connecting to a listed router");
-      assert.deepEqual(session.routers.map((r) => r.peerId), [router.peerId.toString()], "a router met for a lookup is not held");
-
-      await session.discover("mcp", undefined, { timeoutMs: 500 }).catch(() => {});
+      const found = await session.discover("mcp", undefined, { timeoutMs: 5_000 });
+      assert.deepEqual(found, [{ peerId: provider, addrs: [`${routerAddr}/p2p-circuit/p2p/${provider}`] }]);
+      assert.deepEqual(session.dialTargets(provider).addrs.map(String), [`${routerAddr}/p2p-circuit/p2p/${provider}`], "the provider is reached through the held router");
+      assert.deepEqual(asked, ["findProviders"]);
       const connected = session.node.getConnections().map((c) => c.remotePeer.toString());
-      assert.ok(!connected.includes(routerB.peerId.toString()), "the lookup's connection to the router it does not hold is released");
-      assert.ok(connected.includes(router.peerId.toString()), "the held router's connection stays");
+      assert.ok(!connected.includes(otherRouter.peerId.toString()), "the member connected to a router it does not hold");
     } finally {
       await session.close();
+      await router.unhandle(DIRECTORY_PROTOCOL);
     }
   } finally {
-    await routerB.stop();
+    await otherRouter.stop();
   }
 });
 

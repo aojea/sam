@@ -12,23 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Service discovery as agentmesh-node does it (internal/node/service.go): a
-// provider record in the mesh DHT under a CID derived from the service key.
+// The mesh's directory as a member uses it, as agentmesh-node does
+// (internal/node/directory_client.go): the member keeps no DHT and asks the
+// routers it holds over /mesh/directory/1.0.0, one DirectoryRequest per
+// stream, one DirectoryResponse back. A request goes to one held router and
+// to the next when it fails. The routers run the lookup across their own
+// DHT. A key is the sha256 multihash of "mesh:service:<type>[:<name>]" for
+// a service and of "mesh:peer:<peer_id>" for a member.
 
-import { CID } from "multiformats/cid";
-import * as raw from "multiformats/codecs/raw";
+import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
+import type { Connection } from "@libp2p/interface";
+import { lpStream } from "@libp2p/utils";
 import { sha256 } from "multiformats/hashes/sha2";
+import {
+  DirectoryRequestSchema,
+  DirectoryResponseSchema,
+  type DirectoryRequest,
+  type DirectoryResponse,
+  type PeerRecord,
+} from "./gen/agentmesh_pb.ts";
 
-/** The DHT protocol, go-libp2p-kad-dht with dht.ProtocolPrefix("/mesh"). */
-export const DHT_PROTOCOL = "/mesh/kad/1.0.0";
+/** api.DirectoryProtocolID. */
+export const DIRECTORY_PROTOCOL = "/mesh/directory/1.0.0";
 
-/**
- * How many routers hold each record and answer each lookup when the control
- * plane publishes no directory parameters on /info: api.DefaultDHTReplication.
- * A member reads the mesh's value from /info (AgentMesh.dhtReplication) and
- * runs its DHT client on it (createMeshHost), as agentmesh-node does.
- */
-export const DEFAULT_DHT_REPLICATION = 3;
+const REQUEST_TIMEOUT_MS = 10_000;
+const MAX_DIRECTORY_MESSAGE_BYTES = 64 * 1024;
+export const DEFAULT_LIMIT = 20;
 
 export type ServiceType = "mcp" | "inference" | "a2a" | "egress";
 
@@ -36,14 +45,23 @@ export function isServiceType(value: unknown): value is ServiceType {
   return value === "mcp" || value === "inference" || value === "a2a" || value === "egress";
 }
 
-/** The DHT key of a service: by type and name, or by type alone when name is omitted. */
-export async function serviceCID(type: ServiceType, name?: string): Promise<CID> {
-  const key = ["mesh:service", type, ...(name !== undefined && name !== "" ? [name] : [])].join(":");
-  return CID.createV1(raw.code, await sha256.digest(new TextEncoder().encode(key)));
+/** The sha256 multihash of a name: the two-byte header and the digest. */
+async function directoryKey(name: string): Promise<Uint8Array> {
+  return (await sha256.digest(new TextEncoder().encode(name))).bytes;
+}
+
+/** The directory key of a service type, or of one named service of that type (api.ServiceKey). */
+export async function serviceKey(type: ServiceType, name?: string): Promise<Uint8Array> {
+  return directoryKey(["mesh:service", type, ...(name !== undefined && name !== "" ? [name] : [])].join(":"));
+}
+
+/** The directory key a member announces where it is reached under (api.PeerKey). */
+export async function peerKey(peerId: string): Promise<Uint8Array> {
+  return directoryKey(`mesh:peer:${peerId}`);
 }
 
 /** Splits "mcp://calculator" into its type and name; "" is the node's own catalog. */
-export function parseServiceTarget(target: string): { type: ServiceType | "" ; name: string } {
+export function parseServiceTarget(target: string): { type: ServiceType | ""; name: string } {
   if (target === "") {
     return { type: "", name: "" };
   }
@@ -52,4 +70,90 @@ export function parseServiceTarget(target: string): { type: ServiceType | "" ; n
     throw new Error(`service target must look like mcp://<name>, got ${JSON.stringify(target)}`);
   }
   return { type: m[1] as ServiceType, name: m[2] as string };
+}
+
+/** No held router answered a directory request. */
+export class DirectoryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DirectoryError";
+  }
+}
+
+/** A router connection a request goes over. */
+export interface DirectoryRouter {
+  peerId: string;
+  connection(): Connection | undefined;
+}
+
+/** One request to one router, answered or thrown. */
+async function ask(conn: Connection, req: DirectoryRequest, signal: AbortSignal): Promise<DirectoryResponse> {
+  const stream = await conn.newStream(DIRECTORY_PROTOCOL, { signal });
+  try {
+    const lp = lpStream(stream, { maxDataLength: MAX_DIRECTORY_MESSAGE_BYTES });
+    await lp.write(toBinary(DirectoryRequestSchema, req), { signal });
+    const resp = fromBinary(DirectoryResponseSchema, (await lp.read({ signal })).subarray());
+    if (resp.error !== "") {
+      throw new DirectoryError(resp.error);
+    }
+    return resp;
+  } finally {
+    await stream.close().catch(() => stream.abort(new Error("directory stream not closed")));
+  }
+}
+
+/**
+ * Sends req to the held routers in turn until one answers. A router that
+ * is restarting costs the request a timeout, not an answer.
+ */
+export async function request(routers: DirectoryRouter[], req: DirectoryRequest, signal?: AbortSignal): Promise<DirectoryResponse> {
+  let last: unknown;
+  let asked = 0;
+  for (const router of routers) {
+    const conn = router.connection();
+    if (conn === undefined) {
+      continue;
+    }
+    asked++;
+    const bounded = signal === undefined ? AbortSignal.timeout(REQUEST_TIMEOUT_MS) : AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);
+    try {
+      return await ask(conn, req, bounded);
+    } catch (err) {
+      last = err;
+      if (signal?.aborted === true) {
+        break;
+      }
+    }
+  }
+  if (asked === 0) {
+    throw new DirectoryError("no held router to ask");
+  }
+  throw new DirectoryError(`no held router answered: ${last instanceof Error ? last.message : String(last)}`);
+}
+
+/**
+ * Announces this member as a provider of key, reached at addrs, to a held
+ * router; the router keeps the record and places it on the routers closest
+ * to the key.
+ */
+export async function provide(routers: DirectoryRouter[], key: Uint8Array, addrs: string[], signal?: AbortSignal): Promise<void> {
+  await request(routers, create(DirectoryRequestSchema, { request: { case: "provide", value: { key, addrs } } }), signal);
+}
+
+/** Who provides key, up to limit, with their addresses; empty when nobody does. */
+export async function findProviders(routers: DirectoryRouter[], key: Uint8Array, limit = DEFAULT_LIMIT, signal?: AbortSignal): Promise<PeerRecord[]> {
+  const resp = await request(routers, create(DirectoryRequestSchema, { request: { case: "findProviders", value: { key, limit: Math.max(limit, 1) } } }), signal);
+  return resp.providers.slice(0, limit);
+}
+
+/**
+ * Where a peer is reached: its addresses, each ending in its peer ID,
+ * relayed ones included. Undefined when nobody knows the peer.
+ */
+export async function findPeer(routers: DirectoryRouter[], peerId: string, signal?: AbortSignal): Promise<PeerRecord | undefined> {
+  const resp = await request(routers, create(DirectoryRequestSchema, { request: { case: "findPeer", value: { peerId } } }), signal);
+  if (resp.peer === undefined || resp.peer.peerId !== peerId) {
+    return undefined;
+  }
+  return resp.peer;
 }

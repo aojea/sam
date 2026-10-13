@@ -109,7 +109,7 @@ export {
   type GoAwayServerOptions,
 } from "./auth.ts";
 export { createMeshHost, type MeshHost, type MeshHostOptions } from "./host.ts";
-export { DHT_PROTOCOL, isServiceType, parseServiceTarget, serviceCID, type ServiceType } from "./discovery.ts";
+export { DIRECTORY_PROTOCOL, DirectoryError, isServiceType, parseServiceTarget, peerKey, serviceKey, type ServiceType } from "./discovery.ts";
 export { LabelsNotSatisfiedError, StreamTransport, openMCPSession, requireEgressLabels, requireLabels, type MCPSession, type MCPSessionOptions } from "./mcp.ts";
 export { AuthorizationError, authorizeCaller, type AuthorizeRequest, type ProviderAuthorizerOptions } from "./authorizer.ts";
 export {
