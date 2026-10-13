@@ -54,7 +54,7 @@ from .controlplane import (
     verify_keys_response,
 )
 from .credential import MeshCredential, decode_auth_response, encode_auth_frame
-from .discovery import DHT_PROTOCOL, DiscoveredProvider, find_providers, parse_service_target, service_key
+from .discovery import DIRECTORY_PROTOCOL, DiscoveredProvider, DirectoryError, find_providers, parse_service_target, peer_key, service_key
 from .httpx_transport import MESH_PATH_PREFIX, MeshTransport, split_mesh_url
 from .identity import Identity, canonical_peer_id, libp2p_public_key, peer_id_from_public_key, verify_ed25519
 from .libp2p_http import (
@@ -125,7 +125,8 @@ __all__ = [
     "CredentialRetiredError",
     "DEFAULT_A2A_NAME",
     "DEFAULT_ROUTERS",
-    "DHT_PROTOCOL",
+    "DIRECTORY_PROTOCOL",
+    "DirectoryError",
     "DiscoveredProvider",
     "Enrollment",
     "EnrollmentRejectedError",
@@ -207,6 +208,7 @@ __all__ = [
     "revocations_challenge",
     "seal_biscuit",
     "select_routers",
+    "peer_key",
     "service_key",
     "rewrite_agent_card",
     "split_mesh_url",

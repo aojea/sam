@@ -27,10 +27,8 @@ import trio
 from libp2p.abc import IHost
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
-from libp2p.pubsub.gossipsub import PROTOCOL_ID as GOSSIPSUB_V10
-from libp2p.pubsub.gossipsub import PROTOCOL_ID_V11 as GOSSIPSUB_V11
-from libp2p.pubsub.gossipsub import PROTOCOL_ID_V12 as GOSSIPSUB_V12
-from libp2p.pubsub.gossipsub import GossipSub
+from libp2p.pubsub.floodsub import PROTOCOL_ID as FLOODSUB
+from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.tools.anyio_service import background_trio_service
 from mcp import ClientSession
@@ -125,13 +123,13 @@ def canonical_peer_ids(ids: Sequence[str]) -> list[str]:
 
 
 class _MeshsubNoise(logging.Filter):
-    """py-libp2p's pubsub opens a meshsub stream to every new peer and the host
-    logs an error for each one that does not answer. Peers that leave during
-    that exchange and members without pubsub are ordinary on the mesh."""
+    """py-libp2p's pubsub opens a stream to every new peer and the host logs
+    an error for each one that does not answer. Peers that leave during that
+    exchange and members without pubsub are ordinary on the mesh."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
-        return not ("Failed to open stream" in message and "/meshsub/" in message)
+        return not ("Failed to open stream" in message and ("/meshsub/" in message or "/floodsub/" in message))
 
 
 _MESHSUB_NOISE = _MeshsubNoise()
@@ -577,15 +575,14 @@ class MeshSession:
         return out
 
     async def _routed_addresses(self, target: ID) -> tuple[list[multiaddr.Multiaddr], list[multiaddr.Multiaddr]]:
-        """What the routers' DHT knows for a peer: its direct addresses this
+        """What the directory knows for a peer: its direct addresses this
         host can dial, without the peer suffix, and the relays it reserved on
         that are not admitted routers of this member; those the caller tried
         already."""
         direct: list[multiaddr.Multiaddr] = []
         relays: list[multiaddr.Multiaddr] = []
-        seeds = [ID.from_base58(r.peer_id) for r in self.routers]
         suffix = f"/p2p/{target}"
-        for ma in await find_peer(self.host, target, seeds, self.mesh.dht_replication, admit=self._admit_for_lookup):
+        for ma in await find_peer(self.host, self._directory_routers(), target):
             text = str(ma)
             if "/p2p-circuit" not in text:
                 try:
@@ -603,14 +600,9 @@ class MeshSession:
             relays.append(relay_addr)
         return direct, relays
 
-    async def _admit_for_lookup(self, peer_id: ID) -> None:
-        """Runs the handshake with a router a lookup is about to query. A
-        router this member holds is authenticated already; any other serves
-        the query only once this member authenticated on the connection the
-        walk just opened, and the walk closes that connection when it ends."""
-        if any(r.peer_id == str(peer_id) for r in self.routers):
-            return
-        await _authenticate_router(self.host, self.mesh, peer_id)
+    def _directory_routers(self) -> list[ID]:
+        """The routers this member holds, which answer its directory requests."""
+        return [ID.from_base58(r.peer_id) for r in self.routers]
 
     async def _admit_router(self, addr: multiaddr.Multiaddr) -> AdmittedRouter:
         """Dials a router, runs the handshake and, its role verified, adds it
@@ -650,15 +642,14 @@ class MeshSession:
         return await authenticate_with_peer(self.host, peer_id, self.mesh.auth_frame(), self.mesh.credential.control_plane_keys)
 
     async def discover(self, service: str, name: str | None = None, limit: int = 20) -> list[DiscoveredProvider]:
-        """Looks the DHT up for peers offering a service: "mcp://calc", the same
-        string call_tool and request take, or a type alone ("mcp") for every
-        service of that type, or (type, name). The routers we are connected to
-        seed the walk."""
+        """Asks the directory for peers offering a service: "mcp://calc", the
+        same string call_tool and request take, or a type alone ("mcp") for
+        every service of that type, or (type, name). A router this member
+        holds answers."""
         service_type, service_name = parse_service_target(service) if "://" in service else (service, name)
         if service_type not in ("mcp", "inference", "a2a", "egress"):
             raise ValueError(f"service type must be mcp, inference, a2a or egress, got {service_type!r}")
-        seeds = [ID.from_base58(r.peer_id) for r in self.routers]
-        return await find_providers(self.host, service_key(service_type, service_name), seeds, limit, self.mesh.dht_replication, admit=self._admit_for_lookup)
+        return await find_providers(self.host, self._directory_routers(), service_key(service_type, service_name), limit)
 
     def open_mcp(
         self,
@@ -1089,13 +1080,15 @@ async def join_mesh(
     )
     host.set_stream_handler(STOP_PROTOCOL, stop_stream_handler(host))
     # Built before any connection: Pubsub learns of peers through a notifee it
-    # registers here. StrictSign, as every Go component pins it.
-    gossipsub = GossipSub(protocols=[GOSSIPSUB_V12, GOSSIPSUB_V11, GOSSIPSUB_V10], degree=6, degree_low=4, degree_high=12)
-    pubsub = Pubsub(host, gossipsub, strict_signing=True)
+    # registers here. StrictSign, as every Go component pins it. A member is
+    # a leaf of the gossip: it speaks floodsub, so a router delivers every
+    # event to it outright and it takes no part in the routers' gossipsub mesh.
+    floodsub = FloodSub(protocols=[FLOODSUB])
+    pubsub = Pubsub(host, floodsub, strict_signing=True)
     logging.getLogger("libp2p.host.basic_host").addFilter(_MESHSUB_NOISE)
 
     try:
-        async with host.run(listen_addrs=listen), background_trio_service(pubsub), background_trio_service(gossipsub):
+        async with host.run(listen_addrs=listen), background_trio_service(pubsub):
             await pubsub.wait_until_ready()
             admitted = await _admit(host, mesh, ordered, reserve, target_count=target_count)
             async with trio.open_nursery() as nursery:

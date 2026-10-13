@@ -12,67 +12,73 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Service discovery as agentmesh-node does it (internal/node/service.go): a provider
-record in the mesh DHT under a key derived from the service. The lookup is a
-bounded Kademlia GET_PROVIDERS walk, and a peer lookup a FIND_NODE one,
-spoken directly on go-libp2p-kad-dht's protocol: py-libp2p's DHT client
-(0.8 included) hardcodes the /ipfs prefix and the mesh uses /mesh. An SDK
-member only looks records up; it announces none."""
+"""The mesh's directory as a member uses it, as agentmesh-node does
+(internal/node/directory_client.go): the member keeps no DHT and asks the
+routers it holds over /mesh/directory/1.0.0, one DirectoryRequest per
+stream, one DirectoryResponse back. A request goes to one held router and
+to the next when it fails. The routers run the lookup across their own DHT.
+A key is the sha256 multihash of "mesh:service:<type>[:<name>]" for a
+service and of "mesh:peer:<peer_id>" for a member."""
 
 from __future__ import annotations
 
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Iterable, Literal
+from typing import Iterable, Literal
 
 import multiaddr
 import trio
 from libp2p.abc import IHost
 from libp2p.custom_types import TProtocol
-from libp2p.kad_dht.pb import kademlia_pb2 as kad
 from libp2p.peer.id import ID
-from libp2p.peer.peerinfo import PeerInfo
 from libp2p.utils.varint import encode_varint_prefixed
 
+from ._proto import agentmesh_pb2 as pb
 from .auth import read_bounded_varint_prefixed_bytes
-from .host import dial, open_stream
+from .host import open_stream
 
 logger = logging.getLogger("agent_mesh")
 
-# go-libp2p-kad-dht with dht.ProtocolPrefix("/mesh").
-DHT_PROTOCOL = TProtocol("/mesh/kad/1.0.0")
+# api.DirectoryProtocolID.
+DIRECTORY_PROTOCOL = TProtocol("/mesh/directory/1.0.0")
 
 ServiceType = Literal["mcp", "inference", "a2a", "egress"]
 
-_QUERY_TIMEOUT = 5.0
-_MAX_ROUNDS = 3
-_MAX_PEERS_PER_ROUND = 8
-MAX_DHT_MESSAGE_BYTES = 256 * 1024
-
-# How many routers hold each record and answer each lookup when the control
-# plane publishes no directory parameters on /info: api.DefaultDHTReplication.
-# A member reads the mesh's value from /info (Mesh.dht_replication) and
-# follows that many of the closer routers an answer names, as agentmesh-node
-# asks that many at a time.
-DEFAULT_DHT_REPLICATION = 3
+_REQUEST_TIMEOUT = 10.0
+MAX_DIRECTORY_MESSAGE_BYTES = 64 * 1024
+DEFAULT_LIMIT = 20
 
 
 @dataclass
 class DiscoveredProvider:
-    """A peer the DHT names as offering a service."""
+    """A peer the directory names as offering a service."""
 
     peer_id: str
-    # Addresses the provider advertised; may be empty when the record carried none.
+    # Addresses the provider is reached at, each ending in its peer ID; may
+    # be empty when the record carried none.
     addrs: list[str] = field(default_factory=list)
 
 
+class DirectoryError(Exception):
+    """No held router answered a directory request."""
+
+
+def _key(name: str) -> bytes:
+    """The sha256 multihash of a name: the two-byte header and the digest."""
+    return b"\x12\x20" + hashlib.sha256(name.encode()).digest()
+
+
 def service_key(service_type: ServiceType, name: str | None = None) -> bytes:
-    """The DHT key of a service: the sha256 multihash of "mesh:service:<type>[:<name>]".
-    go-libp2p-kad-dht keys provider records by the multihash, not the CID."""
+    """The directory key of a service type, or of one named service of that
+    type: "mesh:service:<type>" or "mesh:service:<type>:<name>" (api.ServiceKey)."""
     parts = ["mesh:service", service_type] + ([name] if name else [])
-    digest = hashlib.sha256(":".join(parts).encode()).digest()
-    return b"\x12\x20" + digest
+    return _key(":".join(parts))
+
+
+def peer_key(peer_id: ID) -> bytes:
+    """The directory key a member announces where it is reached under (api.PeerKey)."""
+    return _key(f"mesh:peer:{peer_id}")
 
 
 def parse_service_target(target: str) -> tuple[str, str]:
@@ -85,188 +91,72 @@ def parse_service_target(target: str) -> tuple[str, str]:
     return scheme, name
 
 
-def _peer_infos(peers: Iterable[kad.Message.Peer]) -> list[PeerInfo]:
-    out = []
-    for p in peers:
-        try:
-            addrs = [multiaddr.Multiaddr(a) for a in p.addrs]
-            out.append(PeerInfo(ID(p.id), addrs))
-        except Exception:  # noqa: BLE001 - a malformed entry from a peer is dropped, not fatal
-            continue
-    return out
-
-
-async def _query(host: IHost, peer_id: ID, req: kad.Message) -> kad.Message | None:
-    """One request to a peer's DHT, answered or None: a peer that does not
-    serve the DHT, or does not answer in time, is skipped."""
+async def _ask(host: IHost, router: ID, req: pb.DirectoryRequest) -> pb.DirectoryResponse:
+    """One request to one router, answered or raised."""
+    stream = await open_stream(host, router, DIRECTORY_PROTOCOL, _REQUEST_TIMEOUT)
     try:
-        stream = await open_stream(host, peer_id, DHT_PROTOCOL, _QUERY_TIMEOUT)
-    except Exception as err:  # noqa: BLE001 - a peer that does not serve the DHT is skipped
-        logger.debug("dht: %s does not answer %s: %s", peer_id, DHT_PROTOCOL, err)
-        return None
-    try:
-        with trio.fail_after(_QUERY_TIMEOUT):
+        with trio.fail_after(_REQUEST_TIMEOUT):
             await stream.write(encode_varint_prefixed(req.SerializeToString()))
-            resp = kad.Message.FromString(await read_bounded_varint_prefixed_bytes(stream, MAX_DHT_MESSAGE_BYTES))
-    except Exception as err:  # noqa: BLE001
-        logger.debug("dht: query to %s failed: %s", peer_id, err)
-        return None
+            resp = pb.DirectoryResponse.FromString(await read_bounded_varint_prefixed_bytes(stream, MAX_DIRECTORY_MESSAGE_BYTES))
     finally:
         await stream.close()
-    return resp if resp.type == req.type else None
+    if resp.error:
+        raise DirectoryError(resp.error)
+    return resp
 
 
-Admit = Callable[[ID], Awaitable[None]]
-"""Authenticates this member with a router before it is queried: a router
-serves its DHT to a peer only once that peer passed the handshake."""
+async def request(host: IHost, routers: Iterable[ID], req: pb.DirectoryRequest) -> pb.DirectoryResponse:
+    """Sends req to the held routers in turn until one answers. A router that
+    is restarting costs the request a timeout, not an answer."""
+    last: Exception | None = None
+    asked = 0
+    for router in routers:
+        asked += 1
+        try:
+            return await _ask(host, router, req)
+        except Exception as err:  # noqa: BLE001 - the next router is asked
+            last = err
+            logger.warning("directory: request through router %s failed: %s", router, err)
+    if asked == 0:
+        raise DirectoryError("no held router to ask")
+    raise DirectoryError(f"no held router answered: {last}")
 
 
-async def find_peer(
-    host: IHost,
-    target: ID,
-    seeds: Iterable[ID],
-    replication: int = DEFAULT_DHT_REPLICATION,
-    admit: Admit | None = None,
-) -> list[multiaddr.Multiaddr]:
-    """The addresses the DHT knows for a peer, as go-libp2p-kad-dht's FindPeer
-    learns them: a router answers FIND_NODE for a peer it is connected to with
-    that peer and its addresses, its relayed one included, and names the
-    routers closer to it otherwise. Empty when nobody knows the peer."""
-    found: list[multiaddr.Multiaddr] = []
-
-    def take(resp: kad.Message) -> bool:
-        for info in _peer_infos(resp.closerPeers):
-            if info.peer_id == target and info.addrs:
-                found.extend(info.addrs)
-                return True
-        return False
-
-    await _walk(host, kad.Message(type=kad.Message.FIND_NODE, key=target.to_bytes()), seeds, take, skip={target}, replication=replication, admit=admit)
-    return found
+async def provide(host: IHost, routers: Iterable[ID], key: bytes, addrs: Iterable[multiaddr.Multiaddr]) -> None:
+    """Announces this member as a provider of key, reached at addrs, to a
+    held router; the router keeps the record and places it on the routers
+    closest to the key."""
+    req = pb.DirectoryRequest(provide=pb.DirectoryProvide(key=key, addrs=[str(a) for a in addrs]))
+    await request(host, routers, req)
 
 
-async def find_providers(
-    host: IHost,
-    key: bytes,
-    seeds: Iterable[ID],
-    limit: int = 20,
-    replication: int = DEFAULT_DHT_REPLICATION,
-    admit: Admit | None = None,
-) -> list[DiscoveredProvider]:
-    """Asks the seed peers (the routers we are connected to) for providers of
-    key and follows the closer peers they name for a few rounds."""
+async def find_providers(host: IHost, routers: Iterable[ID], key: bytes, limit: int = DEFAULT_LIMIT) -> list[DiscoveredProvider]:
+    """Who provides key, up to limit, with their addresses; empty when nobody does."""
+    req = pb.DirectoryRequest(find_providers=pb.DirectoryFindProviders(key=key, limit=max(limit, 1)))
+    resp = await request(host, routers, req)
     found: dict[str, DiscoveredProvider] = {}
-    self_id = host.get_id()
-
-    def take(resp: kad.Message) -> bool:
-        for info in _peer_infos(resp.providerPeers):
-            if info.peer_id == self_id:
-                continue
-            entry = found.setdefault(str(info.peer_id), DiscoveredProvider(peer_id=str(info.peer_id)))
-            for ma in info.addrs:
-                if str(ma) not in entry.addrs:
-                    entry.addrs.append(str(ma))
-        return bool(found)
-
-    await _walk(host, kad.Message(type=kad.Message.GET_PROVIDERS, key=key), seeds, take, replication=replication, admit=admit)
+    self_id = str(host.get_id())
+    for rec in resp.providers:
+        if rec.peer_id == self_id:
+            continue
+        entry = found.setdefault(rec.peer_id, DiscoveredProvider(peer_id=rec.peer_id))
+        for a in rec.addrs:
+            if a not in entry.addrs:
+                entry.addrs.append(a)
     return list(found.values())[:limit]
 
 
-async def _walk(
-    host: IHost,
-    req: kad.Message,
-    seeds: Iterable[ID],
-    take: Callable[[kad.Message], bool],
-    skip: frozenset[ID] | set[ID] = frozenset(),
-    replication: int = DEFAULT_DHT_REPLICATION,
-    admit: Admit | None = None,
-) -> None:
-    """The Kademlia walk both lookups share. A round asks its peers at once
-    and ends when an answer satisfies `take`; only otherwise are the closer
-    peers the answers named dialed, at once as well. A round thus costs one
-    query and one dial timeout, not one per peer: right after a rollout the
-    routers' tables still name the pods it replaced, and the control plane
-    may list a router this member cannot reach. A peer that did not answer
-    its dial is not dialed again. A router names the routers closest to the
-    key in order, and a record lives on the `replication` closest, so only
-    that many of them are followed from one round to the next.
-
-    A router serves a query only from a member that authenticated with it,
-    so `admit` runs before each query. A router the walk connected to for
-    the query is disconnected when the walk ends: the member keeps sessions
-    with the routers it holds and with no other."""
-    self_id = host.get_id()
-    held = set(host.get_connected_peers())
-    try:
-        await _walk_rounds(host, req, seeds, take, skip, replication, admit, self_id)
-    finally:
-        for peer_id in set(host.get_connected_peers()) - held - {self_id}:
-            try:
-                await host.disconnect(peer_id)
-            except Exception as err:  # noqa: BLE001 - already gone
-                logger.debug("dht: disconnect from %s after the walk: %s", peer_id, err)
-
-
-async def _walk_rounds(
-    host: IHost,
-    req: kad.Message,
-    seeds: Iterable[ID],
-    take: Callable[[kad.Message], bool],
-    skip: frozenset[ID] | set[ID],
-    replication: int,
-    admit: Admit | None,
-    self_id: ID,
-) -> None:
-    asked: set[ID] = set()
-    frontier: list[ID] = list(seeds)
-    fanout = min(max(replication, 1), _MAX_PEERS_PER_ROUND)
-    for _ in range(_MAX_ROUNDS):
-        batch = [p for p in frontier if p not in asked and p != self_id][:_MAX_PEERS_PER_ROUND]
-        if not batch:
-            return
-        asked.update(batch)
-        answers: list[kad.Message] = []
-
-        async def ask(peer_id: ID) -> None:
-            if admit is not None:
-                try:
-                    await admit(peer_id)
-                except Exception as err:  # noqa: BLE001 - a router that refuses us is skipped
-                    logger.debug("dht: %s did not admit this member: %s", peer_id, err)
-                    return
-            resp = await _query(host, peer_id, req)
-            if resp is not None:
-                answers.append(resp)
-
-        async with trio.open_nursery() as nursery:
-            for peer_id in batch:
-                nursery.start_soon(ask, peer_id)
-        # Every answer is taken: the providers each router knows add up.
-        satisfied = False
-        for resp in answers:
-            satisfied = take(resp) or satisfied
-        if satisfied:
-            return
-
-        closer: dict[ID, PeerInfo] = {}
-        for resp in answers:
-            for info in _peer_infos(resp.closerPeers):
-                if len(closer) >= fanout:
-                    break
-                if info.peer_id not in asked and info.peer_id != self_id and info.peer_id not in skip:
-                    closer.setdefault(info.peer_id, info)
-        connected = set(host.get_connected_peers())
-        frontier = [p for p in closer if p in connected]
-
-        async def reach(info: PeerInfo) -> None:
-            try:
-                await dial(host, info)
-            except Exception:  # noqa: BLE001 - unreachable closer peers are skipped
-                asked.add(info.peer_id)
-                return
-            frontier.append(info.peer_id)
-
-        async with trio.open_nursery() as nursery:
-            for peer_id, info in closer.items():
-                if peer_id not in connected:
-                    nursery.start_soon(reach, info)
+async def find_peer(host: IHost, routers: Iterable[ID], target: ID) -> list[multiaddr.Multiaddr]:
+    """Where target is reached: its addresses, each ending in its peer ID,
+    relayed ones included. Empty when nobody knows the peer."""
+    req = pb.DirectoryRequest(find_peer=pb.DirectoryFindPeer(peer_id=str(target)))
+    resp = await request(host, routers, req)
+    if not resp.HasField("peer") or resp.peer.peer_id != str(target):
+        return []
+    out: list[multiaddr.Multiaddr] = []
+    for a in resp.peer.addrs:
+        try:
+            out.append(multiaddr.Multiaddr(a))
+        except Exception:  # noqa: BLE001 - a malformed address from a router is dropped
+            logger.debug("directory: dropping address %r of %s", a, target)
+    return out

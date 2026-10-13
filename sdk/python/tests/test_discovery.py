@@ -12,34 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The DHT walks against a fake host: what they do with the closer peers a
-router names. The wire format against a real router is covered by
-tests/integration/sdk_mesh_test.go."""
+"""The directory client: a request goes to a held router, to the next when
+that one fails, and the answer is what the router said."""
 
-import multiaddr
+import hashlib
+
 import pytest
 import trio
 import trio.testing
-from libp2p.kad_dht.pb import kademlia_pb2 as kad
 from libp2p.peer.id import ID
-from libp2p.peer.peerstore import PeerStore
 from libp2p.utils.varint import encode_varint_prefixed, read_varint_prefixed_bytes
 
-from agent_mesh.discovery import DHT_PROTOCOL, _QUERY_TIMEOUT, find_peer, find_providers
-from agent_mesh.host import DIAL_TIMEOUT
+from agent_mesh._proto import agentmesh_pb2 as pb
+from agent_mesh.discovery import DIRECTORY_PROTOCOL, _REQUEST_TIMEOUT, DirectoryError, find_peer, find_providers, peer_key, provide, service_key
 
 SELF = ID.from_base58("12D3KooWJoJPhXqLrGAcVsGSzHMzWrmoHCWoTzVSSiT3JfR7RBVo")
 ROUTER = ID.from_base58("12D3KooWG1pA6goegCncqwbZLSr8pnjUZ6JMAAe6SmnHTgUNCk88")
 ROUTER_B = ID.from_base58("12D3KooWBTdQ3QQZztZFaxQSTzJx5ZSbpgM8zfs43VYzBXAFkdZm")
-DARK_ROUTER = ID.from_base58("12D3KooWGvdRCJLYATauVWfsieF2j3a2wXZoEQJUS2MsvRdDtgLM")
 TARGET = ID.from_base58("12D3KooWQYhTNQdmr3ArTeUHRYzFg94BKyTkoWBDWez9kSCVe2Xo")
 PROVIDER = ID.from_base58("12D3KooWPZCZBAZRx1TNpPt19sZ7PKcdce8rE7gNGwhzLJtWXU9u")
-GONE_POD = ID.from_base58("12D3KooWEETCw8Eb2fGFfenvEEMWhvKCe9fThJeSG8oNGrpPGp1r")
-GONE_POD_2 = ID.from_base58("12D3KooWKmPdCr3BcvPAsP5mAhraWvKwCBT3M58mWe5f7TrFHSRT")
 
 
 class _Stream:
-    """One kad request answered from a table, as a router's DHT would."""
+    """One directory request answered by a function, as a router would."""
 
     def __init__(self, answer):
         self._answer = answer
@@ -51,7 +46,7 @@ class _Stream:
 
     async def read(self, n=None):
         if self._req:
-            req = kad.Message.FromString(await read_varint_prefixed_bytes(_Bytes(self._req)))
+            req = pb.DirectoryRequest.FromString(await read_varint_prefixed_bytes(_Bytes(self._req)))
             self._req = b""
             self._resp = encode_varint_prefixed(self._answer(req).SerializeToString())
         n = len(self._resp) if n is None else n
@@ -73,160 +68,128 @@ class _Bytes:
 
 
 class _Host:
-    """Connected to its routers; any other peer a router names never
-    answers a SYN."""
+    """Connected to its routers, each answering with a function; a router
+    that is None never answers a stream open."""
 
     def __init__(self, answers):
         self._answers = answers
-        self.connected = set(answers)
-        self.dials = []
-        self.peerstore = PeerStore()
+        self.asked = []
 
     def get_id(self):
         return SELF
 
-    def get_peerstore(self):
-        return self.peerstore
-
-    def get_network(self):
-        return None
-
-    def get_connected_peers(self):
-        return list(self.connected)
-
-    async def connect(self, info):
-        self.dials.append(info.peer_id)
-        await trio.sleep_forever()
-
     async def new_stream(self, peer_id, protocols):
-        assert protocols == [DHT_PROTOCOL]
-        assert peer_id in self.connected
-        return _Stream(self._answers[peer_id])
-
-    async def disconnect(self, peer_id):
-        self.connected.discard(peer_id)
-
-
-def _peer(peer_id, *addrs):
-    return kad.Message.Peer(id=peer_id.to_bytes(), addrs=[multiaddr.Multiaddr(a).to_bytes() for a in addrs])
+        assert protocols == [DIRECTORY_PROTOCOL]
+        self.asked.append(peer_id)
+        answer = self._answers[peer_id]
+        if answer is None:
+            await trio.sleep_forever()
+        return _Stream(answer)
 
 
-def _names_the_dark_router(req):
-    return kad.Message(type=req.type, closerPeers=[_peer(DARK_ROUTER, "/ip4/203.0.113.7/tcp/4501")])
+def _record(peer_id, *addrs):
+    return pb.PeerRecord(peer_id=str(peer_id), addrs=[f"{a}/p2p/{peer_id}" for a in addrs])
 
 
-def test_find_providers_dials_an_unanswering_closer_peer_once():
-    """A router the control plane lists may be dark from where a member runs
-    (a public address a network policy drops). Every router names it as
-    closer to every key; the walk dials it once, bounded, then moves on."""
-    host = _Host({ROUTER: _names_the_dark_router})
+def test_keys_are_the_sha256_multihash_of_the_name():
+    """The same bytes api.ServiceKey and api.PeerKey produce, so a record a
+    Go member announced is found from Python and the other way round."""
+    want = b"\x12\x20" + hashlib.sha256(b"mesh:service:mcp:calculator").digest()
+    assert service_key("mcp", "calculator") == want
+    assert service_key("mcp") == b"\x12\x20" + hashlib.sha256(b"mesh:service:mcp").digest()
+    assert peer_key(TARGET) == b"\x12\x20" + hashlib.sha256(f"mesh:peer:{TARGET}".encode()).digest()
+    assert service_key("mcp") != service_key("mcp", "calculator")
+
+
+def test_find_providers_asks_one_held_router_and_takes_its_answer():
+    def knows_provider(req):
+        assert req.WhichOneof("request") == "find_providers"
+        assert req.find_providers.key == service_key("mcp", "calculator")
+        return pb.DirectoryResponse(providers=[_record(PROVIDER, "/ip4/10.0.0.9/tcp/4001"), _record(SELF, "/ip4/10.0.0.1/tcp/1")])
+
+    host = _Host({ROUTER: knows_provider, ROUTER_B: knows_provider})
 
     async def main():
+        found = await find_providers(host, [ROUTER, ROUTER_B], service_key("mcp", "calculator"))
+        assert [p.peer_id for p in found] == [str(PROVIDER)], "the member itself is left out"
+        assert found[0].addrs == [f"/ip4/10.0.0.9/tcp/4001/p2p/{PROVIDER}"]
+        assert host.asked == [ROUTER], "one router answers; the second is not asked"
+
+    trio.run(main)
+
+
+def test_a_router_that_fails_is_skipped_for_the_next():
+    """A router that does not answer costs the request one timeout; a router
+    that answers with an error is skipped at once. Only when every held
+    router fails does the request fail."""
+
+    def errors(req):
+        return pb.DirectoryResponse(error="the directory is not up")
+
+    def answers(req):
+        return pb.DirectoryResponse(providers=[_record(PROVIDER, "/ip4/10.0.0.9/tcp/4001")])
+
+    async def main():
+        host = _Host({ROUTER: None, ROUTER_B: answers})
         started = trio.current_time()
-        assert await find_providers(host, b"key", [ROUTER]) == []
-        assert host.dials == [DARK_ROUTER]
-        assert trio.current_time() - started == pytest.approx(DIAL_TIMEOUT)
+        found = await find_providers(host, [ROUTER, ROUTER_B], b"\x12\x20" + bytes(32))
+        assert [p.peer_id for p in found] == [str(PROVIDER)]
+        assert host.asked == [ROUTER, ROUTER_B]
+        assert trio.current_time() - started == pytest.approx(_REQUEST_TIMEOUT)
+
+        host = _Host({ROUTER: errors, ROUTER_B: answers})
+        assert [p.peer_id for p in await find_providers(host, [ROUTER, ROUTER_B], b"\x12\x20" + bytes(32))] == [str(PROVIDER)]
+
+        host = _Host({ROUTER: errors, ROUTER_B: errors})
+        with pytest.raises(DirectoryError, match="no held router answered"):
+            await find_providers(host, [ROUTER, ROUTER_B], b"\x12\x20" + bytes(32))
+
+        with pytest.raises(DirectoryError, match="no held router to ask"):
+            await find_providers(_Host({}), [], b"\x12\x20" + bytes(32))
 
     trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
 
 
-def test_find_peer_dials_an_unanswering_closer_peer_once():
-    host = _Host({ROUTER: _names_the_dark_router})
-
-    async def main():
-        started = trio.current_time()
-        assert await find_peer(host, TARGET, [ROUTER]) == []
-        assert host.dials == [DARK_ROUTER]
-        assert trio.current_time() - started == pytest.approx(DIAL_TIMEOUT)
-
-    trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
-
-
-def test_find_peer_returns_the_target_a_router_knows():
+def test_find_peer_returns_the_addresses_the_router_knows_or_nothing():
     def knows_target(req):
-        return kad.Message(
-            type=req.type,
-            closerPeers=[_peer(TARGET, "/ip4/10.0.0.9/tcp/4001"), _peer(DARK_ROUTER, "/ip4/203.0.113.7/tcp/4501")],
-        )
+        assert req.WhichOneof("request") == "find_peer"
+        if req.find_peer.peer_id == str(TARGET):
+            return pb.DirectoryResponse(peer=_record(TARGET, "/ip4/10.0.0.9/tcp/4001", f"/ip4/10.0.0.2/tcp/4501/p2p/{ROUTER}/p2p-circuit"))
+        return pb.DirectoryResponse()
 
     host = _Host({ROUTER: knows_target})
 
     async def main():
-        addrs = await find_peer(host, TARGET, [ROUTER])
-        assert [str(a) for a in addrs] == ["/ip4/10.0.0.9/tcp/4001"]
-        assert host.dials == []
+        addrs = await find_peer(host, [ROUTER], TARGET)
+        assert [str(a) for a in addrs] == [
+            f"/ip4/10.0.0.9/tcp/4001/p2p/{TARGET}",
+            f"/ip4/10.0.0.2/tcp/4501/p2p/{ROUTER}/p2p-circuit/p2p/{TARGET}",
+        ]
+        assert await find_peer(host, [ROUTER], PROVIDER) == []
 
-    trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
-
-
-def _after_a_rollout(req):
-    """A router's answer minutes after a deploy: the provider, and a table
-    that still names the pods the rollout replaced."""
-    return kad.Message(
-        type=req.type,
-        providerPeers=[_peer(PROVIDER, "/ip4/10.84.3.81/tcp/5002")],
-        closerPeers=[
-            _peer(GONE_POD, "/ip4/10.84.1.7/tcp/5002"),
-            _peer(GONE_POD_2, "/ip4/10.84.2.9/tcp/5002"),
-            _peer(DARK_ROUTER, "/ip4/203.0.113.7/tcp/4501"),
-        ],
-    )
+    trio.run(main)
 
 
-def test_providers_in_hand_end_the_walk_before_any_closer_peer_is_dialed():
-    """The probe runs right after every canary was rolled: the routers'
-    tables are full of addresses nobody answers on. The first round already
-    has the provider; nothing else is dialed."""
-    host = _Host({ROUTER: _after_a_rollout, ROUTER_B: _after_a_rollout})
+def test_provide_announces_this_member_at_its_addresses():
+    seen = []
+
+    def takes(req):
+        assert req.WhichOneof("request") == "provide"
+        seen.append(req.provide)
+        return pb.DirectoryResponse()
+
+    host = _Host({ROUTER: takes})
 
     async def main():
-        started = trio.current_time()
-        found = await find_providers(host, b"key", [ROUTER, ROUTER_B])
-        assert [p.peer_id for p in found] == [str(PROVIDER)]
-        assert host.dials == []
-        assert trio.current_time() - started == 0
+        import multiaddr
 
-    trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
+        await provide(host, [ROUTER], peer_key(SELF), [multiaddr.Multiaddr("/ip4/10.0.0.1/tcp/1")])
+        assert len(seen) == 1
+        assert seen[0].key == peer_key(SELF)
+        assert list(seen[0].addrs) == ["/ip4/10.0.0.1/tcp/1"]
+        assert seen[0].provider == "", "a member names no provider; it announces itself"
 
-
-def test_stale_closer_peers_are_dialed_at_once_not_one_after_another():
-    """When nobody has the record, the walk follows the closer peers. Three
-    that never answer cost one dial timeout together, not three."""
-
-    def knows_nothing(req):
-        return kad.Message(type=req.type, closerPeers=_after_a_rollout(req).closerPeers)
-
-    host = _Host({ROUTER: knows_nothing, ROUTER_B: knows_nothing})
-
-    async def main():
-        started = trio.current_time()
-        assert await find_providers(host, b"key", [ROUTER, ROUTER_B]) == []
-        assert sorted(map(str, host.dials)) == sorted(map(str, [GONE_POD, GONE_POD_2, DARK_ROUTER]))
-        assert trio.current_time() - started == pytest.approx(DIAL_TIMEOUT)
-
-    trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
-
-
-def test_the_routers_are_asked_at_once():
-    """A router that takes its time to answer does not delay the others'
-    answers: the round lasts as long as the slowest query, bounded."""
-
-    class SlowHost(_Host):
-        async def new_stream(self, peer_id, protocols):
-            if peer_id == ROUTER_B:
-                await trio.sleep_forever()
-            return await super().new_stream(peer_id, protocols)
-
-    host = SlowHost({ROUTER: _after_a_rollout, ROUTER_B: _after_a_rollout})
-
-    async def main():
-        started = trio.current_time()
-        found = await find_providers(host, b"key", [ROUTER, ROUTER_B])
-        assert [p.peer_id for p in found] == [str(PROVIDER)]
-        # ROUTER_B's stream open ran to its timeout while ROUTER answered.
-        assert trio.current_time() - started == pytest.approx(_QUERY_TIMEOUT)
-
-    trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
+    trio.run(main)
 
 
 def test_read_bounded_varint_prefixed_bytes_rejects_oversized_prefix_before_reading_payload():
@@ -253,78 +216,3 @@ def test_read_bounded_varint_prefixed_bytes_rejects_oversized_prefix_before_read
         assert bomb.payload_reads == 0
 
     trio.run(main)
-
-
-
-def test_the_walk_follows_only_the_replication_closest_routers():
-    """A router names the routers closest to the key in order, as many as it
-    knows; a record lives on the mesh's replication of them, so only that
-    many are followed. With the default of three the fourth is never dialed;
-    with a replication of one, only the first."""
-
-    def knows_nothing(req):
-        return kad.Message(
-            type=req.type,
-            closerPeers=[
-                _peer(GONE_POD, "/ip4/10.84.1.7/tcp/5002"),
-                _peer(GONE_POD_2, "/ip4/10.84.2.9/tcp/5002"),
-                _peer(DARK_ROUTER, "/ip4/203.0.113.7/tcp/4501"),
-                _peer(TARGET, "/ip4/10.0.0.9/tcp/4001"),
-            ],
-        )
-
-    async def main(replication, want):
-        host = _Host({ROUTER: knows_nothing, ROUTER_B: knows_nothing})
-        assert await find_providers(host, b"key", [ROUTER, ROUTER_B], replication=replication) == []
-        assert sorted(map(str, host.dials)) == sorted(map(str, want))
-
-    trio.run(main, 3, [GONE_POD, GONE_POD_2, DARK_ROUTER], clock=trio.testing.MockClock(autojump_threshold=0))
-    trio.run(main, 1, [GONE_POD], clock=trio.testing.MockClock(autojump_threshold=0))
-
-
-def test_the_walk_authenticates_before_each_query_and_releases_what_it_connected():
-    """A router serves a query only from a member that authenticated with it,
-    so `admit` runs for a router before it is queried: the held router and
-    the closer one the walk connects to for the record. That connection is
-    the walk's alone and is closed when the walk ends; the held router's
-    stays."""
-
-    class ReachableHost(_Host):
-        async def connect(self, info):
-            self.dials.append(info.peer_id)
-            self.connected.add(info.peer_id)
-            self._answers[info.peer_id] = lambda req: kad.Message(type=req.type, providerPeers=[_peer(PROVIDER, "/ip4/10.0.0.9/tcp/4001")])
-
-    def names_router_b(req):
-        return kad.Message(type=req.type, closerPeers=[_peer(ROUTER_B, "/ip4/10.0.0.2/tcp/4501")])
-
-    host = ReachableHost({ROUTER: names_router_b})
-    admitted = []
-
-    async def admit(peer_id):
-        assert peer_id in host.connected, "admit runs on an open connection"
-        admitted.append(peer_id)
-
-    async def main():
-        found = await find_providers(host, b"key", [ROUTER], admit=admit)
-        assert [p.peer_id for p in found] == [str(PROVIDER)]
-        assert admitted == [ROUTER, ROUTER_B], "every router is admitted before it is queried, in walk order"
-        assert host.connected == {ROUTER}, "the router the walk connected to is released; the held one is kept"
-
-    trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
-
-
-def test_a_router_that_refuses_the_handshake_is_skipped():
-    """A router that does not admit this member answers nothing; the walk
-    takes the other answers and moves on."""
-    host = _Host({ROUTER: _after_a_rollout, ROUTER_B: _after_a_rollout})
-
-    async def admit(peer_id):
-        if peer_id == ROUTER_B:
-            raise RuntimeError("not admitted")
-
-    async def main():
-        found = await find_providers(host, b"key", [ROUTER, ROUTER_B], admit=admit)
-        assert [p.peer_id for p in found] == [str(PROVIDER)]
-
-    trio.run(main, clock=trio.testing.MockClock(autojump_threshold=0))
