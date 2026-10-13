@@ -109,8 +109,8 @@ func (n *AgentMeshNode) debugReady() error {
 		return fmt.Errorf("node not initialized")
 	case n.Host == nil:
 		return fmt.Errorf("libp2p host not initialized")
-	case n.DHT == nil:
-		return fmt.Errorf("DHT not initialized")
+	case n.Directory == nil:
+		return fmt.Errorf("the directory is not up")
 	case n.Store == nil:
 		return fmt.Errorf("node store not initialized")
 	}
@@ -132,12 +132,8 @@ type meshInfoResponse struct {
 	PeerID          string   `json:"peer_id"`
 	ConnectedPeers  []string `json:"connected_peers"`
 	AttachedRouters []string `json:"attached_routers"`
-	// DirectoryRouters are the routers the node holds a session with for
-	// its DHT alone: the ones its keys landed on, not attached.
-	DirectoryRouters []string `json:"directory_routers"`
-	DHTSize          int      `json:"dht_size"`
-	RouterPeerID     string   `json:"router_peer_id"`
-	LocalAPISocket   string   `json:"local_api_socket,omitempty"`
+	RouterPeerID    string   `json:"router_peer_id"`
+	LocalAPISocket  string   `json:"local_api_socket,omitempty"`
 }
 
 type connectivityResponse struct {
@@ -194,21 +190,13 @@ func (n *AgentMeshNode) meshInfo() (*meshInfoResponse, error) {
 		attachedRouters = append(attachedRouters, p.String())
 	}
 	slices.Sort(attachedRouters)
-	directory := n.directoryRouters()
-	directoryRouters := make([]string, 0, len(directory))
-	for _, p := range directory {
-		directoryRouters = append(directoryRouters, p.String())
-	}
-	slices.Sort(directoryRouters)
 
 	return &meshInfoResponse{
-		PeerID:           n.Host.ID().String(),
-		ConnectedPeers:   connectedPeers,
-		AttachedRouters:  attachedRouters,
-		DirectoryRouters: directoryRouters,
-		DHTSize:          n.DHT.RoutingTable().Size(),
-		RouterPeerID:     n.RouterPeerID.String(),
-		LocalAPISocket:   n.BoundSocketPath,
+		PeerID:          n.Host.ID().String(),
+		ConnectedPeers:  connectedPeers,
+		AttachedRouters: attachedRouters,
+		RouterPeerID:    n.RouterPeerID.String(),
+		LocalAPISocket:  n.BoundSocketPath,
 	}, nil
 }
 
@@ -221,7 +209,7 @@ func (n *AgentMeshNode) peerAddrs(ctx context.Context, pid peer.ID) (*peerAddrsR
 	}
 	ctx, cancel := context.WithTimeout(ctx, dhtLookupTimeout)
 	defer cancel()
-	info, err := n.DHT.FindPeer(ctx, pid)
+	info, err := n.Directory.FindPeer(ctx, pid)
 	if err != nil {
 		return nil, fmt.Errorf("find %s: %w", pid, err)
 	}

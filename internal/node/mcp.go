@@ -434,8 +434,8 @@ func (n *AgentMeshNode) fetchRemoteServiceCatalog(ctx context.Context, peerID pe
 // and ensures relay circuits are available. This prevents dial backoff errors when the
 // relay is behind a load-balanced DNS address or when pods advertise internal IPs.
 func (n *AgentMeshNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
-	if n.Host == nil || n.DHT == nil {
-		logger.Debugf("[Discovery] Host or DHT is nil")
+	if n.Host == nil || n.Directory == nil {
+		logger.Debugf("[Discovery] Host or directory is nil")
 		return
 	}
 	logger.Debugf("[Discovery] connectedness for %s: %s (conns: %d)", targetPeer, n.Host.Network().Connectedness(targetPeer), len(n.Host.Network().ConnsToPeer(targetPeer)))
@@ -467,28 +467,21 @@ func (n *AgentMeshNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID
 	changed := false
 	addrs := n.Host.Peerstore().Addrs(targetPeer)
 	if len(addrs) == 0 {
-		logger.Debugf("[Discovery] No addresses in peerstore for %s, querying DHT...", targetPeer)
+		logger.Debugf("[Discovery] No addresses in peerstore for %s, asking the directory", targetPeer)
 		findCtx, cancel := context.WithTimeout(ctx, dhtLookupTimeout)
-		addrInfo, err := n.DHT.FindPeer(findCtx, targetPeer)
+		addrInfo, err := n.Directory.FindPeer(findCtx, targetPeer)
 		cancel()
 		addrs = addrInfo.Addrs
-		if err != nil {
-			// kad-dht answers "not found" for a peer it could not dial during
-			// the lookup, which a peer reached only through a router this node
-			// has not handshaken with is; what the lookup learned is in the
-			// peerstore all the same.
-			addrs = n.Host.Peerstore().Addrs(targetPeer)
-		}
 		switch {
 		case len(addrs) > 0:
 			changed = true
 			peerLookupsTotal.WithLabelValues(lookupFound).Inc()
 		case err != nil && !errors.Is(err, routing.ErrNotFound):
 			peerLookupsTotal.WithLabelValues(lookupFailed).Inc()
-			logger.Warnf("[Discovery] DHT lookup for %s failed (routing table holds %d peers): %v", targetPeer, n.DHT.RoutingTable().Size(), err)
+			logger.Warnf("[Discovery] Directory lookup for %s failed: %v", targetPeer, err)
 		default:
 			peerLookupsTotal.WithLabelValues(lookupNotFound).Inc()
-			logger.Infof("[Discovery] DHT lookup found no address for %s (routing table holds %d peers); trying circuits through this node's routers", targetPeer, n.DHT.RoutingTable().Size())
+			logger.Infof("[Discovery] The directory knows no address for %s; trying circuits through this node's routers", targetPeer)
 		}
 	}
 	logger.Debugf("[Discovery] preparePeerAddrs for %s: found %d addrs in peerstore: %v", targetPeer, len(addrs), addrs)
@@ -543,14 +536,14 @@ func (n *AgentMeshNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID
 		}
 
 		if len(n.Host.Peerstore().Addrs(relayID)) == 0 {
-			logger.Debugf("[Discovery] No addresses for relay %s, resolving via DHT...", relayID)
+			logger.Debugf("[Discovery] No addresses for relay %s, asking the directory", relayID)
 			findCtx, cancel := context.WithTimeout(ctx, dhtLookupTimeout)
-			addrInfo, err := n.DHT.FindPeer(findCtx, relayID)
+			addrInfo, err := n.Directory.FindPeer(findCtx, relayID)
 			cancel()
 			if err != nil {
-				logger.Debugf("[Discovery] Failed to find relay %s on DHT: %v", relayID, err)
+				logger.Debugf("[Discovery] Relay %s not found in the directory: %v", relayID, err)
 			} else {
-				n.Host.Peerstore().AddAddrs(relayID, addrInfo.Addrs, peerstore.TempAddrTTL)
+				rememberAddrs(n.Host.Peerstore(), addrInfo)
 			}
 		}
 

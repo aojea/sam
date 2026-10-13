@@ -42,7 +42,7 @@ import (
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/google/agentmesh/api"
 	"github.com/libp2p/go-libp2p"
-	dht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
@@ -278,10 +278,7 @@ func startMockRouterWithControlPlaneKey(t *testing.T) (peer.ID, string, ed25519.
 		_ = writer.WriteMsg(respBytes)
 	})
 
-	kdht, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mesh"))
-	if err != nil {
-		t.Fatalf("failed to create DHT on mock router: %v", err)
-	}
+	h.SetStreamHandler(api.DirectoryProtocolID, newMockDirectory(h).handle)
 
 	// Start HTTP server for enrollment
 
@@ -321,7 +318,6 @@ func startMockRouterWithControlPlaneKey(t *testing.T) (peer.ID, string, ed25519.
 
 	t.Cleanup(func() {
 		httpServer.Close()
-		_ = kdht.Close()
 		_ = h.Close()
 	})
 
@@ -656,6 +652,8 @@ func extractPeerID(maddrStr string) string {
 	return ""
 }
 
+// waitForDHTReady returns once the node holds a router: the directory it
+// announces to and looks peers up through.
 func waitForDHTReady(t *testing.T, clientBin string, apiPort int, token string) {
 	t.Helper()
 	deadline := time.Now().Add(45 * time.Second)
@@ -669,14 +667,12 @@ func waitForDHTReady(t *testing.T, clientBin string, apiPort int, token string) 
 	for time.Now().Before(deadline) {
 		cmd := exec.Command(clientBin, cmdArgs...)
 		out, err := cmd.Output()
-		if err == nil {
-			if strings.Contains(string(out), `"dht_size":`) && !strings.Contains(string(out), `"dht_size":0`) {
-				return
-			}
+		if err == nil && strings.Contains(string(out), `"attached_routers":["`) {
+			return
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	t.Fatalf("DHT not ready on port %d", apiPort)
+	t.Fatalf("node on port %d holds no router", apiPort)
 }
 
 func waitForControlPlane(t *testing.T, port int) {
@@ -845,4 +841,61 @@ func newBoundaryMCPHandler(t *testing.T) http.Handler {
 		}, nil
 	})
 	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
+}
+
+// mockDirectory is the directory a mock router serves: records by key, a
+// peer from the router's peerstore or its peer-key record.
+type mockDirectory struct {
+	h       host.Host
+	mu      sync.Mutex
+	records map[string]map[peer.ID][]string
+}
+
+func newMockDirectory(h host.Host) *mockDirectory {
+	return &mockDirectory{h: h, records: map[string]map[peer.ID][]string{}}
+}
+
+func (d *mockDirectory) handle(s network.Stream) {
+	defer func() { _ = s.Close() }()
+	reader := msgio.NewVarintReaderSize(s, 1024*64)
+	msg, err := reader.ReadMsg()
+	if err != nil {
+		return
+	}
+	var req api.DirectoryRequest
+	err = proto.Unmarshal(msg, &req)
+	reader.ReleaseMsg(msg)
+	if err != nil {
+		return
+	}
+	resp := &api.DirectoryResponse{}
+	d.mu.Lock()
+	switch {
+	case req.GetProvide() != nil:
+		q := req.GetProvide()
+		if d.records[string(q.GetKey())] == nil {
+			d.records[string(q.GetKey())] = map[peer.ID][]string{}
+		}
+		d.records[string(q.GetKey())][s.Conn().RemotePeer()] = q.GetAddrs()
+	case req.GetFindProviders() != nil:
+		for p, addrs := range d.records[string(req.GetFindProviders().GetKey())] {
+			resp.Providers = append(resp.Providers, &api.PeerRecord{PeerId: p.String(), Addrs: addrs})
+		}
+	case req.GetFindPeer() != nil:
+		if p, err := peer.Decode(req.GetFindPeer().GetPeerId()); err == nil {
+			var addrs []string
+			for _, a := range d.h.Peerstore().Addrs(p) {
+				addrs = append(addrs, a.String()+"/p2p/"+p.String())
+			}
+			if len(addrs) == 0 {
+				addrs = d.records[string(api.PeerKey(p))][p]
+			}
+			if len(addrs) > 0 {
+				resp.Peer = &api.PeerRecord{PeerId: p.String(), Addrs: addrs}
+			}
+		}
+	}
+	d.mu.Unlock()
+	respBytes, _ := proto.Marshal(resp)
+	_ = msgio.NewVarintWriter(s).WriteMsg(respBytes)
 }

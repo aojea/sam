@@ -24,18 +24,17 @@ import (
 	"time"
 
 	"github.com/google/agentmesh/api"
-	"github.com/ipfs/go-cid"
 )
 
 type fakeDHT struct {
-	calls   []cid.Cid
+	calls   [][]byte
 	failNth int
 	count   int32
 }
 
-func (f *fakeDHT) Provide(ctx context.Context, c cid.Cid, _ bool) error {
+func (f *fakeDHT) Provide(ctx context.Context, key []byte) error {
 	n := atomic.AddInt32(&f.count, 1)
-	f.calls = append(f.calls, c)
+	f.calls = append(f.calls, key)
 	if f.failNth > 0 && int(n) == f.failNth {
 		return errors.New("fake dht failure")
 	}
@@ -69,7 +68,7 @@ func newFakeSvc(name string, st api.ServiceType) *fakeService {
 }
 
 // newServiceRegistryForTest builds a registry against the fake DHT for tests.
-func newServiceRegistryForTest(d dhtProvider) *ServiceRegistry {
+func newServiceRegistryForTest(d directoryProvider) *ServiceRegistry {
 	return &ServiceRegistry{
 		services:            map[string]Service{},
 		dht:                 d,

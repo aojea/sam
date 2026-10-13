@@ -25,8 +25,6 @@ import (
 	"strings"
 
 	"github.com/google/agentmesh/api"
-	"github.com/ipfs/go-cid"
-	"github.com/multiformats/go-multihash"
 )
 
 // Service is the contract the ServiceRegistry and ingress server use.
@@ -183,30 +181,4 @@ func buildRegisterRequest(sCfg api.ServiceConfig) (*api.RegisterServiceRequest, 
 		return nil, fmt.Errorf("service %s has no backend specified", sCfg.Name)
 	}
 	return req, nil
-}
-
-// serviceKeyToCID hashes "mesh:service[:part]..." into a DHT rendezvous CID.
-func serviceKeyToCID(parts ...string) (cid.Cid, error) {
-	srvKey := strings.Join(append([]string{"mesh:service"}, parts...), ":")
-	hash, err := multihash.Sum([]byte(srvKey), multihash.SHA2_256, -1)
-	if err != nil {
-		return cid.Undef, err
-	}
-	return cid.NewCidV1(cid.Raw, hash), nil
-}
-
-func serviceNameToCID(serviceType api.ServiceType, serviceName string) (cid.Cid, error) {
-	srvTypeStr, err := api.ServiceTypeToString(serviceType)
-	if err != nil {
-		return cid.Undef, err
-	}
-	return serviceKeyToCID(srvTypeStr, serviceName)
-}
-
-func serviceTypeToCID(serviceType api.ServiceType) (cid.Cid, error) {
-	srvTypeStr, err := api.ServiceTypeToString(serviceType)
-	if err != nil {
-		return cid.Undef, err
-	}
-	return serviceKeyToCID(srvTypeStr)
 }

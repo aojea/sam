@@ -73,25 +73,8 @@ func TestServiceDiscovery(t *testing.T) {
 	// We use the multiplexed HTTP address for MCP calls too!
 	connectPeer(t, actualApiAddrB, addrA)
 
-	// Wait for DHT to have peers on Node A
-	t.Log("Waiting for DHT to have peers on Node A...")
-	deadline := time.Now().Add(10 * time.Second)
-	var dhtReady bool
-	for time.Now().Before(deadline) {
-		respData := callMCP(t, actualApiAddrA, "get_mesh_info", map[string]any{})
-		var data map[string]any
-		if err := json.Unmarshal([]byte(respData), &data); err == nil {
-			dhtSize, _ := data["dht_size"].(float64)
-			if dhtSize > 0 {
-				dhtReady = true
-				break
-			}
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	if !dhtReady {
-		t.Fatalf("DHT not ready on Node A (size 0)")
-	}
+	t.Log("Waiting for Node A to hold a router...")
+	waitForDHTPeers(t, actualApiAddrA)
 
 	// Wait for DHT propagation
 	t.Log("Waiting for DHT propagation...")
@@ -166,25 +149,8 @@ func TestServiceDiscoveryStreaming(t *testing.T) {
 	// Connect Node B to Node A
 	connectPeer(t, actualApiAddrB, addrA)
 
-	// Wait for DHT to have peers on Node A
-	t.Log("Waiting for DHT to have peers on Node A...")
-	deadline := time.Now().Add(10 * time.Second)
-	var dhtReady bool
-	for time.Now().Before(deadline) {
-		respData := callMCP(t, actualApiAddrA, "get_mesh_info", map[string]any{})
-		var data map[string]any
-		if err := json.Unmarshal([]byte(respData), &data); err == nil {
-			dhtSize, _ := data["dht_size"].(float64)
-			if dhtSize > 0 {
-				dhtReady = true
-				break
-			}
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	if !dhtReady {
-		t.Fatalf("DHT not ready on Node A")
-	}
+	t.Log("Waiting for Node A to hold a router...")
+	waitForDHTPeers(t, actualApiAddrA)
 
 	// Wait for DHT propagation
 	t.Log("Waiting for DHT propagation...")

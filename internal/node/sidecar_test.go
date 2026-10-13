@@ -28,9 +28,7 @@ import (
 
 	"github.com/google/agentmesh/api"
 	"github.com/libp2p/go-libp2p"
-	dht "github.com/libp2p/go-libp2p-kad-dht"
 
-	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -519,35 +517,17 @@ func TestRegisterService(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = h.Close() }()
-	d, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mesh"))
-	if err != nil {
+	// The router the node announces to.
+	router := newFakeRouter(t, "/ip4/127.0.0.1/tcp/0")
+	serveDirectory(router.h)
+	if err := h.Connect(context.Background(), peer.AddrInfo{ID: router.h.ID(), Addrs: router.h.Addrs()}); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = d.Close() }()
-
-	// Create a second host to populate routing table
-	h2, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = h2.Close() }()
-	d2, err := dht.New(h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mesh"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = d2.Close() }()
-
-	err = h.Connect(context.Background(), peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Wait for DHT to recognize the peer
-	time.Sleep(100 * time.Millisecond)
+	d := &routerDirectory{host: h, routers: func() []peer.ID { return []peer.ID{router.h.ID()} }, addrs: h.Addrs}
 
 	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond,
-		services: NewServiceRegistry(d, 0),
-		DHT:      d,
+		services:  NewServiceRegistry(d, 0),
+		Directory: d,
 	}
 
 	// MCPService.Init() opens a live session to the URL; serve a fake MCP backend.
@@ -594,48 +574,32 @@ func TestHandleDiscoverService(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = h.Close() }()
-	d, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mesh"))
-	if err != nil {
+	router := newFakeRouter(t, "/ip4/127.0.0.1/tcp/0")
+	dir := serveDirectory(router.h)
+	if err := h.Connect(context.Background(), peer.AddrInfo{ID: router.h.ID(), Addrs: router.h.Addrs()}); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = d.Close() }()
+	d := &routerDirectory{host: h, routers: func() []peer.ID { return []peer.ID{router.h.ID()} }, addrs: h.Addrs}
 
 	node := &AgentMeshNode{BiscuitTimeout: 500 * time.Millisecond,
 		services:      NewServiceRegistry(d, 0),
-		DHT:           d,
+		Directory:     d,
 		Host:          h,
 		BoundHTTPAddr: "127.0.0.1:8080",
 	}
 
-	// Register a service on another host to be discovered
+	// A service another member announced to the directory.
 	h2, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = h2.Close() }()
-	d2, err := dht.New(h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mesh"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = d2.Close() }()
-
-	err = h.Connect(context.Background(), peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	serviceInfo := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "remote-service"}
-	c, err := serviceNameToCID(serviceInfo.Type, serviceInfo.Name)
+	key, err := api.ServiceKey(serviceInfo.Type, serviceInfo.Name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// We don't strictly need Provide to succeed if we can mock the DHT lookup,
-	// but here we are using real DHT. If it fails because table is empty,
-	// we might need to ensure routing table is populated.
-	// Let's ignore the error for now to see if it works without it (maybe DHT cache works).
-	_ = d2.Provide(context.Background(), c, true)
-
-	time.Sleep(100 * time.Millisecond) // Wait for DHT
+	dir.add(key, h2.ID(), h2.Addrs()...)
 
 	req := httptest.NewRequest("GET", "/mesh/service/discover?type=mcp&name=remote-service", nil)
 	rr := httptest.NewRecorder()
@@ -708,70 +672,6 @@ func TestListLocalServices_TypeFilter(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestServiceTypeToCID_Properties(t *testing.T) {
-	mcp1, err := serviceTypeToCID(api.ServiceType_SERVICE_TYPE_MCP)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mcp2, err := serviceTypeToCID(api.ServiceType_SERVICE_TYPE_MCP)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !mcp1.Equals(mcp2) {
-		t.Errorf("serviceTypeToCID is non-deterministic: %s vs %s", mcp1, mcp2)
-	}
-
-	inf, err := serviceTypeToCID(api.ServiceType_SERVICE_TYPE_INFERENCE)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mcp1.Equals(inf) {
-		t.Errorf("expected distinct CIDs for distinct types, both = %s", mcp1)
-	}
-
-	named, err := serviceNameToCID(api.ServiceType_SERVICE_TYPE_MCP, "some-service")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mcp1.Equals(named) {
-		t.Errorf("type-only CID collided with name-keyed CID: %s", mcp1)
-	}
-
-	if _, err := serviceTypeToCID(api.ServiceType_SERVICE_TYPE_UNSPECIFIED); err == nil {
-		t.Errorf("expected error for unspecified type")
-	}
-}
-
-// TestServiceKeyToCID_Equivalence pins the wire format: the public
-// helpers must compose into the same CID as a direct call to the
-// shared key builder, so optimizing the helpers later can't silently
-// shift the DHT keys.
-func TestServiceKeyToCID_Equivalence(t *testing.T) {
-	gotName, err := serviceNameToCID(api.ServiceType_SERVICE_TYPE_MCP, "svc")
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantName, err := serviceKeyToCID("mcp", "svc")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !gotName.Equals(wantName) {
-		t.Errorf("serviceNameToCID != serviceKeyToCID: %s vs %s", gotName, wantName)
-	}
-
-	gotType, err := serviceTypeToCID(api.ServiceType_SERVICE_TYPE_MCP)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantType, err := serviceKeyToCID("mcp")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !gotType.Equals(wantType) {
-		t.Errorf("serviceTypeToCID != serviceKeyToCID: %s vs %s", gotType, wantType)
 	}
 }
 
@@ -850,59 +750,34 @@ func TestDiscoverService_Pagination(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = h.Close() }()
-	d, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mesh"))
-	if err != nil {
+	router := newFakeRouter(t, "/ip4/127.0.0.1/tcp/0")
+	dir := serveDirectory(router.h)
+	if err := h.Connect(context.Background(), peer.AddrInfo{ID: router.h.ID(), Addrs: router.h.Addrs()}); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = d.Close() }()
+	d := &routerDirectory{host: h, routers: func() []peer.ID { return []peer.ID{router.h.ID()} }, addrs: h.Addrs}
 
 	node := &AgentMeshNode{
 		BiscuitTimeout: 500 * time.Millisecond,
 		services:       NewServiceRegistry(d, 0),
-		DHT:            d,
+		Directory:      d,
 		Host:           h,
 		BoundHTTPAddr:  "127.0.0.1:8080",
 	}
 
-	var hosts []host.Host
-	var dhts []*dht.IpfsDHT
-	defer func() {
-		for _, hs := range hosts {
-			_ = hs.Close()
-		}
-		for _, dt := range dhts {
-			_ = dt.Close()
-		}
-	}()
-
 	serviceInfo := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "paginated-service"}
-	c, err := serviceNameToCID(serviceInfo.Type, serviceInfo.Name)
+	key, err := api.ServiceKey(serviceInfo.Type, serviceInfo.Name)
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	for i := 0; i < 3; i++ {
 		h2, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		hosts = append(hosts, h2)
-
-		d2, err := dht.New(h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/mesh"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		dhts = append(dhts, d2)
-
-		err = h.Connect(context.Background(), peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		_ = d2.Provide(context.Background(), c, true)
+		defer func() { _ = h2.Close() }()
+		dir.add(key, h2.ID(), h2.Addrs()...)
 	}
-
-	time.Sleep(200 * time.Millisecond) // Wait for DHT propagation
 
 	// 1. Query page 1 (limit=2, offset=0)
 	req := httptest.NewRequest("GET", "/mesh/service/discover?type=mcp&name=paginated-service&limit=2&offset=0", nil)

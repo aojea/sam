@@ -192,7 +192,8 @@ func TestOpenAIFacadeCUJ(t *testing.T) {
 	t.Log("OpenAI facade CUJ test passed.")
 }
 
-// waitForDHTPeers polls get_mesh_info until the node sees DHT peers.
+// waitForDHTPeers polls get_mesh_info until the node holds a router: the
+// directory it announces to and looks peers up through.
 func waitForDHTPeers(t *testing.T, apiAddr string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
@@ -200,13 +201,13 @@ func waitForDHTPeers(t *testing.T, apiAddr string) {
 		respData := callMCP(t, apiAddr, "get_mesh_info", map[string]any{})
 		var data map[string]any
 		if err := json.Unmarshal([]byte(respData), &data); err == nil {
-			if dhtSize, _ := data["dht_size"].(float64); dhtSize > 0 {
+			if routers, _ := data["attached_routers"].([]any); len(routers) > 0 {
 				return
 			}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	t.Fatal("DHT not ready (size 0)")
+	t.Fatal("the node holds no router")
 }
 
 // waitForFacadeModel polls the consumer's /v1/models until the model appears.

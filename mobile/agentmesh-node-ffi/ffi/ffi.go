@@ -513,15 +513,11 @@ func GetMeshInfo() string {
 	}
 
 	peers := activeNode.Host.Network().Peers()
-	dhtSize := 0
-	if activeNode.DHT != nil && activeNode.DHT.RoutingTable() != nil {
-		dhtSize = activeNode.DHT.RoutingTable().Size()
-	}
 
 	resData := map[string]any{
-		"connected_peers": len(peers),
-		"dht_size":        dhtSize,
-		"node_id":         activeNode.Host.ID().String(),
+		"connected_peers":  len(peers),
+		"attached_routers": activeNode.AttachedRouters(),
+		"node_id":          activeNode.Host.ID().String(),
 	}
 
 	jsonBytes, err := json.Marshal(resData)

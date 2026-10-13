@@ -107,6 +107,18 @@ func (n *AgentMeshNode) requireAuthenticated(next network.StreamHandler) network
 	}
 }
 
+// isCatalogRouter reports whether p is a router the control plane lists.
+func (n *AgentMeshNode) isCatalogRouter(p peer.ID) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for _, c := range n.routerCatalog {
+		if c.ID == p {
+			return true
+		}
+	}
+	return false
+}
+
 // awaitPeerAuthenticated returns once p is authenticated, or with an error
 // when ctx ends, p's connections are gone, or authWait passes.
 func (n *AgentMeshNode) awaitPeerAuthenticated(ctx context.Context, p peer.ID) error {

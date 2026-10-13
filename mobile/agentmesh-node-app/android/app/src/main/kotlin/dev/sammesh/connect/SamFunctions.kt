@@ -22,7 +22,7 @@ class SamFunctions {
 
     /**
      * Retrieves the current status and statistics of the Agent Mesh node.
-     * Returns a JSON string containing connected_peers, dht_size, and node_id.
+     * Returns a JSON string containing connected_peers, attached_routers, and node_id.
      */
     @AppFunction(isDescribedByKDoc = true)
     suspend fun getMeshStatus(context: AppFunctionContext): String {

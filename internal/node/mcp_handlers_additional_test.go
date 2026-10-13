@@ -76,8 +76,8 @@ func TestHandleGetMeshInfo(t *testing.T) {
 	if _, ok := info["connected_peers"]; !ok {
 		t.Errorf("missing connected_peers in mesh info")
 	}
-	if _, ok := info["dht_size"]; !ok {
-		t.Errorf("missing dht_size in mesh info")
+	if _, ok := info["attached_routers"]; !ok {
+		t.Errorf("missing attached_routers in mesh info")
 	}
 }
 

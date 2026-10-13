@@ -101,17 +101,6 @@ var transitHandshakesTotal = promauto.NewCounterVec(
 	[]string{"router", "result"},
 )
 
-// directoryHandshakesTotal counts the handshakes run with a router this node
-// connected to for its DHT without being attached to it, so the router
-// keeps the connection as a session; see authDirectoryRouter.
-var directoryHandshakesTotal = promauto.NewCounterVec(
-	prometheus.CounterOpts{
-		Name: "agentmesh_node_directory_handshakes_total",
-		Help: "Handshakes with a router this node connected to for a DHT lookup or announcement without being attached to it, by result",
-	},
-	[]string{"result"},
-)
-
 // nodeStateCollector exports the node's own view of its mesh membership: the
 // same figures GET /debug/mesh-info and /debug/token-info answer on demand,
 // as gauges a scraper can keep. A node that runs unattended, such as a
@@ -123,7 +112,6 @@ type nodeStateCollector struct {
 	meshConnectedDesc *prometheus.Desc
 	connectedDesc     *prometheus.Desc
 	authenticatedDesc *prometheus.Desc
-	dhtDesc           *prometheus.Desc
 	biscuitExpiryDesc *prometheus.Desc
 	servicesDesc      *prometheus.Desc
 	routersDesc       *prometheus.Desc
@@ -149,10 +137,6 @@ func newNodeStateCollector(n *AgentMeshNode) *nodeStateCollector {
 			"agentmesh_node_authenticated_peers",
 			"Peers that have completed the mesh authentication handshake with this node",
 			nil, nil),
-		dhtDesc: prometheus.NewDesc(
-			"agentmesh_node_dht_routing_table_size",
-			"Peers in the Kademlia routing table",
-			nil, nil),
 		biscuitExpiryDesc: prometheus.NewDesc(
 			"agentmesh_node_biscuit_expiry_timestamp_seconds",
 			"Unix time the node's mesh credential expires",
@@ -175,7 +159,7 @@ func newNodeStateCollector(n *AgentMeshNode) *nodeStateCollector {
 func (c *nodeStateCollector) Describe(ch chan<- *prometheus.Desc) {
 	for _, d := range []*prometheus.Desc{
 		c.readyDesc, c.meshConnectedDesc, c.connectedDesc, c.authenticatedDesc,
-		c.dhtDesc, c.biscuitExpiryDesc, c.servicesDesc, c.routersDesc, c.routerCandsDesc, connsPerSourceIPDesc,
+		c.biscuitExpiryDesc, c.servicesDesc, c.routersDesc, c.routerCandsDesc, connsPerSourceIPDesc,
 	} {
 		ch <- d
 	}
@@ -199,7 +183,6 @@ func (c *nodeStateCollector) Collect(ch chan<- prometheus.Metric) {
 
 	ch <- prometheus.MustNewConstMetric(c.routersDesc, prometheus.GaugeValue, float64(n.AttachedRouters()), "attached")
 	ch <- prometheus.MustNewConstMetric(c.routersDesc, prometheus.GaugeValue, float64(n.wantRouters()), "wanted")
-	ch <- prometheus.MustNewConstMetric(c.routersDesc, prometheus.GaugeValue, float64(n.DirectoryRouters()), "directory")
 	cands := n.routerCandidates()
 	_, matching := selectRouters(cands, 0, n.config.RouterSelector, nil, nil)
 	ch <- prometheus.MustNewConstMetric(c.routerCandsDesc, prometheus.GaugeValue, float64(len(cands)), "any")
@@ -211,7 +194,6 @@ func (c *nodeStateCollector) Collect(ch chan<- prometheus.Metric) {
 		return true
 	})
 	ch <- prometheus.MustNewConstMetric(c.authenticatedDesc, prometheus.GaugeValue, float64(authenticated))
-	ch <- prometheus.MustNewConstMetric(c.dhtDesc, prometheus.GaugeValue, float64(n.DHT.RoutingTable().Size()))
 
 	if exp, err := n.Store.LoadIdentityExpiration(); err == nil && exp > 0 {
 		ch <- prometheus.MustNewConstMetric(c.biscuitExpiryDesc, prometheus.GaugeValue, float64(exp))

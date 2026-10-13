@@ -45,11 +45,9 @@ import (
 	"github.com/google/agentmesh/internal/p2plimits"
 	"github.com/google/agentmesh/internal/ratelimit"
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/ipfs/go-cid"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p"
 	gostream "github.com/libp2p/go-libp2p-gostream"
-	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/event"
@@ -149,7 +147,7 @@ func (n *AgentMeshNode) isAdmitted(p peer.ID) bool {
 type AgentMeshNode struct {
 	config               Options
 	Host                 host.Host
-	DHT                  *dht.IpfsDHT
+	Directory            Directory
 	PubSub               *pubsub.PubSub
 	Discovery            *samdiscovery.Discovery
 	Store                *Store
@@ -648,9 +646,6 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 				}
 				logger.Debugf("[Discovery] Peer %s connected via relay/public IP (%s), marking private IP as failed", remotePeer, remoteAddr)
 			}
-			if c.Stat().Direction == network.DirOutbound {
-				n.authDirectoryRouter(ctx, remotePeer)
-			}
 		},
 		// The router drops us from its authenticated set the moment our last
 		// connection to it closes, so a stale entry here would report a
@@ -688,30 +683,19 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 		}
 	}
 
-	// The DHT and gossip are served by, and serve, authenticated peers only.
+	// Gossip and the directory are served by, and serve, authenticated
+	// peers only.
 	gated := &meshHost{Host: h, n: n}
 
-	// Initialize Rendezvous (DHT Client)
-	kdht, err := dht.New(gated, dhtOptions(n.directorySettings())...)
-	if err != nil {
-		return err
-	}
-	n.DHT = kdht
+	// The directory: the routers this node is attached to answer for it.
+	n.Directory = &routerDirectory{host: gated, routers: n.attachedRouters, addrs: h.Addrs}
 
-	n.services = NewServiceRegistry(n.DHT, n.config.BackendProbeTimeout)
+	n.services = NewServiceRegistry(n.Directory, n.config.BackendProbeTimeout)
 	n.services.reprovideNow = n.triggerReprovide
 	n.applyPendingEgress(ctx)
 
-	authenticated, err := n.admitByRouters(ctx)
-	if err != nil {
+	if _, err := n.admitByRouters(ctx); err != nil {
 		return err
-	}
-
-	if authenticated {
-		logger.Infof("[DHT] Bootstrapping DHT with connected router...")
-		if err := n.DHT.Bootstrap(ctx); err != nil {
-			logger.Warnf("[DHT] Failed to trigger DHT bootstrap: %v", err)
-		}
 	}
 
 	// Initialize Gossipsub for control plane events. StrictSign is the
@@ -964,11 +948,7 @@ func (n *AgentMeshNode) startConnectionMonitor(ctx context.Context, bootstrapDur
 				}
 
 				if reconnected {
-					logger.Infof("[Monitor] Reconnected successfully. Bootstrapping DHT...")
-					if err := n.DHT.Bootstrap(ctx); err != nil {
-						logger.Warnf("[DHT] Failed to trigger DHT bootstrap on reconnect: %v", err)
-					}
-					logger.Infof("[Monitor] Reproviding services to DHT...")
+					logger.Infof("[Monitor] Reconnected successfully. Announcing services again...")
 					n.services.ReprovideAll(ctx)
 					consecutiveFailures = 0
 					continue
@@ -985,24 +965,23 @@ func (n *AgentMeshNode) startConnectionMonitor(ctx context.Context, bootstrapDur
 }
 
 func (n *AgentMeshNode) RegisterStaticServices(ctx context.Context, services []api.ServiceConfig) error {
-	// Wait for node to be connected to a router or DHT to be ready
-	// This avoids failure if we try to register immediately after enrollment
-	// before the connection is established.
+	// A router has to hold the node before a service can be announced, so
+	// a registration right after enrollment waits for the first one.
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	timeout := time.After(10 * time.Second)
 
-dhtLoop:
+attached:
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timeout:
-			return fmt.Errorf("timeout waiting for DHT to be ready before registering static services")
+			return fmt.Errorf("timeout waiting for a router before registering static services")
 		case <-ticker.C:
-			if n.IsConnected() || (n.DHT != nil && n.DHT.RoutingTable().Size() > 0) {
-				break dhtLoop
+			if n.IsConnected() {
+				break attached
 			}
 		}
 	}
@@ -2036,11 +2015,6 @@ func (n *AgentMeshNode) Teardown() error {
 		n.services.TeardownAll()
 	}
 	var errs []error
-	if n.DHT != nil {
-		if err := n.DHT.Close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
 	if n.Host != nil {
 		if err := n.Host.Close(); err != nil {
 			errs = append(errs, err)
@@ -2061,47 +2035,33 @@ const (
 	discoveryFanoutTimeout = 40 * time.Second
 )
 
-// findProvidersByCID is the shared DHT-lookup primitive; bounds the
-// lookup so FindProvidersAsync's channel is guaranteed to close.
-func (n *AgentMeshNode) findProvidersByCID(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
-	if n.DHT == nil {
-		return nil, fmt.Errorf("DHT not initialized")
+// findProviders asks the directory who provides key and keeps their
+// addresses for the dials that follow.
+func (n *AgentMeshNode) findProviders(ctx context.Context, key []byte) ([]peer.AddrInfo, error) {
+	if n.Directory == nil {
+		return nil, fmt.Errorf("the directory is not up")
 	}
 	lookupCtx, cancel := context.WithTimeout(ctx, dhtLookupTimeout)
 	defer cancel()
-	// FindProvidersAsync can emit the same peer multiple times when the
-	// DHT walk converges from different paths; dedupe so downstream
-	// fan-out (e.g. discoverServicesByType) doesn't double-fetch.
-	providersMap := make(map[peer.ID]peer.AddrInfo)
-	limit := n.config.DHTLookupLimit
-	if limit <= 0 {
-		limit = 20
+	found, err := n.Directory.FindProviders(lookupCtx, key, n.config.DHTLookupLimit)
+	if errors.Is(err, errNoDirectoryRouter) {
+		// A member not yet on the mesh knows of nobody; the lookup is
+		// counted as failed, the caller sees an empty mesh.
+		return nil, nil
 	}
-	for p := range n.DHT.FindProvidersAsync(lookupCtx, c, limit) {
-		providersMap[p.ID] = p
+	if err != nil {
+		return nil, err
 	}
-	providers := make([]peer.AddrInfo, 0, len(providersMap))
-	for _, p := range providersMap {
-		// Same reason as the discovery loop: a revoked peer's provider
-		// record outlives its ban, so without this every service lookup
-		// fans out a doomed dial and returns one fewer usable provider.
+	providers := make([]peer.AddrInfo, 0, len(found))
+	for _, p := range found {
+		// A revoked peer's record outlives its ban, so without this every
+		// service lookup fans out a doomed dial and returns one fewer
+		// usable provider.
 		if n.peerIsRevoked(p.ID) {
 			continue
 		}
-		routerAddrsCount := 0
-		if n.RouterPeerID != "" {
-			routerAddrsCount = len(n.Host.Peerstore().Addrs(n.RouterPeerID))
-		}
-		logger.Infof("[Discovery] Evaluating relay for %s: RouterPeerID=%s, RouterAddrsCount=%d", p.ID, n.RouterPeerID, routerAddrsCount)
-
-		for _, addr := range p.Addrs {
-			logger.Infof("[Discovery] Provider %s advertised address: %s", p.ID, addr)
-		}
-
-		if len(p.Addrs) > 0 {
-			n.Host.Peerstore().AddAddrs(p.ID, p.Addrs, peerstore.TempAddrTTL)
-		}
-
+		logger.Debugf("[Discovery] Provider %s is reached at %v", p.ID, p.Addrs)
+		rememberAddrs(n.Host.Peerstore(), p)
 		providers = append(providers, p)
 	}
 	return providers, nil
@@ -2109,20 +2069,20 @@ func (n *AgentMeshNode) findProvidersByCID(ctx context.Context, c cid.Cid) ([]pe
 
 // FindProvidersByName returns peers hosting a specific {type, name} service.
 func (n *AgentMeshNode) FindProvidersByName(ctx context.Context, serviceType api.ServiceType, serviceName string) ([]peer.AddrInfo, error) {
-	c, err := serviceNameToCID(serviceType, serviceName)
+	key, err := api.ServiceKey(serviceType, serviceName)
 	if err != nil {
 		return nil, err
 	}
-	return n.findProvidersByCID(ctx, c)
+	return n.findProviders(ctx, key)
 }
 
 // FindProvidersByType returns peers hosting at least one service of the given type.
 func (n *AgentMeshNode) FindProvidersByType(ctx context.Context, serviceType api.ServiceType) ([]peer.AddrInfo, error) {
-	c, err := serviceTypeToCID(serviceType)
+	key, err := api.ServiceKey(serviceType, "")
 	if err != nil {
 		return nil, err
 	}
-	return n.findProvidersByCID(ctx, c)
+	return n.findProviders(ctx, key)
 }
 
 // localProxyURL builds the loopback URL clients use to reach a remote service.

@@ -22,13 +22,12 @@ import (
 	"time"
 
 	"github.com/google/agentmesh/api"
-	"github.com/ipfs/go-cid"
 )
 
-// dhtProvider is the narrow DHT surface ServiceRegistry depends on.
-// Production wires this to *dht.IpfsDHT; tests use a fake.
-type dhtProvider interface {
-	Provide(ctx context.Context, c cid.Cid, broadcast bool) error
+// directoryProvider is the one directory call ServiceRegistry makes.
+// Production wires this to the node's Directory; tests use a fake.
+type directoryProvider interface {
+	Provide(ctx context.Context, key []byte) error
 }
 
 // backendProber is implemented by services that can be asked whether their
@@ -70,7 +69,7 @@ func advertisable(ctx context.Context, svc Service, probeTimeout time.Duration) 
 type ServiceRegistry struct {
 	mu       sync.RWMutex
 	services map[string]Service
-	dht      dhtProvider
+	dht      directoryProvider
 
 	// reprovideNow asks the node to run a reprovide cycle now, so a service
 	// registered after the loop last ran does not wait a whole interval to be
@@ -88,7 +87,7 @@ type ServiceRegistry struct {
 // defaultDHTProbeTimeout, so callers can pass an unset
 // Options.BackendProbeTimeout straight through without an explicit
 // zero-check.
-func NewServiceRegistry(d dhtProvider, backendProbeTimeout time.Duration) *ServiceRegistry {
+func NewServiceRegistry(d directoryProvider, backendProbeTimeout time.Duration) *ServiceRegistry {
 	if backendProbeTimeout <= 0 {
 		backendProbeTimeout = defaultDHTProbeTimeout
 	}
@@ -139,11 +138,11 @@ func (r *ServiceRegistry) Register(ctx context.Context, svc Service) error {
 		return fmt.Errorf("init %s: %w", info.Name, err)
 	}
 
-	srvNameCID, err := serviceNameToCID(info.Type, info.Name)
+	nameKey, err := api.ServiceKey(info.Type, info.Name)
 	if err != nil {
 		return err
 	}
-	srvTypeCID, err := serviceTypeToCID(info.Type)
+	typeKey, err := api.ServiceKey(info.Type, "")
 	if err != nil {
 		return err
 	}
@@ -154,14 +153,14 @@ func (r *ServiceRegistry) Register(ctx context.Context, svc Service) error {
 	} else {
 		nameCtx, nameCancel := context.WithTimeout(ctx, 5*time.Second)
 		defer nameCancel()
-		if err := r.dht.Provide(nameCtx, srvNameCID, true); err != nil {
-			logger.Warnf("[ServiceRegistry] DHT Provide (name) for %s: %v", info.Name, err)
+		if err := r.dht.Provide(nameCtx, nameKey); err != nil {
+			logger.Warnf("[ServiceRegistry] Announcing %s by name: %v", info.Name, err)
 		}
 
 		typeCtx, typeCancel := context.WithTimeout(ctx, 5*time.Second)
 		defer typeCancel()
-		if err := r.dht.Provide(typeCtx, srvTypeCID, true); err != nil {
-			logger.Warnf("[ServiceRegistry] DHT Provide (type) for %s: %v", info.Name, err)
+		if err := r.dht.Provide(typeCtx, typeKey); err != nil {
+			logger.Warnf("[ServiceRegistry] Announcing %s by type: %v", info.Name, err)
 		}
 	}
 
@@ -177,7 +176,7 @@ func (r *ServiceRegistry) Register(ctx context.Context, svc Service) error {
 	}
 
 	if probeErr == nil {
-		logger.Infof("[ServiceRegistry] Registered %s/%s (name CID: %s, type CID: %s)", info.Type, info.Name, srvNameCID, srvTypeCID)
+		logger.Infof("[ServiceRegistry] Registered and announced %s/%s", info.Type, info.Name)
 	} else if r.reprovideNow != nil {
 		r.reprovideNow()
 	}
@@ -297,19 +296,20 @@ Loop:
 				// On shutdown every service fails this way, and saying so
 				// would blame backends for the node stopping.
 				if ctx.Err() == nil {
-					logger.Warnf("[ServiceRegistry] Withholding %s/%s from the DHT: backend did not answer: %v", info.Type, info.Name, err)
+					logger.Warnf("[ServiceRegistry] Withholding %s/%s from the directory: backend did not answer: %v", info.Type, info.Name, err)
 				}
 				return
 			}
 
-			if srvNameCID, err := serviceNameToCID(info.Type, info.Name); err == nil {
-				nameCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-				_ = r.dht.Provide(nameCtx, srvNameCID, true)
-				cancel()
-			}
-			if srvTypeCID, err := serviceTypeToCID(info.Type); err == nil {
-				typeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-				_ = r.dht.Provide(typeCtx, srvTypeCID, true)
+			for _, name := range []string{info.Name, ""} {
+				key, err := api.ServiceKey(info.Type, name)
+				if err != nil {
+					continue
+				}
+				provideCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				if err := r.dht.Provide(provideCtx, key); err != nil && ctx.Err() == nil {
+					logger.Warnf("[ServiceRegistry] Announcing %s/%s again: %v", info.Type, info.Name, err)
+				}
 				cancel()
 			}
 		}()

@@ -29,9 +29,7 @@ import (
 	"github.com/google/agentmesh/internal/ratelimit"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p"
-	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-msgio"
@@ -808,63 +806,32 @@ func TestNewAgentMeshNode_DHTOptions(t *testing.T) {
 	}
 }
 
-// newDHTHost returns a host wired to a DHT on the /mesh prefix. Client mode
-// keeps the host out of its peers' routing tables, so nothing dials it except
-// the code under test.
-func newDHTHost(t *testing.T, mode dht.ModeOpt) (host.Host, *dht.IpfsDHT) {
-	t.Helper()
-	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = h.Close() })
-	d, err := dht.New(h, dht.Mode(mode), dht.ProtocolPrefix("/mesh"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = d.Close() })
-	return h, d
-}
-
-// waitForRoutingTable polls until the DHT has learned about a peer.
-func waitForRoutingTable(t *testing.T, d *dht.IpfsDHT) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for d.RoutingTable().Size() == 0 {
-		if time.Now().After(deadline) {
-			t.Fatalf("routing table still empty after 5s")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
 func TestFindProvidersSkipsRevoked(t *testing.T) {
 	ctx := context.Background()
 
-	hostA, dhtA := newDHTHost(t, dht.ModeServer)
-	hostB, dhtB := newDHTHost(t, dht.ModeServer)
-	if err := hostA.Connect(ctx, peer.AddrInfo{ID: hostB.ID(), Addrs: hostB.Addrs()}); err != nil {
-		t.Fatal(err)
-	}
-	waitForRoutingTable(t, dhtA)
-	waitForRoutingTable(t, dhtB)
-
-	c, err := serviceNameToCID(api.ServiceType_SERVICE_TYPE_MCP, "revoked-svc")
+	router := newFakeRouter(t, "/ip4/127.0.0.1/tcp/0")
+	dir := serveDirectory(router.h)
+	hostA, directory := newDirectoryClient(t, router.h)
+	hostB, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := dhtB.Provide(ctx, c, true); err != nil {
+	t.Cleanup(func() { _ = hostB.Close() })
+
+	key, err := api.ServiceKey(api.ServiceType_SERVICE_TYPE_MCP, "revoked-svc")
+	if err != nil {
 		t.Fatal(err)
 	}
+	dir.add(key, hostB.ID(), hostB.Addrs()...)
 
 	revokedCache, err := lru.New[string, int64](10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	node := &AgentMeshNode{Host: hostA, DHT: dhtA, revokedPeers: revokedCache}
+	node := &AgentMeshNode{Host: hostA, Directory: directory, revokedPeers: revokedCache}
 
-	// Positive control: the provider record is findable before the ban, so a
-	// later empty result is the guard and not a lookup that never worked.
+	// Positive control: the record is findable before the ban, so a later
+	// empty result is the guard and not a lookup that never worked.
 	providers, err := node.FindProvidersByName(ctx, api.ServiceType_SERVICE_TYPE_MCP, "revoked-svc")
 	if err != nil {
 		t.Fatal(err)

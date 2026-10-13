@@ -144,9 +144,8 @@ func (n *AgentMeshNode) handleGetMeshInfoRemote(ctx context.Context, req *mcp.Ca
 		return nil, nil, err
 	}
 	responseBytes, err := json.Marshal(struct {
-		PeerID  string `json:"peer_id"`
-		DHTSize int    `json:"dht_size"`
-	}{PeerID: full.PeerID, DHTSize: full.DHTSize})
+		PeerID string `json:"peer_id"`
+	}{PeerID: full.PeerID})
 	if err != nil {
 		return nil, nil, err
 	}

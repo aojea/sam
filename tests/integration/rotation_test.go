@@ -214,7 +214,7 @@ roles:
 	if err != nil {
 		t.Fatalf("failed to query node: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "dht_size") {
+	if !strings.Contains(stdout, "attached_routers") {
 		t.Fatalf("unexpected node response: %s", stdout)
 	}
 }

@@ -24,7 +24,6 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/multiformats/go-multiaddr v0.16.1
 	github.com/multiformats/go-multiaddr-dns v0.6.0
-	github.com/multiformats/go-multihash v0.2.3
 	github.com/openai/openai-go v1.12.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.3
@@ -96,6 +95,7 @@ require (
 	github.com/multiformats/go-multiaddr-fmt v0.1.0 // indirect
 	github.com/multiformats/go-multibase v0.3.0 // indirect
 	github.com/multiformats/go-multicodec v0.10.0 // indirect
+	github.com/multiformats/go-multihash v0.2.3 // indirect
 	github.com/multiformats/go-multistream v0.6.1 // indirect
 	github.com/multiformats/go-varint v0.1.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect

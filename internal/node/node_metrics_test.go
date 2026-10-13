@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p"
-	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -80,18 +79,12 @@ func TestNodeMetricsServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = host.Close() }()
-	kad, err := dht.New(host, dht.Mode(dht.ModeServer))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = kad.Close() }()
-
 	expiry := time.Now().Add(time.Hour).Unix()
 	if err := store.SaveIdentityExpiration(expiry); err != nil {
 		t.Fatal(err)
 	}
 	node.Host = host
-	node.DHT = kad
+	node.Directory = &routerDirectory{host: host, routers: node.attachedRouters, addrs: host.Addrs}
 	node.authPeers.Store(peer.ID("peer-a"), time.Now().Add(time.Hour))
 	node.authPeers.Store(peer.ID("peer-b"), time.Now().Add(time.Hour))
 
@@ -105,7 +98,6 @@ func TestNodeMetricsServer(t *testing.T) {
 		"agentmesh_node_mesh_connected 0",
 		"agentmesh_node_connected_peers 0",
 		"agentmesh_node_authenticated_peers 2",
-		"agentmesh_node_dht_routing_table_size 0",
 		"agentmesh_node_conns_per_source_ip_limit 100",
 		`agentmesh_node_inbound_connections_refused_total{reason="per_ip_limit"} 0`,
 		"agentmesh_node_biscuit_expiry_timestamp_seconds " + strconv.FormatFloat(float64(expiry), 'g', -1, 64),

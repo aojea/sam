@@ -142,7 +142,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
   String _status = '';
   String _nodeID = '';
   int _connectedPeers = 0;
-  int _dhtSize = 0;
+  int _attachedRouters = 0;
   bool _loggingIn = false;
   bool _devicePollingActive = false;
   Timer? _pollingTimer;
@@ -976,7 +976,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
           if (!mounted) return;
           setState(() {
             _connectedPeers = info['connected_peers'] ?? 0;
-            _dhtSize = info['dht_size'] ?? 0;
+            _attachedRouters = info['attached_routers'] ?? 0;
             if (info['node_id'] != null) {
               _nodeID = info['node_id'];
             }
@@ -1106,7 +1106,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
         _running = false;
         _status = 'Stopped';
         _connectedPeers = 0;
-        _dhtSize = 0;
+        _attachedRouters = 0;
       }
     });
   }
@@ -1752,9 +1752,9 @@ class _NodeControlPageState extends State<NodeControlPage> {
               const SizedBox(width: 16),
               Expanded(
                 child: _buildStatCard(
-                  icon: Icons.storage,
-                  title: 'DHT Size',
-                  value: '$_dhtSize',
+                  icon: Icons.hub,
+                  title: 'Routers',
+                  value: '$_attachedRouters',
                   color: Colors.purple,
                 ),
               ),

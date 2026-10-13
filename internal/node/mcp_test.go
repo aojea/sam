@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/google/agentmesh/api"
-	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
@@ -88,16 +87,10 @@ func TestResolveRelayAddresses(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create a real DHT bound to the mock host
-	kdht, err := dht.New(localHost, dht.Mode(dht.ModeServer))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = kdht.Close() }()
-
+	// The directory is not asked: the addresses are in the peerstore.
 	node := &AgentMeshNode{
 		Host:           localHost,
-		DHT:            kdht,
+		Directory:      &routerDirectory{host: localHost, routers: func() []peer.ID { return nil }, addrs: localHost.Addrs},
 		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
@@ -113,19 +106,8 @@ func TestResolveRelayAddresses(t *testing.T) {
 	localHost.Peerstore().AddAddr(relayID, relayDirectAddr, peerstore.PermanentAddrTTL)
 	relayHost.Peerstore().AddAddr(relayID, relayDirectAddr, peerstore.PermanentAddrTTL)
 
-	// Create DHT for relay
-	relayDHT, err := dht.New(relayHost, dht.Mode(dht.ModeServer))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = relayDHT.Close() }()
-
 	_ = mn.LinkAll()
 	_ = mn.ConnectAllButSelf()
-
-	// Wait for DHT
-	_, _ = kdht.RoutingTable().TryAddPeer(relayID, true, true)
-	_, _ = relayDHT.RoutingTable().TryAddPeer(localHost.ID(), true, true)
 
 	// Create a target node behind the relay
 	targetHost, err := mn.GenPeer()
@@ -171,11 +153,6 @@ func TestPreparePeerAddrsFallsBackToAuthenticatedRouters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kdht, err := dht.New(localHost, dht.Mode(dht.ModeClient))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = kdht.Close() }()
 	admitted, err := mn.GenPeer()
 	if err != nil {
 		t.Fatal(err)
@@ -195,7 +172,7 @@ func TestPreparePeerAddrsFallsBackToAuthenticatedRouters(t *testing.T) {
 
 	node := &AgentMeshNode{
 		Host:                 localHost,
-		DHT:                  kdht,
+		Directory:            &routerDirectory{host: localHost, routers: func() []peer.ID { return nil }, addrs: localHost.Addrs},
 		BiscuitTimeout:       500 * time.Millisecond,
 		authenticatedRouters: map[peer.ID]bool{admitted.ID(): true, stale.ID(): true},
 	}
