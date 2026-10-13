@@ -178,11 +178,14 @@ func TestGossipJunkFloodIsRejectedNotForwarded(t *testing.T) {
 	victim.keysMu.Unlock()
 
 	// attacker -> victim -> observer. The observer only ever hears what the
-	// victim chooses to forward.
+	// victim chooses to forward. Both authenticated with the victim, as a
+	// caller does: the victim gossips with no one who did not.
 	attacker := newGossipPeer(t, ctx)
 	observer := newGossipPeer(t, ctx)
-	attacker.connect(t, ctx, victim.Host)
-	observer.connect(t, ctx, victim.Host)
+	for _, g := range []*gossipPeer{attacker, observer} {
+		victim.authPeers.Store(g.host.ID(), time.Now().Add(time.Hour))
+		g.connect(t, ctx, victim.Host)
+	}
 
 	var mu sync.Mutex
 	var forwardedJunk []string

@@ -688,8 +688,11 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 		}
 	}
 
+	// The DHT and gossip are served by, and serve, authenticated peers only.
+	gated := &meshHost{Host: h, n: n}
+
 	// Initialize Rendezvous (DHT Client)
-	kdht, err := dht.New(h, dhtOptions(n.directorySettings())...)
+	kdht, err := dht.New(gated, dhtOptions(n.directorySettings())...)
 	if err != nil {
 		return err
 	}
@@ -715,7 +718,7 @@ func (n *AgentMeshNode) Start(ctx context.Context) error {
 	// library default; it is pinned because the event validator and the
 	// per-author rate limit key on msg.GetFrom(), which only the signature
 	// makes trustworthy.
-	ps, err := pubsub.NewGossipSub(ctx, h, pubsub.WithMessageSignaturePolicy(pubsub.StrictSign))
+	ps, err := pubsub.NewGossipSub(ctx, gated, pubsub.WithMessageSignaturePolicy(pubsub.StrictSign))
 	if err != nil {
 		return err
 	}
