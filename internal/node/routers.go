@@ -162,6 +162,30 @@ func (n *AgentMeshNode) setRouterCatalog(cands []routerCandidate) {
 			n.Host.Peerstore().AddAddrs(c.ID, c.Addrs, peerstore.PermanentAddrTTL)
 		}
 	}
+	n.pruneDHTTable(cands)
+}
+
+// pruneDHTTable drops from the DHT routing table every peer the catalog
+// does not list. The routers are the only DHT servers, so the catalog is
+// the table's source of truth; kad-dht's own liveness pings are off
+// (dhtOptions), and without this a router that left would stay in the
+// table until a lookup failed against it.
+func (n *AgentMeshNode) pruneDHTTable(cands []routerCandidate) {
+	if n.DHT == nil || len(cands) == 0 {
+		return
+	}
+	listed := make(map[peer.ID]bool, len(cands))
+	for _, c := range cands {
+		listed[c.ID] = true
+	}
+	rt := n.DHT.RoutingTable()
+	for _, p := range rt.ListPeers() {
+		if listed[p] {
+			continue
+		}
+		rt.RemovePeer(p)
+		logger.Infof("[DHT] Dropped %s from the routing table: the control plane no longer lists it as a router", p)
+	}
 }
 
 func (n *AgentMeshNode) routerCandidates() []routerCandidate {

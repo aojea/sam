@@ -27,6 +27,16 @@ import (
 // on a 400-connection budget, answer whoever connects, and be trusted for
 // unsigned provider records. A public member is still dialled directly; the
 // role in the directory and the way it is reached are separate things.
+//
+// The table is not refreshed. kad-dht treats a table of ten peers or fewer
+// as starved and, every two minutes, pings every entry and runs a lookup
+// for the member's own ID against all of them; with the routers as the only
+// servers that is a connection to every router the member is not attached
+// to, closed by the router at its auth deadline and opened again two
+// minutes later, for nothing the member needs: the servers are the routers
+// the control plane lists, learned on attach and from closer-peer answers,
+// and a router that leaves the catalog leaves the table (setRouterCatalog).
+// Bootstrap still fills the table once at start.
 func dhtOptions(cfg Options) []dht.Option {
 	providerTTL := cfg.DHTProviderAddrTTL
 	if providerTTL <= 0 {
@@ -34,6 +44,7 @@ func dhtOptions(cfg Options) []dht.Option {
 	}
 	opts := []dht.Option{
 		dht.Mode(dht.ModeClient),
+		dht.DisableAutoRefresh(),
 		dht.ProtocolPrefix(api.DHTProtocolPrefix),
 		dht.ProviderManagerOpts(records.ProviderAddrTTL(providerTTL), records.ProvideValidity(providerTTL)),
 	}

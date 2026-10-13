@@ -23,7 +23,9 @@ import (
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-libp2p/core/test"
 
 	"github.com/google/agentmesh/api"
 )
@@ -79,5 +81,41 @@ func TestMemberDHTStaysClientWhenPublic(t *testing.T) {
 	}
 	if serves(member) {
 		t.Errorf("member on a public host serves %s; protocols: %v", api.DHTProtocolID, member.Mux().Protocols())
+	}
+}
+
+// TestSetRouterCatalogPrunesDHTTable: with kad-dht's liveness pings off, the
+// catalog is what takes a router out of the member's DHT table.
+func TestSetRouterCatalogPrunesDHTTable(t *testing.T) {
+	h, err := libp2p.New(libp2p.NoListenAddrs)
+	if err != nil {
+		t.Fatalf("libp2p.New: %v", err)
+	}
+	t.Cleanup(func() { _ = h.Close() })
+	kdht, err := dht.New(h, dhtOptions(Options{})...)
+	if err != nil {
+		t.Fatalf("dht.New: %v", err)
+	}
+	t.Cleanup(func() { _ = kdht.Close() })
+
+	listed, gone := test.RandPeerIDFatal(t), test.RandPeerIDFatal(t)
+	for _, p := range []peer.ID{listed, gone} {
+		if added, err := kdht.RoutingTable().TryAddPeer(p, false, false); err != nil || !added {
+			t.Fatalf("TryAddPeer(%s) = %v, %v; want added", p, added, err)
+		}
+	}
+
+	n := &AgentMeshNode{config: Options{Routers: 2}, Host: h, DHT: kdht}
+	n.setRouterCatalog([]routerCandidate{{AddrInfo: peer.AddrInfo{ID: listed}}})
+
+	got := kdht.RoutingTable().ListPeers()
+	if len(got) != 1 || got[0] != listed {
+		t.Fatalf("routing table after the catalog dropped %s = %v, want [%s]", gone, got, listed)
+	}
+
+	// An empty catalog says nothing about the routers and must not empty the table.
+	n.setRouterCatalog(nil)
+	if got := kdht.RoutingTable().ListPeers(); len(got) != 1 {
+		t.Fatalf("routing table after an empty catalog = %v, want [%s]", got, listed)
 	}
 }
