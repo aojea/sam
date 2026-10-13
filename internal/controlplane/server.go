@@ -671,6 +671,7 @@ func (s *Server) HandleInfo(w http.ResponseWriter, r *http.Request) {
 		RouterAddresses: routerAddrs, // Reused this field for back-compatibility with bootstrap routers list
 		Routers:         s.routerInfos(r.Context(), activeRouters),
 		BannedPeerIds:   bannedPeerIDs,
+		Directory:       api.NewDirectoryParameters(s.config.DHTReplication, s.config.DHTReprovideInterval),
 	}
 
 	respData, err := proto.Marshal(resp)

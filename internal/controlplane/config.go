@@ -32,12 +32,17 @@ type Options struct {
 	// human user tokens. Tokens from a workload issuer are accepted at
 	// /register, /refresh, and /token/exchange, and refused at /user/* and
 	// /oauth/authorize.
-	WorkloadIssuer        string
-	OIDCClientID          string // OAuth client id advertised via /info; defaults to the first allowed audience
-	AllowedAudiences      []string
-	LeaseDuration         time.Duration
-	KeyRotationInterval   time.Duration
-	KeyGracePeriod        time.Duration
+	WorkloadIssuer      string
+	OIDCClientID        string // OAuth client id advertised via /info; defaults to the first allowed audience
+	AllowedAudiences    []string
+	LeaseDuration       time.Duration
+	KeyRotationInterval time.Duration
+	KeyGracePeriod      time.Duration
+	// DHTReplication and DHTReprovideInterval are the mesh's directory
+	// parameters, published on /info for every member and router
+	// (api.DirectoryParameters); 0 is the api default of each.
+	DHTReplication        int
+	DHTReprovideInterval  time.Duration
 	InsecureSkipTLSVerify bool
 	BiscuitTimeout        time.Duration
 	BiscuitTTL            time.Duration // Lifespan minted into every issued Biscuit's expiration() fact; defaults to api.BiscuitTokenTTL
@@ -104,6 +109,12 @@ func (o *Options) Default() {
 	if o.KeyGracePeriod <= 0 {
 		o.KeyGracePeriod = 1 * time.Hour
 	}
+	if o.DHTReplication == 0 {
+		o.DHTReplication = api.DefaultDHTReplication
+	}
+	if o.DHTReprovideInterval == 0 {
+		o.DHTReprovideInterval = api.DefaultReprovideInterval
+	}
 	if o.BiscuitTTL <= 0 {
 		o.BiscuitTTL = api.BiscuitTokenTTL
 	}
@@ -134,6 +145,9 @@ func (o *Options) Validate() error {
 	}
 	if o.DataSourceName == "" {
 		return fmt.Errorf("DataSourceName must be specified")
+	}
+	if err := api.ValidateDirectoryParameters(o.DHTReplication, o.DHTReprovideInterval); err != nil {
+		return err
 	}
 	return nil
 }

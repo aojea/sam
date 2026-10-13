@@ -59,6 +59,7 @@ of zero leaves the default of that component unchanged.
 | Flag | Corresponds to |
 |---|---|
 | `--control-plane-lease-duration` | `agentmesh-control-plane --lease-duration` |
+| `--dht-replication`, `--dht-reprovide-interval` | the same flags of `agentmesh-control-plane`: the mesh's directory parameters, published on `/info`. |
 | `--control-plane-key-rotation-interval` | `--key-rotation-interval` |
 | `--control-plane-key-grace-period` | `--key-grace-period` |
 | `--control-plane-biscuit-ttl` | `--biscuit-ttl` |

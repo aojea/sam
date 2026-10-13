@@ -128,6 +128,10 @@ type ControlPlaneTunables struct {
 	KeyRotationInterval time.Duration
 	// KeyGracePeriod keeps rotated-out keys valid for verification.
 	KeyGracePeriod time.Duration
+	// DHTReplication and DHTReprovideInterval are the mesh's directory
+	// parameters; see controlplane.Options.
+	DHTReplication       int
+	DHTReprovideInterval time.Duration
 	// BiscuitTTL is the lifespan minted into issued biscuits.
 	BiscuitTTL time.Duration
 	// WorkloadSessionTTL is how long a workload-issuer enrollment stays
@@ -285,6 +289,8 @@ func (s *Server) Start(ctx context.Context) (retErr error) {
 		AllowedAudiences:      s.opts.AllowedAudiences,
 		LeaseDuration:         s.opts.ControlPlane.LeaseDuration,
 		KeyRotationInterval:   s.opts.ControlPlane.KeyRotationInterval,
+		DHTReplication:        s.opts.ControlPlane.DHTReplication,
+		DHTReprovideInterval:  s.opts.ControlPlane.DHTReprovideInterval,
 		KeyGracePeriod:        s.opts.ControlPlane.KeyGracePeriod,
 		BiscuitTTL:            s.opts.ControlPlane.BiscuitTTL,
 		WorkloadSessionTTL:    s.opts.ControlPlane.WorkloadSessionTTL,

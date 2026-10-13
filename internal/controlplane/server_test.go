@@ -4693,3 +4693,66 @@ func TestRefreshWithPlatformJWT(t *testing.T) {
 		t.Errorf("expected updated ClaimsJSON to include new group claim, got %s", updatedRec.ClaimsJSON)
 	}
 }
+
+// /info carries the directory parameters every member and router runs on:
+// the two the operator sets and the TTL derived from them, with the api
+// defaults when nothing was set.
+func TestHandleInfoPublishesDirectoryParameters(t *testing.T) {
+	issuer, _ := startCustomMockOIDC(t)
+	for _, tc := range []struct {
+		name            string
+		override        func(*Options)
+		wantReplication int32
+		wantReprovide   time.Duration
+	}{
+		{name: "defaults", override: func(*Options) {}, wantReplication: api.DefaultDHTReplication, wantReprovide: api.DefaultReprovideInterval},
+		{name: "set", override: func(o *Options) { o.DHTReplication = 5; o.DHTReprovideInterval = 20 * time.Minute }, wantReplication: 5, wantReprovide: 20 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, st, _ := setupTestServer(t, issuer, tc.override)
+			defer func() {
+				_ = srv.Close()
+				_ = st.Close()
+			}()
+			rec := httptest.NewRecorder()
+			srv.HandleInfo(rec, httptest.NewRequest(http.MethodGet, "/info", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("/info status = %d", rec.Code)
+			}
+			var info api.ControlPlaneInfoResponse
+			if err := proto.Unmarshal(rec.Body.Bytes(), &info); err != nil {
+				t.Fatalf("unmarshal /info: %v", err)
+			}
+			d := info.GetDirectory()
+			if d.GetReplication() != tc.wantReplication {
+				t.Errorf("directory.replication = %d, want %d", d.GetReplication(), tc.wantReplication)
+			}
+			if got := d.GetReprovideInterval().AsDuration(); got != tc.wantReprovide {
+				t.Errorf("directory.reprovide_interval = %s, want %s", got, tc.wantReprovide)
+			}
+			if got := d.GetRecordTtl().AsDuration(); got != api.RecordTTL(tc.wantReprovide) {
+				t.Errorf("directory.record_ttl = %s, want %s", got, api.RecordTTL(tc.wantReprovide))
+			}
+		})
+	}
+}
+
+// An operator cannot publish a directory no member could run on.
+func TestOptionsRefuseAnUnusableDirectory(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		set  func(*Options)
+	}{
+		{name: "no replica", set: func(o *Options) { o.DHTReplication = -1 }},
+		{name: "no announcements", set: func(o *Options) { o.DHTReprovideInterval = -time.Second }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := Options{DriverName: "sqlite", DataSourceName: "x"}
+			tc.set(&o)
+			o.Default()
+			if err := o.Validate(); err == nil {
+				t.Fatalf("Validate accepted %+v", o)
+			}
+		})
+	}
+}

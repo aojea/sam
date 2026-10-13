@@ -191,20 +191,22 @@ class CommandBackend(_message.Message):
     def __init__(self, command: _Optional[_Iterable[str]] = ..., env: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class ControlPlaneInfoResponse(_message.Message):
-    __slots__ = ["audience", "banned_peer_ids", "client_id", "oidc_issuer", "router_addresses", "routers"]
+    __slots__ = ["audience", "banned_peer_ids", "client_id", "directory", "oidc_issuer", "router_addresses", "routers"]
     AUDIENCE_FIELD_NUMBER: _ClassVar[int]
     BANNED_PEER_IDS_FIELD_NUMBER: _ClassVar[int]
     CLIENT_ID_FIELD_NUMBER: _ClassVar[int]
+    DIRECTORY_FIELD_NUMBER: _ClassVar[int]
     OIDC_ISSUER_FIELD_NUMBER: _ClassVar[int]
     ROUTERS_FIELD_NUMBER: _ClassVar[int]
     ROUTER_ADDRESSES_FIELD_NUMBER: _ClassVar[int]
     audience: str
     banned_peer_ids: _containers.RepeatedScalarFieldContainer[str]
     client_id: str
+    directory: DirectoryParameters
     oidc_issuer: str
     router_addresses: _containers.RepeatedScalarFieldContainer[str]
     routers: _containers.RepeatedCompositeFieldContainer[RouterInfo]
-    def __init__(self, oidc_issuer: _Optional[str] = ..., client_id: _Optional[str] = ..., audience: _Optional[str] = ..., router_addresses: _Optional[_Iterable[str]] = ..., banned_peer_ids: _Optional[_Iterable[str]] = ..., routers: _Optional[_Iterable[_Union[RouterInfo, _Mapping]]] = ...) -> None: ...
+    def __init__(self, oidc_issuer: _Optional[str] = ..., client_id: _Optional[str] = ..., audience: _Optional[str] = ..., router_addresses: _Optional[_Iterable[str]] = ..., banned_peer_ids: _Optional[_Iterable[str]] = ..., routers: _Optional[_Iterable[_Union[RouterInfo, _Mapping]]] = ..., directory: _Optional[_Union[DirectoryParameters, _Mapping]] = ...) -> None: ...
 
 class CredentialBroker(_message.Message):
     __slots__ = ["aws_assume_role", "oidc_federation", "platform_identity", "static_secret"]
@@ -217,6 +219,16 @@ class CredentialBroker(_message.Message):
     platform_identity: PlatformIdentity
     static_secret: str
     def __init__(self, static_secret: _Optional[str] = ..., oidc_federation: _Optional[_Union[OIDCFederation, _Mapping]] = ..., aws_assume_role: _Optional[_Union[AWSAssumeRole, _Mapping]] = ..., platform_identity: _Optional[_Union[PlatformIdentity, _Mapping]] = ...) -> None: ...
+
+class DirectoryParameters(_message.Message):
+    __slots__ = ["record_ttl", "replication", "reprovide_interval"]
+    RECORD_TTL_FIELD_NUMBER: _ClassVar[int]
+    REPLICATION_FIELD_NUMBER: _ClassVar[int]
+    REPROVIDE_INTERVAL_FIELD_NUMBER: _ClassVar[int]
+    record_ttl: _duration_pb2.Duration
+    replication: int
+    reprovide_interval: _duration_pb2.Duration
+    def __init__(self, replication: _Optional[int] = ..., reprovide_interval: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ..., record_ttl: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ...) -> None: ...
 
 class DiscoveredProvider(_message.Message):
     __slots__ = ["local_proxy_url", "peer_id", "srv_description", "srv_name"]
