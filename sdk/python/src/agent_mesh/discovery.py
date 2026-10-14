@@ -107,16 +107,27 @@ async def _ask(host: IHost, router: ID, req: pb.DirectoryRequest) -> pb.Director
 
 async def request(host: IHost, routers: Iterable[ID], req: pb.DirectoryRequest) -> pb.DirectoryResponse:
     """Sends req to the held routers in turn until one answers. A router that
-    is restarting costs the request a timeout, not an answer."""
+    is restarting costs the request a timeout, not an answer. A lookup one
+    router answers with nothing is put to the next as well: a router cut off
+    from the routers closest to the key answers from what it can reach."""
+    lookup = req.WhichOneof("request") in ("find_providers", "find_peer")
     last: Exception | None = None
     asked = 0
+    empty: pb.DirectoryResponse | None = None
     for router in routers:
         asked += 1
         try:
-            return await _ask(host, router, req)
+            resp = await _ask(host, router, req)
         except Exception as err:  # noqa: BLE001 - the next router is asked
             last = err
             logger.warning("directory: request through router %s failed: %s", router, err)
+            continue
+        if lookup and not resp.providers and not resp.HasField("peer"):
+            empty = resp
+            continue
+        return resp
+    if empty is not None:
+        return empty
     if asked == 0:
         raise DirectoryError("no held router to ask")
     raise DirectoryError(f"no held router answered: {last}")

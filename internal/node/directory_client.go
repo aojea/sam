@@ -185,7 +185,10 @@ func (d *routerDirectory) FindPeer(ctx context.Context, p peer.ID) (peer.AddrInf
 	return info, nil
 }
 
-// request sends req to the attached routers in turn until one answers.
+// request sends req to the attached routers in turn until one answers. A
+// lookup one router answers with nothing is put to the next as well: a
+// router cut off from the routers closest to the key answers from what it
+// can reach, and the member holds another that may not be.
 func (d *routerDirectory) request(ctx context.Context, op string, req *api.DirectoryRequest) (*api.DirectoryResponse, error) {
 	start := time.Now()
 	defer func() { directoryRequestSeconds.WithLabelValues(op).Observe(time.Since(start).Seconds()) }()
@@ -199,15 +202,17 @@ func (d *routerDirectory) request(ctx context.Context, op string, req *api.Direc
 		logger.Warnf("[Directory] %s: %v", op, errNoDirectoryRouter)
 		return nil, errNoDirectoryRouter
 	}
+	lookup := op == directoryOpFindProviders || op == directoryOpFindPeer
 	var lastErr error
+	var empty *api.DirectoryResponse
 	for _, router := range routers {
 		resp, err := d.ask(ctx, router, data)
 		if err == nil {
-			result := directoryResultOK
-			if op != directoryOpProvide && op != directoryOpWithdraw && len(resp.GetProviders()) == 0 && resp.GetPeer() == nil {
-				result = directoryResultEmpty
+			if lookup && len(resp.GetProviders()) == 0 && resp.GetPeer() == nil {
+				empty = resp
+				continue
 			}
-			directoryRequestsTotal.WithLabelValues(op, result).Inc()
+			directoryRequestsTotal.WithLabelValues(op, directoryResultOK).Inc()
 			return resp, nil
 		}
 		lastErr = err
@@ -215,6 +220,10 @@ func (d *routerDirectory) request(ctx context.Context, op string, req *api.Direc
 		if ctx.Err() != nil {
 			break
 		}
+	}
+	if empty != nil {
+		directoryRequestsTotal.WithLabelValues(op, directoryResultEmpty).Inc()
+		return empty, nil
 	}
 	directoryRequestsTotal.WithLabelValues(op, directoryResultFailed).Inc()
 	return nil, fmt.Errorf("%s: no attached router answered: %w", op, lastErr)

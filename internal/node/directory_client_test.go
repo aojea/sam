@@ -227,6 +227,18 @@ func TestRouterDirectoryAsksTheAttachedRouters(t *testing.T) {
 		t.Fatalf("FindPeer of the member = %v, %v; want it from the router's own connection", info, err)
 	}
 
+	// The first router knows nothing of a key the second holds: a lookup
+	// one router answers with nothing is put to the next.
+	elsewhere, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_MCP, "elsewhere")
+	dir2.add(elsewhere, member.ID(), member.Addrs()...)
+	before1, before2 := dir1.servedCount(), dir2.servedCount()
+	if found, err := directory.FindProviders(ctx, elsewhere, 0); err != nil || len(found) != 1 {
+		t.Fatalf("FindProviders of a key only the second router holds = %v, %v; want the second router's answer", found, err)
+	}
+	if dir1.servedCount() != before1+1 || dir2.servedCount() != before2+1 {
+		t.Fatalf("routers served %d and %d requests, want %d and %d: the second is asked when the first has nothing", dir1.servedCount(), dir2.servedCount(), before1+1, before2+1)
+	}
+
 	// The first router fails: the second answers, and the member is none the wiser.
 	dir1.fail(true)
 	dir2.add(key, member.ID(), member.Addrs()...)

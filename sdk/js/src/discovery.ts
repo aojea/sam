@@ -104,11 +104,15 @@ async function ask(conn: Connection, req: DirectoryRequest, signal: AbortSignal)
 
 /**
  * Sends req to the held routers in turn until one answers. A router that
- * is restarting costs the request a timeout, not an answer.
+ * is restarting costs the request a timeout, not an answer. A lookup one
+ * router answers with nothing is put to the next as well: a router cut
+ * off from the routers closest to the key answers from what it can reach.
  */
 export async function request(routers: DirectoryRouter[], req: DirectoryRequest, signal?: AbortSignal): Promise<DirectoryResponse> {
+  const lookup = req.request.case === "findProviders" || req.request.case === "findPeer";
   let last: unknown;
   let asked = 0;
+  let empty: DirectoryResponse | undefined;
   for (const router of routers) {
     const conn = router.connection();
     if (conn === undefined) {
@@ -117,13 +121,21 @@ export async function request(routers: DirectoryRouter[], req: DirectoryRequest,
     asked++;
     const bounded = signal === undefined ? AbortSignal.timeout(REQUEST_TIMEOUT_MS) : AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);
     try {
-      return await ask(conn, req, bounded);
+      const resp = await ask(conn, req, bounded);
+      if (lookup && resp.providers.length === 0 && resp.peer === undefined) {
+        empty = resp;
+        continue;
+      }
+      return resp;
     } catch (err) {
       last = err;
       if (signal?.aborted === true) {
         break;
       }
     }
+  }
+  if (empty !== undefined) {
+    return empty;
   }
   if (asked === 0) {
     throw new DirectoryError("no held router to ask");

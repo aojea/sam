@@ -216,3 +216,31 @@ def test_read_bounded_varint_prefixed_bytes_rejects_oversized_prefix_before_read
         assert bomb.payload_reads == 0
 
     trio.run(main)
+
+
+def test_an_empty_answer_is_put_to_the_next_router():
+    """A router cut off from the routers closest to the key answers with
+    nothing; the next held router is asked before the lookup is empty. An
+    announcement is not repeated: one router taking it is enough."""
+
+    def knows_nothing(req):
+        return pb.DirectoryResponse()
+
+    def answers(req):
+        return pb.DirectoryResponse(providers=[_record(PROVIDER, "/ip4/10.0.0.9/tcp/4001")])
+
+    async def main():
+        host = _Host({ROUTER: knows_nothing, ROUTER_B: answers})
+        found = await find_providers(host, [ROUTER, ROUTER_B], service_key("mcp", "calculator"))
+        assert [p.peer_id for p in found] == [str(PROVIDER)]
+        assert host.asked == [ROUTER, ROUTER_B]
+
+        host = _Host({ROUTER: knows_nothing, ROUTER_B: knows_nothing})
+        assert await find_providers(host, [ROUTER, ROUTER_B], service_key("mcp", "calculator")) == []
+        assert host.asked == [ROUTER, ROUTER_B]
+
+        host = _Host({ROUTER: knows_nothing, ROUTER_B: answers})
+        await provide(host, [ROUTER, ROUTER_B], service_key("mcp", "calculator"), [])
+        assert host.asked == [ROUTER], "an announcement one router took is not repeated"
+
+    trio.run(main)
