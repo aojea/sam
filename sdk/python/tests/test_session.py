@@ -52,7 +52,7 @@ from agent_mesh.auth import (
 from agent_mesh.authorizer import ProviderAuthorizerOptions
 from agent_mesh.biscuit import ROLE_ROUTER, BiscuitVerificationError
 from agent_mesh.controlplane import ROLE_NODE
-from agent_mesh.discovery import DiscoveredProvider
+from agent_mesh.discovery import DIRECTORY_PROTOCOL, DiscoveredProvider, peer_key
 from agent_mesh.httpx_transport import MeshTransport
 from agent_mesh.identity import Identity
 from agent_mesh.libp2p_http import HTTP_PROTOCOL, A2AEndpoint, HTTPResponse, ProviderOptions, http_ingress_handler
@@ -1037,3 +1037,42 @@ def test_join_holds_two_routers_handles_go_away_and_redials_before_failover():
 
     trio.run(with_timeout, 60, main)
 
+
+
+def test_a_member_announces_where_it_is_reached_and_withdraws_it_on_leaving():
+    """A member with a relay reservation announces its relayed addresses under
+    its peer key to a router it holds, so that a peer on other routers finds
+    it by ID; it withdraws the record as it leaves."""
+    requests = []
+
+    def directory_handler(stream):
+        async def run():
+            req = pb.DirectoryRequest.FromString(await read_varint_prefixed_bytes(stream))
+            requests.append((req.WhichOneof("request"), req))
+            await stream.write(encode_varint_prefixed(pb.DirectoryResponse().SerializeToString()))
+            await stream.close()
+
+        return run()
+
+    async def main():
+        async with trio.open_nursery() as nursery:
+            router, router_addr = await start_router(nursery)
+            router.set_stream_handler(DIRECTORY_PROTOCOL, directory_handler)
+            mesh = AgentMesh.enroll("http://127.0.0.1:1", bootstrap_token="sbt", transport=fake_control_plane([router_addr]))
+            async with mesh.join(listen_addrs=["/ip4/127.0.0.1/tcp/0"], refresh_lead=0) as session:
+                relayed = f"{router_addr}/p2p-circuit/p2p/{mesh.peer_id}"
+                assert session.relay_addresses == [relayed]
+                assert [op for op, _ in requests] == ["provide"]
+                assert requests[0][1].provide.key == peer_key(session.host.get_id())
+                assert list(requests[0][1].provide.addrs) == [relayed]
+            assert [op for op, _ in requests] == ["provide", "withdraw"]
+            assert requests[1][1].withdraw.key == peer_key(session.host.get_id())
+
+            # A member that reserves no relay has no address to announce.
+            del requests[:]
+            async with mesh.join(reserve=False) as session:
+                assert session.relay_addresses == []
+            assert requests == []
+            nursery.cancel_scope.cancel()
+
+    trio.run(with_timeout, 30, main)

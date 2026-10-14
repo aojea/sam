@@ -28,7 +28,7 @@ import type { Libp2p } from "@libp2p/interface";
 import { tcp } from "@libp2p/tcp";
 import { tls } from "@libp2p/tls";
 import { lpStream } from "@libp2p/utils";
-import { DIRECTORY_PROTOCOL } from "./discovery.ts";
+import { DIRECTORY_PROTOCOL, peerKey } from "./discovery.ts";
 import { multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p } from "libp2p";
 import assert from "node:assert/strict";
@@ -451,6 +451,49 @@ test("discovery asks a held router over the directory protocol and connects to n
     }
   } finally {
     await otherRouter.stop();
+  }
+});
+
+test("a member announces where it is reached under its peer key and withdraws it on close", async () => {
+  // A member with a relay reservation announces its relayed addresses so
+  // that a peer on other routers finds it by ID; a member that reserves
+  // nothing has nothing to announce.
+  const requests: Array<{ op: string; key: Uint8Array; addrs: string[] }> = [];
+  await router.handle(DIRECTORY_PROTOCOL, (stream) => {
+    void (async () => {
+      const lp = lpStream(stream, { maxDataLength: 64 * 1024 });
+      const req = fromBinary(DirectoryRequestSchema, (await lp.read()).subarray());
+      const value = req.request.value as { key?: Uint8Array; addrs?: string[] } | undefined;
+      requests.push({ op: req.request.case ?? "", key: value?.key ?? new Uint8Array(), addrs: value?.addrs ?? [] });
+      await lp.write(toBinary(DirectoryResponseSchema, create(DirectoryResponseSchema, {})));
+      await stream.close();
+    })();
+  });
+  try {
+    const mesh = await AgentMesh.enroll({ controlPlaneUrl: "http://127.0.0.1:1", bootstrapToken: "sbt", fetch: fakeControlPlane([routerAddr]) });
+    const session = await mesh.join({ refreshLeadMs: 0 });
+    const relayed = session.relayAddresses.map(String).sort();
+    assert.ok(relayed.length > 0, "no relayed address after the reservation");
+    const key = await peerKey(session.peerId);
+    assert.deepEqual(
+      requests.map((r) => r.op),
+      ["provide"],
+    );
+    assert.equal(Buffer.from(requests[0]?.key ?? []).toString("hex"), Buffer.from(key).toString("hex"));
+    assert.deepEqual(requests[0]?.addrs, relayed);
+    await session.close();
+    assert.deepEqual(
+      requests.map((r) => r.op),
+      ["provide", "withdraw"],
+    );
+    assert.equal(Buffer.from(requests[1]?.key ?? []).toString("hex"), Buffer.from(key).toString("hex"));
+
+    requests.length = 0;
+    const silent = await mesh.join({ refreshLeadMs: 0, reserveRelay: false });
+    await silent.close();
+    assert.deepEqual(requests, [], "a member with no relayed address announces nothing");
+  } finally {
+    await router.unhandle(DIRECTORY_PROTOCOL);
   }
 });
 

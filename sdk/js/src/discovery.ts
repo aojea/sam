@@ -152,6 +152,14 @@ export async function provide(routers: DirectoryRouter[], key: Uint8Array, addrs
   await request(routers, create(DirectoryRequestSchema, { request: { case: "provide", value: { key, addrs } } }), signal);
 }
 
+/**
+ * Removes this member's record under key from the held router and from the
+ * routers it was placed on.
+ */
+export async function withdraw(routers: DirectoryRouter[], key: Uint8Array, signal?: AbortSignal): Promise<void> {
+  await request(routers, create(DirectoryRequestSchema, { request: { case: "withdraw", value: { key } } }), signal);
+}
+
 /** Who provides key, up to limit, with their addresses; empty when nobody does. */
 export async function findProviders(routers: DirectoryRouter[], key: Uint8Array, limit = DEFAULT_LIMIT, signal?: AbortSignal): Promise<PeerRecord[]> {
   const resp = await request(routers, create(DirectoryRequestSchema, { request: { case: "findProviders", value: { key, limit: Math.max(limit, 1) } } }), signal);

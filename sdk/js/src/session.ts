@@ -32,7 +32,7 @@ import { ROLE_ROUTER, attenuateBiscuit, requireRole, sealBiscuit, type VerifiedB
 import { ROLE_NODE } from "./controlplane.ts";
 import { encodeAuthFrame } from "./credential.ts";
 import { canonicalPeerId } from "./identity.ts";
-import { findPeer, findProviders, isServiceType, parseServiceTarget, serviceKey, type DirectoryRouter } from "./discovery.ts";
+import { findPeer, findProviders, isServiceType, parseServiceTarget, peerKey, provide, serviceKey, withdraw, type DirectoryRouter } from "./discovery.ts";
 import type { PeerRecord, RouterGoAway, RouterInfo, TaskAuthorizationRuleSchema } from "./gen/agentmesh_pb.ts";
 import { createMeshHost, listenThroughRelay, type MeshHost, type MeshHostOptions, type RelayListener } from "./host.ts";
 import { openMCPSession, requireEgressLabels, type MCPSession, type MCPSessionOptions } from "./mcp.ts";
@@ -115,6 +115,11 @@ export interface JoinOptions extends MeshHostOptions {
    */
   relayCheckIntervalMs?: number;
   /**
+   * How often this member announces where it is reached under its peer
+   * key (default 5 minutes, agentmesh-node's reprovide interval).
+   */
+  announceIntervalMs?: number;
+  /**
    * agentmesh-node's egress.require_labels for an SDK member: every provider this
    * session calls must attest all of these pairs, on top of a call's
    * requiredLabels. Held on every call, MCP and HTTP alike; no call waives it.
@@ -186,6 +191,13 @@ const DEFAULT_CONTROL_PLANE_SYNC_MS = 15 * 60 * 1000;
 const FIRST_CONTROL_PLANE_SYNC_MS = 2_000;
 const DEFAULT_CONTROL_PLANE_SYNC_JITTER_MS = 2_000;
 const DEFAULT_RELAY_CHECK_MS = 30 * 1000;
+/**
+ * How often a member announces where it is reached: agentmesh-node's default
+ * reprovide interval, a third of the mesh's default record TTL.
+ */
+const DEFAULT_ANNOUNCE_MS = 5 * 60 * 1000;
+/** What close() waits for the member's record to be withdrawn. */
+const WITHDRAW_TIMEOUT_MS = 2 * 1000;
 /** How long a provider's positive egress verdict is kept; agentmesh-node's labelGateTTL. */
 const EGRESS_VERDICT_TTL_MS = 5 * 60 * 1000;
 
@@ -212,6 +224,9 @@ export class MeshSession {
   #policyTimer: ReturnType<typeof setInterval> | undefined;
   #syncTimer: ReturnType<typeof setTimeout> | undefined;
   #relayTimer: ReturnType<typeof setInterval> | undefined;
+  #announceTimer: ReturnType<typeof setInterval> | undefined;
+  /** The addresses of the record last announced under this member's peer key. */
+  #announced: string[] = [];
   #syncing: Promise<ControlPlaneSync> | undefined;
   #keepingRelay: Promise<void> | undefined;
   #keepRelayPending = false;
@@ -286,6 +301,8 @@ export class MeshSession {
       }
       this.#relayTimer = setInterval(() => void this.keepRelay().catch(() => {}), options.relayCheckIntervalMs ?? DEFAULT_RELAY_CHECK_MS);
       this.#relayTimer.unref?.();
+      this.#announceTimer = setInterval(() => void this.announce().catch(() => {}), options.announceIntervalMs ?? DEFAULT_ANNOUNCE_MS);
+      this.#announceTimer.unref?.();
     }
   }
 
@@ -367,6 +384,26 @@ export class MeshSession {
         const s = ma.toString();
         return s.includes("/p2p-circuit") && [...this.#heldRouterIds].some((id) => s.includes(`/p2p/${id}/p2p-circuit`));
       });
+  }
+
+  /**
+   * Announces where this member is reached, its relayed addresses on the
+   * routers it holds, under its peer key, so that a peer attached to other
+   * routers finds it by ID. Runs after join, when the addresses change and
+   * every announceIntervalMs; the record outlives its last announcement by
+   * the mesh's record TTL. A member with no relayed address announces
+   * nothing: there is nothing to reach it at.
+   */
+  async announce(): Promise<void> {
+    if (this.#closed || this.#isTaskView) {
+      return;
+    }
+    const addrs = this.relayAddresses.map(String).sort();
+    if (addrs.length === 0) {
+      return;
+    }
+    await provide(this.#directoryRouters(), await peerKey(this.peerId), addrs);
+    this.#announced = addrs;
   }
 
   /** Whether peerId is currently one of the routers this member holds. */
@@ -567,6 +604,17 @@ export class MeshSession {
     if (this.#closed) {
       return;
     }
+    try {
+      await this.#maintainRouters();
+    } finally {
+      const addrs = this.relayAddresses.map(String).sort();
+      if (!this.#closed && addrs.length > 0 && addrs.join(" ") !== this.#announced.join(" ")) {
+        await this.announce().catch(() => {});
+      }
+    }
+  }
+
+  async #maintainRouters(): Promise<void> {
     const held = this.routers.filter((r) => this.#heldRouterIds.has(r.peerId));
     for (const r of held) {
       if (this.#closed) {
@@ -1160,11 +1208,18 @@ export class MeshSession {
   }
 
   async close(): Promise<void> {
+    const announced = this.#announced.length > 0 && !this.#closed && !this.#isTaskView;
     this.#closed = true;
     clearTimeout(this.#refreshTimer);
     clearTimeout(this.#syncTimer);
     clearInterval(this.#policyTimer);
     clearInterval(this.#relayTimer);
+    clearInterval(this.#announceTimer);
+    if (announced) {
+      // Best effort: the record expires on its own within the record TTL.
+      await withdraw(this.#directoryRouters(), await peerKey(this.peerId), AbortSignal.timeout(WITHDRAW_TIMEOUT_MS)).catch(() => {});
+      this.#announced = [];
+    }
     if (!this.#isTaskView) {
       await this.node.stop();
     }
@@ -1401,6 +1456,9 @@ export async function joinMesh(mesh: AgentMesh, options: JoinOptions = {}): Prom
       const detail = failures.length > 0 ? `:\n  ${failures.join("\n  ")}` : "";
       throw new Error(`no router admitted this member${detail}`);
     }
+    // Best effort: a router that does not take the record is a warning the
+    // next announcement retries; the member is on the mesh regardless.
+    await session.announce().catch(() => {});
     return session;
   } catch (err) {
     if (session !== undefined) {

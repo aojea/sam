@@ -48,7 +48,7 @@ from .authorizer import ProviderAuthorizerOptions
 from .biscuit import ROLE_ROUTER, VerifiedBiscuit, attenuate_biscuit, require_role, seal_biscuit
 from .controlplane import ROLE_NODE
 from .credential import encode_auth_frame
-from .discovery import DiscoveredProvider, find_peer, find_providers, parse_service_target, service_key
+from .discovery import DiscoveredProvider, find_peer, find_providers, parse_service_target, peer_key, provide, service_key, withdraw
 from .host import create_mesh_host, dial, dial_addrs, peer_info
 from .identity import canonical_peer_id
 from .libp2p_http import (
@@ -94,6 +94,11 @@ DEFAULT_POLICY_SYNC = 15 * 60.0
 DEFAULT_CONTROL_PLANE_SYNC = 15 * 60.0
 FIRST_CONTROL_PLANE_SYNC = 2.0
 DEFAULT_CONTROL_PLANE_SYNC_JITTER = 2.0
+# How often a member announces where it is reached: agentmesh-node's default
+# reprovide interval, a third of the mesh's default record TTL.
+DEFAULT_ANNOUNCE_INTERVAL = 5 * 60.0
+# What leaving the mesh waits for the member's record to be withdrawn.
+WITHDRAW_TIMEOUT = 2.0
 # How long a provider's positive egress verdict is kept; agentmesh-node's labelGateTTL.
 EGRESS_VERDICT_TTL = 5 * 60.0
 
@@ -318,7 +323,10 @@ class MeshSession:
     reservation_lead: float = RESERVATION_RENEW_LEAD
     reservation_retry: float = DEFAULT_REFRESH_RETRY
     reservation_check_interval: float = RESERVATION_CHECK_INTERVAL
+    announce_interval: float = DEFAULT_ANNOUNCE_INTERVAL
     _held_router_ids: set[str] = field(default_factory=set, repr=False)
+    # The addresses of the record last announced under this member's peer key.
+    _announced: list[str] = field(default_factory=list, repr=False)
     _relay_lock: trio.Lock = field(default_factory=trio.Lock, repr=False)
     _relay_trigger: trio.Event = field(default_factory=trio.Event, repr=False)
     _nursery: Optional[trio.Nursery] = field(default=None, repr=False)
@@ -401,7 +409,14 @@ class MeshSession:
 
     async def top_up_routers(self) -> list[str]:
         """Attaches and reserves on additional routers from the catalog until this
-        session holds _want_routers() routers or no more eligible candidates remain."""
+        session holds _want_routers() routers or no more eligible candidates remain.
+        One top-up at a time: the reservation loop and a go-away both call it,
+        and two picking the same router at once would hold it twice, or shun
+        it while holding it."""
+        async with self._relay_lock:
+            return await self._top_up_routers()
+
+    async def _top_up_routers(self) -> list[str]:
         failures: list[str] = []
         want = self._want_routers()
         if len(self._held_router_ids) >= want:
@@ -461,6 +476,50 @@ class MeshSession:
     def agent_url(self) -> Optional[str]:
         """The mesh URL of this member's own agent, once accept_a2a was called."""
         return self.mesh_url(self.peer_id, self.endpoint.service) if self.endpoint is not None else None
+
+    async def announce(self) -> None:
+        """Announces where this member is reached, its relayed addresses on the
+        routers it holds, under its peer key, so that a peer attached to other
+        routers finds it by ID. Runs after join, when the addresses change and
+        every announce_interval; the record outlives its last announcement by
+        the mesh's record TTL. A member with no relayed address announces
+        nothing: there is nothing to reach it at."""
+        if self._task_biscuit is not None:
+            return
+        addrs = sorted(self.relay_addresses)
+        if not addrs:
+            return
+        await provide(self.host, self._directory_routers(), peer_key(self.host.get_id()), [multiaddr.Multiaddr(a) for a in addrs])
+        self._announced = addrs
+
+    async def _announce_loop(self) -> None:
+        while True:
+            await trio.sleep(self.announce_interval)
+            try:
+                await self.announce()
+            except Exception as err:  # noqa: BLE001 - the next announcement retries
+                logger.warning("announcing where this member is reached: %s", err)
+
+    async def _announce_if_moved(self) -> None:
+        """Announces again when the relayed addresses changed since the last
+        announcement, as after a router was replaced."""
+        if self.relay_addresses and sorted(self.relay_addresses) != self._announced:
+            try:
+                await self.announce()
+            except Exception as err:  # noqa: BLE001
+                logger.warning("announcing where this member is reached: %s", err)
+
+    async def _withdraw_self(self) -> None:
+        """Withdraws this member's record as it leaves; best effort, the record
+        expires on its own within the record TTL."""
+        if not self._announced or self._task_biscuit is not None:
+            return
+        with trio.move_on_after(WITHDRAW_TIMEOUT):
+            try:
+                await withdraw(self.host, self._directory_routers(), peer_key(self.host.get_id()))
+            except Exception as err:  # noqa: BLE001
+                logger.debug("withdrawing this member's record: %s", err)
+        self._announced = []
 
     @property
     def relay_addresses(self) -> list[str]:
@@ -601,8 +660,12 @@ class MeshSession:
         return direct, relays
 
     def _directory_routers(self) -> list[ID]:
-        """The routers this member holds, which answer its directory requests."""
-        return [ID.from_base58(r.peer_id) for r in self.routers]
+        """The routers this member holds and is connected to, which answer its
+        directory requests. A request goes over the session the handshake
+        opened, never over a dial of its own: a router admits a connection it
+        has verified, and the reservation loop is what reconnects."""
+        connected = set(self.host.get_connected_peers())
+        return [ID.from_base58(r.peer_id) for r in self.routers if ID.from_base58(r.peer_id) in connected]
 
     async def _admit_router(self, addr: multiaddr.Multiaddr) -> AdmittedRouter:
         """Dials a router, runs the handshake and, its role verified, adds it
@@ -891,6 +954,7 @@ class MeshSession:
 
             if len(self._held_router_ids) < self._want_routers():
                 await self.top_up_routers()
+            await self._announce_if_moved()
             if failed:
                 await trio.sleep(self.reservation_retry)
 
@@ -1014,6 +1078,7 @@ async def join_mesh(
     refresh_retry: float = DEFAULT_REFRESH_RETRY,
     reservation_lead: float = RESERVATION_RENEW_LEAD,
     reservation_check_interval: float = RESERVATION_CHECK_INTERVAL,
+    announce_interval: float = DEFAULT_ANNOUNCE_INTERVAL,
     policy_sync_interval: float = DEFAULT_POLICY_SYNC,
     control_plane_sync_interval: float = DEFAULT_CONTROL_PLANE_SYNC,
     control_plane_sync_jitter: float = DEFAULT_CONTROL_PLANE_SYNC_JITTER,
@@ -1111,6 +1176,7 @@ async def join_mesh(
                     reservation_lead=reservation_lead,
                     reservation_retry=refresh_retry,
                     reservation_check_interval=reservation_check_interval,
+                    announce_interval=announce_interval,
                     _nursery=nursery,
                 )
                 session_ref.append(session)
@@ -1118,9 +1184,15 @@ async def join_mesh(
                 nursery.start_soon(session._events_loop, pubsub)  # noqa: SLF001
                 nursery.start_soon(session._sync_loop)  # noqa: SLF001
                 nursery.start_soon(session._reservation_loop)  # noqa: SLF001
+                nursery.start_soon(session._announce_loop)  # noqa: SLF001
+                # Best effort: a router that does not take the record is a
+                # warning the next announcement retries.
+                await session._announce_if_moved()  # noqa: SLF001
                 try:
                     yield session
                 finally:
+                    with trio.CancelScope(shield=True):
+                        await session._withdraw_self()  # noqa: SLF001
                     nursery.cancel_scope.cancel()
     except BaseExceptionGroup as group:
         cause = _single_cause(group)

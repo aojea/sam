@@ -141,6 +141,12 @@ async def provide(host: IHost, routers: Iterable[ID], key: bytes, addrs: Iterabl
     await request(host, routers, req)
 
 
+async def withdraw(host: IHost, routers: Iterable[ID], key: bytes) -> None:
+    """Removes this member's record under key from the held router and from
+    the routers it was placed on."""
+    await request(host, routers, pb.DirectoryRequest(withdraw=pb.DirectoryWithdraw(key=key)))
+
+
 async def find_providers(host: IHost, routers: Iterable[ID], key: bytes, limit: int = DEFAULT_LIMIT) -> list[DiscoveredProvider]:
     """Who provides key, up to limit, with their addresses; empty when nobody does."""
     req = pb.DirectoryRequest(find_providers=pb.DirectoryFindProviders(key=key, limit=max(limit, 1)))
