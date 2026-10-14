@@ -15,7 +15,9 @@
 package node
 
 import (
+	"bytes"
 	"context"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -36,11 +38,12 @@ import (
 // way a router does: records by key, a peer from the router's own peerstore
 // or its peer-key record. It fails every request while failing is set.
 type fakeDirectoryServer struct {
-	h       host.Host
-	mu      sync.Mutex
-	records map[string]map[peer.ID][]multiaddr.Multiaddr
-	served  int
-	failing bool
+	h        host.Host
+	mu       sync.Mutex
+	records  map[string]map[peer.ID][]multiaddr.Multiaddr
+	provided [][]byte // keys announced here, in order
+	served   int
+	failing  bool
 }
 
 func serveDirectory(h host.Host) *fakeDirectoryServer {
@@ -69,6 +72,13 @@ func (d *fakeDirectoryServer) providers(key []byte) []peer.ID {
 		out = append(out, p)
 	}
 	return out
+}
+
+// providedKeys is the keys announced here so far, in order.
+func (d *fakeDirectoryServer) providedKeys() [][]byte {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.provided)
 }
 
 // add puts a record in as if another router had placed it.
@@ -111,6 +121,7 @@ func (d *fakeDirectoryServer) handle(s network.Stream) {
 			d.records[string(q.GetKey())] = map[peer.ID][]multiaddr.Multiaddr{}
 		}
 		d.records[string(q.GetKey())][s.Conn().RemotePeer()] = addrs
+		d.provided = append(d.provided, q.GetKey())
 	case req.GetFindProviders() != nil:
 		for p, addrs := range d.records[string(req.GetFindProviders().GetKey())] {
 			resp.Providers = append(resp.Providers, recordOf(p, addrs))
@@ -227,5 +238,52 @@ func TestRouterDirectoryAsksTheAttachedRouters(t *testing.T) {
 	dir2.fail(true)
 	if _, err := directory.FindProviders(ctx, key, 0); err == nil {
 		t.Fatal("FindProviders succeeded with every router failing")
+	}
+}
+
+// An announcement pass announces the node's services and then the node
+// itself under its peer key, so a router that does not hold the node can
+// still say where it is reached, and the pass is what the directory holds
+// for the node: its last announced addresses are the ones the records
+// carry, and a pass no router took leaves them as they were.
+func TestAnnounceAllEndsWithThePeerRecord(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	router := newFakeRouter(t, "/ip4/127.0.0.1/tcp/0")
+	dir := serveDirectory(router.h)
+	member, directory := newDirectoryClient(t, router.h)
+	if got := directory.Announced(); len(got) != 0 {
+		t.Fatalf("Announced before any announcement = %v, want none", got)
+	}
+	node := &AgentMeshNode{Host: member, Directory: directory, services: NewServiceRegistry(directory, 0)}
+	if err := node.services.Register(ctx, newFakeSvc("calc", api.ServiceType_SERVICE_TYPE_MCP)); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	registered := len(dir.providedKeys())
+
+	if withheld := node.announceAll(ctx); withheld != 0 {
+		t.Fatalf("announceAll withheld %d services, want 0", withheld)
+	}
+	nameKey, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_MCP, "calc")
+	typeKey, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_MCP, "")
+	pass := dir.providedKeys()[registered:]
+	if len(pass) != 3 || !bytes.Equal(pass[0], nameKey) || !bytes.Equal(pass[1], typeKey) || !bytes.Equal(pass[2], api.PeerKey(member.ID())) {
+		t.Fatalf("the pass announced %d keys, want the service by name, by type, then the peer key last", len(pass))
+	}
+	if got := dir.providers(api.PeerKey(member.ID())); len(got) != 1 || got[0] != member.ID() {
+		t.Fatalf("the router holds %v under the peer key, want the member", got)
+	}
+	info, err := directory.FindPeer(ctx, member.ID())
+	if err != nil || len(info.Addrs) != len(member.Addrs()) {
+		t.Fatalf("FindPeer = %v, %v; want the member at its %d addresses", info, err, len(member.Addrs()))
+	}
+	if got, want := directory.Announced(), member.Addrs(); !slices.EqualFunc(got, want, multiaddr.Multiaddr.Equal) {
+		t.Fatalf("Announced = %v, want the addresses the pass carried, %v", got, want)
+	}
+
+	dir.fail(true)
+	node.announceAll(ctx)
+	if got, want := directory.Announced(), member.Addrs(); !slices.EqualFunc(got, want, multiaddr.Multiaddr.Equal) {
+		t.Fatalf("Announced after a pass no router took = %v, want the last announced %v", got, want)
 	}
 }

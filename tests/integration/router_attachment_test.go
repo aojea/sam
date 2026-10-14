@@ -233,17 +233,30 @@ func peerIDStrings(ids ...peer.ID) []string {
 // addresses through, from its own debug endpoint.
 func announcedCircuitRelays(t *testing.T, n *backgroundNode) []string {
 	t.Helper()
-	var info struct {
-		AnnouncedAddresses []string `json:"announced_addresses"`
-	}
+	return circuitRelaysOf(networkInfo(t, n).AnnouncedAddresses)
+}
+
+// recordedCircuitRelays lists the relays in the records the node last
+// announced to the directory: what a lookup of its services returns, as
+// against announcedCircuitRelays, what it will announce at its next pass.
+func recordedCircuitRelays(t *testing.T, n *backgroundNode) []string {
+	t.Helper()
+	return circuitRelaysOf(networkInfo(t, n).DirectoryAddresses)
+}
+
+func networkInfo(t *testing.T, n *backgroundNode) (info struct {
+	AnnouncedAddresses []string `json:"announced_addresses"`
+	DirectoryAddresses []string `json:"directory_addresses"`
+}) {
+	t.Helper()
 	if err := json.Unmarshal([]byte(debugGetWithToken(t, n.apiAddr, n.token, "/debug/network-info")), &info); err != nil {
 		t.Fatalf("decode network-info: %v", err)
 	}
-	return circuitRelaysOf(info.AnnouncedAddresses)
+	return info
 }
 
-// circuitRelaysInRecord lists the relays in a peer's DHT record as reader
-// looks it up: the addresses a call from reader would choose among.
+// circuitRelaysInRecord lists the relays in a peer's record as reader
+// looks it up through a router it holds.
 func circuitRelaysInRecord(t *testing.T, reader *backgroundNode, target peer.ID) []string {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, "http://"+reader.apiAddr+"/debug/peer-addrs?peer_id="+target.String(), nil)
@@ -736,21 +749,24 @@ func TestCallerTransitsTheRouterItShares(t *testing.T) {
 	caller.waitForAPI(t)
 	waitForEqual(t, "routers attached by the provider", func() []string { return attachedRouters(t, provider) }, peerIDStrings(routerA.peerID, routerB.peerID), 10*time.Second)
 	waitForEqual(t, "routers attached by the caller", func() []string { return attachedRouters(t, caller) }, peerIDStrings(routerB.peerID, routerC.peerID), 10*time.Second)
-	// The provider's record must name both circuits, or the caller has only
+	// The provider's records must name both circuits, or the caller has only
 	// router a to go through. A reservation on the second router comes a
-	// moment after the first, and the record follows it after a 2 s debounce;
-	// the caller's DHT lookup is what the call will read.
+	// moment after the first, and the records follow it at the next
+	// announcement pass, 2 s later. A router that holds the provider answers
+	// a lookup from what it sees of it, which is ahead of the records; the
+	// call reads the service record, so the wait is on what the provider
+	// announced, then on what the caller reads.
 	waitForEqual(t, "routers the provider announces circuits through", func() []string { return announcedCircuitRelays(t, provider) },
 		peerIDStrings(routerA.peerID, routerB.peerID), 15*time.Second)
-	waitForEqual(t, "relays in the provider's DHT record as the caller reads it", func() []string { return circuitRelaysInRecord(t, caller, provider.peerID) },
+	waitForEqual(t, "relays in the records the provider announced", func() []string { return recordedCircuitRelays(t, provider) },
+		peerIDStrings(routerA.peerID, routerB.peerID), 15*time.Second)
+	waitForEqual(t, "relays in the provider's record as the caller reads it", func() []string { return circuitRelaysInRecord(t, caller, provider.peerID) },
 		peerIDStrings(routerA.peerID, routerB.peerID), 15*time.Second)
 
 	callAcrossMesh(t, caller, "token-c", provider, "shared-tool")
 
 	// The caller holds router b, which the provider's record names, so the
-	// call went through it and no handshake was run for transit. Router a
-	// may still hold the caller for its DHT: the provider's key lands on
-	// the closest routers, which on a mesh of three is all of them.
+	// call went through it and no handshake was run for transit.
 	for _, kind := range []string{"listed", "unlisted"} {
 		for _, result := range []string{"ok", "failed"} {
 			series := fmt.Sprintf(`agentmesh_node_transit_handshakes_total{result="%s",router="%s"}`, result, kind)
@@ -808,9 +824,10 @@ func TestCallerTransitsARouterItsCatalogMissed(t *testing.T) {
 	waitForEqual(t, "routers attached by the provider", func() []string { return attachedRouters(t, provider) }, peerIDStrings(routerB.peerID), 10*time.Second)
 	waitForEqual(t, "routers the provider announces circuits through", func() []string { return announcedCircuitRelays(t, provider) },
 		peerIDStrings(routerB.peerID), 15*time.Second)
-	// A peer lookup by ID has to connect the peer, and the only path is the
-	// circuit through router b, so the record is not readable from here
-	// before the handshake there; discovery by service name needs no dial.
+	// Router a does not hold the provider, so only the record the provider
+	// announced under its peer key can answer the caller's lookup of it.
+	waitForEqual(t, "relays in the provider's record as the caller reads it", func() []string { return circuitRelaysInRecord(t, caller, provider.peerID) },
+		peerIDStrings(routerB.peerID), 15*time.Second)
 	callAcrossMesh(t, caller, "token-c", provider, "late-tool")
 
 	// Router b admitted the provider, router a, the control plane's publisher

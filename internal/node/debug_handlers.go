@@ -156,6 +156,16 @@ type tokenInfoResponse struct {
 type networkInfoResponse struct {
 	ListenAddresses    []string `json:"listen_addresses"`
 	AnnouncedAddresses []string `json:"announced_addresses"`
+	// DirectoryAddresses is what the directory holds for this node: the
+	// addresses of the record it last announced, which follow
+	// AnnouncedAddresses at the next announcement pass.
+	DirectoryAddresses []string `json:"directory_addresses"`
+}
+
+// recordAnnouncer is a directory that remembers the record it last
+// announced.
+type recordAnnouncer interface {
+	Announced() []multiaddr.Multiaddr
 }
 
 // peerAddrsResponse is what the DHT says about a peer: the addresses it
@@ -294,9 +304,17 @@ func (n *AgentMeshNode) networkInfo() networkInfoResponse {
 		announcedAddrs = append(announcedAddrs, a.String())
 	}
 
+	directoryAddrs := []string{}
+	if d, ok := n.Directory.(recordAnnouncer); ok {
+		for _, a := range d.Announced() {
+			directoryAddrs = append(directoryAddrs, a.String())
+		}
+	}
+
 	return networkInfoResponse{
 		ListenAddresses:    listenAddrs,
 		AnnouncedAddresses: announcedAddrs,
+		DirectoryAddresses: directoryAddrs,
 	}
 }
 

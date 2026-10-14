@@ -18,6 +18,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/host"
@@ -101,19 +103,35 @@ type routerDirectory struct {
 	host    host.Host // the gated host: a stream to a router follows its handshake
 	routers func() []peer.ID
 	addrs   func() []multiaddr.Multiaddr
+
+	mu        sync.Mutex
+	announced []multiaddr.Multiaddr // the addresses of the record last announced
 }
 
 func (d *routerDirectory) Provide(ctx context.Context, key []byte) error {
 	addrs := d.addrs()
+	if len(addrs) > api.DirectoryMaxAddrs {
+		addrs = addrs[:api.DirectoryMaxAddrs]
+	}
 	rec := &api.DirectoryProvide{Key: key, Addrs: make([]string, 0, len(addrs))}
 	for _, a := range addrs {
 		rec.Addrs = append(rec.Addrs, a.String())
 	}
-	if len(rec.Addrs) > api.DirectoryMaxAddrs {
-		rec.Addrs = rec.Addrs[:api.DirectoryMaxAddrs]
+	if _, err := d.request(ctx, directoryOpProvide, &api.DirectoryRequest{Request: &api.DirectoryRequest_Provide{Provide: rec}}); err != nil {
+		return err
 	}
-	_, err := d.request(ctx, directoryOpProvide, &api.DirectoryRequest{Request: &api.DirectoryRequest_Provide{Provide: rec}})
-	return err
+	d.mu.Lock()
+	d.announced = addrs
+	d.mu.Unlock()
+	return nil
+}
+
+// Announced is the addresses of the record this member last announced:
+// what the directory holds for it, as against what it would announce now.
+func (d *routerDirectory) Announced() []multiaddr.Multiaddr {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.announced)
 }
 
 func (d *routerDirectory) FindProviders(ctx context.Context, key []byte, limit int) ([]peer.AddrInfo, error) {

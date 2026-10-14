@@ -44,12 +44,12 @@ The [node API reference](../../reference/node-api/) lists every route.
 ## Discovery
 
 The routers keep the mesh's directory: a Kademlia DHT among themselves,
-served to members over `/mesh/directory/1.0.0`. A node that publishes a
-service announces itself to a router it holds as a provider of that
-service name, and where it is reached; the router keeps the record and
-places it on the routers closest to the key. A node that looks for a
-service, or for a peer, asks a router it holds, and the router runs the
-lookup across the routers' DHT. A node keeps no DHT of its own and
+served to members over `/mesh/directory/1.0.0`. A node announces where it
+is reached, and a node that publishes a service announces itself as a
+provider of that service name, to a router it holds; the router keeps the
+records and places each on the routers closest to its key. A node that
+looks for a service, or for a peer, asks a router it holds, and the router
+runs the lookup across the routers' DHT. A node keeps no DHT of its own and
 connects to no router it does not hold. It re-announces every reprovide
 interval of the mesh (`/info`), and a record a provider stopped
 announcing leaves the directory after three of them.
@@ -86,10 +86,12 @@ out what each connection carries and what a NAT or firewall sees.
 Routers are the fixed points. A node learns their addresses, labels and
 load from the control plane's `/info` at enrollment and again on a
 schedule, holds two of them with a relay reservation on each, and replaces
-one that drops or that sends it away. A router that grants a reservation
-records the member's address through itself, so a directory lookup for
-the member learns where it is reached; an SDK member listens on nothing
-else. A call to a peer reached through a
+one that drops or that sends it away. A router that holds a member answers
+a lookup for it from what it sees of the member; any other router answers
+from the record the member announced under its own peer ID, so a lookup
+for the member learns where it is reached through any router. An SDK
+member listens on nothing of its own and is reached through a router it
+holds. A call to a peer reached through a
 third router goes through that router: the caller runs the credential
 handshake there first, since a router relays only between peers it has
 verified. The directory, the gossip and the relay are closed to anyone who

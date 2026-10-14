@@ -40,8 +40,8 @@ func newDebugCmd() *cobra.Command {
 	debugCmd.PersistentFlags().StringVar(&socketPathFlag, "socket-path", "", "Unix socket of the running node (defaults to <data-dir>/"+node.DefaultSocketName+")")
 
 	debugCmd.AddCommand(
-		newDebugGetCmd("mesh-info", "Show connected peers, the routers the node holds, and DHT size", "/debug/mesh-info"),
-		newDebugGetCmd("network-info", "Show listener and announced addresses", "/debug/network-info"),
+		newDebugGetCmd("mesh-info", "Show connected peers and the routers the node holds", "/debug/mesh-info"),
+		newDebugGetCmd("network-info", "Show listener, announced and directory addresses", "/debug/network-info"),
 		newDebugGetCmd("token-info", "Show the local auth token's expiration and status", "/debug/token-info"),
 		newDebugGetCmd("logs", "Show the last few lines of the node's log output", "/debug/logs"),
 	)

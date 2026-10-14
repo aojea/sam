@@ -798,9 +798,26 @@ func (n *AgentMeshNode) triggerReprovide() {
 	}
 }
 
-// startReprovideLoop re-announces the node's services every reprovide
-// interval of the mesh, read at each cycle so a control plane that changed
-// it is followed at the next one.
+// announceAll is one announcement pass: the node's services, then the
+// node itself under its peer key, so a lookup of the node through a router
+// that does not hold it finds it at the addresses its records carry. The
+// peer record goes last so that, once it names an address, every service
+// record of the pass does too. It returns how many services were withheld
+// because their backend did not answer.
+func (n *AgentMeshNode) announceAll(ctx context.Context) int {
+	withheld := n.services.ReprovideAll(ctx)
+	provideCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := n.Directory.Provide(provideCtx, api.PeerKey(n.Host.ID())); err != nil && ctx.Err() == nil && !errors.Is(err, errNoDirectoryRouter) {
+		// With no router attached the directory client has said so already.
+		logger.Warnf("[Directory] Announcing where this node is reached: %v", err)
+	}
+	return withheld
+}
+
+// startReprovideLoop re-announces the node's services and its own record
+// every reprovide interval of the mesh, read at each cycle so a control
+// plane that changed it is followed at the next one.
 func (n *AgentMeshNode) startReprovideLoop(ctx context.Context) {
 	go func() {
 		initialDelay := 5 * time.Second
@@ -830,7 +847,7 @@ func (n *AgentMeshNode) startReprovideLoop(ctx context.Context) {
 
 			interval := n.directorySettings().Reprovide
 			next := interval
-			if n.services.ReprovideAll(ctx) > 0 {
+			if n.announceAll(ctx) > 0 {
 				// A backend that is not answering yet is usually one that is
 				// still starting. Waiting the full interval would leave it
 				// undiscoverable for minutes after it came up.
@@ -946,7 +963,7 @@ func (n *AgentMeshNode) startConnectionMonitor(ctx context.Context, bootstrapDur
 
 				if reconnected {
 					logger.Infof("[Monitor] Reconnected successfully. Announcing services again...")
-					n.services.ReprovideAll(ctx)
+					n.announceAll(ctx)
 					consecutiveFailures = 0
 					continue
 				}

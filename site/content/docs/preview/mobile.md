@@ -241,13 +241,14 @@ or shows an error, record the status text before retrying.
 2. Allow up to a minute for the connection to settle.
 3. Check that the dashboard says **Node is Running**, **Node ID** contains
   an identifier, and **Connected Peers** is greater than zero.
-4. Record the **Node ID**, **Connected Peers**, and **DHT Size** values.
-  Peer counts can change. A particular DHT size is not a pass criterion.
+4. Record the **Node ID**, **Connected Peers**, and **Routers** values.
+  Peer counts can change. **Routers** is how many routers the node holds,
+  two on a mesh with two or more.
 
 **Node is Running** alone does not prove a mesh connection. Report a peer
 count that remains zero, even if the app shows no error.
 
-{{< figure src="../../../images/agentmesh-connect-running.png" alt="Agent Mesh Connect dashboard showing Node is Running, one connected peer, DHT size one, and a Node ID" caption="A connected node shows Node is Running, a Node ID, and at least one Connected Peer. Your Node ID and peer counts will differ from this example." width="320" >}}
+{{< figure src="../../../images/agentmesh-connect-running.png" alt="Agent Mesh Connect dashboard showing Node is Running, one connected peer, one router, and a Node ID" caption="A connected node shows Node is Running, a Node ID, and at least one Connected Peer. Your Node ID and peer counts will differ from this example." width="320" >}}
 
 ### 5. Check restart and reconnection
 

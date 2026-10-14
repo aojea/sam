@@ -378,6 +378,10 @@ material is meant for the node's owner and for auditors, not for agents.
 and `POST /debug/connect-peer` report and probe the node's view of the mesh
 for troubleshooting, and answer even while the mesh is unreachable.
 `mesh-info` lists the routers the node holds (`attached_routers`) next to
-every peer it is connected to; `peer-addrs` is where the directory says a
-peer is reached, looked up and not dialed. `agentmesh-node debug` on the
-command line wraps them. Their output is not stable across releases.
+every peer it is connected to; `network-info` lists the addresses the node
+listens on, the ones it announces, and the ones in the records it last
+announced to the directory (`directory_addresses`), which follow the
+announced ones at the next announcement pass; `peer-addrs` is where the
+directory says a peer is reached, looked up and not dialed. `agentmesh-node
+debug` on the command line wraps them. Their output is not stable across
+releases.
