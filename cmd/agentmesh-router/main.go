@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -28,8 +29,26 @@ import (
 	"github.com/google/agentmesh/internal/router"
 	"github.com/google/agentmesh/internal/version"
 	golog "github.com/ipfs/go-log/v2"
+	madns "github.com/multiformats/go-multiaddr-dns"
 	"github.com/spf13/cobra"
 )
+
+// The integration tests run a DNS server of their own for the dnsaddr
+// addresses routers announce; the router resolves peer routers through it
+// when told to, as agentmesh-node does.
+func init() {
+	if dnsServer := os.Getenv("AGENTMESH_TEST_DNS_SERVER"); dnsServer != "" {
+		customResolver := &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				d := net.Dialer{Timeout: 5 * time.Second}
+				return d.DialContext(ctx, "udp", dnsServer)
+			},
+		}
+		net.DefaultResolver = customResolver
+		madns.DefaultResolver, _ = madns.NewResolver(madns.WithDefaultResolver(customResolver))
+	}
+}
 
 var (
 	controlPlaneURL      string

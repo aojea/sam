@@ -265,17 +265,20 @@ roles:
 
 	// Search for the service from Node B
 	t.Log("Searching for tool from Node B...")
-	searchCmd := exec.Command(clientBin,
-		"-url", fmt.Sprintf("http://127.0.0.1:%d/mcp", apiPortB),
-		"-token", "tokenB",
-		"-tool", "discover_remote_services",
-		"-args", `{"type": "mcp"}`,
-	)
+	search := func() ([]byte, error) {
+		return exec.Command(clientBin,
+			"-url", fmt.Sprintf("http://127.0.0.1:%d/mcp", apiPortB),
+			"-token", "tokenB",
+			"-tool", "discover_remote_services",
+			"-args", `{"type": "mcp"}`,
+		).Output()
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	var found bool
+	attempts := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -283,9 +286,12 @@ roles:
 			t.Logf("Node A Stderr: %s", nodeStderrA.String())
 			t.Logf("Node B Stdout: %s", nodeStdoutB.String())
 			t.Logf("Node B Stderr: %s", nodeStderrB.String())
+			t.Logf("Router A Stderr: %s", stderrRouterA.String())
+			t.Logf("Router B Stderr: %s", stderrRouterB.String())
 			t.Fatalf("timed out waiting to discover tool from Node B.")
 		default:
-			out, err := searchCmd.Output()
+			attempts++
+			out, err := search()
 			if err == nil {
 				if strings.Contains(string(out), "federated-tool") {
 					found = true
@@ -299,7 +305,7 @@ roles:
 		}
 	}
 
-	t.Log("Successfully discovered federated tool via relay!")
+	t.Logf("Successfully discovered federated tool via relay after %d attempt(s)!", attempts)
 
 	// Assert datapath works via Node B's local Egress Proxy
 	t.Log("Testing datapath from Node B to Node A...")
