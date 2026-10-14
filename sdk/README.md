@@ -23,7 +23,7 @@ An SDK member is an agent, not a service provider. It calls what the mesh
 offers: MCP tools, inference and A2A services that `agentmesh-node`s publish and
 the discovery table names. Inbound, it accepts one thing: A2A requests for
 itself, as `a2a://<name>`, reached by peer ID through a router. It publishes
-no service, writes no provider record and reports no catalog; a tool, a
+no service, writes no directory record and reports no catalog; a tool, a
 model or a named agent that others should find by name runs behind a
 `agentmesh-node`. The reasons are in [Agents, not services](#agents-not-services).
 
@@ -44,7 +44,7 @@ Milestones 1 to 5 are implemented and tested in both languages:
 | `/mesh/auth/1.0.0`, both sides; join = pick `k` routers (default 2) by selector, preference and load, handshake and check role | yes | yes |
 | Circuit relay v2 reservation on each held router; dial and accept through them | yes | yes |
 | `/mesh/goaway/1.0.0`: shun a draining or overloaded router for `retry_after` and replace it from the catalog; redial (`2s, 4s, 8s`) before failing over on a dropped connection | yes | yes |
-| Service discovery in the mesh DHT (`/mesh/kad/1.0.0`) | yes | yes |
+| Service discovery through a held router (`/mesh/directory/1.0.0`) | yes | yes |
 | `/mesh/mcp/1.0.0` client: list and call a provider's tools, or its catalog | yes | yes |
 | Caller-side label requirements on the provider's credential | yes | yes |
 | `/libp2p-http` client: call inference and A2A services on the mesh; response bodies stream | yes | yes |
@@ -58,7 +58,7 @@ Milestones 1 to 5 are implemented and tested in both languages:
 | Published to a registry from the release workflow | npm `@agentmesh-p2p/sdk` | PyPI `agentmesh-p2p` |
 
 A member built this way is on the mesh and uses it in both directions: it
-finds a service in the DHT and calls it through the router, verifying the
+finds a service in the directory and calls it through the router, verifying the
 provider on every call, and it answers A2A requests for its own agent from
 a `agentmesh-node` or another SDK member that names it by peer ID, authorizing
 every caller with the same Datalog the Go node evaluates. It follows the
@@ -125,14 +125,11 @@ pinned by a test:
   host dials such addresses by name (libp2p/py-libp2p#1549). It also dials
   `wss` with certificate verification off unless given a TLS context
   (libp2p/py-libp2p#1550); the host gives it the system roots.
-- py-libp2p's Kademlia client takes a protocol prefix but its provider
-  lookups still speak `/ipfs/kad/1.0.0`, so it cannot reach the mesh DHT.
-  The Python SDK does a bounded GET_PROVIDERS walk itself on
-  `/mesh/kad/1.0.0`, seeded by the routers (`agent_mesh/discovery.py`).
-  js-libp2p's `@libp2p/kad-dht` takes the protocol and works as is.
-- go-libp2p-kad-dht keys provider records by the multihash, not the CID.
-  `sdk/testdata/service_keys.json` pins the keys both SDKs derive against
-  `internal/node/service.go`.
+- A member keeps no DHT. Both SDKs ask a router they hold over
+  `/mesh/directory/1.0.0` (`discovery.ts`, `agent_mesh/discovery.py`), one
+  `DirectoryRequest` per stream, and the router runs the lookup in the DHT
+  the routers keep among themselves. `sdk/testdata/service_keys.json` pins
+  the keys both SDKs derive against `api/directory_keys.go`.
 - go-libp2p-http is plain HTTP/1.1 on a stream, one request per stream,
   with `Host` set to the peer ID. The JS SDK bridges the stream to a Node
   duplex and runs Node's HTTP server and client on it; the Python SDK
@@ -144,7 +141,7 @@ pinned by a test:
   `http://mesh/mesh/<peer-id>/<type>/<name>/<path>`, the shape of `agentmesh-node`'s
   egress proxy and of an agent card rewritten for the mesh; the host is ignored.
 - A member that publishes nothing has announced no address, so nothing in
-  the DHT or a router's peerstore names one. `agentmesh-node` dials
+  the directory names one. `agentmesh-node` dials
   `/p2p/<router>/p2p-circuit` for every router it authenticated with when
   it knows nothing else about a peer, as both SDKs do for a peer named by
   ID (`internal/node/mcp.go`, `preparePeerAddrs`).
@@ -243,7 +240,7 @@ messages in `api/agentmesh.proto`. Bodies are capped at 1 MiB on both sides.
   not.
   Challenges are defined in `api/network.go`. It is the one instant on the
   wire that is an `int64`: it is the number in the signed text. Every other
-  instant (`expire_time`, `sign_time`, `event_time`, `announce_time`) is a
+  instant (`expire_time`, `sign_time`, `event_time`) is a
   `google.protobuf.Timestamp`, and a receiver rejects a message whose
   required instant is unset.
 - A bootstrap enrollment answers `PENDING` until an operator approves it,
@@ -283,7 +280,8 @@ messages in `api/agentmesh.proto`. Bodies are capped at 1 MiB on both sides.
 - Muxer: yamux (libp2p default).
 - Relay: circuit relay v2, with the routers as static relays; hole punching
   is on. A node behind NAT is reached through a router.
-- DHT: Kademlia with protocol prefix `/mesh`, mode auto.
+- Directory: `/mesh/directory/1.0.0` to a router the session holds; a
+  member keeps no DHT and speaks no Kademlia.
 
 ### Streams
 
@@ -334,15 +332,15 @@ length, then the bytes), with a 64 KiB cap on the first frame.
   (`2s, 4s, 8s`) and, if it does not come back or refuses auth, shuns it and
   tops up from the catalog.
 
-### Discovery (`internal/node/service.go`)
+### Discovery (`api/directory_keys.go`, `internal/node/directory_client.go`)
 
-A provider announces a service as a DHT provider record for
-`cidv1(raw, sha256("mesh:service:<type>[:<name>]"))`, once for the type and
-once for the name (`<type>` is `mcp`, `inference`, `a2a` or `egress`). A consumer
-looks up providers for the same CID, dials one and opens `/mesh/mcp/1.0.0`.
-Gossip topics under `/mesh/discovery/v1/...` carry `ServiceAnnounce` for
-interest-scoped updates; the DHT is the source of truth. The SDKs look
-records up and announce none.
+A provider announces a service to a router it holds as a record under
+the key `sha256("mesh:service:<type>[:<name>]")`, once for the type and once
+for the name (`<type>` is `mcp`, `inference`, `a2a` or `egress`), with the
+addresses it is reached at; the router keeps the record and places it on
+the routers closest to the key. A consumer asks a router it holds for the
+providers of the same key, dials one and opens `/mesh/mcp/1.0.0`. The SDKs
+look records up and announce none.
 
 A peer that announced nothing is still reachable by peer ID: every router
 relays for the peers it admitted, so a caller dials
@@ -385,7 +383,7 @@ of it is derived in the SDK:
 
 An SDK member calls services and accepts A2A requests for its own agent.
 It does not publish services: no MCP server, no named inference or A2A
-service, no DHT record, no catalog entry. The reasons:
+service, no directory record, no catalog entry. The reasons:
 
 - **The agent is the principal; a service is infrastructure.** A harness
   (LangChain, Claude Code, a browser agent) is an MCP client. The tools it
@@ -393,9 +391,9 @@ service, no DHT record, no catalog entry. The reasons:
   that must be reachable by name, a tool, a model, a named agent, is a
   deployment concern, and the sidecar model exists for it: the `agentmesh-node`
   beside it publishes the service and enforces the policy once, in Go.
-- **Publishing is the expensive part.** Being a provider needs a DHT
-  provide loop, a catalog report and provider records that go stale on
-  every rollout. Accepting requests for the agent itself needs the relay
+- **Publishing is the expensive part.** Being a provider needs an
+  announcement loop, a catalog report and records that go stale on every
+  rollout. Accepting requests for the agent itself needs the relay
   reservation, the auth handshake and the authorizer, all of which a member
   needs anyway to be verified by a `agentmesh-node` before it is called.
 - **One inbound protocol.** A2A is the protocol for talking to an agent,
@@ -411,7 +409,7 @@ service, no DHT record, no catalog entry. The reasons:
 
 What an SDK agent is on the wire: a peer with a relay reservation on a
 router, answering `/mesh/auth/1.0.0` and `/libp2p-http` for `a2a://<name>`,
-with no DHT record and no catalog entry. To a `agentmesh-node` it is a peer whose
+with no directory record and no catalog entry. To a `agentmesh-node` it is a peer whose
 address nobody announced, reached through the router that admitted both,
 and whose credential it verifies before forwarding
 `/mesh/<peer>/a2a/<name>/...`. Routers, the control plane and the Datalog
@@ -483,10 +481,8 @@ holds against the control plane's records.
 ### Milestone 3 — call tools (done)
 
 - Discovery: `session.discover("mcp://calc")`, or `(type, name)`, or a type
-  alone, looks the mesh DHT up for the service key
-  `internal/node/service.go` derives. JS: `@libp2p/kad-dht` in client mode
-  on `/mesh/kad/1.0.0`; Python: the SDK's own bounded GET_PROVIDERS walk on
-  the same protocol (see the facts above).
+  alone, asks a router the session holds, over `/mesh/directory/1.0.0`,
+  for the providers of the service key `api/directory_keys.go` derives.
 - Naming a peer: every call takes a `Peer`, which is a provider `discover`
   returned, a peer id, or a multiaddr. For the first two the SDK dials the
   advertised addresses and `<router>/p2p-circuit/p2p/<peer>` through every
@@ -521,7 +517,7 @@ holds against the control plane's records.
   it, reads its catalog, and is refused for missing labels, an untrusted
   provider, a forged caller credential and an unknown service. Integration:
   the mesh of `sdk_mesh_test.go` has an MCP backend behind the `agentmesh-node`
-  (`calc`, tool `add`); each SDK member discovers it in the DHT, lists and
+  (`calc`, tool `add`); each SDK member discovers it through its router, lists and
   calls `add` through the router, reads the node's catalog and is refused a
   service the node does not have. The runners took `discover`, `tools` and
   `call` commands for it.
@@ -673,7 +669,7 @@ same commit as the Go components they talk to.
 
 - Rewriting the control plane, router or sandbox components; they stay Go.
 - Publishing services from an SDK: an MCP server, a named inference or A2A
-  service, a DHT record or a catalog entry. That is `agentmesh-node`'s job; see
+  service, a directory record or a catalog entry. That is `agentmesh-node`'s job; see
   [Agents, not services](#agents-not-services).
 - Any SDK-only wire protocol. If an SDK needs something the Go node does not
   speak, the Go node learns it first.
@@ -750,7 +746,7 @@ one follows is named so a change on one side can be carried to the others.
 | `auth.ts` | `auth.py` | `/mesh/auth/1.0.0` on both sides, as `HandleAuthHandshake` |
 | — | `relay.py` | circuit relay v2 client (py-libp2p's cannot talk to go-libp2p) |
 | `session.ts` | `session.py` | `MeshSession`: join, relay reservation, refresh loop, control plane sync loop, gossip events, `acceptA2A()` / `accept_a2a()`, `fetch()` |
-| `discovery.ts` | `discovery.py` | service keys and DHT lookups as `internal/node/service.go`; lookups only, no records |
+| `discovery.ts` | `discovery.py` | service keys and directory requests to a held router, as `internal/node/directory_client.go`; lookups only, no records |
 | `mcp.ts` | `mcp_client.py` | MCP over `/mesh/mcp/1.0.0`, the client side of `internal/node/gate.go` |
 | `authorizer.ts` | `authorizer.py` | the provider authorizer, as `internal/node.(*AgentMeshNode).Authorize`, over the generated baseline and `datalog_rules` |
 | `libp2p-http.ts` | `libp2p_http.py` | `/libp2p-http` client (streaming) and the A2A ingress for the agent, as go-libp2p-http and `StartIngressServer`; mesh URLs |

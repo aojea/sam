@@ -1,5 +1,5 @@
 {
-  "_comment": "Service discovery keys as internal/node/service.go derives them: cid = cidv1(raw, sha256(\"mesh:service:\u003ctype\u003e[:\u003cname\u003e]\")); go-libp2p-kad-dht keys the provider record by the multihash (hex).",
+  "_comment": "Service directory keys as api.ServiceKey derives them: multihash = sha256(\"mesh:service:<type>[:<name>]\") (hex); cid is the same key as cidv1(raw, multihash), the form the routers' DHT stores it under.",
   "services": [
     {
       "type": "mcp",

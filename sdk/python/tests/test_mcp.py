@@ -153,7 +153,7 @@ def frame(biscuit: bytes, target: str) -> bytes:
     return pb.AuthFrame(biscuit=biscuit, target_service=target).SerializeToString()
 
 
-def test_service_keys_match_internal_node_service():
+def test_service_keys_match_api_service_key():
     for s in FIXTURE["services"]:
         assert service_key(s["type"], s["name"] or None).hex() == s["multihash"], f"{s['type']}:{s['name']}"
     assert parse_service_target("mcp://calc") == ("mcp", "calc")
