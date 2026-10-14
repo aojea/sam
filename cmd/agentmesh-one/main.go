@@ -234,8 +234,7 @@ func main() {
 	rootCmd.Flags().BoolVar(&cpTunables.ManualEnrollment, "control-plane-manual-enrollment", false, "Queue bootstrap enrollments for admin approval instead of auto-approving")
 
 	// Embedded router tunables.
-	rootCmd.Flags().DurationVar(&routerTunables.KeysSyncInterval, "router-keys-sync-interval", 0, "Biscuit public key refresh interval (0 keeps the component default)")
-	rootCmd.Flags().DurationVar(&routerTunables.LeaseRenewInterval, "router-lease-renew-interval", 0, "Lease renewal interval (0 keeps the component default)")
+	rootCmd.Flags().DurationVar(&routerTunables.ControlPlaneSyncInterval, "router-control-plane-sync-interval", 0, "How often the router renews its lease and pulls keys, routers, bans and policy from the control plane (0 keeps the component default)")
 	rootCmd.Flags().IntVar(&routerTunables.LowWaterMark, "router-low-watermark", 0, "Connection manager low watermark (0 is 15% below the high watermark)")
 	rootCmd.Flags().IntVar(&routerTunables.HighWaterMark, "router-high-watermark", 0, "Connection manager high watermark (0 keeps the component default)")
 	rootCmd.Flags().IntVar(&routerTunables.ConnsPerSourceIP, "router-conns-per-source-ip", 0, "Per-source-IP connection budget (0 follows the high watermark; proxied peers share source IPs)")

@@ -35,25 +35,33 @@ const DefaultShutdownLeaseTTL = 30 * time.Second
 // less.
 const DefaultAuthDeadline = time.Minute
 
+// DefaultControlPlaneSyncInterval is how often a router talks to the control
+// plane when nothing happens: the lease is renewed, and /info, /keys and
+// /policies re-read, every five minutes. What has to be quick does not wait
+// for it: a mesh event runs a pass at once, a new router reads /info on its
+// own first pass and handshakes with every listed router, and a lookup that
+// finds nothing re-reads /info (refederateIfStale).
+const DefaultControlPlaneSyncInterval = 5 * time.Minute
+
 // Options holds configuration details for the agentmesh-router.
 type Options struct {
-	ControlPlaneURL    string
-	ListenAddrs        []string
-	ExternalAddrs      []string
-	KeysSyncInterval   time.Duration
-	PolicySyncInterval time.Duration
-	LeaseRenewInterval time.Duration
-	OIDCProvider       string // For OIDC enrollment
-	OIDCToken          string // OIDC JWT token for enrollment
-	BootstrapToken     string // Pre-shared bootstrap token for enrollment
-	BootstrapTokenPath string // File path containing pre-shared bootstrap token
-	JWTPath            string // File path containing OIDC JWT token
-	KeysDBPath         string // Path to save peer private key
-	AllowLoopback      bool
-	BiscuitTimeout     time.Duration
-	LogVerbose         bool
-	LowWaterMark       int
-	HighWaterMark      int
+	ControlPlaneURL string
+	ListenAddrs     []string
+	ExternalAddrs   []string
+	// ControlPlaneSyncInterval is how often the router's one pass over the
+	// control plane runs: lease, /info, /keys, /policies, credential expiry.
+	ControlPlaneSyncInterval time.Duration
+	OIDCProvider             string // For OIDC enrollment
+	OIDCToken                string // OIDC JWT token for enrollment
+	BootstrapToken           string // Pre-shared bootstrap token for enrollment
+	BootstrapTokenPath       string // File path containing pre-shared bootstrap token
+	JWTPath                  string // File path containing OIDC JWT token
+	KeysDBPath               string // Path to save peer private key
+	AllowLoopback            bool
+	BiscuitTimeout           time.Duration
+	LogVerbose               bool
+	LowWaterMark             int
+	HighWaterMark            int
 	// RelayLimitDuration / RelayLimitData cap each relayed connection; 0 is
 	// no limit, so Default() leaves them alone.
 	RelayLimitDuration time.Duration
@@ -119,14 +127,8 @@ func (o *Options) Default() {
 	if len(o.ListenAddrs) == 0 {
 		o.ListenAddrs = []string{"/ip4/0.0.0.0/tcp/5001", "/ip6/::/tcp/5001"}
 	}
-	if o.KeysSyncInterval <= 0 {
-		o.KeysSyncInterval = 5 * time.Minute
-	}
-	if o.PolicySyncInterval <= 0 {
-		o.PolicySyncInterval = 15 * time.Minute
-	}
-	if o.LeaseRenewInterval <= 0 {
-		o.LeaseRenewInterval = 30 * time.Second
+	if o.ControlPlaneSyncInterval <= 0 {
+		o.ControlPlaneSyncInterval = DefaultControlPlaneSyncInterval
 	}
 	if o.HighWaterMark <= 0 {
 		o.HighWaterMark = DefaultHighWaterMark

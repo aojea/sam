@@ -159,14 +159,13 @@ func startReadmissionMesh(t *testing.T, ctx context.Context) *readmissionMesh {
 	cpPort, _ := strconv.Atoi(portStr)
 
 	rtr, err := router.NewRouter(ctx, router.Options{
-		ControlPlaneURL:    baseURL,
-		ListenAddrs:        []string{"/ip4/127.0.0.1/tcp/0"},
-		KeysDBPath:         filepath.Join(tmp, "router.key"),
-		OIDCToken:          mintToken(map[string]interface{}{"sub": "router", "groups": []string{"routers"}, "roles": []string{api.RoleRouter}}),
-		AllowLoopback:      true,
-		KeysSyncInterval:   20 * time.Second,
-		LeaseRenewInterval: 500 * time.Millisecond,
-		BiscuitTimeout:     time.Second,
+		ControlPlaneURL:          baseURL,
+		ListenAddrs:              []string{"/ip4/127.0.0.1/tcp/0"},
+		KeysDBPath:               filepath.Join(tmp, "router.key"),
+		OIDCToken:                mintToken(map[string]interface{}{"sub": "router", "groups": []string{"routers"}, "roles": []string{api.RoleRouter}}),
+		AllowLoopback:            true,
+		ControlPlaneSyncInterval: 500 * time.Millisecond,
+		BiscuitTimeout:           time.Second,
 	})
 	if err != nil {
 		t.Fatalf("failed to create router: %v", err)

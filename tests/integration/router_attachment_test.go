@@ -108,7 +108,7 @@ func startLabelledRouter(t *testing.T, routerBin, tmpDir, name string, cpPort in
 		"--keys-path", keysPath,
 		"--allow-loopback",
 		"--oidc-token", routerJWT,
-		"--lease-renew-interval", "250ms",
+		"--control-plane-sync-interval", "250ms",
 		"--metrics-addr", metricsAddr,
 	}
 	for _, l := range labels {

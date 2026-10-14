@@ -471,7 +471,7 @@ func startRouter(t *testing.T, tmpDir string, cpPort int, mintToken func(map[str
 		"--oidc-token", routerJWT,
 		// Each renewal carries the router's connected peers, which is how
 		// tests see a node reach the mesh through the control plane.
-		"--lease-renew-interval", "250ms",
+		"--control-plane-sync-interval", "250ms",
 	)
 	routerCmd.Stdout = os.Stdout
 	routerCmd.Stderr = os.Stderr

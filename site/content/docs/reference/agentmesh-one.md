@@ -65,8 +65,7 @@ of zero leaves the default of that component unchanged.
 | `--control-plane-biscuit-ttl` | `--biscuit-ttl` |
 | `--control-plane-workload-session-ttl` | `--workload-session-ttl` |
 | `--control-plane-manual-enrollment` | The opposite of `--auto-approve-enrollment`: queue bootstrap enrollments for approval. |
-| `--router-keys-sync-interval` | `agentmesh-router --keys-sync-interval` |
-| `--router-lease-renew-interval` | `--lease-renew-interval` |
+| `--router-control-plane-sync-interval` | `agentmesh-router --control-plane-sync-interval` |
 | `--router-low-watermark`, `--router-high-watermark` | `--low-watermark`, `--high-watermark` |
 | `--router-conns-per-source-ip` | `--conns-per-source-ip`. `0` follows the high watermark, because peers behind a proxy share source IPs. |
 | `--router-relay-limit-duration`, `--router-relay-limit-data` | `--relay-limit-duration`, `--relay-limit-data`. `0` keeps `1h` and no data limit, so set a long duration such as `24h` instead of an unlimited one. |

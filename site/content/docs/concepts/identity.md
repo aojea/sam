@@ -201,10 +201,10 @@ any user action.
 The control plane rotates its Biscuit Ed25519 signing key every
 `--key-rotation-interval` (24 hours by default). The previous key stays valid
 for `--key-grace-period` (1 hour by default) and is then retired. `GET /keys`
-returns the current set of keys, signed by each key in the set. Routers poll
-it every `--keys-sync-interval`; nodes fetch it at enrollment and then every
-`--control-plane-sync-interval`, together with the ban set, revocation list,
-and the mesh policy. A rotation event only brings the next pull forward. Both
+returns the current set of keys, signed by each key in the set. Routers and
+nodes fetch it at enrollment and then every `--control-plane-sync-interval`,
+together with the ban set, revocation list, and the mesh policy. A rotation
+event only brings the next pull forward. Both
 accept a new set only if one of its signatures verifies under a key they
 already trust. The first key comes from enrollment, and each later key is
 vouched for by the key it replaces.

@@ -379,8 +379,9 @@ type Router struct {
 	// only the last biscuit it issued.
 	refreshMu sync.Mutex
 
-	keysSyncTrigger   chan struct{}
-	policySyncTrigger chan struct{}
+	// syncTrigger asks the control plane sync loop for a pass now; a mesh
+	// event sends on it.
+	syncTrigger chan struct{}
 
 	// Control contexts
 	ctx      context.Context
@@ -415,12 +416,11 @@ func NewRouter(ctx context.Context, config Options) (*Router, error) {
 	}
 
 	return &Router{
-		config:            config,
-		ctx:               ctx,
-		cancel:            cancel,
-		handshakeLimiter:  handshakeLimiter,
-		keysSyncTrigger:   make(chan struct{}, 1),
-		policySyncTrigger: make(chan struct{}, 1),
+		config:           config,
+		ctx:              ctx,
+		cancel:           cancel,
+		handshakeLimiter: handshakeLimiter,
+		syncTrigger:      make(chan struct{}, 1),
 	}, nil
 }
 
@@ -599,12 +599,8 @@ func (r *Router) Start() (retErr error) {
 	})
 
 	// 5. Start background routines
-	r.wg.Add(9)
-	go r.runLeaseRenewalLoop()
-	go r.runKeysSyncLoop()
-	go r.runPolicySyncLoop()
-	go r.runFederationLoop()
-	go r.runBiscuitRenewalLoop()
+	r.wg.Add(5)
+	go r.runControlPlaneSyncLoop()
 	go r.runShedLoop()
 	go r.listenForControlPlaneEvents(r.ctx)
 	go func() {
@@ -1049,65 +1045,93 @@ func (r *Router) listenForControlPlaneEvents(ctx context.Context) {
 				}
 			}
 		case api.MeshEvent_KEY_ROTATION:
-			logger.Infof("[Router Event] Received KEY_ROTATION event, triggering key sync")
-			r.triggerKeysSync()
+			logger.Infof("[Router Event] Received KEY_ROTATION event, triggering control plane sync")
+			r.triggerSync()
 		case api.MeshEvent_POLICY_UPDATE:
-			logger.Infof("[Router Event] Received POLICY_UPDATE event, triggering policy sync")
-			r.triggerPolicySync()
+			logger.Infof("[Router Event] Received POLICY_UPDATE event, triggering control plane sync")
+			r.triggerSync()
 		}
 	}
 }
 
-func (r *Router) triggerKeysSync() {
+func (r *Router) triggerSync() {
 	select {
-	case r.keysSyncTrigger <- struct{}{}:
+	case r.syncTrigger <- struct{}{}:
 	default:
 	}
 }
 
-func (r *Router) runKeysSyncLoop() {
+// runControlPlaneSyncLoop is the router's one conversation with the control
+// plane. Every ControlPlaneSyncInterval, and at once on a mesh event, a pass
+// re-reads /keys, renews the lease, re-reads /info (the routers to federate
+// with and the ban set), re-reads /policies and refreshes the router's own
+// credential when it nears expiry. Between passes, while a listed router is
+// not yet authenticated, the federation step alone is retried every
+// federationCatchUp, so a router that cannot be reached costs the control
+// plane nothing beyond the pass.
+func (r *Router) runControlPlaneSyncLoop() {
 	defer r.wg.Done()
-	ticker := time.NewTicker(r.config.KeysSyncInterval)
-	defer ticker.Stop()
-
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	var lastPass time.Time
 	for {
+		now := false
 		select {
-		case <-ticker.C:
-		case <-r.keysSyncTrigger:
+		case <-timer.C:
+		case <-r.syncTrigger:
+			now = true
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 		case <-r.ctx.Done():
 			return
 		}
-		if err := r.syncKeys(); err != nil {
-			logger.Errorf("Failed keys sync: %v", err)
+		if now || time.Since(lastPass) >= r.config.ControlPlaneSyncInterval {
+			r.syncControlPlane()
+			lastPass = time.Now()
+		} else {
+			r.connectBootstrapRouters()
 		}
+		next := r.config.ControlPlaneSyncInterval - time.Since(lastPass)
+		if listed, authenticated := r.peerRouterCounts(); authenticated < listed && federationCatchUp < next {
+			next = federationCatchUp
+		}
+		timer.Reset(max(next, 0))
 	}
 }
 
-func (r *Router) triggerPolicySync() {
-	select {
-	case r.policySyncTrigger <- struct{}{}:
-	default:
+// syncControlPlane is one pass of the sync loop. Keys come first: a lease
+// or a policy read presented with a credential the control plane no longer
+// signs for is refused until the rotation is learned and the credential
+// refreshed (syncKeys).
+func (r *Router) syncControlPlane() {
+	if err := r.syncKeys(); err != nil {
+		logger.Errorf("Failed keys sync: %v", err)
 	}
+	r.renewLease()
+	r.connectBootstrapRouters()
+	if err := r.syncPolicy(); err != nil {
+		logger.Errorf("Failed policy sync: %v", err)
+	}
+	r.refreshExpiringCredential()
 }
 
-// runPolicySyncLoop pulls the mesh policy at start, on each POLICY_UPDATE
-// event and every PolicySyncInterval: the event is best effort, the pull is
-// what bounds how long a policy change takes to reach this router.
-func (r *Router) runPolicySyncLoop() {
-	defer r.wg.Done()
-	ticker := time.NewTicker(r.config.PolicySyncInterval)
-	defer ticker.Stop()
-
-	for {
-		if err := r.syncPolicy(); err != nil {
-			logger.Errorf("Failed policy sync: %v", err)
-		}
-		select {
-		case <-ticker.C:
-		case <-r.policySyncTrigger:
-		case <-r.ctx.Done():
-			return
-		}
+// refreshExpiringCredential refreshes the router's own credential once less
+// than a fifth of its lifetime is left, so a credential is never presented
+// close to its expiry.
+func (r *Router) refreshExpiringCredential() {
+	r.keysMu.RLock()
+	expiration := r.credential.expiration
+	r.keysMu.RUnlock()
+	if expiration.IsZero() || time.Until(expiration) >= api.BiscuitTokenTTL/5 {
+		return
+	}
+	logger.Infof("Router biscuit expiring in %v, triggering proactive refresh...", time.Until(expiration))
+	if err := r.RefreshEnrollment(r.ctx); err != nil {
+		logger.Errorf("Proactive router biscuit refresh failed: %v", err)
 	}
 }
 
@@ -1155,24 +1179,6 @@ func (r *Router) meshPolicyRules() []biscuit.Rule {
 		return p.rules
 	}
 	return nil
-}
-
-func (r *Router) runLeaseRenewalLoop() {
-	defer r.wg.Done()
-	ticker := time.NewTicker(r.config.LeaseRenewInterval)
-	defer ticker.Stop()
-
-	// Initial renewal after host is online
-	r.renewLease()
-
-	for {
-		select {
-		case <-ticker.C:
-			r.renewLease()
-		case <-r.ctx.Done():
-			return
-		}
-	}
 }
 
 // renewLease extends the lease for the control plane's duration. Once the
@@ -1414,35 +1420,12 @@ func (r *Router) reconcileBannedPeers(peerIDs []string, fetchedAt time.Time) {
 	}
 }
 
-// federationInterval is how often a router reads the control plane's list
-// of routers and authenticates with the ones it has not; federationCatchUp
-// is the interval while the list names a router it has not reached yet,
-// which it does at start, when the other routers started at the same
-// moment and leased after this one's first pass, and whenever a router
-// joins.
-const (
-	federationInterval = 30 * time.Second
-	federationCatchUp  = 2 * time.Second
-)
-
-func (r *Router) runFederationLoop() {
-	defer r.wg.Done()
-	timer := time.NewTimer(0)
-	defer timer.Stop()
-	for {
-		select {
-		case <-timer.C:
-			r.connectBootstrapRouters()
-			next := federationInterval
-			if listed, authenticated := r.peerRouterCounts(); authenticated < listed {
-				next = federationCatchUp
-			}
-			timer.Reset(next)
-		case <-r.ctx.Done():
-			return
-		}
-	}
-}
+// federationCatchUp is how often the sync loop retries the federation step
+// alone while the control plane's list names a router this one has not
+// authenticated with yet, which it does at start, when the other routers
+// started at the same moment and leased after this one's first pass, and
+// whenever a router joins.
+const federationCatchUp = 2 * time.Second
 
 func (r *Router) connectBootstrapRouters() {
 	// Taken before the request: anything banned after this point cannot be
@@ -2016,28 +1999,4 @@ func (r *Router) verifyOwnBiscuit(token []byte, peerID peer.ID) error {
 		return err
 	}
 	return identity.VerifyBiscuitRole(token, key, r.config.RequiredRole, r.config.BiscuitTimeout)
-}
-
-func (r *Router) runBiscuitRenewalLoop() {
-	defer r.wg.Done()
-	ticker := time.NewTicker(api.TokenRefreshCheckInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			r.keysMu.RLock()
-			expiration := r.credential.expiration
-			r.keysMu.RUnlock()
-
-			if !expiration.IsZero() && time.Until(expiration) < api.BiscuitTokenTTL/5 { // 80% elapsed lifespan of 24h (remaining time < 20% of TTL)
-				logger.Infof("Router biscuit expiring in %v, triggering proactive refresh...", time.Until(expiration))
-				if err := r.RefreshEnrollment(r.ctx); err != nil {
-					logger.Errorf("Proactive router biscuit refresh failed: %v", err)
-				}
-			}
-		case <-r.ctx.Done():
-			return
-		}
-	}
 }

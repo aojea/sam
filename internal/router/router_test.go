@@ -184,14 +184,13 @@ func TestRouterIntegration(t *testing.T) {
 
 	// 1. Create and Start Router
 	rOpts := Options{
-		ControlPlaneURL:    cpURL,
-		ListenAddrs:        []string{"/ip4/127.0.0.1/tcp/0"},
-		KeysSyncInterval:   2 * time.Second,
-		LeaseRenewInterval: 2 * time.Second,
-		OIDCToken:          routerJWT,
-		KeysDBPath:         routerKeyPath,
-		AllowLoopback:      true,
-		BiscuitTimeout:     1 * time.Second,
+		ControlPlaneURL:          cpURL,
+		ListenAddrs:              []string{"/ip4/127.0.0.1/tcp/0"},
+		ControlPlaneSyncInterval: 2 * time.Second,
+		OIDCToken:                routerJWT,
+		KeysDBPath:               routerKeyPath,
+		AllowLoopback:            true,
+		BiscuitTimeout:           1 * time.Second,
 	}
 
 	r, err := NewRouter(context.Background(), rOpts)
@@ -354,14 +353,13 @@ func TestRouterFederation(t *testing.T) {
 
 	r1KeyPath := filepath.Join(tempDir, "router1.key")
 	r1, err := NewRouter(context.Background(), Options{
-		ControlPlaneURL:    cpURL,
-		ListenAddrs:        []string{"/ip4/127.0.0.1/tcp/0"},
-		KeysSyncInterval:   2 * time.Second,
-		LeaseRenewInterval: 2 * time.Second,
-		OIDCToken:          router1JWT,
-		KeysDBPath:         r1KeyPath,
-		AllowLoopback:      true,
-		BiscuitTimeout:     1 * time.Second,
+		ControlPlaneURL:          cpURL,
+		ListenAddrs:              []string{"/ip4/127.0.0.1/tcp/0"},
+		ControlPlaneSyncInterval: 2 * time.Second,
+		OIDCToken:                router1JWT,
+		KeysDBPath:               r1KeyPath,
+		AllowLoopback:            true,
+		BiscuitTimeout:           1 * time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -373,14 +371,13 @@ func TestRouterFederation(t *testing.T) {
 
 	r2KeyPath := filepath.Join(tempDir, "router2.key")
 	r2, err := NewRouter(context.Background(), Options{
-		ControlPlaneURL:    cpURL,
-		ListenAddrs:        []string{"/ip4/127.0.0.1/tcp/0"},
-		KeysSyncInterval:   2 * time.Second,
-		LeaseRenewInterval: 2 * time.Second,
-		OIDCToken:          router2JWT,
-		KeysDBPath:         r2KeyPath,
-		AllowLoopback:      true,
-		BiscuitTimeout:     1 * time.Second,
+		ControlPlaneURL:          cpURL,
+		ListenAddrs:              []string{"/ip4/127.0.0.1/tcp/0"},
+		ControlPlaneSyncInterval: 2 * time.Second,
+		OIDCToken:                router2JWT,
+		KeysDBPath:               r2KeyPath,
+		AllowLoopback:            true,
+		BiscuitTimeout:           1 * time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -443,14 +440,13 @@ func TestRouterProactiveTokenRefresh(t *testing.T) {
 	})
 
 	rOpts := Options{
-		ControlPlaneURL:    cpURL,
-		ListenAddrs:        []string{"/ip4/127.0.0.1/tcp/0"},
-		KeysSyncInterval:   20 * time.Second,
-		LeaseRenewInterval: 20 * time.Second,
-		OIDCToken:          routerJWT,
-		KeysDBPath:         routerKeyPath,
-		AllowLoopback:      true,
-		BiscuitTimeout:     1 * time.Second,
+		ControlPlaneURL:          cpURL,
+		ListenAddrs:              []string{"/ip4/127.0.0.1/tcp/0"},
+		ControlPlaneSyncInterval: 20 * time.Second,
+		OIDCToken:                routerJWT,
+		KeysDBPath:               routerKeyPath,
+		AllowLoopback:            true,
+		BiscuitTimeout:           1 * time.Second,
 	}
 
 	r, err := NewRouter(context.Background(), rOpts)
@@ -504,14 +500,13 @@ func TestRouterLeaseRenewalReEnrollOn401(t *testing.T) {
 	})
 
 	rOpts := Options{
-		ControlPlaneURL:    cpURL,
-		ListenAddrs:        []string{"/ip4/127.0.0.1/tcp/0"},
-		KeysSyncInterval:   20 * time.Second,
-		LeaseRenewInterval: 20 * time.Second,
-		OIDCToken:          routerJWT,
-		KeysDBPath:         routerKeyPath,
-		AllowLoopback:      true,
-		BiscuitTimeout:     1 * time.Second,
+		ControlPlaneURL:          cpURL,
+		ListenAddrs:              []string{"/ip4/127.0.0.1/tcp/0"},
+		ControlPlaneSyncInterval: 20 * time.Second,
+		OIDCToken:                routerJWT,
+		KeysDBPath:               routerKeyPath,
+		AllowLoopback:            true,
+		BiscuitTimeout:           1 * time.Second,
 	}
 
 	r, err := NewRouter(context.Background(), rOpts)
@@ -705,14 +700,13 @@ func TestRouterProactiveRefreshReEnrollOn401(t *testing.T) {
 	})
 
 	rOpts := Options{
-		ControlPlaneURL:    cpURL,
-		ListenAddrs:        []string{"/ip4/127.0.0.1/tcp/0"},
-		KeysSyncInterval:   20 * time.Second,
-		LeaseRenewInterval: 20 * time.Second,
-		OIDCToken:          routerJWT,
-		KeysDBPath:         routerKeyPath,
-		AllowLoopback:      true,
-		BiscuitTimeout:     1 * time.Second,
+		ControlPlaneURL:          cpURL,
+		ListenAddrs:              []string{"/ip4/127.0.0.1/tcp/0"},
+		ControlPlaneSyncInterval: 20 * time.Second,
+		OIDCToken:                routerJWT,
+		KeysDBPath:               routerKeyPath,
+		AllowLoopback:            true,
+		BiscuitTimeout:           1 * time.Second,
 	}
 
 	r, err := NewRouter(context.Background(), rOpts)
@@ -764,14 +758,13 @@ func TestRouterGossipSubBannedEvent(t *testing.T) {
 	})
 
 	rOpts := Options{
-		ControlPlaneURL:    cpURL,
-		ListenAddrs:        []string{"/ip4/127.0.0.1/tcp/0"},
-		KeysSyncInterval:   20 * time.Second,
-		LeaseRenewInterval: 20 * time.Second,
-		OIDCToken:          routerJWT,
-		KeysDBPath:         routerKeyPath,
-		AllowLoopback:      true,
-		BiscuitTimeout:     1 * time.Second,
+		ControlPlaneURL:          cpURL,
+		ListenAddrs:              []string{"/ip4/127.0.0.1/tcp/0"},
+		ControlPlaneSyncInterval: 20 * time.Second,
+		OIDCToken:                routerJWT,
+		KeysDBPath:               routerKeyPath,
+		AllowLoopback:            true,
+		BiscuitTimeout:           1 * time.Second,
 	}
 
 	r, err := NewRouter(context.Background(), rOpts)
@@ -782,6 +775,17 @@ func TestRouterGossipSubBannedEvent(t *testing.T) {
 		t.Fatalf("failed to start router: %v", err)
 	}
 	defer func() { _ = r.Close() }()
+
+	// The control plane never learns of this ban, so the event must land
+	// after the first sync pass read /info: a pass that fetched after the
+	// event would read the ban's absence as an unban (reconcileBannedPeers),
+	// which is right for a real ban the control plane recorded first.
+	for deadline := time.Now().Add(5 * time.Second); r.lastFederation.Load() == 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("the router's first sync pass did not read /info")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 
 	privNode, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	if err != nil {
@@ -1326,14 +1330,13 @@ func TestRouterRefreshEnrollmentReattestsJWT(t *testing.T) {
 	}
 
 	r, err := NewRouter(context.Background(), Options{
-		ControlPlaneURL:    cpURL,
-		ListenAddrs:        []string{"/ip4/127.0.0.1/tcp/0"},
-		KeysSyncInterval:   time.Hour,
-		LeaseRenewInterval: time.Hour,
-		JWTPath:            jwtPath,
-		KeysDBPath:         filepath.Join(tempDir, "router.key"),
-		AllowLoopback:      true,
-		BiscuitTimeout:     time.Second,
+		ControlPlaneURL:          cpURL,
+		ListenAddrs:              []string{"/ip4/127.0.0.1/tcp/0"},
+		ControlPlaneSyncInterval: time.Hour,
+		JWTPath:                  jwtPath,
+		KeysDBPath:               filepath.Join(tempDir, "router.key"),
+		AllowLoopback:            true,
+		BiscuitTimeout:           time.Second,
 	})
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)

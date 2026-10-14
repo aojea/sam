@@ -163,7 +163,13 @@ func TestSyncKeysRequiresTrustedSignature(t *testing.T) {
 	})
 }
 
-func TestKeysSyncLoopCoalescesTriggers(t *testing.T) {
+// TestControlPlaneSyncLoopCoalescesTriggers pins two properties of the one
+// control plane loop: a burst of mesh events while a pass is in flight costs
+// one follow-up pass, and readers of the trust set never wait on the control
+// plane. The fake control plane holds /keys until released and answers the
+// rest of the pass with empty documents; the router is not enrolled, so the
+// lease and policy steps log and move on.
+func TestControlPlaneSyncLoopCoalescesTriggers(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -179,6 +185,10 @@ func TestKeysSyncLoopCoalescesTriggers(t *testing.T) {
 	requests := make(chan struct{}, 4)
 	release := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/keys" {
+			w.Header().Set("Content-Type", "application/x-protobuf")
+			return
+		}
 		requests <- struct{}{}
 		select {
 		case <-release:
@@ -187,13 +197,13 @@ func TestKeysSyncLoopCoalescesTriggers(t *testing.T) {
 		}
 	}))
 	t.Cleanup(server.Close)
-	router, err := NewRouter(context.Background(), Options{ControlPlaneURL: server.URL, KeysSyncInterval: time.Hour})
+	router, err := NewRouter(context.Background(), Options{ControlPlaneURL: server.URL, ControlPlaneSyncInterval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
 	router.trustedPublicKeys = []ed25519.PublicKey{publicKey}
 	router.wg.Add(1)
-	go router.runKeysSyncLoop()
+	go router.runControlPlaneSyncLoop()
 	t.Cleanup(func() {
 		router.cancel()
 		router.wg.Wait()
@@ -206,25 +216,26 @@ func TestKeysSyncLoopCoalescesTriggers(t *testing.T) {
 			t.Fatal(message)
 		}
 	}
-	router.triggerKeysSync()
-	await(requests, "key sync did not start")
+	// The loop's first pass runs at start.
+	await(requests, "the first pass did not start")
 	notified := make(chan struct{})
 	go func() {
 		for range 10 {
-			router.triggerKeysSync()
+			router.triggerSync()
 		}
 		router.getTrustedPublicKeys()
 		close(notified)
 	}()
 	await(notified, "notifications or key readers blocked on the control-plane request")
-	if pending := len(router.keysSyncTrigger); pending != 1 {
+	if pending := len(router.syncTrigger); pending != 1 {
 		t.Fatalf("pending triggers = %d, want one coalesced follow-up", pending)
 	}
 	release <- struct{}{}
-	await(requests, "pending key sync was lost")
-	if pending := len(router.keysSyncTrigger); pending != 0 {
-		t.Fatalf("pending triggers = %d after follow-up", pending)
+	await(requests, "the follow-up pass was lost")
+	if pending := len(router.syncTrigger); pending != 0 {
+		t.Fatalf("pending triggers = %d after the follow-up", pending)
 	}
+	release <- struct{}{}
 }
 
 func TestSyncKeysRefreshesOnRotation(t *testing.T) {

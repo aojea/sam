@@ -73,7 +73,7 @@ func TestRouterGracefulShutdownWithdrawsLease(t *testing.T) {
 			"--oidc-token", routerJWT,
 			// Long enough that only a withdrawal, never a renewal, changes
 			// the active set during the test.
-			"--lease-renew-interval", "1m",
+			"--control-plane-sync-interval", "1m",
 			"--shutdown-lease-ttl", shutdownTTL,
 		)
 		if err := cmd.Start(); err != nil {

@@ -100,8 +100,7 @@ roles:
 		"--keys-path", filepath.Join(tmpDir, "router-keys.db"),
 		"--allow-loopback",
 		"--oidc-token", routerJWT,
-		"--lease-renew-interval", "1s",
-		"--keys-sync-interval", "500ms",
+		"--control-plane-sync-interval", "500ms",
 	)
 	routerCmd.Stdout = os.Stdout
 	routerCmd.Stderr = os.Stderr

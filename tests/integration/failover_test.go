@@ -149,7 +149,7 @@ roles: []
 		"--keys-path", filepath.Join(tmpDir, "router_keysA.db"),
 		"--allow-loopback",
 		"--oidc-token", routerJWT,
-		"--lease-renew-interval", "250ms",
+		"--control-plane-sync-interval", "250ms",
 	)
 	if err := cmdRouterA.Start(); err != nil {
 		t.Fatalf("failed to start Router A: %v", err)
@@ -182,7 +182,7 @@ roles: []
 		"--keys-path", filepath.Join(tmpDir, "router_keysB.db"),
 		"--allow-loopback",
 		"--oidc-token", routerJWT,
-		"--lease-renew-interval", "250ms",
+		"--control-plane-sync-interval", "250ms",
 	)
 	if err := cmdRouterB.Start(); err != nil {
 		t.Fatalf("failed to start Router B: %v", err)

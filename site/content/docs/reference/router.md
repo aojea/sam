@@ -38,8 +38,7 @@ replica count.
 | `--listen` | `/ip4/0.0.0.0/tcp/5001`, `/ip6/::/tcp/5001` | libp2p listen addresses. Repeatable. Add `/ip4/0.0.0.0/udp/5001/quic-v1` for QUIC. |
 | `--external-addr` | none | Addresses to announce instead of the detected ones, such as `/dnsaddr/bootstrap.example.com` or `/ip4/<public-ip>/tcp/5001`. Repeatable. |
 | `--keys-path` | `router.key` | The router's private key. It fixes the peer ID across restarts and belongs on persistent storage. |
-| `--keys-sync-interval` | `5m` | How often `/keys` is polled for signing-key rotations. |
-| `--lease-renew-interval` | `300s` | How often the lease is renewed. Must be well below the control plane's `--lease-duration`. |
+| `--control-plane-sync-interval` | `5m` | How often the router's one pass over the control plane runs: it renews the lease, re-reads `/info`, `/keys` and `/policies`, and refreshes its own credential when it nears expiry. A mesh event runs a pass at once. Must be well below the control plane's `--lease-duration` and `--key-grace-period`. |
 | `--allow-loopback` | `false` | Announce and accept loopback and link-local addresses. For a router and nodes on one host. |
 | `--conns-per-source-ip` | a quarter of `--high-watermark` (`1000`) | Inbound connections accepted per source address. One address can hold at most this share of the router's connection budget, so filling a router takes at least four addresses. Members behind a NAT or a cluster's SNAT share one address and each holds one connection per router, two while enrolling. |
 | `--low-watermark`, `--high-watermark` | 15% below the high mark (`3400`), `4000` | How many members the router holds: peers that passed the handshake, other routers aside. At the high mark the router sends members away (see below) until it is back at the low mark, so the gap between the two is what one shedding moves; the default moves 15%. The same numbers bound connections: above the high mark the connection manager closes connections, oldest first among those that carry no session, then members; connections to the other routers are never closed. A connection without a session lasts at most `--auth-deadline`; the connection manager leaves a connection alone while it is younger than its grace period, and libp2p's connection cap, twice the high mark, is what bounds the total (see the [scalability guide](../../guides/scalability/#what-bounds-the-mesh)). |
@@ -60,8 +59,13 @@ replica count.
 2. Starts the libp2p host, the DHT it shares with the other routers, the
    directory it serves to its members, the relay service and GossipSub.
 3. Registers a lease at `POST /routers/lease` with its announced addresses
-   and renews it every `--lease-renew-interval`. The control plane lists the
-   router on `/info` while the lease is live.
+   and renews it every `--control-plane-sync-interval`, in the same pass
+   that re-reads `/keys`, `/info` (the routers to federate with and the ban
+   set) and `/policies` (the mesh policy, which decides what a member may
+   publish). A `KEY_ROTATION` or `POLICY_UPDATE` event runs the pass at
+   once; while the list names a router this one has not authenticated with,
+   the federation step alone is retried every 2 seconds. The control plane
+   lists the router on `/info` while the lease is live.
 4. Runs the mutual credential handshake on every inbound connection and
    refuses peers whose credential does not verify and peers on the ban list.
    Until a peer passes it, the router serves it nothing but the handshake:
@@ -87,7 +91,8 @@ replica count.
    a key or for a peer; the router answers from its own records and from
    the routers closest to the key, asked at once. A member keeps no DHT
    and connects to no router it does not hold.
-6. Refreshes its own credential before it expires, like a node.
+6. Refreshes its own credential before it expires, like a node, at the
+   pass that finds less than a fifth of its lifetime left.
 7. Every 5 seconds, compares the members it holds, the peers that passed
    the handshake, with `--high-watermark`. At the mark it picks members at
    random, as many as take it back to `--low-watermark`, and sends each a

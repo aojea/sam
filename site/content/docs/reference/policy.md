@@ -125,8 +125,8 @@ A change to `allowed_publish` takes effect without a new credential. The
 grant is also rendered into the policy text as
 `granted_publish_*(...) <- role("<role>")` (and `<- label(...)` for
 `served_by`), and every verifier adds that text to its authorizer: the
-router, a node and an SDK member at their next sync, all of them at once on
-the `POLICY_UPDATE` event
+router at its next `--control-plane-sync-interval` pass, a node and an SDK
+member at their next sync, all of them at once on the `POLICY_UPDATE` event
 the control plane publishes. A node whose policy text changed announces its
 services again, so a record the router refused under the previous policy is
 in the directory within the sync interval; until then the router answers
@@ -355,8 +355,8 @@ identity's roles from the bindings and mints into the credential one `role()`
 fact per role and the compiled `granted_*` facts of every role. The control
 plane also renders the policy as Datalog rules served as `datalog_rules` at
 `GET /policies`. Nodes, routers and SDK members fetch this text
-(`--control-plane-sync-interval`, 15 minutes) and add it to their authorizer
-as it arrives.
+(`--control-plane-sync-interval`, 15 minutes for a node, 5 for a router) and
+add it to their authorizer as it arrives.
 
 At the destination node, in this order:
 

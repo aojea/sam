@@ -51,32 +51,31 @@ func init() {
 }
 
 var (
-	controlPlaneURL      string
-	insecureControlPlane bool
-	listenAddrs          []string
-	externalAddrs        []string
-	keysSyncInterval     time.Duration
-	leaseRenewInterval   time.Duration
-	oidcToken            string
-	bootstrapToken       string
-	bootstrapTokenPath   string
-	jwtPath              string
-	keysPath             string
-	allowLoopback        bool
-	connsPerSourceIP     int
-	logLevel             string
-	logFormat            string
-	lowWaterMark         int
-	highWaterMark        int
-	metricsAddr          string
-	pprofAddr            string
-	relayLimitDuration   time.Duration
-	relayLimitData       router.ByteSize
-	relayMaxReservations int
-	relayMaxCircuits     int
-	shutdownLeaseTTL     time.Duration
-	authDeadline         time.Duration
-	labelFlags           []string
+	controlPlaneURL          string
+	insecureControlPlane     bool
+	listenAddrs              []string
+	externalAddrs            []string
+	controlPlaneSyncInterval time.Duration
+	oidcToken                string
+	bootstrapToken           string
+	bootstrapTokenPath       string
+	jwtPath                  string
+	keysPath                 string
+	allowLoopback            bool
+	connsPerSourceIP         int
+	logLevel                 string
+	logFormat                string
+	lowWaterMark             int
+	highWaterMark            int
+	metricsAddr              string
+	pprofAddr                string
+	relayLimitDuration       time.Duration
+	relayLimitData           router.ByteSize
+	relayMaxReservations     int
+	relayMaxCircuits         int
+	shutdownLeaseTTL         time.Duration
+	authDeadline             time.Duration
+	labelFlags               []string
 )
 
 var logger = golog.Logger("agentmesh-router-cli")
@@ -94,8 +93,7 @@ func main() {
 				AllowInsecureControlPlane: insecureControlPlane,
 				ListenAddrs:               listenAddrs,
 				ExternalAddrs:             externalAddrs,
-				KeysSyncInterval:          keysSyncInterval,
-				LeaseRenewInterval:        leaseRenewInterval,
+				ControlPlaneSyncInterval:  controlPlaneSyncInterval,
 				OIDCToken:                 oidcToken,
 				BootstrapToken:            bootstrapToken,
 				BootstrapTokenPath:        bootstrapTokenPath,
@@ -150,8 +148,7 @@ func main() {
 	rootCmd.Flags().BoolVar(&insecureControlPlane, "insecure-control-plane", false, "Accept a plaintext http:// control plane URL to a non-loopback host (whoever answers it becomes this router's trust root; only for networks you already trust)")
 	rootCmd.Flags().StringSliceVar(&listenAddrs, "listen", []string{"/ip4/0.0.0.0/tcp/5001", "/ip6/::/tcp/5001"}, "libp2p Listen Addresses")
 	rootCmd.Flags().StringSliceVar(&externalAddrs, "external-addr", []string{}, "External addresses to announce to control plane")
-	rootCmd.Flags().DurationVar(&keysSyncInterval, "keys-sync-interval", 5*time.Minute, "Key synchronization polling interval")
-	rootCmd.Flags().DurationVar(&leaseRenewInterval, "lease-renew-interval", 300*time.Second, "Lease renewal registration interval")
+	rootCmd.Flags().DurationVar(&controlPlaneSyncInterval, "control-plane-sync-interval", router.DefaultControlPlaneSyncInterval, "How often the lease is renewed and signing keys, the router list, bans and the mesh policy are pulled from the control plane; a mesh event pulls at once. Keep it well below the control plane's --lease-duration and --key-grace-period.")
 	rootCmd.Flags().StringVar(&oidcToken, "oidc-token", "", "OIDC ID token for enrollment")
 	rootCmd.Flags().StringVar(&bootstrapToken, "bootstrap-token", "", "Pre-shared bootstrap token for enrollment")
 	rootCmd.Flags().StringVar(&bootstrapTokenPath, "bootstrap-token-path", "", "Path to file containing bootstrap token for enrollment")

@@ -144,10 +144,9 @@ type ControlPlaneTunables struct {
 
 // RouterTunables are the embedded router's operator knobs.
 type RouterTunables struct {
-	// KeysSyncInterval is how often biscuit public keys are refreshed.
-	KeysSyncInterval time.Duration
-	// LeaseRenewInterval is how often the router renews its lease.
-	LeaseRenewInterval time.Duration
+	// ControlPlaneSyncInterval is how often the router renews its lease and
+	// pulls keys, routers, bans and policy from the control plane.
+	ControlPlaneSyncInterval time.Duration
 	// LowWaterMark / HighWaterMark bound the connection manager.
 	LowWaterMark  int
 	HighWaterMark int
@@ -367,20 +366,19 @@ func (s *Server) Start(ctx context.Context) (retErr error) {
 	}
 
 	rtr, err := router.NewRouter(ctx, router.Options{
-		ControlPlaneURL:    "http://" + cp.Addr(),
-		ListenAddrs:        append([]string{wsAddr}, s.opts.P2PListen...),
-		ExternalAddrs:      externalAddrs,
-		AllowLoopback:      !s.opts.Router.DisallowLoopback,
-		KeysDBPath:         routerKeyPath,
-		BootstrapToken:     routerToken,
-		KeysSyncInterval:   s.opts.Router.KeysSyncInterval,
-		LeaseRenewInterval: s.opts.Router.LeaseRenewInterval,
-		LowWaterMark:       s.opts.Router.LowWaterMark,
-		HighWaterMark:      s.opts.Router.HighWaterMark,
-		RelayLimitDuration: s.opts.Router.RelayLimitDuration,
-		RelayLimitData:     int64(s.opts.Router.RelayLimitData),
-		ShutdownLeaseTTL:   s.opts.Router.ShutdownLeaseTTL,
-		AuthDeadline:       s.opts.Router.AuthDeadline,
+		ControlPlaneURL:          "http://" + cp.Addr(),
+		ListenAddrs:              append([]string{wsAddr}, s.opts.P2PListen...),
+		ExternalAddrs:            externalAddrs,
+		AllowLoopback:            !s.opts.Router.DisallowLoopback,
+		KeysDBPath:               routerKeyPath,
+		BootstrapToken:           routerToken,
+		ControlPlaneSyncInterval: s.opts.Router.ControlPlaneSyncInterval,
+		LowWaterMark:             s.opts.Router.LowWaterMark,
+		HighWaterMark:            s.opts.Router.HighWaterMark,
+		RelayLimitDuration:       s.opts.Router.RelayLimitDuration,
+		RelayLimitData:           int64(s.opts.Router.RelayLimitData),
+		ShutdownLeaseTTL:         s.opts.Router.ShutdownLeaseTTL,
+		AuthDeadline:             s.opts.Router.AuthDeadline,
 		// Single-port deployments typically sit behind a TLS-terminating
 		// proxy (Cloud Run, L7 LBs) or NAT where every peer shares a few
 		// source IPs; libp2p's default 8-conns-per-IP cap would throttle
