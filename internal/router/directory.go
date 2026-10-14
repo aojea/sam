@@ -229,6 +229,7 @@ func (r *Router) directoryProvide(ctx context.Context, remote peer.ID, q *api.Di
 		return nil, fmt.Errorf("store record: %w", err)
 	}
 	if !placed {
+		r.ensureFederated(ctx)
 		r.placeRecord(ctx, q.GetKey(), provider, q.GetAddrs())
 	}
 	return &api.DirectoryResponse{}, nil
@@ -345,6 +346,17 @@ func (r *Router) lookupProviders(ctx context.Context, key []byte, limit int) ([]
 	if r.DHT == nil {
 		return nil, errors.New("the directory is not up")
 	}
+	r.ensureFederated(ctx)
+	records, err := r.findProviders(ctx, key, limit)
+	if err == nil && len(records) == 0 && r.refederateIfStale() {
+		// A router that joined since the last pass may hold the record.
+		records, err = r.findProviders(ctx, key, limit)
+	}
+	return records, err
+}
+
+// findProviders runs one lookup across the routers' DHT.
+func (r *Router) findProviders(ctx context.Context, key []byte, limit int) ([]*api.PeerRecord, error) {
 	c := cid.NewCidV1(cid.Raw, key)
 	records := make([]*api.PeerRecord, 0, limit)
 	seen := map[peer.ID]bool{}

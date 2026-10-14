@@ -341,6 +341,11 @@ type Router struct {
 	// gated is the host the DHT, gossip and the directory run on: it serves
 	// and reaches authenticated peers only (authGate).
 	gated *authGate
+	// listedRouters is the peer routers the control plane listed on the
+	// last federation pass (*[]peer.AddrInfo), for ensureFederated.
+	listedRouters  atomic.Value
+	lastFederation atomic.Int64
+	federateMu     sync.Mutex
 	// handshakeLimiter bounds /mesh/auth attempts per peer; any internet peer
 	// can open those streams.
 	handshakeLimiter *ratelimit.PeerRateLimiter
@@ -1307,17 +1312,30 @@ func (r *Router) reconcileBannedPeers(peerIDs []string, fetchedAt time.Time) {
 	}
 }
 
+// federationInterval is how often a router reads the control plane's list
+// of routers and authenticates with the ones it has not; federationCatchUp
+// is the interval while the list names a router it has not reached yet,
+// which it does at start, when the other routers started at the same
+// moment and leased after this one's first pass, and whenever a router
+// joins.
+const (
+	federationInterval = 30 * time.Second
+	federationCatchUp  = 2 * time.Second
+)
+
 func (r *Router) runFederationLoop() {
 	defer r.wg.Done()
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	r.connectBootstrapRouters()
-
+	timer := time.NewTimer(0)
+	defer timer.Stop()
 	for {
 		select {
-		case <-ticker.C:
+		case <-timer.C:
 			r.connectBootstrapRouters()
+			next := federationInterval
+			if listed, authenticated := r.peerRouterCounts(); authenticated < listed {
+				next = federationCatchUp
+			}
+			timer.Reset(next)
 		case <-r.ctx.Done():
 			return
 		}
@@ -1340,6 +1358,7 @@ func (r *Router) connectBootstrapRouters() {
 	r.reconcileBannedPeers(info.GetBannedPeerIds(), fetchedAt)
 
 	listed := map[peer.ID]bool{}
+	var listedInfos []peer.AddrInfo
 	for _, addrStr := range info.RouterAddresses {
 		ma, err := multiaddr.NewMultiaddr(addrStr)
 		if err != nil {
@@ -1362,6 +1381,7 @@ func (r *Router) connectBootstrapRouters() {
 				continue
 			}
 			listed[pi.ID] = true
+			listedInfos = append(listedInfos, *pi)
 			r.peerRouters.Store(pi.ID, true)
 			r.Host.ConnManager().Protect(pi.ID, federationTag)
 			if r.isPeerAuthenticated(pi.ID) {
@@ -1376,7 +1396,77 @@ func (r *Router) connectBootstrapRouters() {
 			r.authenticatePeerRouter(*pi)
 		}
 	}
+	r.listedRouters.Store(&listedInfos)
+	r.lastFederation.Store(time.Now().UnixNano())
 	r.forgetUnlistedRouters(listed)
+}
+
+// federationStaleAfter is how old the last federation pass may be before
+// a directory lookup that found nothing runs one of its own: a router that
+// leased since may hold the record.
+const federationStaleAfter = time.Second
+
+// refederateIfStale runs a federation pass when the last one is older than
+// federationStaleAfter, one at a time, and reports whether one ran. A
+// lookup that found nothing calls it before trying once more.
+func (r *Router) refederateIfStale() bool {
+	if time.Since(time.Unix(0, r.lastFederation.Load())) < federationStaleAfter {
+		return false
+	}
+	r.federateMu.Lock()
+	defer r.federateMu.Unlock()
+	if time.Since(time.Unix(0, r.lastFederation.Load())) < federationStaleAfter {
+		return true
+	}
+	logger.Infof("[Federation] A lookup found nothing; reading the control plane's router list again")
+	r.connectBootstrapRouters()
+	return true
+}
+
+// ensureFederated authenticates with every listed peer router this router
+// has not authenticated with yet, at once, and returns when they are done
+// or ctx ends. The federation pass does the same every 30 seconds; a
+// directory request runs it first, so a lookup right after a router
+// started, or right after another router joined, reaches every router's
+// records instead of the ones in a table that is still filling. One run
+// at a time: a second caller waits for the first.
+func (r *Router) ensureFederated(ctx context.Context) {
+	listed, _ := r.listedRouters.Load().(*[]peer.AddrInfo)
+	if listed == nil {
+		return
+	}
+	var missing []peer.AddrInfo
+	for _, pi := range *listed {
+		if !r.isPeerAuthenticated(pi.ID) {
+			missing = append(missing, pi)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+	r.federateMu.Lock()
+	defer r.federateMu.Unlock()
+	logger.Infof("[Federation] %d listed router(s) not authenticated yet; authenticating before serving the directory", len(missing))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var wg sync.WaitGroup
+		for _, pi := range missing {
+			if r.isPeerAuthenticated(pi.ID) {
+				continue
+			}
+			wg.Add(1)
+			go func(pi peer.AddrInfo) {
+				defer wg.Done()
+				r.authenticatePeerRouter(pi)
+			}(pi)
+		}
+		wg.Wait()
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 // forgetUnlistedRouters drops the peer routers the control plane no longer
