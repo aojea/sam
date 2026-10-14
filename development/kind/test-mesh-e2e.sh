@@ -42,7 +42,7 @@ mcp() { ./bin/mcp-client -url "$URL" -token "devtoken" -timeout 20 "$@" 2>/dev/n
 echo "== get_mesh_info =="
 info=$(mcp -tool get_mesh_info -args '{}')
 echo "$info"
-echo "$info" | jq -e '.router_peer_id != "" and (.dht_size > 0)' >/dev/null \
+echo "$info" | jq -e '.router_peer_id != "" and (.attached_routers | length > 0)' >/dev/null \
   || { echo "get_mesh_info assertion failed"; exit 1; }
 
 echo "== discover services / find calculator (poll) =="
