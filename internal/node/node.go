@@ -1131,6 +1131,7 @@ func (n *AgentMeshNode) redialRouter(ctx context.Context, router peer.ID) {
 			err := n.authRouter(ctx, peer.AddrInfo{ID: router, Addrs: addrs}, biscuitBytes)
 			if err == nil {
 				logger.Infof("[AuthN] Router %s re-admitted this node on redial %d", router, attempt)
+				// A router that restarted lost this node's records.
 				n.triggerReprovide()
 				return
 			}

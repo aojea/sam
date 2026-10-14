@@ -243,6 +243,9 @@ func (n *AgentMeshNode) attach(router peer.ID) {
 		n.connMgr.Protect(router, routerTag)
 	}
 	n.refreshRelays()
+	// A router to announce to: services registered before this one was
+	// held, as the egress assignments are at start, go to the directory now.
+	n.triggerReprovide()
 }
 
 // detach gives a router up: the node stops redialling it and lets the
@@ -363,11 +366,7 @@ func (n *AgentMeshNode) topUpRouters(ctx context.Context) int {
 	for range targets {
 		<-results
 	}
-	after := n.AttachedRouters()
-	if after > have {
-		n.triggerReprovide()
-	}
-	return after
+	return n.AttachedRouters()
 }
 
 // TopUp attaches to more routers from what the node knows and returns how
