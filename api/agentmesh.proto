@@ -222,26 +222,40 @@ message DirectoryParameters {
 
 // DirectoryRequest is what a member asks a router it is attached to over
 // /mesh/directory/1.0.0: one request per stream, answered with one
-// DirectoryResponse. The member keeps no DHT of its own; the router runs
-// the lookup across the routers' DHT and answers from it. A router sends
-// the same message to another router to place a member's record on it.
+// DirectoryResponse. The member keeps no DHT of its own; the router keeps
+// its records, places them on the routers closest to each key, and answers
+// a lookup from its own records and those routers'. A router sends the
+// same message to another router to place a member's record, or its
+// withdrawal, on it.
 message DirectoryRequest {
   oneof request {
     DirectoryProvide provide = 1;
     DirectoryFindProviders find_providers = 2;
     DirectoryFindPeer find_peer = 3;
+    DirectoryWithdraw withdraw = 4;
   }
 }
 
 // DirectoryProvide announces the sender as a provider of key, reached at
 // addrs. A key is a sha256 multihash: of "mesh:service:<type>[:<name>]" for
-// a service, of "mesh:peer:<peer_id>" for the member itself. provider is set
-// only between routers, by the router that holds the member, and refused
-// from anyone else: a member can only announce itself.
+// a service, of "mesh:peer:<peer_id>" for the member itself. A record lives
+// for the mesh's record TTL after its last announcement; announcing it
+// again replaces its addresses. provider is set only between routers, by
+// the router that holds the member, and refused from anyone else: a member
+// can only announce itself.
 message DirectoryProvide {
   bytes key = 1;
   repeated string addrs = 2;
   string provider = 3;
+}
+
+// DirectoryWithdraw removes the sender's record under key, from the router
+// asked and from the routers closest to the key: what a member sends when
+// it stops a service or leaves the mesh, so that callers do not find it
+// until the record would have expired. provider is as in DirectoryProvide.
+message DirectoryWithdraw {
+  bytes key = 1;
+  string provider = 2;
 }
 
 // DirectoryFindProviders asks for up to limit providers of key.

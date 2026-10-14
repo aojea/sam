@@ -15,6 +15,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -27,9 +28,10 @@ import (
 )
 
 type fakeDHT struct {
-	calls   [][]byte
-	failNth int
-	count   int32
+	calls     [][]byte
+	withdrawn [][]byte
+	failNth   int
+	count     int32
 }
 
 func (f *fakeDHT) Provide(ctx context.Context, key []byte) error {
@@ -38,6 +40,11 @@ func (f *fakeDHT) Provide(ctx context.Context, key []byte) error {
 	if f.failNth > 0 && int(n) == f.failNth {
 		return errors.New("fake dht failure")
 	}
+	return nil
+}
+
+func (f *fakeDHT) Withdraw(ctx context.Context, key []byte) error {
+	f.withdrawn = append(f.withdrawn, key)
 	return nil
 }
 
@@ -420,5 +427,61 @@ func TestServiceRegistry_ReplacingServiceTearsDownPrevious(t *testing.T) {
 	}
 	if got, ok := r.Get("demo"); !ok || got != Service(second) {
 		t.Error("registry should hold the replacement instance")
+	}
+}
+
+// Unregistering a service withdraws its record by name, and its record by
+// type only once no service of that type is left; leaving the mesh
+// withdraws every record.
+func TestServiceRegistry_UnregisterWithdrawsRecords(t *testing.T) {
+	dht := &fakeDHT{}
+	r := newServiceRegistryForTest(dht)
+	for _, name := range []string{"calc", "weather"} {
+		if err := r.Register(context.Background(), newFakeSvc(name, api.ServiceType_SERVICE_TYPE_MCP)); err != nil {
+			t.Fatalf("Register %s: %v", name, err)
+		}
+	}
+	calcKey, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_MCP, "calc")
+	weatherKey, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_MCP, "weather")
+	typeKey, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_MCP, "")
+
+	if err := r.Unregister(context.Background(), "calc"); err != nil {
+		t.Fatal(err)
+	}
+	if len(dht.withdrawn) != 1 || !bytes.Equal(dht.withdrawn[0], calcKey) {
+		t.Fatalf("withdrawn after unregistering calc = %d keys, want calc's alone: weather still serves the type", len(dht.withdrawn))
+	}
+	if err := r.Unregister(context.Background(), "weather"); err != nil {
+		t.Fatal(err)
+	}
+	if len(dht.withdrawn) != 3 || !bytes.Equal(dht.withdrawn[1], weatherKey) || !bytes.Equal(dht.withdrawn[2], typeKey) {
+		t.Fatalf("withdrawn after unregistering weather = %d keys, want weather's then the type's", len(dht.withdrawn))
+	}
+	if err := r.Unregister(context.Background(), "nobody"); err != nil || len(dht.withdrawn) != 3 {
+		t.Fatalf("unregistering an unknown service: err %v, %d withdrawals; want a no-op", err, len(dht.withdrawn))
+	}
+
+	dht.withdrawn = nil
+	if err := r.Register(context.Background(), newFakeSvc("calc", api.ServiceType_SERVICE_TYPE_MCP)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Register(context.Background(), newFakeSvc("llm", api.ServiceType_SERVICE_TYPE_INFERENCE)); err != nil {
+		t.Fatal(err)
+	}
+	r.WithdrawAll(context.Background())
+	inferenceKey, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_INFERENCE, "")
+	llmKey, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_INFERENCE, "llm")
+	want := map[string]bool{string(calcKey): true, string(typeKey): true, string(llmKey): true, string(inferenceKey): true}
+	got := map[string]bool{}
+	for _, k := range dht.withdrawn {
+		got[string(k)] = true
+	}
+	if len(dht.withdrawn) != 4 || len(got) != 4 {
+		t.Fatalf("WithdrawAll withdrew %d keys, want 4 distinct: two names, two types", len(dht.withdrawn))
+	}
+	for k := range want {
+		if !got[k] {
+			t.Fatalf("WithdrawAll did not withdraw %x", k)
+		}
 	}
 }

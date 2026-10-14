@@ -84,6 +84,8 @@ func TestRouterMetricsListener(t *testing.T) {
 
 	r.Host = host
 	r.DHT = kad
+	r.records = newRecordStore(time.Minute)
+	r.records.put([]byte("k"), peer.ID("peer-a"), nil, time.Now())
 	r.authenticatedPeers.Store(peer.ID("peer-a"), true)
 	r.authenticatedPeers.Store(peer.ID("peer-b"), true)
 	r.bannedPeers.Store(peer.ID("peer-x"), true)
@@ -119,6 +121,7 @@ func TestRouterMetricsListener(t *testing.T) {
 		"agentmesh_router_banned_peers 1",
 		"agentmesh_router_connected_peers 0",
 		"agentmesh_router_dht_routing_table_size 0",
+		"agentmesh_router_directory_records 1",
 		// The text format renders values with strconv 'g', so a unix time
 		// comes out in scientific notation.
 		"agentmesh_router_biscuit_expiry_timestamp_seconds " + strconv.FormatFloat(float64(expiry.Unix()), 'g', -1, 64),

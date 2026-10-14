@@ -43,16 +43,18 @@ The [node API reference](../../reference/node-api/) lists every route.
 
 ## Discovery
 
-The routers keep the mesh's directory: a Kademlia DHT among themselves,
-served to members over `/mesh/directory/1.0.0`. A node announces where it
-is reached, and a node that publishes a service announces itself as a
-provider of that service name, to a router it holds; the router keeps the
-records and places each on the routers closest to its key. A node that
-looks for a service, or for a peer, asks a router it holds, and the router
-runs the lookup across the routers' DHT. A node keeps no DHT of its own and
-connects to no router it does not hold. It re-announces every reprovide
-interval of the mesh (`/info`), and a record a provider stopped
-announcing leaves the directory after three of them.
+The routers keep the mesh's directory, served to members over
+`/mesh/directory/1.0.0`. A node announces where it is reached, and a node
+that publishes a service announces itself as a provider of that service
+name, to a router it holds; the router keeps the records and places each
+on the routers closest to its key, which it finds in the Kademlia table
+the routers keep among themselves. A node that looks for a service, or
+for a peer, asks a router it holds, and the router answers from its own
+records and from those closest routers. A node keeps no DHT of its own
+and connects to no router it does not hold. It re-announces every
+reprovide interval of the mesh (`/info`), withdraws a record when it
+stops the service or leaves, and a record a provider stopped announcing
+without withdrawing it leaves the directory after three intervals.
 
 Before a node advertises a backend, it probes the backend
 (`--backend-probe-timeout`, 2 seconds by default). A backend that does not

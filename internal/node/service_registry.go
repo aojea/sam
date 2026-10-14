@@ -16,6 +16,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -24,10 +25,12 @@ import (
 	"github.com/google/agentmesh/api"
 )
 
-// directoryProvider is the one directory call ServiceRegistry makes.
-// Production wires this to the node's Directory; tests use a fake.
+// directoryProvider is what ServiceRegistry asks of the directory: to
+// announce a key and to withdraw it. Production wires this to the node's
+// Directory; tests use a fake.
 type directoryProvider interface {
 	Provide(ctx context.Context, key []byte) error
+	Withdraw(ctx context.Context, key []byte) error
 }
 
 // backendProber is implemented by services that can be asked whether their
@@ -183,21 +186,70 @@ func (r *ServiceRegistry) Register(ctx context.Context, svc Service) error {
 	return nil
 }
 
-// Unregister removes the service from the map and calls Teardown.
-// Unknown names are a no-op.
+// Unregister removes the service from the map, withdraws its records from
+// the directory and calls Teardown. The record by type stays while another
+// service of that type is registered. Unknown names are a no-op.
 func (r *ServiceRegistry) Unregister(ctx context.Context, name string) error {
 	r.mu.Lock()
 	svc, ok := r.services[name]
 	delete(r.services, name)
+	typeStillServed := false
+	if ok {
+		for _, other := range r.services {
+			if other.Info().Type == svc.Info().Type {
+				typeStillServed = true
+				break
+			}
+		}
+	}
 	r.mu.Unlock()
 	if !ok {
 		return nil
+	}
+	info := svc.Info()
+	r.withdraw(ctx, info.Type, info.Name)
+	if !typeStillServed {
+		r.withdraw(ctx, info.Type, "")
 	}
 	if err := svc.Teardown(); err != nil {
 		logger.Errorf("[ServiceRegistry] Teardown %s: %v", name, err)
 	}
 	logger.Infof("[ServiceRegistry] Unregistered %s", name)
 	return nil
+}
+
+// withdraw removes one of the registry's records from the directory. A
+// failure is logged: the record expires on its own within the mesh's
+// record TTL.
+func (r *ServiceRegistry) withdraw(ctx context.Context, serviceType api.ServiceType, name string) {
+	key, err := api.ServiceKey(serviceType, name)
+	if err != nil {
+		return
+	}
+	withdrawCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := r.dht.Withdraw(withdrawCtx, key); err != nil && !errors.Is(err, errNoDirectoryRouter) {
+		logger.Warnf("[ServiceRegistry] Withdrawing %s/%s from the directory: %v", serviceType, name, err)
+	}
+}
+
+// WithdrawAll withdraws every registered service's records from the
+// directory, by name and by type, as a node does before it leaves the mesh.
+func (r *ServiceRegistry) WithdrawAll(ctx context.Context) {
+	r.mu.RLock()
+	infos := make([]*api.ServiceInfo, 0, len(r.services))
+	for _, svc := range r.services {
+		infos = append(infos, svc.Info())
+	}
+	r.mu.RUnlock()
+	types := map[api.ServiceType]bool{}
+	for _, info := range infos {
+		r.withdraw(ctx, info.Type, info.Name)
+		types[info.Type] = true
+	}
+	for t := range types {
+		r.withdraw(ctx, t, "")
+	}
 }
 
 // Get returns the service registered under name, if any.

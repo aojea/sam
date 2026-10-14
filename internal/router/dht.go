@@ -19,28 +19,24 @@ import (
 	"time"
 
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	"github.com/libp2p/go-libp2p-kad-dht/records"
 	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/google/agentmesh/api"
 )
 
 // dhtTableBucketSize is kademlia's k on a router: how many routers one
-// bucket of its table holds, and how many closest routers it names in a
-// FIND_NODE answer. The routers are a full mesh, so a table that holds them
-// all costs nothing, and it is what lets a member find the routers closest
-// to a key in one answer from a router it is attached to (node.dhtOptions):
-// the answer lists the closest routers in order and the member keeps the
-// first 2r. A mesh with more routers than this per bucket still works; a
-// lookup takes a hop more.
+// bucket of its table holds. The routers are a full mesh, so a table that
+// holds them all costs nothing, and it is what lets a router name the
+// routers closest to a key from its own table (closestRouters). A mesh with
+// more routers than this per bucket still works; the closest routers are
+// then the closest the table knows.
 const dhtTableBucketSize = 64
 
-// dhtOptions configures the router's DHT: a server for the members and the
-// other routers, with every router in its table. The record TTL is the
-// mesh's (syncDirectory): three of the members' reprovide intervals, so a
-// node that is gone drops out of discovery within it and two missed
-// announcements do not unlist one that is not. The library default (48h)
-// would keep every past identity listed.
+// dhtOptions configures the router's DHT: a server among the other
+// routers, with every router in its table. The table is what the directory
+// uses: the routers closest to a key are where a record is placed and
+// where a lookup asks (closestRouters). The records themselves are kept
+// in recordStore, not in the DHT's provider store.
 //
 // Its table holds, and its lookups ask, authenticated peer routers only: a
 // peer in server mode that never authenticated would otherwise be handed
@@ -51,7 +47,6 @@ func (r *Router) dhtOptions() []dht.Option {
 		dht.Mode(dht.ModeServer),
 		dht.ProtocolPrefix(api.DHTProtocolPrefix),
 		dht.BucketSize(dhtTableBucketSize),
-		dht.ProviderManagerOpts(records.ProviderAddrTTL(r.directory.RecordTTL), records.ProvideValidity(r.directory.RecordTTL)),
 		dht.RoutingTableFilter(func(_ interface{}, p peer.ID) bool { return r.isAuthenticatedPeerRouter(p) }),
 		dht.QueryFilter(func(_ interface{}, ai peer.AddrInfo) bool { return r.isAuthenticatedPeerRouter(ai.ID) }),
 	}

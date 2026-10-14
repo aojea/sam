@@ -25,10 +25,11 @@ uses the directory: it announces each service it publishes, and where it
 is reached, to a router it holds, and asks a router it holds for
 providers and peers. The router keeps the member's records, places each
 on the routers closest to its key (three, the mesh's replication,
-`agentmesh-control-plane --dht-replication`), and runs each lookup across
-the routers' own DHT. The member keeps no DHT and connects to no router
-it does not hold. It re-announces every 5 minutes (the mesh's
-`--dht-reprovide-interval`). A member connects to another member only to
+`agentmesh-control-plane --dht-replication`), and answers each lookup
+from its own records and those routers', asked at once. The member keeps
+no DHT and connects to no router it does not hold. It re-announces every
+5 minutes (the mesh's `--dht-reprovide-interval`) and withdraws a record
+when it stops the service or leaves. A member connects to another member only to
 call it, through that member's router, where it runs the credential
 handshake before asking for the circuit. At rest it uses about 55 MiB of
 memory, 300 goroutines and 20 file descriptors, and almost no CPU.
@@ -213,13 +214,14 @@ N − 1 others, which is where the headroom in the next section goes.
 
 The directory costs a router no sessions. A member's announcements and
 lookups travel on the sessions it already holds, and a router answers a
-lookup from the DHT the routers keep among themselves, over the
-connections they already hold to each other. What the directory costs
-is records and requests: a router keeps the records of its own members
-and r copies of records whose keys land on it, and runs one lookup
-across the routers per request. A key that every member publishes, such
-as a service type, lands on the same r routers for all of them; those r
-routers hold a record per publisher and answer every lookup of it.
+lookup from its own records and the r routers closest to the key, over
+the connections the routers already hold to each other. What the
+directory costs is records and requests: a router keeps the records of
+its own members and r copies of records whose keys land on it, and asks
+r routers per lookup. A key that every member publishes, such as a
+service type, lands on the same r routers for all of them; those r
+routers hold a record per publisher and answer every lookup of it, and
+a lookup of it returns at most 100 providers.
 
 What bounds the total is the router's libp2p connection cap, twice the
 high watermark: a router past it refuses the next connection, session or
@@ -455,7 +457,7 @@ The router and the control plane serve Prometheus metrics on
 | `agentmesh_control_plane_http_request_duration_seconds` | The control plane's own latency; p99 above a second under a join burst means the database is the bound. |
 | `agentmesh_node_mesh_connected` | On every node: `0` for five minutes is a member off the mesh. |
 | `agentmesh_node_routers{state="attached"}` against `{state="wanted"}` | On every node: fewer attached than wanted for long is a member that cannot find a router with room, or one whose selector too few routers carry. `agentmesh_node_router_candidates{match="selector"}` is how many it could choose from. |
-| `agentmesh_router_directory_requests_total{op,result}`, `agentmesh_router_directory_request_seconds{op}` | On every router: the directory requests its members made, by operation (`provide`, `find_providers`, `find_peer`; `place` is a record another router put here) and result. `error` rising is a lookup across the routers failing, a peer router down or slow; the histogram is what a member waits for a lookup. `agentmesh_router_directory_placements_total{result="error"}` rising is a router that does not take the records placed on it. |
+| `agentmesh_router_directory_requests_total{op,result}`, `agentmesh_router_directory_request_seconds{op}` | On every router: the directory requests its members made, by operation (`provide`, `withdraw`, `find_providers`, `find_peer`; `place` is a record or withdrawal another router put here, `lookup` a find another router ran here) and result. `agentmesh_router_directory_lookups_total{result="error"}` rising is a peer router down or slow, whose records lookups miss; the histogram is what a member waits for a lookup. `agentmesh_router_directory_placements_total{result="error"}` rising is a router that does not take the records placed on it. `agentmesh_router_directory_records` is what each router holds. |
 | `agentmesh_node_directory_requests_total{op,result}`, `agentmesh_node_directory_request_seconds{op}` | On every node: the same from the member's side. `failed` is a request no held router answered; `empty` a lookup nobody had a record for, which on a fresh mesh is ordinary. |
 
 An autoscaler for the routers has its inputs in the first two rows: scale

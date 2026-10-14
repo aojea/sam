@@ -122,6 +122,8 @@ func (d *fakeDirectoryServer) handle(s network.Stream) {
 		}
 		d.records[string(q.GetKey())][s.Conn().RemotePeer()] = addrs
 		d.provided = append(d.provided, q.GetKey())
+	case req.GetWithdraw() != nil:
+		delete(d.records[string(req.GetWithdraw().GetKey())], s.Conn().RemotePeer())
 	case req.GetFindProviders() != nil:
 		for p, addrs := range d.records[string(req.GetFindProviders().GetKey())] {
 			resp.Providers = append(resp.Providers, recordOf(p, addrs))

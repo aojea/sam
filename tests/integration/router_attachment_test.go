@@ -830,11 +830,21 @@ func TestCallerTransitsARouterItsCatalogMissed(t *testing.T) {
 		peerIDStrings(routerB.peerID), 15*time.Second)
 	callAcrossMesh(t, caller, "token-c", provider, "late-tool")
 
-	// Router b admitted the provider, router a, the control plane's publisher
-	// and, for the call, the caller.
-	if got := routerB.gauge(t, "agentmesh_router_authenticated_peers"); got != 4 {
-		t.Errorf("router b authenticated %v peers, want 4: the caller must have handshaken there before asking for the circuit", got)
+	// The caller handshook with router b before asking it for the circuit:
+	// one transit handshake, and router b counts the caller among the peers
+	// it admitted, with the provider, router a and the control plane's
+	// publisher. The publisher reaches a new router on its own clock, so
+	// its admission is waited for rather than read off the call's finish.
+	var transits float64
+	for _, kind := range []string{"listed", "unlisted"} {
+		transits += nodeCounter(t, caller, fmt.Sprintf(`agentmesh_node_transit_handshakes_total{result="ok",router="%s"}`, kind))
 	}
+	if transits != 1 {
+		t.Errorf("caller ran %v transit handshakes, want 1: the one with router b before the circuit", transits)
+	}
+	waitForEqual(t, "peers router b authenticated", func() []string {
+		return []string{fmt.Sprint(routerB.gauge(t, "agentmesh_router_authenticated_peers"))}
+	}, []string{"4"}, 10*time.Second)
 	t.Logf("--- caller ---\n%s", caller.log())
 }
 

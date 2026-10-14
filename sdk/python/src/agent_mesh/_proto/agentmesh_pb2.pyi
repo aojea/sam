@@ -255,14 +255,16 @@ class DirectoryProvide(_message.Message):
     def __init__(self, key: _Optional[bytes] = ..., addrs: _Optional[_Iterable[str]] = ..., provider: _Optional[str] = ...) -> None: ...
 
 class DirectoryRequest(_message.Message):
-    __slots__ = ["find_peer", "find_providers", "provide"]
+    __slots__ = ["find_peer", "find_providers", "provide", "withdraw"]
     FIND_PEER_FIELD_NUMBER: _ClassVar[int]
     FIND_PROVIDERS_FIELD_NUMBER: _ClassVar[int]
     PROVIDE_FIELD_NUMBER: _ClassVar[int]
+    WITHDRAW_FIELD_NUMBER: _ClassVar[int]
     find_peer: DirectoryFindPeer
     find_providers: DirectoryFindProviders
     provide: DirectoryProvide
-    def __init__(self, provide: _Optional[_Union[DirectoryProvide, _Mapping]] = ..., find_providers: _Optional[_Union[DirectoryFindProviders, _Mapping]] = ..., find_peer: _Optional[_Union[DirectoryFindPeer, _Mapping]] = ...) -> None: ...
+    withdraw: DirectoryWithdraw
+    def __init__(self, provide: _Optional[_Union[DirectoryProvide, _Mapping]] = ..., find_providers: _Optional[_Union[DirectoryFindProviders, _Mapping]] = ..., find_peer: _Optional[_Union[DirectoryFindPeer, _Mapping]] = ..., withdraw: _Optional[_Union[DirectoryWithdraw, _Mapping]] = ...) -> None: ...
 
 class DirectoryResponse(_message.Message):
     __slots__ = ["error", "peer", "providers"]
@@ -273,6 +275,14 @@ class DirectoryResponse(_message.Message):
     peer: PeerRecord
     providers: _containers.RepeatedCompositeFieldContainer[PeerRecord]
     def __init__(self, providers: _Optional[_Iterable[_Union[PeerRecord, _Mapping]]] = ..., peer: _Optional[_Union[PeerRecord, _Mapping]] = ..., error: _Optional[str] = ...) -> None: ...
+
+class DirectoryWithdraw(_message.Message):
+    __slots__ = ["key", "provider"]
+    KEY_FIELD_NUMBER: _ClassVar[int]
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    key: bytes
+    provider: str
+    def __init__(self, key: _Optional[bytes] = ..., provider: _Optional[str] = ...) -> None: ...
 
 class DiscoveredProvider(_message.Message):
     __slots__ = ["local_proxy_url", "peer_id", "srv_description", "srv_name"]

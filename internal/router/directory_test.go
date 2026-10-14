@@ -43,8 +43,14 @@ func newDirectoryRouter(t *testing.T) *Router {
 	}
 	t.Cleanup(func() { _ = kdht.Close() })
 	r.DHT = kdht
+	r.records = newRecordStore(r.directory.RecordTTL)
 	gated.SetStreamHandler(api.DirectoryProtocolID, r.handleDirectory)
 	return r
+}
+
+// held is the providers router r holds under key.
+func held(r *Router, key []byte) []peer.AddrInfo {
+	return r.records.providers(key, time.Now())
 }
 
 // federate connects two routers and has each admit the other as an
@@ -122,9 +128,9 @@ func directoryCount(t *testing.T, op, result string) float64 {
 // A member announces a record to the router it is attached to; the router
 // keeps it and places it on the routers closest to the key, as many as the
 // mesh's replication. A member attached to any router then finds it: from
-// that router's own store when it holds a copy, through the routers' DHT
-// otherwise. A peer is found the same way, under its peer key, or from the
-// router that holds it.
+// that router's own records when it holds a copy, from the routers closest
+// to the key otherwise. A peer is found the same way, under its peer key,
+// or from the router that holds it.
 func TestDirectoryRecordsAreFoundFromAnyRouter(t *testing.T) {
 	a, b, c := newDirectoryRouter(t), newDirectoryRouter(t), newDirectoryRouter(t)
 	federate(t, a, b)
@@ -154,14 +160,14 @@ func TestDirectoryRecordsAreFoundFromAnyRouter(t *testing.T) {
 	if closest[0] == c.Host.ID() {
 		holder, other = c, b
 	}
-	if provs, _ := holder.DHT.ProviderStore().GetProviders(context.Background(), key); len(provs) != 1 || provs[0].ID != member.ID() {
+	if provs := held(holder, key); len(provs) != 1 || provs[0].ID != member.ID() {
 		t.Fatalf("the closest router holds %v, want the member's record", provs)
 	}
-	if provs, _ := other.DHT.ProviderStore().GetProviders(context.Background(), key); len(provs) != 0 {
+	if provs := held(other, key); len(provs) != 0 {
 		t.Fatalf("the other router holds %v, want nothing: replication is one", provs)
 	}
 
-	for name, router := range map[string]*Router{"own router": a, "holder": holder, "other router, through the DHT": other} {
+	for name, router := range map[string]*Router{"own router": a, "holder": holder, "other router, asking the closest": other} {
 		t.Run("find providers from the "+name, func(t *testing.T) {
 			asker := attach(t, router)
 			resp := ask(t, asker, router.Host.ID(), findProviders(key))
@@ -250,7 +256,7 @@ func TestDirectoryRefusesWhatAMemberMayNotAnnounce(t *testing.T) {
 			}
 		})
 	}
-	if provs, _ := a.DHT.ProviderStore().GetProviders(context.Background(), key); len(provs) != 0 {
+	if provs := held(a, key); len(provs) != 0 {
 		t.Fatalf("a refused record was stored: %v", provs)
 	}
 }
@@ -267,14 +273,102 @@ func TestDirectoryPlacementNamesTheProvider(t *testing.T) {
 	if resp := ask(t, member, a.Host.ID(), provide(key, memberAddr)); resp.GetError() != "" {
 		t.Fatalf("provide refused: %s", resp.GetError())
 	}
-	provs, err := b.DHT.ProviderStore().GetProviders(context.Background(), key)
-	if err != nil {
-		t.Fatal(err)
-	}
+	provs := held(b, key)
 	if len(provs) != 1 || provs[0].ID != member.ID() {
 		t.Fatalf("router b holds %v, want the member's record placed by router a", provs)
 	}
 	if len(provs[0].Addrs) == 0 || provs[0].Addrs[0].String() != member.Addrs()[0].String() {
 		t.Fatalf("router b holds addrs %v, want the member's %v without the peer suffix", provs[0].Addrs, member.Addrs()[0])
+	}
+}
+
+func withdraw(key []byte) *api.DirectoryRequest {
+	return &api.DirectoryRequest{Request: &api.DirectoryRequest_Withdraw{Withdraw: &api.DirectoryWithdraw{Key: key}}}
+}
+
+// A member that stops a service withdraws its record: it is gone from the
+// router it announced to and from the routers the record was placed on,
+// and a lookup from any router no longer names the member. Announcing a
+// record again replaces its addresses rather than adding to them, so a
+// circuit through a router the member left does not linger.
+func TestDirectoryWithdrawAndReplace(t *testing.T) {
+	a, b := newDirectoryRouter(t), newDirectoryRouter(t)
+	federate(t, a, b)
+	member := attach(t, a)
+	key, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_MCP, "calculator")
+	oldAddr := "/ip4/10.0.0.1/tcp/4001/p2p/" + member.ID().String()
+	newAddr := "/ip4/10.0.0.2/tcp/4001/p2p/" + member.ID().String()
+
+	if resp := ask(t, member, a.Host.ID(), provide(key, oldAddr)); resp.GetError() != "" {
+		t.Fatalf("provide refused: %s", resp.GetError())
+	}
+	if resp := ask(t, member, a.Host.ID(), provide(key, newAddr)); resp.GetError() != "" {
+		t.Fatalf("second provide refused: %s", resp.GetError())
+	}
+	for name, router := range map[string]*Router{"own router": a, "placed on": b} {
+		provs := held(router, key)
+		if len(provs) != 1 || len(provs[0].Addrs) != 1 || provs[0].Addrs[0].String() != "/ip4/10.0.0.2/tcp/4001" {
+			t.Fatalf("%s holds %v, want the member at its new address only", name, provs)
+		}
+	}
+
+	before := directoryCount(t, directoryOpWithdraw, directoryResultOK)
+	if resp := ask(t, member, a.Host.ID(), withdraw(key)); resp.GetError() != "" {
+		t.Fatalf("withdraw refused: %s", resp.GetError())
+	}
+	if got := directoryCount(t, directoryOpWithdraw, directoryResultOK); got != before+1 {
+		t.Fatalf("withdrawals counted = %v, want %v", got, before+1)
+	}
+	for name, router := range map[string]*Router{"own router": a, "placed on": b} {
+		if provs := held(router, key); len(provs) != 0 {
+			t.Fatalf("%s still holds %v after the withdrawal", name, provs)
+		}
+	}
+	asker := attach(t, b)
+	if resp := ask(t, asker, b.Host.ID(), findProviders(key)); resp.GetError() != "" || len(resp.GetProviders()) != 0 {
+		t.Fatalf("find_providers after the withdrawal = %v, want nobody", resp)
+	}
+	// Withdrawing again is not an error: the record may have expired.
+	if resp := ask(t, member, a.Host.ID(), withdraw(key)); resp.GetError() != "" {
+		t.Fatalf("withdrawing a record that is gone: %s", resp.GetError())
+	}
+	// A member withdraws its own records only.
+	stranger := newClient(t, a)
+	named := &api.DirectoryRequest{Request: &api.DirectoryRequest_Withdraw{Withdraw: &api.DirectoryWithdraw{Key: key, Provider: stranger.ID().String()}}}
+	if resp := ask(t, member, a.Host.ID(), named); resp.GetError() == "" {
+		t.Fatal("a member withdrew a record naming another provider")
+	}
+}
+
+// A record lives for the mesh's record TTL after its last announcement:
+// announcing it again extends it, and the sweep drops what expired.
+func TestRecordStoreExpiry(t *testing.T) {
+	store := newRecordStore(time.Minute)
+	p1, p2 := peer.ID("p1"), peer.ID("p2")
+	key := []byte("k")
+	t0 := time.Unix(1000, 0)
+	store.put(key, p1, nil, t0)
+	store.put(key, p2, nil, t0.Add(30*time.Second))
+	if got := store.providers(key, t0.Add(59*time.Second)); len(got) != 2 {
+		t.Fatalf("providers before expiry = %v, want both", got)
+	}
+	if got := store.providers(key, t0.Add(time.Minute)); len(got) != 1 || got[0].ID != p2 {
+		t.Fatalf("providers at the first record's expiry = %v, want the second only", got)
+	}
+	store.put(key, p1, nil, t0.Add(time.Minute))
+	if got := store.sweep(t0.Add(90 * time.Second)); got != 1 {
+		t.Fatalf("sweep dropped %d records, want 1: the second, not the first that was announced again", got)
+	}
+	if got := store.providers(key, t0.Add(90*time.Second)); len(got) != 1 || got[0].ID != p1 {
+		t.Fatalf("providers after the sweep = %v, want the first", got)
+	}
+	if store.sweep(t0.Add(3*time.Minute)) != 1 || store.size() != 0 {
+		t.Fatalf("the store holds %d records after everything expired, want 0", store.size())
+	}
+	if got := recordSweepInterval(15 * time.Minute); got != time.Minute {
+		t.Fatalf("sweep interval for a 15m TTL = %s, want 1m", got)
+	}
+	if got := recordSweepInterval(6 * time.Second); got != 2*time.Second {
+		t.Fatalf("sweep interval for a 6s TTL = %s, want 2s", got)
 	}
 }

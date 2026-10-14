@@ -75,9 +75,13 @@ replica count.
    holds. A member announces each service it publishes and where it is
    reached; the router keeps the record and places it on the routers
    closest to the key, as many as the mesh's replication (`/info`). A
-   member asks for providers of a key or for a peer; the router runs the
-   lookup across the routers' DHT and answers. A member keeps no DHT and
-   connects to no router it does not hold.
+   record lives for the mesh's record TTL after its last announcement,
+   and an announcement replaces the addresses of the one before; a member
+   that stops a service or leaves withdraws its records, and the router
+   withdraws them from the same routers. A member asks for providers of
+   a key or for a peer; the router answers from its own records and from
+   the routers closest to the key, asked at once. A member keeps no DHT
+   and connects to no router it does not hold.
 6. Refreshes its own credential before it expires, like a node.
 7. Every 5 seconds, compares the members it holds, the peers that passed
    the handshake, with `--high-watermark`. At the mark it picks members at
@@ -130,8 +134,11 @@ The metrics address exposes, next to the Go runtime metrics:
 | `agentmesh_router_connected_peers`, `agentmesh_router_authenticated_peers`, `agentmesh_router_banned_peers` | Peers in each state. |
 | `agentmesh_router_peer_routers{state}` | Other routers this one knows, from the control plane's list or a handshake that proved the router role: `listed`, and `authenticated` for those it currently holds a mutual authentication with. The two differ while a federation pass is pending or a peer router is down. |
 | `agentmesh_router_dht_routing_table_size` | Peer routers in the DHT's routing table: the authenticated peer routers, since nothing else enters it. |
-| `agentmesh_router_directory_requests_total{op,result}`, `agentmesh_router_directory_request_seconds{op}` | Directory requests served, by operation (`provide`, `find_providers`, `find_peer`, and `place` for a record another router put here) and result (`ok`, `empty`, `invalid`, `error`), with the time each took. |
-| `agentmesh_router_directory_placements_total{result}` | Copies of a member's record this router placed on the routers closest to the key. |
+| `agentmesh_router_directory_requests_total{op,result}`, `agentmesh_router_directory_request_seconds{op}` | Directory requests served, by operation (`provide`, `withdraw`, `find_providers`, `find_peer`; `place` is a record or withdrawal another router put here, `lookup` a find another router ran here) and result (`ok`, `empty`, `invalid`, `error`), with the time each took. |
+| `agentmesh_router_directory_records` | Directory records this router holds: its own members' and the copies placed on it. |
+| `agentmesh_router_directory_records_expired_total` | Records dropped because their provider stopped announcing them for the mesh's record TTL. |
+| `agentmesh_router_directory_placements_total{result}` | Copies of a member's record, or of its withdrawal, this router placed on the routers closest to the key. |
+| `agentmesh_router_directory_lookups_total{result}` | Peer routers asked during a lookup; `error` is one that did not answer in time and was left out of the answer. |
 | `agentmesh_router_auth_handshakes_total{result}`, `agentmesh_router_lease_renewals_total{result}` | Handshakes and lease renewals by outcome. |
 | `agentmesh_router_goaway_sent_total{reason,result}` | Members sent away, by reason (`DRAINING`, `OVERLOADED`) and outcome: `ok` when the member took the message, `unsupported` when it does not speak the protocol and was closed instead, `failed` when the stream broke. A rising `OVERLOADED` count on a router that is not draining is a fleet that has outgrown its routers. |
 | `agentmesh_router_unauthenticated_connections_closed_total` | Connections closed at `--auth-deadline` without a handshake. A member handshakes with a router the moment it connects, so a steady rate is members that cannot complete the handshake, and a burst is a scanner. |

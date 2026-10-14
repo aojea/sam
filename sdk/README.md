@@ -127,9 +127,9 @@ pinned by a test:
   (libp2p/py-libp2p#1550); the host gives it the system roots.
 - A member keeps no DHT. Both SDKs ask a router they hold over
   `/mesh/directory/1.0.0` (`discovery.ts`, `agent_mesh/discovery.py`), one
-  `DirectoryRequest` per stream, and the router runs the lookup in the DHT
-  the routers keep among themselves. `sdk/testdata/service_keys.json` pins
-  the keys both SDKs derive against `api/directory_keys.go`.
+  `DirectoryRequest` per stream, and the router answers from its own
+  records and the routers closest to the key. `sdk/testdata/service_keys.json`
+  pins the keys both SDKs derive against `api/directory_keys.go`.
 - go-libp2p-http is plain HTTP/1.1 on a stream, one request per stream,
   with `Host` set to the peer ID. The JS SDK bridges the stream to a Node
   duplex and runs Node's HTTP server and client on it; the Python SDK

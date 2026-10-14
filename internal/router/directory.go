@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ipfs/go-cid"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -35,10 +34,13 @@ import (
 )
 
 const (
-	// directoryRequestTimeout bounds one request, the lookup across the
-	// routers included. A lookup on a mesh of routers that all know each
-	// other is one round; the bound is for a router that stopped answering.
+	// directoryRequestTimeout bounds one request from a member, the lookup
+	// on the routers closest to the key included.
 	directoryRequestTimeout = 20 * time.Second
+	// directoryLookupTimeout bounds what a lookup waits for one peer router:
+	// the routers are a full mesh, so an answer is one round trip, and a
+	// router that does not answer in this time is left out of the answer.
+	directoryLookupTimeout = 5 * time.Second
 	// directoryMaxMessage bounds a request or response frame.
 	directoryMaxMessage = 64 * 1024
 	// directoryDefaultLimit and directoryMaxLimit bound how many providers
@@ -49,9 +51,11 @@ const (
 
 const (
 	directoryOpProvide       = "provide"
+	directoryOpWithdraw      = "withdraw"
 	directoryOpFindProviders = "find_providers"
 	directoryOpFindPeer      = "find_peer"
 	directoryOpPlace         = "place"
+	directoryOpLookup        = "lookup"
 
 	directoryResultOK      = "ok"
 	directoryResultEmpty   = "empty"
@@ -62,7 +66,7 @@ const (
 var directoryRequestsTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "agentmesh_router_directory_requests_total",
-		Help: "Directory requests served to members and routers, by operation and result; place is a record another router put here",
+		Help: "Directory requests served to members and routers, by operation and result; place is a record or withdrawal another router put here, lookup a find another router ran here",
 	},
 	[]string{"op", "result"},
 )
@@ -70,7 +74,7 @@ var directoryRequestsTotal = promauto.NewCounterVec(
 var directoryRequestSeconds = promauto.NewHistogramVec(
 	prometheus.HistogramOpts{
 		Name:    "agentmesh_router_directory_request_seconds",
-		Help:    "Time to answer a directory request, the lookup across the routers included",
+		Help:    "Time to answer a directory request, the lookup on the closest routers included",
 		Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 	},
 	[]string{"op"},
@@ -79,28 +83,39 @@ var directoryRequestSeconds = promauto.NewHistogramVec(
 var directoryPlacementsTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "agentmesh_router_directory_placements_total",
-		Help: "Copies of a member's record this router placed on the routers closest to the key, by result",
+		Help: "Copies of a member's record, or of its withdrawal, this router placed on the routers closest to the key, by result",
+	},
+	[]string{"result"},
+)
+
+var directoryLookupsTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "agentmesh_router_directory_lookups_total",
+		Help: "Peer routers asked during a lookup, by result; error is a router that did not answer in time",
 	},
 	[]string{"result"},
 )
 
 func init() {
-	for _, op := range []string{directoryOpProvide, directoryOpFindProviders, directoryOpFindPeer, directoryOpPlace} {
+	for _, op := range []string{directoryOpProvide, directoryOpWithdraw, directoryOpFindProviders, directoryOpFindPeer, directoryOpPlace, directoryOpLookup} {
 		for _, result := range []string{directoryResultOK, directoryResultEmpty, directoryResultInvalid, directoryResultError} {
 			directoryRequestsTotal.WithLabelValues(op, result)
 		}
 	}
 	for _, result := range []string{directoryResultOK, directoryResultError} {
 		directoryPlacementsTotal.WithLabelValues(result)
+		directoryLookupsTotal.WithLabelValues(result)
 	}
 }
+
+var errDirectoryNotUp = errors.New("the directory is not up")
 
 // handleDirectory serves one DirectoryRequest on a stream from a member
 // or a router. It is registered through the auth gate, so the peer has
 // authenticated by the time it runs. A member keeps no DHT: it announces
-// its records here and the router keeps them and places them on the
-// routers closest to the key; it looks keys up here and the router runs
-// the lookup across the routers' DHT.
+// and withdraws its records here, and the router keeps them and places
+// them on the routers closest to the key; it looks keys up here, and the
+// router asks those routers.
 func (r *Router) handleDirectory(s network.Stream) {
 	defer func() { _ = s.Close() }()
 	remote := s.Conn().RemotePeer()
@@ -151,12 +166,24 @@ func (r *Router) serveDirectory(ctx context.Context, remote peer.ID, req *api.Di
 			op = directoryOpPlace
 		}
 		resp, err = r.directoryProvide(ctx, remote, q.Provide)
+	case *api.DirectoryRequest_Withdraw:
+		op = directoryOpWithdraw
+		if q.Withdraw.GetProvider() != "" {
+			op = directoryOpPlace
+		}
+		resp, err = r.directoryWithdraw(ctx, remote, q.Withdraw)
 	case *api.DirectoryRequest_FindProviders:
 		op = directoryOpFindProviders
-		resp, err = r.directoryFindProviders(ctx, q.FindProviders)
+		if r.isAuthenticatedPeerRouter(remote) {
+			op = directoryOpLookup
+		}
+		resp, err = r.directoryFindProviders(ctx, remote, q.FindProviders)
 	case *api.DirectoryRequest_FindPeer:
 		op = directoryOpFindPeer
-		resp, err = r.directoryFindPeer(ctx, q.FindPeer)
+		if r.isAuthenticatedPeerRouter(remote) {
+			op = directoryOpLookup
+		}
+		resp, err = r.directoryFindPeer(ctx, remote, q.FindPeer)
 	default:
 		return "unknown", r.directoryRefused("unknown", remote, errInvalidDirectoryRequest)
 	}
@@ -165,14 +192,14 @@ func (r *Router) serveDirectory(ctx context.Context, remote peer.ID, req *api.Di
 		return op, r.directoryRefused(op, remote, err)
 	}
 	result := directoryResultOK
-	if len(resp.GetProviders()) == 0 && resp.GetPeer() == nil && op != directoryOpProvide && op != directoryOpPlace {
+	if len(resp.GetProviders()) == 0 && resp.GetPeer() == nil && (op == directoryOpFindProviders || op == directoryOpFindPeer || op == directoryOpLookup) {
 		result = directoryResultEmpty
 	}
 	directoryRequestsTotal.WithLabelValues(op, result).Inc()
 	return op, resp
 }
 
-var errInvalidDirectoryRequest = errors.New("request is not provide, find_providers or find_peer")
+var errInvalidDirectoryRequest = errors.New("request is not provide, withdraw, find_providers or find_peer")
 
 // directoryRefused answers a request the router did not run, and says why
 // at the level the cause deserves: a malformed request is the peer's
@@ -199,38 +226,72 @@ func invalidDirectoryRequest(format string, args ...any) error {
 	return &directoryInvalidError{err: fmt.Errorf(format, args...)}
 }
 
+// recordProvider is whose record a provide or withdraw is about: the
+// sender's own, or the member a peer router names, which only a router may.
+func (r *Router) recordProvider(remote peer.ID, named string) (provider peer.ID, placed bool, err error) {
+	if named == "" {
+		return remote, false, nil
+	}
+	if !r.isAuthenticatedPeerRouter(remote) {
+		return "", false, invalidDirectoryRequest("only a router may name a provider; %s is not one", remote)
+	}
+	p, err := peer.Decode(named)
+	if err != nil {
+		return "", false, invalidDirectoryRequest("provider: %w", err)
+	}
+	return p, true, nil
+}
+
 // directoryProvide stores a record. From a member it is the member's own,
 // kept here and placed on the routers closest to the key; from a router it
-// is a member's record that router placed here, which only a router may do.
+// is a member's record that router placed here. A new record for the same
+// key and provider replaces the addresses of the old one.
 func (r *Router) directoryProvide(ctx context.Context, remote peer.ID, q *api.DirectoryProvide) (*api.DirectoryResponse, error) {
 	if err := api.ValidateDirectoryKey(q.GetKey()); err != nil {
 		return nil, invalidDirectoryRequest("%w", err)
 	}
-	provider := remote
-	placed := q.GetProvider() != ""
-	if placed {
-		if !r.isAuthenticatedPeerRouter(remote) {
-			return nil, invalidDirectoryRequest("only a router may name a provider; %s is not one", remote)
-		}
-		p, err := peer.Decode(q.GetProvider())
-		if err != nil {
-			return nil, invalidDirectoryRequest("provider: %w", err)
-		}
-		provider = p
+	provider, placed, err := r.recordProvider(remote, q.GetProvider())
+	if err != nil {
+		return nil, err
 	}
 	addrs, err := recordAddrs(provider, q.GetAddrs())
 	if err != nil {
 		return nil, invalidDirectoryRequest("%w", err)
 	}
-	if r.DHT == nil {
-		return nil, errors.New("the directory is not up")
+	if r.records == nil {
+		return nil, errDirectoryNotUp
 	}
-	if err := r.DHT.ProviderStore().AddProvider(ctx, q.GetKey(), peer.AddrInfo{ID: provider, Addrs: addrs}); err != nil {
-		return nil, fmt.Errorf("store record: %w", err)
+	r.records.put(q.GetKey(), provider, addrs, time.Now())
+	if !placed {
+		r.placeRecord(ctx, provider, &api.DirectoryRequest{Request: &api.DirectoryRequest_Provide{Provide: &api.DirectoryProvide{
+			Key: q.GetKey(), Addrs: q.GetAddrs(), Provider: provider.String(),
+		}}})
+	}
+	return &api.DirectoryResponse{}, nil
+}
+
+// directoryWithdraw removes a record: a member's own, from here and from
+// the routers closest to the key, or one a peer router withdraws for a
+// member it holds. Withdrawing a record that is not here is not an error:
+// it may have expired, or never have been placed here.
+func (r *Router) directoryWithdraw(ctx context.Context, remote peer.ID, q *api.DirectoryWithdraw) (*api.DirectoryResponse, error) {
+	if err := api.ValidateDirectoryKey(q.GetKey()); err != nil {
+		return nil, invalidDirectoryRequest("%w", err)
+	}
+	provider, placed, err := r.recordProvider(remote, q.GetProvider())
+	if err != nil {
+		return nil, err
+	}
+	if r.records == nil {
+		return nil, errDirectoryNotUp
+	}
+	if !r.records.remove(q.GetKey(), provider) {
+		logger.Debugf("[Directory] %s withdrew a record this router did not hold", provider)
 	}
 	if !placed {
-		r.ensureFederated(ctx)
-		r.placeRecord(ctx, q.GetKey(), provider, q.GetAddrs())
+		r.placeRecord(ctx, provider, &api.DirectoryRequest{Request: &api.DirectoryRequest_Withdraw{Withdraw: &api.DirectoryWithdraw{
+			Key: q.GetKey(), Provider: provider.String(),
+		}}})
 	}
 	return &api.DirectoryResponse{}, nil
 }
@@ -260,26 +321,39 @@ func recordAddrs(provider peer.ID, raw []string) ([]multiaddr.Multiaddr, error) 
 	return addrs, nil
 }
 
-// placeRecord puts a member's record on the routers closest to the key,
-// as many as the mesh's replication, over the directory protocol with the
-// provider named. Every copy is attempted; a router that fails to take it
-// is logged and counted, the member's own router keeps a copy regardless.
-func (r *Router) placeRecord(ctx context.Context, key []byte, provider peer.ID, addrs []string) {
-	targets := r.DHT.RoutingTable().NearestPeers(kb.ConvertKey(string(key)), r.directory.Replication)
-	req := &api.DirectoryRequest{Request: &api.DirectoryRequest_Provide{Provide: &api.DirectoryProvide{
-		Key: key, Addrs: addrs, Provider: provider.String(),
-	}}}
+// closestRouters is the peer routers closest to key, as many as the
+// mesh's replication: where a record is placed and where a lookup asks.
+func (r *Router) closestRouters(key []byte) []peer.ID {
+	if r.DHT == nil {
+		return nil
+	}
+	return r.DHT.RoutingTable().NearestPeers(kb.ConvertKey(string(key)), r.directory.Replication)
+}
+
+// placeRecord puts a member's record, or its withdrawal, on the routers
+// closest to the key, over the directory protocol with the provider named.
+// Every copy is attempted; a router that fails to take it is logged and
+// counted, the member's own router keeps its copy regardless.
+func (r *Router) placeRecord(ctx context.Context, provider peer.ID, req *api.DirectoryRequest) {
+	var key []byte
+	switch q := req.GetRequest().(type) {
+	case *api.DirectoryRequest_Provide:
+		key = q.Provide.GetKey()
+	case *api.DirectoryRequest_Withdraw:
+		key = q.Withdraw.GetKey()
+	}
+	r.ensureFederated(ctx)
 	data, err := proto.Marshal(req)
 	if err != nil {
 		logger.Errorf("[Directory] Placement for %s not encoded: %v", provider, err)
 		return
 	}
 	var wg sync.WaitGroup
-	for _, target := range targets {
+	for _, target := range r.closestRouters(key) {
 		wg.Add(1)
 		go func(target peer.ID) {
 			defer wg.Done()
-			if err := r.sendDirectory(ctx, target, data); err != nil {
+			if _, err := r.sendDirectory(ctx, target, data); err != nil {
 				directoryPlacementsTotal.WithLabelValues(directoryResultError).Inc()
 				logger.Warnf("[Directory] Record of %s not placed on router %s: %v", provider, target, err)
 				return
@@ -290,12 +364,12 @@ func (r *Router) placeRecord(ctx context.Context, key []byte, provider peer.ID, 
 	wg.Wait()
 }
 
-// sendDirectory sends one encoded request to a peer router and reads its
+// sendDirectory sends one encoded request to a peer router and returns its
 // answer, over the gated host so the router has authenticated first.
-func (r *Router) sendDirectory(ctx context.Context, target peer.ID, data []byte) error {
+func (r *Router) sendDirectory(ctx context.Context, target peer.ID, data []byte) (*api.DirectoryResponse, error) {
 	s, err := r.gated.NewStream(ctx, target, api.DirectoryProtocolID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = s.Close() }()
 	if deadline, ok := ctx.Deadline(); ok {
@@ -303,27 +377,27 @@ func (r *Router) sendDirectory(ctx context.Context, target peer.ID, data []byte)
 	}
 	if err := msgio.NewVarintWriter(s).WriteMsg(data); err != nil {
 		_ = s.Reset()
-		return err
+		return nil, err
 	}
 	reader := msgio.NewVarintReaderSize(s, directoryMaxMessage)
 	frame, err := reader.ReadMsg()
 	if err != nil {
 		_ = s.Reset()
-		return err
+		return nil, err
 	}
 	defer reader.ReleaseMsg(frame)
 	var resp api.DirectoryResponse
 	if err := proto.Unmarshal(frame, &resp); err != nil {
-		return err
+		return nil, err
 	}
 	if resp.GetError() != "" {
-		return errors.New(resp.GetError())
+		return nil, errors.New(resp.GetError())
 	}
-	return nil
+	return &resp, nil
 }
 
-// directoryFindProviders runs the lookup across the routers' DHT.
-func (r *Router) directoryFindProviders(ctx context.Context, q *api.DirectoryFindProviders) (*api.DirectoryResponse, error) {
+// directoryFindProviders answers who provides a key.
+func (r *Router) directoryFindProviders(ctx context.Context, remote peer.ID, q *api.DirectoryFindProviders) (*api.DirectoryResponse, error) {
 	if err := api.ValidateDirectoryKey(q.GetKey()); err != nil {
 		return nil, invalidDirectoryRequest("%w", err)
 	}
@@ -334,7 +408,7 @@ func (r *Router) directoryFindProviders(ctx context.Context, q *api.DirectoryFin
 	if limit > directoryMaxLimit {
 		limit = directoryMaxLimit
 	}
-	records, err := r.lookupProviders(ctx, q.GetKey(), limit)
+	records, err := r.lookupProviders(ctx, remote, q.GetKey(), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -342,44 +416,134 @@ func (r *Router) directoryFindProviders(ctx context.Context, q *api.DirectoryFin
 }
 
 // lookupProviders is the lookup both find_providers and find_peer run.
-func (r *Router) lookupProviders(ctx context.Context, key []byte, limit int) ([]*api.PeerRecord, error) {
-	if r.DHT == nil {
-		return nil, errors.New("the directory is not up")
+// For a member it is this router's records and the routers' closest to
+// the key, asked at once; a peer router asking is itself running such a
+// lookup, and gets this router's records alone. A lookup that finds
+// nothing re-reads the control plane's router list once and asks again:
+// a router that joined since the last pass may hold the record.
+func (r *Router) lookupProviders(ctx context.Context, remote peer.ID, key []byte, limit int) ([]*api.PeerRecord, error) {
+	if r.records == nil {
+		return nil, errDirectoryNotUp
+	}
+	if r.isAuthenticatedPeerRouter(remote) {
+		return r.freshRecords(r.records.providers(key, time.Now()), limit), nil
 	}
 	r.ensureFederated(ctx)
-	records, err := r.findProviders(ctx, key, limit)
-	if err == nil && len(records) == 0 && r.refederateIfStale() {
-		// A router that joined since the last pass may hold the record.
-		records, err = r.findProviders(ctx, key, limit)
+	found := r.findProviders(ctx, key, limit)
+	if len(found) == 0 && r.refederateIfStale() {
+		found = r.findProviders(ctx, key, limit)
 	}
-	return records, err
+	if err := ctx.Err(); err != nil && len(found) == 0 {
+		return nil, fmt.Errorf("lookup: %w", err)
+	}
+	return r.freshRecords(found, limit), nil
 }
 
-// findProviders runs one lookup across the routers' DHT.
-func (r *Router) findProviders(ctx context.Context, key []byte, limit int) ([]*api.PeerRecord, error) {
-	c := cid.NewCidV1(cid.Raw, key)
-	records := make([]*api.PeerRecord, 0, limit)
-	seen := map[peer.ID]bool{}
-	for info := range r.DHT.FindProvidersAsync(ctx, c, limit) {
-		if seen[info.ID] {
-			continue
+// findProviders merges this router's records under key with what the
+// routers closest to it hold, each asked within directoryLookupTimeout.
+func (r *Router) findProviders(ctx context.Context, key []byte, limit int) []peer.AddrInfo {
+	req := &api.DirectoryRequest{Request: &api.DirectoryRequest_FindProviders{FindProviders: &api.DirectoryFindProviders{Key: key, Limit: uint32(limit)}}}
+	data, err := proto.Marshal(req)
+	if err != nil {
+		logger.Errorf("[Directory] Lookup not encoded: %v", err)
+		return r.records.providers(key, time.Now())
+	}
+	targets := r.closestRouters(key)
+	answers := make(chan []peer.AddrInfo, len(targets))
+	var wg sync.WaitGroup
+	for _, target := range targets {
+		wg.Add(1)
+		go func(target peer.ID) {
+			defer wg.Done()
+			askCtx, cancel := context.WithTimeout(ctx, directoryLookupTimeout)
+			defer cancel()
+			resp, err := r.sendDirectory(askCtx, target, data)
+			if err != nil {
+				directoryLookupsTotal.WithLabelValues(directoryResultError).Inc()
+				logger.Warnf("[Directory] Router %s did not answer a lookup: %v", target, err)
+				return
+			}
+			directoryLookupsTotal.WithLabelValues(directoryResultOK).Inc()
+			var infos []peer.AddrInfo
+			for _, rec := range resp.GetProviders() {
+				if info, err := addrInfoOfRecord(rec); err == nil {
+					infos = append(infos, info)
+				}
+			}
+			answers <- infos
+		}(target)
+	}
+	wg.Wait()
+	close(answers)
+
+	merged := r.records.providers(key, time.Now())
+	index := map[peer.ID]int{}
+	for i, info := range merged {
+		index[info.ID] = i
+	}
+	for infos := range answers {
+		for _, info := range infos {
+			i, seen := index[info.ID]
+			if !seen {
+				index[info.ID] = len(merged)
+				merged = append(merged, info)
+				continue
+			}
+			for _, a := range info.Addrs {
+				if !containsAddr(merged[i].Addrs, a) {
+					merged[i].Addrs = append(merged[i].Addrs, a)
+				}
+			}
 		}
-		seen[info.ID] = true
-		records = append(records, peerRecord(info))
+	}
+	return merged
+}
+
+// freshRecords renders up to limit providers, each at the addresses this
+// router sees for it when it holds the provider, which are ahead of the
+// record, and at the record's otherwise.
+func (r *Router) freshRecords(infos []peer.AddrInfo, limit int) []*api.PeerRecord {
+	records := make([]*api.PeerRecord, 0, min(limit, len(infos)))
+	for _, info := range infos {
 		if len(records) >= limit {
 			break
 		}
+		if r.isPeerAuthenticated(info.ID) && r.Host.Network().Connectedness(info.ID) == network.Connected {
+			if addrs := r.Host.Peerstore().Addrs(info.ID); len(addrs) > 0 {
+				info.Addrs = addrs
+			}
+		}
+		records = append(records, peerRecord(info))
 	}
-	if err := ctx.Err(); err != nil && len(records) == 0 {
-		return nil, fmt.Errorf("lookup: %w", err)
+	return records
+}
+
+// addrInfoOfRecord parses a record another router answered with.
+func addrInfoOfRecord(rec *api.PeerRecord) (peer.AddrInfo, error) {
+	p, err := peer.Decode(rec.GetPeerId())
+	if err != nil {
+		return peer.AddrInfo{}, err
 	}
-	return records, nil
+	addrs, err := recordAddrs(p, rec.GetAddrs())
+	if err != nil {
+		return peer.AddrInfo{}, err
+	}
+	return peer.AddrInfo{ID: p, Addrs: addrs}, nil
+}
+
+func containsAddr(addrs []multiaddr.Multiaddr, a multiaddr.Multiaddr) bool {
+	for _, b := range addrs {
+		if b.Equal(a) {
+			return true
+		}
+	}
+	return false
 }
 
 // directoryFindPeer answers where a peer is reached: from this router's
 // own peerstore for a member attached here, from the record the member
 // announced under its peer key otherwise.
-func (r *Router) directoryFindPeer(ctx context.Context, q *api.DirectoryFindPeer) (*api.DirectoryResponse, error) {
+func (r *Router) directoryFindPeer(ctx context.Context, remote peer.ID, q *api.DirectoryFindPeer) (*api.DirectoryResponse, error) {
 	p, err := peer.Decode(q.GetPeerId())
 	if err != nil {
 		return nil, invalidDirectoryRequest("peer_id: %w", err)
@@ -389,7 +553,7 @@ func (r *Router) directoryFindPeer(ctx context.Context, q *api.DirectoryFindPeer
 			return &api.DirectoryResponse{Peer: peerRecord(peer.AddrInfo{ID: p, Addrs: addrs})}, nil
 		}
 	}
-	records, err := r.lookupProviders(ctx, api.PeerKey(p), 1)
+	records, err := r.lookupProviders(ctx, remote, api.PeerKey(p), 1)
 	if err != nil {
 		return nil, err
 	}

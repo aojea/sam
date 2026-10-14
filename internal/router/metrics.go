@@ -120,6 +120,7 @@ type routerStateCollector struct {
 	relayLimitDesc    *prometheus.Desc
 	bannedDesc        *prometheus.Desc
 	dhtDesc           *prometheus.Desc
+	recordsDesc       *prometheus.Desc
 	biscuitExpiryDesc *prometheus.Desc
 }
 
@@ -170,6 +171,10 @@ func newRouterStateCollector(r *Router) *routerStateCollector {
 			"agentmesh_router_dht_routing_table_size",
 			"Peers in the Kademlia routing table",
 			nil, nil),
+		recordsDesc: prometheus.NewDesc(
+			"agentmesh_router_directory_records",
+			"Directory records this router holds: its members' and the copies placed on it",
+			nil, nil),
 		biscuitExpiryDesc: prometheus.NewDesc(
 			"agentmesh_router_biscuit_expiry_timestamp_seconds",
 			"Unix time the router's own mesh credential expires",
@@ -180,7 +185,7 @@ func newRouterStateCollector(r *Router) *routerStateCollector {
 func (c *routerStateCollector) Describe(ch chan<- *prometheus.Desc) {
 	for _, d := range []*prometheus.Desc{
 		c.infoDesc, c.readyDesc, c.drainingDesc, c.authenticatedDesc, c.peerRoutersDesc, c.connectedDesc, c.connectionsDesc, c.watermarkDesc, c.relayLimitDesc,
-		c.bannedDesc, c.dhtDesc, c.biscuitExpiryDesc, connsPerSourceIPDesc,
+		c.bannedDesc, c.dhtDesc, c.recordsDesc, c.biscuitExpiryDesc, connsPerSourceIPDesc,
 	} {
 		ch <- d
 	}
@@ -224,6 +229,7 @@ func (c *routerStateCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.connectionsDesc, prometheus.GaugeValue, float64(outbound), "outbound")
 	ch <- prometheus.MustNewConstMetric(c.bannedDesc, prometheus.GaugeValue, float64(syncMapLen(&r.bannedPeers)))
 	ch <- prometheus.MustNewConstMetric(c.dhtDesc, prometheus.GaugeValue, float64(r.DHT.RoutingTable().Size()))
+	ch <- prometheus.MustNewConstMetric(c.recordsDesc, prometheus.GaugeValue, float64(r.records.size()))
 
 	r.keysMu.RLock()
 	expiry := r.credential.expiration

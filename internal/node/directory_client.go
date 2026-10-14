@@ -44,6 +44,9 @@ type Directory interface {
 	// addresses it announces, to a router it is attached to; the router
 	// keeps the record and places it on the routers closest to the key.
 	Provide(ctx context.Context, key []byte) error
+	// Withdraw removes this member's record under key from the router it is
+	// attached to and from the routers the record was placed on.
+	Withdraw(ctx context.Context, key []byte) error
 	// FindProviders is who provides key, up to limit, with their addresses.
 	FindProviders(ctx context.Context, key []byte, limit int) ([]peer.AddrInfo, error)
 	// FindPeer is where p is reached; routing.ErrNotFound when nobody knows.
@@ -52,8 +55,8 @@ type Directory interface {
 
 const (
 	// directoryRequestTimeout bounds one request to one router: the router's
-	// lookup across the mesh included, which is one round between routers
-	// that all know each other.
+	// lookup on the routers closest to the key included, which is one round
+	// between routers that all know each other.
 	directoryRequestTimeout = 10 * time.Second
 	directoryMaxMessage     = 64 * 1024
 	directoryDefaultLimit   = 20
@@ -80,6 +83,7 @@ var directoryRequestSeconds = promauto.NewHistogramVec(
 
 const (
 	directoryOpProvide       = "provide"
+	directoryOpWithdraw      = "withdraw"
 	directoryOpFindProviders = "find_providers"
 	directoryOpFindPeer      = "find_peer"
 
@@ -89,7 +93,7 @@ const (
 )
 
 func init() {
-	for _, op := range []string{directoryOpProvide, directoryOpFindProviders, directoryOpFindPeer} {
+	for _, op := range []string{directoryOpProvide, directoryOpWithdraw, directoryOpFindProviders, directoryOpFindPeer} {
 		for _, result := range []string{directoryResultOK, directoryResultEmpty, directoryResultFailed} {
 			directoryRequestsTotal.WithLabelValues(op, result)
 		}
@@ -124,6 +128,11 @@ func (d *routerDirectory) Provide(ctx context.Context, key []byte) error {
 	d.announced = addrs
 	d.mu.Unlock()
 	return nil
+}
+
+func (d *routerDirectory) Withdraw(ctx context.Context, key []byte) error {
+	_, err := d.request(ctx, directoryOpWithdraw, &api.DirectoryRequest{Request: &api.DirectoryRequest_Withdraw{Withdraw: &api.DirectoryWithdraw{Key: key}}})
+	return err
 }
 
 // Announced is the addresses of the record this member last announced:
@@ -195,7 +204,7 @@ func (d *routerDirectory) request(ctx context.Context, op string, req *api.Direc
 		resp, err := d.ask(ctx, router, data)
 		if err == nil {
 			result := directoryResultOK
-			if op != directoryOpProvide && len(resp.GetProviders()) == 0 && resp.GetPeer() == nil {
+			if op != directoryOpProvide && op != directoryOpWithdraw && len(resp.GetProviders()) == 0 && resp.GetPeer() == nil {
 				result = directoryResultEmpty
 			}
 			directoryRequestsTotal.WithLabelValues(op, result).Inc()

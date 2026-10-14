@@ -332,9 +332,10 @@ type Router struct {
 	EventTopic         *pubsub.Topic
 	authenticatedPeers sync.Map
 	bannedPeers        sync.Map
-	// directory is how the mesh keeps its DHT, read from /info at start
-	// (syncDirectory).
+	// directory is how the mesh keeps its directory, read from /info at
+	// start (syncDirectory); records is the records this router holds.
 	directory api.DirectorySettings
+	records   *recordStore
 	// peerRouters is the other routers of the mesh, as /info lists them or as
 	// a handshake proved them: held whatever the load and never sent away.
 	peerRouters sync.Map
@@ -524,6 +525,7 @@ func (r *Router) Start() (retErr error) {
 		return err
 	}
 	r.DHT = kadDHT
+	r.records = newRecordStore(r.directory.RecordTTL)
 
 	if err = kadDHT.Bootstrap(r.ctx); err != nil {
 		return err
@@ -579,13 +581,17 @@ func (r *Router) Start() (retErr error) {
 	})
 
 	// 5. Start background routines
-	r.wg.Add(7)
+	r.wg.Add(8)
 	go r.runLeaseRenewalLoop()
 	go r.runKeysSyncLoop()
 	go r.runFederationLoop()
 	go r.runBiscuitRenewalLoop()
 	go r.runShedLoop()
 	go r.listenForControlPlaneEvents(r.ctx)
+	go func() {
+		defer r.wg.Done()
+		r.records.runSweep(r.ctx, recordSweepInterval(r.directory.RecordTTL))
+	}()
 	go func() {
 		defer r.wg.Done()
 		p2plimits.ObserveStreamPressure(hostNode.Network().Conns, busiestConnStreams, logger.Warnf).Run(r.ctx, streamPressureInterval)

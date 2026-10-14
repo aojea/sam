@@ -877,6 +877,8 @@ func (d *mockDirectory) handle(s network.Stream) {
 			d.records[string(q.GetKey())] = map[peer.ID][]string{}
 		}
 		d.records[string(q.GetKey())][s.Conn().RemotePeer()] = q.GetAddrs()
+	case req.GetWithdraw() != nil:
+		delete(d.records[string(req.GetWithdraw().GetKey())], s.Conn().RemotePeer())
 	case req.GetFindProviders() != nil:
 		for p, addrs := range d.records[string(req.GetFindProviders().GetKey())] {
 			resp.Providers = append(resp.Providers, &api.PeerRecord{PeerId: p.String(), Addrs: addrs})

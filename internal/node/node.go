@@ -2023,9 +2023,22 @@ func (n *AgentMeshNode) UnregisterService(ctx context.Context, serviceName strin
 	return n.services.Unregister(ctx, serviceName)
 }
 
-// Teardown detaches all registered services and closes the libp2p host.
-// Store is owned by the caller and is not closed here.
+// withdrawTimeout bounds what a node leaving the mesh waits for its
+// records to be withdrawn: a few round trips to the routers it holds.
+const withdrawTimeout = 5 * time.Second
+
+// Teardown withdraws the node's records from the directory, detaches all
+// registered services and closes the libp2p host. Store is owned by the
+// caller and is not closed here.
 func (n *AgentMeshNode) Teardown() error {
+	if n.services != nil && n.Directory != nil && n.Host != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), withdrawTimeout)
+		n.services.WithdrawAll(ctx)
+		if err := n.Directory.Withdraw(ctx, api.PeerKey(n.Host.ID())); err != nil && !errors.Is(err, errNoDirectoryRouter) {
+			logger.Warnf("[Directory] Withdrawing this node's record: %v", err)
+		}
+		cancel()
+	}
 	if n.services != nil {
 		n.services.TeardownAll()
 	}
