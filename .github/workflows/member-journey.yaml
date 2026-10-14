@@ -128,7 +128,7 @@ jobs:
               sleep 1
             done
             [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:1909$i/readyz")" = "200" ]
-            grep -q 'Registered SERVICE_TYPE_MCP/everything' "$RUNNER_TEMP/provider-$i.log"
+            grep -q 'Registered and announced SERVICE_TYPE_MCP/everything' "$RUNNER_TEMP/provider-$i.log"
           done
 
       - name: Run the member journey
