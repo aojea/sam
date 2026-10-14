@@ -58,6 +58,8 @@ type artifact struct {
 	FactTime                string   `json:"fact_time"`
 	FactRole                string   `json:"fact_role"`
 	FactTargetFact          string   `json:"fact_target_fact"`
+	FactPublish             string   `json:"fact_publish"`
+	CatalogTarget           string   `json:"catalog_target"`
 	FactTARBlock            string   `json:"fact_tar_block"`
 	TARBlockSourcePattern   string   `json:"tar_block_source_pattern"`
 	HTTPMethodSyntax        string   `json:"http_method_syntax"`
@@ -714,6 +716,8 @@ func main() {
 		FactTime:                api.FactTime,
 		FactRole:                api.FactRole,
 		FactTargetFact:          api.FactTargetFact,
+		FactPublish:             api.FactPublish,
+		CatalogTarget:           api.CatalogTarget,
 		FactTARBlock:            api.FactTARBlock,
 		TARBlockSourcePattern:   api.TARBlockSourcePattern,
 		HTTPMethodSyntax:        api.HTTPMethodSyntaxPattern(),

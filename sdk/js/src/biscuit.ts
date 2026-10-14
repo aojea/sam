@@ -83,6 +83,8 @@ export interface VerifiedBiscuit {
   labels: Record<string, string>;
   /** Verified TaskAuthorizationRule chain from blocks 1..N (empty for unattenuated tokens). */
   taskRules: TaskAuthorizationRule[];
+  /** The token as received, for what is decided over its facts after verification (requirePublish). */
+  token: Uint8Array;
 }
 
 function describe(err: unknown): string {
@@ -219,6 +221,7 @@ export async function verifyPeerBiscuit(
     roles: strings(query("r($r) <- role($r)")),
     labels,
     taskRules,
+    token: biscuitBytes,
   };
 }
 
@@ -268,6 +271,35 @@ export async function sealBiscuit(biscuitBytes: Uint8Array, trustedKeys: Uint8Ar
 export function requireRole(verified: VerifiedBiscuit, role: string): void {
   if (!verified.roles.includes(role)) {
     throw new BiscuitVerificationError(`biscuit lacks expected role ${JSON.stringify(role)}`);
+  }
+}
+
+/**
+ * Requires that an already verified provider credential grants serving
+ * targetService ("<type>://<name>"), as identity.RequirePublish: the
+ * directory names whoever announced the service, only the credential says
+ * who may serve it. The provider's own catalog names no service and needs
+ * no grant; so does an empty target.
+ */
+export async function requirePublish(verified: VerifiedBiscuit, targetService: string): Promise<void> {
+  if (targetService === "" || targetService === `system://${BASELINE_DATALOG.catalog_target}`) {
+    return;
+  }
+  const m = /^([a-z0-9]+):\/\/(.+)$/.exec(targetService);
+  if (m === null) {
+    throw new BiscuitVerificationError(`service ${JSON.stringify(targetService)} must be <type>://<name>`);
+  }
+  const wasm = await loadBiscuit();
+  const token = wasm.Biscuit.fromBytes(verified.token, wasm.PublicKey.fromBytes(verified.verifyingKey, wasm.SignatureAlgorithm.Ed25519));
+  const builder = new wasm.AuthorizerBuilder();
+  builder.addFact(wasm.Fact.fromString(`${BASELINE_DATALOG.fact_publish}(${JSON.stringify(m[1])}, ${JSON.stringify(m[2])})`));
+  for (const policy of BASELINE_DATALOG.publish_policies) {
+    builder.addPolicy(wasm.Policy.fromString(policy));
+  }
+  try {
+    withinLimits(() => builder.buildAuthenticated(token).authorizeWithLimits(AUTHORIZER_LIMITS));
+  } catch {
+    throw new BiscuitVerificationError(`peer ${verified.peerId} is not granted serving ${targetService}`);
   }
 }
 

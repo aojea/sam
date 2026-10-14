@@ -153,6 +153,7 @@ func TestSTSTaskScopedSecurityCUJ(t *testing.T) {
 	policyYAML := fmt.Sprintf(`roles:
   - name: pep
     allowed_services: ["egress://api.github.com", "mcp://github"]
+    allowed_publish: ["mcp://github"]
     allowed_targets: ["*"]
   - name: developer
     allowed_services: ["egress://api.github.com", "mcp://github"]

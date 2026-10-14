@@ -337,6 +337,14 @@ func createMockBiscuitToken(t *testing.T, peerID string, priv ed25519.PrivateKey
 		}
 	}
 
+	// The mock router stands in for a control plane whose node role grants
+	// allowed_publish ["*"], as the policy fixtures in this suite do.
+	if role == api.RoleNode {
+		if err := builder.AddAuthorityFact(api.MarkerFact(api.FactGrantedPublishAllTypes)); err != nil {
+			t.Fatalf("failed to add publish grant: %v", err)
+		}
+	}
+
 	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 		Name: api.FactExpiration,
 		IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(1 * time.Hour))},
@@ -721,7 +729,8 @@ func writePolicyWithRouter(t *testing.T, path string, yamlContent string) {
     allowed_targets: ["*"]
   - name: %s
     allowed_services: []
-    allowed_targets: []`, api.RoleRouter, api.RoleNode)
+    allowed_targets: []
+    allowed_publish: ["*"]`, api.RoleRouter, api.RoleNode)
 	routerBinding := fmt.Sprintf(`  - role: %s
     members: ["group:routers"]`, api.RoleRouter)
 

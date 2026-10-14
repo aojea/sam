@@ -346,6 +346,7 @@ func startAttachmentMesh(t *testing.T) *attachmentMesh {
     allowed_labels: ["site=*", "pa=*", "pb=*"]
   - name: %s
     allowed_services: ["mcp://*"]
+    allowed_publish: ["mcp://*"]
     allowed_targets: ["*"]
 bindings:
   - role: %s

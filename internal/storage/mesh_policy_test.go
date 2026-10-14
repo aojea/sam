@@ -46,6 +46,7 @@ func TestMeshPolicyRoundTripsEveryRoleField(t *testing.T) {
 		AllowedServices: []string{"mcp://tool"},
 		CustomDatalog:   []string{`region("emea")`},
 		AllowedLabels:   []string{"region=*"},
+		AllowedPublish:  []string{"mcp://tool", "inference://*"},
 		Http:            []*api.HTTPGrant{{Service: "mcp://tool", Methods: []string{"GET"}, Paths: []string{"/v1/*"}}},
 	}
 

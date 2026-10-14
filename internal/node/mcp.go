@@ -340,11 +340,13 @@ func (n *AgentMeshNode) ConnectMCPSession(ctx context.Context, targetPeer peer.I
 		return nil, nil, fmt.Errorf("%w by %s: %s", ErrAuthRejected, targetPeer, resp.Error)
 	}
 
-	// The provider's biscuit is verified unconditionally: signature, expiry and
-	// binding to targetPeer. Discovery (DHT, gossip) names whoever announced
-	// the service; only this says the peer is enrolled. Caller-required labels
-	// and the operator's egress floor are additional checks on the same token.
-	if err := n.checkPeerLabels(resp.Biscuit, targetPeer, requiredLabels); err != nil {
+	// The provider's biscuit is verified unconditionally: signature, expiry,
+	// binding to targetPeer and, for a named service, the grant to serve it.
+	// The directory names whoever announced the service; only this says the
+	// peer is enrolled and may serve it. Caller-required labels and the
+	// operator's egress floor are additional checks on the same token. An
+	// empty target is the peer's own catalog, which names no service.
+	if err := n.checkProvider(resp.Biscuit, targetPeer, requiredLabels, targetService); err != nil {
 		cleanup()
 		return nil, nil, err
 	}

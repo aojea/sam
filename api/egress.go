@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/eclipse-biscuit/biscuit-go/v2"
+	"google.golang.org/protobuf/proto"
 )
 
 // credentialNameSyntax bounds a credential name to one safe file name: the
@@ -226,6 +227,43 @@ func EgressServedBy(d *EgressDestination, roles []string, labels map[string]stri
 		}
 	}
 	return false
+}
+
+// WithEgressPublish returns policyRoles with the egress destinations a node
+// with these roles and labels serves added to what it may publish: served_by
+// is who may serve a destination, and the record the node announces for it
+// needs the grant like any other. The role entries are copied, never
+// changed in place; a role the policy does not define gets an entry that
+// grants publishing alone.
+func WithEgressPublish(policyRoles []*PolicyRole, egress []*EgressDestination, roles []string, labels map[string]string) []*PolicyRole {
+	var served []string
+	for _, d := range egress {
+		if d == nil || ValidateEgressName(d.GetName()) != nil {
+			continue
+		}
+		if EgressServedBy(d, roles, labels) {
+			served = append(served, ServiceTypeStringEgress+"://"+d.GetName())
+		}
+	}
+	if len(served) == 0 || len(roles) == 0 {
+		return policyRoles
+	}
+	out := make([]*PolicyRole, 0, len(policyRoles)+1)
+	found := false
+	for _, pr := range policyRoles {
+		if pr != nil && pr.GetName() == roles[0] {
+			cp := proto.Clone(pr).(*PolicyRole)
+			cp.AllowedPublish = append(cp.AllowedPublish, served...)
+			out = append(out, cp)
+			found = true
+			continue
+		}
+		out = append(out, pr)
+	}
+	if !found {
+		out = append(out, &PolicyRole{Name: roles[0], AllowedPublish: served})
+	}
+	return out
 }
 
 // BuildEgressServingRules grants each destination to the nodes that serve it:

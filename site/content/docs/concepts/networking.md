@@ -137,10 +137,14 @@ and the node adds the `/v1` prefix. The same backend is therefore reachable
 through the `/v1` endpoint and, with `/v1/...` appended, through the proxy
 path.
 
-A caller can restrict which providers are acceptable with
-`X-Mesh-Required-Labels: key=value[,key=value]`. The node then verifies the
-provider's credential and confirms that every listed label is attested in it
-before forwarding. The header is removed before the request leaves the node.
+Before any request leaves the node for a provider, the node verifies the
+provider's credential and that its role grants serving the service the
+request names (`allowed_publish`): the directory says who announced a
+name, the credential says who may serve it. A caller can restrict which
+providers are acceptable further with
+`X-Mesh-Required-Labels: key=value[,key=value]`. The node then confirms
+that every listed label is attested in the credential as well before
+forwarding. The header is removed before the request leaves the node.
 An operator can set a floor that every provider must meet with
 `egress.require_labels` in the node configuration.
 

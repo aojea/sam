@@ -34,9 +34,13 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// publishEverything is the node role as a test mesh's policy grants it:
+// serving every service, so a node's record and its calls pass the gates.
+var publishEverything = []*api.PolicyRole{{Name: api.RoleNode, AllowedPublish: []string{"*"}}}
+
 // buildAndSaveBiscuit builds a biscuit signed with rootPriv that identifies
-// node as caller, grants allow_mcp_server("*"), carries the node role as a
-// real enrollment does, and saves it to node's store.
+// node as caller, grants every service to call and to serve, carries the
+// node role as a real enrollment does, and saves it to node's store.
 func buildAndSaveBiscuit(node *AgentMeshNode, rootPriv ed25519.PrivateKey) error {
 	callerID := node.Host.ID().String()
 	builder := biscuit.NewBuilder(rootPriv)
@@ -60,6 +64,9 @@ func buildAndSaveBiscuit(node *AgentMeshNode, rootPriv ed25519.PrivateKey) error
 		return err
 	}
 	if err := builder.AddAuthorityFact(api.MarkerFact(api.FactGrantedServiceAllTypes)); err != nil {
+		return err
+	}
+	if err := builder.AddAuthorityFact(api.MarkerFact(api.FactGrantedPublishAllTypes)); err != nil {
 		return err
 	}
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
@@ -556,7 +563,7 @@ func TestCallMCPTool_LabelEnforcement(t *testing.T) {
 
 	// nodeB's own identity is control-plane-attested with region=eu-de; nodeA
 	// must trust the same root to verify it.
-	nodeBIdentity, err := identity.MintBootstrapBiscuitToken(rootPriv, nodeB.Host.ID(), api.RoleNode, time.Now().Add(time.Hour), nil, map[string]string{"region": "eu-de"})
+	nodeBIdentity, err := identity.MintBootstrapBiscuitToken(rootPriv, nodeB.Host.ID(), api.RoleNode, time.Now().Add(time.Hour), publishEverything, map[string]string{"region": "eu-de"})
 	if err != nil {
 		t.Fatalf("mint nodeB identity: %v", err)
 	}
@@ -618,7 +625,7 @@ func TestCallMCPTool_EgressFloorEnforcement(t *testing.T) {
 	nodeB.keysMu.Unlock()
 
 	// nodeB attests region=eu-de and nothing else.
-	nodeBIdentity, err := identity.MintBootstrapBiscuitToken(rootPriv, nodeB.Host.ID(), api.RoleNode, time.Now().Add(time.Hour), nil, map[string]string{"region": "eu-de"})
+	nodeBIdentity, err := identity.MintBootstrapBiscuitToken(rootPriv, nodeB.Host.ID(), api.RoleNode, time.Now().Add(time.Hour), publishEverything, map[string]string{"region": "eu-de"})
 	if err != nil {
 		t.Fatalf("mint nodeB identity: %v", err)
 	}

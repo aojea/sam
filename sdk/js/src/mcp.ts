@@ -22,9 +22,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { JSONRPCMessageSchema, type JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { AUTH_HANDSHAKE_TIMEOUT_MS, AuthRejectedError, MAX_AUTH_FRAME_BYTES, MCP_PROTOCOL } from "./auth.ts";
-import { BiscuitVerificationError, requireRole, verifyPeerBiscuit, type VerifiedBiscuit } from "./biscuit.ts";
+import { BiscuitVerificationError, requirePublish, requireRole, verifyPeerBiscuit, type VerifiedBiscuit } from "./biscuit.ts";
 import { ROLE_NODE } from "./controlplane.ts";
-import { decodeAuthResponse } from "./credential.ts";
+import { decodeAuthFrame, decodeAuthResponse } from "./credential.ts";
 
 /** go-msgio's default message cap, which agentmesh-node's StreamTransport uses. */
 export const MAX_MCP_MESSAGE_BYTES = 8 * 1024 * 1024;
@@ -173,6 +173,8 @@ export async function openMCPSession(
     provider = await verifyPeerBiscuit(resp.biscuit, conn.remotePeer.toString(), trustedKeys);
     // Only nodes host services; a router's or an admin's credential is a member, not a provider.
     requireRole(provider, ROLE_NODE);
+    // And only a node the policy lets serve the named service is one.
+    await requirePublish(provider, decodeAuthFrame(frame).targetService);
     requireLabels(provider, options.requiredLabels);
     requireEgressLabels(provider, egressRequireLabels);
   } catch (err) {

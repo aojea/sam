@@ -64,7 +64,7 @@ func newTestFacade() *openAIFacade {
 		remoteModels: func(_ context.Context, _, _ string) ([]string, error) {
 			return nil, nil
 		},
-		verifyPeerLabels: func(context.Context, string, map[string]string) error { return nil },
+		verifyPeerLabels: func(context.Context, string, string, map[string]string) error { return nil },
 		authorizeLocal:   func(context.Context, string, string, string) error { return nil },
 	}
 }
@@ -704,7 +704,7 @@ func TestFacade_Completions_LabelRequirement(t *testing.T) {
 		}
 	}
 	var attested [][2]string
-	f.verifyPeerLabels = func(_ context.Context, peerID string, required map[string]string) error {
+	f.verifyPeerLabels = func(_ context.Context, peerID, _ string, required map[string]string) error {
 		attested = append(attested, [2]string{peerID, required["region"]})
 		return nil
 	}
@@ -762,7 +762,7 @@ func TestFacade_Completions_LabelAttestation(t *testing.T) {
 
 	t.Run("unattested provider is skipped, attested one serves", func(t *testing.T) {
 		f := newLabelFacade()
-		f.verifyPeerLabels = func(_ context.Context, peerID string, _ map[string]string) error {
+		f.verifyPeerLabels = func(_ context.Context, peerID, _ string, _ map[string]string) error {
 			if peerID == "peerEU1" {
 				return fmt.Errorf("no attested label")
 			}
@@ -806,7 +806,7 @@ func TestFacade_Completions_LabelAttestation(t *testing.T) {
 		// provider fails verification, so nothing may be forwarded.
 		f := newLabelFacade()
 		verified := 0
-		f.verifyPeerLabels = func(_ context.Context, _ string, required map[string]string) error {
+		f.verifyPeerLabels = func(_ context.Context, _, _ string, required map[string]string) error {
 			verified++
 			if len(required) != 0 {
 				t.Errorf("required = %v, want none", required)
@@ -984,7 +984,7 @@ func TestFacade_Completions_FloorGatesSilentCaller(t *testing.T) {
 		f := newFloorFacade()
 		var gateRequired map[string]string
 		gateCalled := false
-		f.verifyPeerLabels = func(_ context.Context, _ string, required map[string]string) error {
+		f.verifyPeerLabels = func(_ context.Context, _, _ string, required map[string]string) error {
 			gateCalled = true
 			gateRequired = required
 			return fmt.Errorf("floor not attested")
@@ -1011,7 +1011,7 @@ func TestFacade_Completions_FloorGatesSilentCaller(t *testing.T) {
 
 	t.Run("an attested floor forwards", func(t *testing.T) {
 		f := newFloorFacade()
-		f.verifyPeerLabels = func(context.Context, string, map[string]string) error { return nil }
+		f.verifyPeerLabels = func(context.Context, string, string, map[string]string) error { return nil }
 		forwarded := false
 		f.forward = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			forwarded = true

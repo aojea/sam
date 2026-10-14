@@ -16,10 +16,13 @@ package router
 
 import (
 	"context"
+	"crypto/ed25519"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/eclipse-biscuit/biscuit-go/v2"
+	"github.com/golang-jwt/jwt/v5"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -29,6 +32,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/identity"
 )
 
 // newDirectoryRouter is a router with its DHT and the directory handler
@@ -68,11 +72,27 @@ func federate(t *testing.T, a, b *Router) {
 	}
 }
 
-// attach connects a member host to a router and marks it authenticated there.
-func attach(t *testing.T, r *Router) host.Host {
+// attach connects a member host to a router and marks it authenticated
+// there, holding a credential that grants publishing the given services
+// (allowed_publish syntax), as the handshake would have recorded.
+func attach(t *testing.T, r *Router, publish ...string) host.Host {
 	t.Helper()
 	m := newClient(t, r)
 	r.authenticatedPeers.Store(m.ID(), time.Now().Add(time.Hour))
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	role := &api.PolicyRole{Name: "member", AllowedPublish: publish}
+	tok, _, err := identity.MintBiscuitToken(priv, jwt.MapClaims{"sub": "member"}, nil, m.ID(), time.Now().Add(time.Hour), []string{"member"}, []*api.PolicyRole{role}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := biscuit.Unmarshal(tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.credentials.Store(m.ID(), memberCredential{biscuit: b, key: pub})
 	return m
 }
 
@@ -141,7 +161,7 @@ func TestDirectoryRecordsAreFoundFromAnyRouter(t *testing.T) {
 	// One copy besides the member's own router, on the closest of the others.
 	a.directory.Replication = 1
 
-	member := attach(t, a)
+	member := attach(t, a, "mcp://calculator")
 	key, err := api.ServiceKey(api.ServiceType_SERVICE_TYPE_MCP, "calculator")
 	if err != nil {
 		t.Fatal(err)
@@ -228,7 +248,7 @@ func TestDirectoryRecordsAreFoundFromAnyRouter(t *testing.T) {
 // as invalid, and nothing is stored.
 func TestDirectoryRefusesWhatAMemberMayNotAnnounce(t *testing.T) {
 	a := newDirectoryRouter(t)
-	member := attach(t, a)
+	member := attach(t, a, "mcp://*")
 	stranger := newClient(t, a)
 	key, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_MCP, "calculator")
 
@@ -275,7 +295,7 @@ func TestDirectoryRefusesWhatAMemberMayNotAnnounce(t *testing.T) {
 func TestDirectoryPlacementNamesTheProvider(t *testing.T) {
 	a, b := newDirectoryRouter(t), newDirectoryRouter(t)
 	federate(t, a, b)
-	member := attach(t, a)
+	member := attach(t, a, "inference://llm")
 	key, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_INFERENCE, "")
 	memberAddr := member.Addrs()[0].String() + "/p2p/" + member.ID().String()
 	if resp := ask(t, member, a.Host.ID(), provide(key, "inference://llm", memberAddr)); resp.GetError() != "" {
@@ -302,7 +322,7 @@ func withdraw(key []byte) *api.DirectoryRequest {
 func TestDirectoryWithdrawAndReplace(t *testing.T) {
 	a, b := newDirectoryRouter(t), newDirectoryRouter(t)
 	federate(t, a, b)
-	member := attach(t, a)
+	member := attach(t, a, "mcp://calculator")
 	key, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_MCP, "calculator")
 	oldAddr := "/ip4/10.0.0.1/tcp/4001/p2p/" + member.ID().String()
 	newAddr := "/ip4/10.0.0.2/tcp/4001/p2p/" + member.ID().String()
@@ -378,5 +398,72 @@ func TestRecordStoreExpiry(t *testing.T) {
 	}
 	if got := recordSweepInterval(6 * time.Second); got != 2*time.Second {
 		t.Fatalf("sweep interval for a 6s TTL = %s, want 2s", got)
+	}
+}
+
+// A member serves only what its credential grants: a record for a service
+// its role does not allow publishing is refused and counted as denied, and
+// nothing is stored; its own record under its peer key needs no grant. The
+// grant is checked as a service grant is: by name, by type, or for all.
+func TestDirectoryDeniesWhatTheCredentialDoesNotGrant(t *testing.T) {
+	a := newDirectoryRouter(t)
+	calc, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_MCP, "calculator")
+	mcpAll, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_MCP, "")
+	weather, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_MCP, "weather")
+	llm, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_INFERENCE, "llm")
+	calcV2, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_MCP, "calc.v2")
+
+	for name, tc := range map[string]struct {
+		publish []string
+		req     *api.DirectoryRequest
+		denied  bool
+	}{
+		"no grant, a service":            {publish: nil, req: provide(calc, "mcp://calculator"), denied: true},
+		"no grant, its own peer key":     {publish: nil, req: nil},
+		"exact grant, that service":      {publish: []string{"mcp://calculator"}, req: provide(calc, "mcp://calculator")},
+		"exact grant, by type too":       {publish: []string{"mcp://calculator"}, req: provide(mcpAll, "mcp://calculator")},
+		"exact grant, another service":   {publish: []string{"mcp://calculator"}, req: provide(weather, "mcp://weather"), denied: true},
+		"type grant, any of the type":    {publish: []string{"mcp://*"}, req: provide(weather, "mcp://weather")},
+		"type grant, another type":       {publish: []string{"mcp://*"}, req: provide(llm, "inference://llm"), denied: true},
+		"prefix grant":                   {publish: []string{"mcp://calc.*"}, req: provide(calc, "mcp://calculator"), denied: true},
+		"prefix grant matching":          {publish: []string{"mcp://calc.*"}, req: provide(calcV2, "mcp://calc.v2")},
+		"everything":                     {publish: []string{"*"}, req: provide(llm, "inference://llm")},
+		"a set of exact grants":          {publish: []string{"mcp://weather", "mcp://calculator"}, req: provide(calc, "mcp://calculator")},
+		"a set of exact grants, another": {publish: []string{"mcp://weather", "mcp://clock"}, req: provide(calc, "mcp://calculator"), denied: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			member := attach(t, a, tc.publish...)
+			req := tc.req
+			if req == nil {
+				req = provide(api.PeerKey(member.ID()), "")
+			}
+			before := directoryCount(t, directoryOpProvide, directoryResultDenied)
+			resp := ask(t, member, a.Host.ID(), req)
+			if tc.denied {
+				if resp.GetError() == "" {
+					t.Fatal("stored; want a refusal")
+				}
+				if got := directoryCount(t, directoryOpProvide, directoryResultDenied); got != before+1 {
+					t.Fatalf("denied counted = %v, want %v", got, before+1)
+				}
+				if provs := held(a, req.GetProvide().GetKey()); slices.ContainsFunc(provs, func(p peer.AddrInfo) bool { return p.ID == member.ID() }) {
+					t.Fatalf("a denied record was stored: %v", provs)
+				}
+				return
+			}
+			if resp.GetError() != "" {
+				t.Fatalf("refused: %s", resp.GetError())
+			}
+			if provs := held(a, req.GetProvide().GetKey()); !slices.ContainsFunc(provs, func(p peer.AddrInfo) bool { return p.ID == member.ID() }) {
+				t.Fatalf("the record was not stored: %v", provs)
+			}
+		})
+	}
+
+	// A member whose credential the router no longer holds is refused too.
+	member := attach(t, a, "mcp://calculator")
+	a.credentials.Delete(member.ID())
+	if resp := ask(t, member, a.Host.ID(), provide(calc, "mcp://calculator")); resp.GetError() == "" {
+		t.Fatal("stored with no credential held; want a refusal")
 	}
 }

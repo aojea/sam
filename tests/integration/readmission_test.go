@@ -131,7 +131,7 @@ func startReadmissionMesh(t *testing.T, ctx context.Context) *readmissionMesh {
 	// through group "routers"; what either may reach is not the subject here.
 	roles := []*api.PolicyRole{
 		{Name: api.RoleRouter, AllowedServices: []string{"*"}, AllowedTargets: []string{"*"}},
-		{Name: api.RoleNode, AllowedServices: []string{"*"}, AllowedTargets: []string{"*"}},
+		{Name: api.RoleNode, AllowedServices: []string{"*"}, AllowedPublish: []string{"*"}, AllowedTargets: []string{"*"}},
 	}
 	bindings := []*api.PolicyBinding{
 		{Role: api.RoleRouter, Members: []string{"group:routers"}},

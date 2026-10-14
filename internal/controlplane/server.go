@@ -862,7 +862,7 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	if sessionExpiresAt.Before(biscuitExpiry) {
 		biscuitExpiry = sessionExpiresAt
 	}
-	biscuitData, _, err := identity.MintBiscuitToken(privKey, claims, token, pID, biscuitExpiry, finalRoles, policyRoles, req.Labels)
+	biscuitData, _, err := identity.MintBiscuitToken(privKey, claims, token, pID, biscuitExpiry, finalRoles, s.mintRoles(r.Context(), policyRoles, finalRoles, req.Labels), req.Labels)
 	if err != nil {
 		logger.Errorw("Biscuit minting failed", "peer_id", canonical, "error", err)
 		http.Error(w, "Failed to mint biscuit: "+err.Error(), http.StatusForbidden)
@@ -1226,7 +1226,7 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		finalRoles = append(finalRoles, customAccessRoles...)
 		nodeRecord.Labels = labelsStillAllowed(canonical, allowedLabelPatterns(finalRoles, policyRoles), nodeRecord.Labels)
 
-		bBytes, _, err := identity.MintBiscuitToken(privKey, claims, nil, pID, biscuitExpiry, finalRoles, policyRoles, nodeRecord.Labels)
+		bBytes, _, err := identity.MintBiscuitToken(privKey, claims, nil, pID, biscuitExpiry, finalRoles, s.mintRoles(r.Context(), policyRoles, finalRoles, nodeRecord.Labels), nodeRecord.Labels)
 		if err != nil {
 			logger.Errorf("Failed to mint refreshed token for node %s: %v", nodeRecord.PeerID, err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -1237,7 +1237,7 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		// Bootstrap node
 		finalRoles, _ := nodeRoles(nodeRecord, bindings)
 		nodeRecord.Labels = labelsStillAllowed(canonical, allowedLabelPatterns(finalRoles, policyRoles), nodeRecord.Labels)
-		bBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, nodeRecord.Role, biscuitExpiry, policyRoles, nodeRecord.Labels)
+		bBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, nodeRecord.Role, biscuitExpiry, s.mintRoles(r.Context(), policyRoles, []string{nodeRecord.Role}, nodeRecord.Labels), nodeRecord.Labels)
 		if err != nil {
 			logger.Errorf("Failed to mint refreshed token for node %s: %v", nodeRecord.PeerID, err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -1763,6 +1763,19 @@ func (s *Server) HandleEgress(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(respData)
 }
 
+// mintRoles is policyRoles as a credential for a member with these roles
+// and labels is minted from: with the egress destinations served_by grants
+// it added to what it may publish. A failure to read the destinations
+// mints without them; the next refresh tries again.
+func (s *Server) mintRoles(ctx context.Context, policyRoles []*api.PolicyRole, roles []string, labels map[string]string) []*api.PolicyRole {
+	egress, err := s.store.GetEgressDestinations(ctx)
+	if err != nil {
+		logger.Warnf("Minting without egress publish grants: destinations not read: %v", err)
+		return policyRoles
+	}
+	return api.WithEgressPublish(policyRoles, egress, roles, labels)
+}
+
 // nodeRoles is the role set a refresh would mint for the node: the enrolled
 // role plus the custom roles its identity resolves to, from the bindings.
 func nodeRoles(nodeRecord *storage.EnrolledNode, bindings []*api.PolicyBinding) ([]string, error) {
@@ -2128,7 +2141,7 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
-		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(s.config.BiscuitTTL), policyRoles, req.Labels)
+		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(s.config.BiscuitTTL), s.mintRoles(ctx, policyRoles, []string{tokenRecord.Role}, req.Labels), req.Labels)
 		if err != nil {
 			logger.Errorf("Failed to mint bootstrap biscuit: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -2740,7 +2753,7 @@ func (s *Server) HandleAdminEnrollmentAction(w http.ResponseWriter, r *http.Requ
 			return
 		}
 
-		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(s.config.BiscuitTTL), policyRoles, enrollReq.Labels)
+		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(s.config.BiscuitTTL), s.mintRoles(ctx, policyRoles, []string{tokenRecord.Role}, enrollReq.Labels), enrollReq.Labels)
 		if err != nil {
 			logger.Errorf("Failed to mint bootstrap biscuit: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -3019,7 +3032,7 @@ func (s *Server) remintApprovedBootstrapBiscuit(ctx context.Context, existingReq
 
 	biscuitExpiry := time.Now().Add(s.config.BiscuitTTL)
 	allowedLabels := filterAllowedLabels(allowedLabelPatterns(s.nodeRoles(ctx, nodeRecord), policyRoles), nodeRecord.Labels)
-	biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, nodeRecord.Role, biscuitExpiry, policyRoles, allowedLabels)
+	biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, nodeRecord.Role, biscuitExpiry, s.mintRoles(ctx, policyRoles, []string{nodeRecord.Role}, allowedLabels), allowedLabels)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to mint refreshed bootstrap biscuit: %w", err)
 	}
@@ -3557,6 +3570,11 @@ func validatePolicyConfig(req *api.PolicyConfig) error {
 				return fmt.Errorf("in role %s: %w", r.Name, err)
 			}
 		}
+		for _, svc := range r.AllowedPublish {
+			if err := api.ValidateServiceFormat(svc); err != nil {
+				return fmt.Errorf("invalid allowed_publish %q in role %s: %w", svc, r.Name, err)
+			}
+		}
 		if err := api.ValidateHTTPGrants(r.Http, r.AllowedServices); err != nil {
 			return fmt.Errorf("in role %s: %w", r.Name, err)
 		}
@@ -3577,6 +3595,7 @@ func validatePolicyConfig(req *api.PolicyConfig) error {
 		// sum each role's contribution rather than relying on assumptions about
 		// which roles are mutually exclusive for a given identity.
 		factBudget += len(api.BuildServiceDatalogFacts(r.AllowedServices))
+		factBudget += len(api.BuildPublishDatalogFacts(r.AllowedPublish))
 		factBudget += len(api.BuildTargetDatalogFacts(r.AllowedTargets))
 		factBudget += len(r.CustomDatalog)
 		for _, g := range r.Http {

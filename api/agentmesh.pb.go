@@ -2275,9 +2275,17 @@ type PolicyRole struct {
 	// declaration into something the control plane is willing to sign.
 	AllowedLabels []string `protobuf:"bytes,5,rep,name=allowed_labels,json=allowedLabels,proto3" json:"allowed_labels,omitempty"`
 	// HTTP narrowing of allowed_services entries; see HTTPGrant.
-	Http          []*HTTPGrant `protobuf:"bytes,6,rep,name=http,proto3" json:"http,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Http []*HTTPGrant `protobuf:"bytes,6,rep,name=http,proto3" json:"http,omitempty"`
+	// Services a member with this role may serve, in the syntax of
+	// allowed_services ("mcp://calc", "inference://*", "*"). A role serves
+	// nothing it is not granted here: a router keeps a member's record only
+	// for a service its credential grants, and a caller sends a request to
+	// a provider it found by name only when the provider's credential does.
+	// An egress destination needs no entry: served_by grants it to the
+	// nodes it selects.
+	AllowedPublish []string `protobuf:"bytes,7,rep,name=allowed_publish,json=allowedPublish,proto3" json:"allowed_publish,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *PolicyRole) Reset() {
@@ -2348,6 +2356,13 @@ func (x *PolicyRole) GetAllowedLabels() []string {
 func (x *PolicyRole) GetHttp() []*HTTPGrant {
 	if x != nil {
 		return x.Http
+	}
+	return nil
+}
+
+func (x *PolicyRole) GetAllowedPublish() []string {
+	if x != nil {
+		return x.AllowedPublish
 	}
 	return nil
 }
@@ -6127,7 +6142,7 @@ const file_api_agentmesh_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12;\n" +
 	"\vexpire_time\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"expireTime\"\xef\x01\n" +
+	"expireTime\"\x98\x02\n" +
 	"\n" +
 	"PolicyRole\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
@@ -6135,7 +6150,8 @@ const file_api_agentmesh_proto_rawDesc = "" +
 	"\x10allowed_services\x18\x03 \x03(\tR\x0fallowedServices\x12%\n" +
 	"\x0ecustom_datalog\x18\x04 \x03(\tR\rcustomDatalog\x12%\n" +
 	"\x0eallowed_labels\x18\x05 \x03(\tR\rallowedLabels\x12+\n" +
-	"\x04http\x18\x06 \x03(\v2\x17.agentmesh.v1.HTTPGrantR\x04http\"U\n" +
+	"\x04http\x18\x06 \x03(\v2\x17.agentmesh.v1.HTTPGrantR\x04http\x12'\n" +
+	"\x0fallowed_publish\x18\a \x03(\tR\x0eallowedPublish\"U\n" +
 	"\tHTTPGrant\x12\x18\n" +
 	"\aservice\x18\x01 \x01(\tR\aservice\x12\x18\n" +
 	"\amethods\x18\x02 \x03(\tR\amethods\x12\x14\n" +

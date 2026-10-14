@@ -52,7 +52,7 @@ api POST /policies -H "Content-Type: application/json" -d '{
   "roles": [
     {"name": "mesh-admin", "allowed_services": ["*"], "allowed_targets": ["*"]},
     {"name": "mesh:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]},
-    {"name": "mesh:role:node", "allowed_services": ["mcp://*", "system://mesh.catalog"], "allowed_targets": ["*"]}
+    {"name": "mesh:role:node", "allowed_services": ["mcp://*", "system://mesh.catalog"], "allowed_publish": ["mcp://*"], "allowed_targets": ["*"]}
   ],
   "bindings": [
     {"role": "mesh:role:router", "members": ["group:routers"]},

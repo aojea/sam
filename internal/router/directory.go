@@ -31,6 +31,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/identity"
 )
 
 const (
@@ -60,13 +61,14 @@ const (
 	directoryResultOK      = "ok"
 	directoryResultEmpty   = "empty"
 	directoryResultInvalid = "invalid"
+	directoryResultDenied  = "denied"
 	directoryResultError   = "error"
 )
 
 var directoryRequestsTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "agentmesh_router_directory_requests_total",
-		Help: "Directory requests served to members and routers, by operation and result; place is a record or withdrawal another router put here, lookup a find another router ran here",
+		Help: "Directory requests served to members and routers, by operation and result; denied is a record for a service the member's credential does not grant; place is a record or withdrawal another router put here, lookup a find another router ran here",
 	},
 	[]string{"op", "result"},
 )
@@ -98,7 +100,7 @@ var directoryLookupsTotal = promauto.NewCounterVec(
 
 func init() {
 	for _, op := range []string{directoryOpProvide, directoryOpWithdraw, directoryOpFindProviders, directoryOpFindPeer, directoryOpPlace, directoryOpLookup} {
-		for _, result := range []string{directoryResultOK, directoryResultEmpty, directoryResultInvalid, directoryResultError} {
+		for _, result := range []string{directoryResultOK, directoryResultEmpty, directoryResultInvalid, directoryResultDenied, directoryResultError} {
 			directoryRequestsTotal.WithLabelValues(op, result)
 		}
 	}
@@ -203,12 +205,17 @@ var errInvalidDirectoryRequest = errors.New("request is not provide, withdraw, f
 
 // directoryRefused answers a request the router did not run, and says why
 // at the level the cause deserves: a malformed request is the peer's
-// doing, a failed lookup is the mesh's.
+// doing, a record its credential does not grant is a policy decision, a
+// failed lookup is the mesh's.
 func (r *Router) directoryRefused(op string, remote peer.ID, err error) *api.DirectoryResponse {
 	var invalid *directoryInvalidError
+	var denied *directoryDeniedError
 	if errors.As(err, &invalid) {
 		directoryRequestsTotal.WithLabelValues(op, directoryResultInvalid).Inc()
 		logger.Warnf("[Directory] Refusing %s from %s: %v", op, remote, err)
+	} else if errors.As(err, &denied) {
+		directoryRequestsTotal.WithLabelValues(op, directoryResultDenied).Inc()
+		logger.Warnw("[Directory] Record denied", "op", op, "peer_id", remote.String(), "service", denied.service, "reason", denied.err.Error())
 	} else {
 		directoryRequestsTotal.WithLabelValues(op, directoryResultError).Inc()
 		logger.Warnf("[Directory] %s from %s failed: %v", op, remote, err)
@@ -224,6 +231,39 @@ func (e *directoryInvalidError) Unwrap() error { return e.err }
 
 func invalidDirectoryRequest(format string, args ...any) error {
 	return &directoryInvalidError{err: fmt.Errorf(format, args...)}
+}
+
+// directoryDeniedError is a record for a service the member's credential
+// does not grant serving.
+type directoryDeniedError struct {
+	service string
+	err     error
+}
+
+func (e *directoryDeniedError) Error() string { return e.err.Error() }
+func (e *directoryDeniedError) Unwrap() error { return e.err }
+
+// requirePublish checks the admitted member's credential grants serving
+// the service a record names. A record under the member's own peer key
+// names no service and needs no grant: a member may always say where it
+// is reached.
+func (r *Router) requirePublish(provider peer.ID, svcType api.ServiceType, svcName string) error {
+	if svcName == "" {
+		return nil
+	}
+	typeStr, err := api.ServiceTypeToString(svcType)
+	if err != nil {
+		return invalidDirectoryRequest("%w", err)
+	}
+	v, ok := r.credentials.Load(provider)
+	if !ok {
+		return &directoryDeniedError{service: typeStr + "://" + svcName, err: errors.New("no credential held for the member")}
+	}
+	cred := v.(memberCredential)
+	if err := identity.RequirePublish(cred.biscuit, cred.key, typeStr, svcName, r.config.BiscuitTimeout); err != nil {
+		return &directoryDeniedError{service: typeStr + "://" + svcName, err: err}
+	}
+	return nil
 }
 
 // recordProvider is whose record a provide or withdraw is about: the
@@ -259,10 +299,15 @@ func (r *Router) directoryProvide(ctx context.Context, remote peer.ID, q *api.Di
 		return nil, invalidDirectoryRequest("%w", err)
 	}
 	if !placed {
-		// The member's own router checks what the record is about; a placed
-		// copy was checked by the router that holds the member.
-		if _, _, err := api.ServiceOfRecord(provider, q.GetKey(), q.GetService()); err != nil {
+		// The member's own router checks what the record is about and that
+		// the member may serve it; a placed copy was checked by the router
+		// that holds the member.
+		svcType, svcName, err := api.ServiceOfRecord(provider, q.GetKey(), q.GetService())
+		if err != nil {
 			return nil, invalidDirectoryRequest("%w", err)
+		}
+		if err := r.requirePublish(provider, svcType, svcName); err != nil {
+			return nil, err
 		}
 	}
 	if r.records == nil {

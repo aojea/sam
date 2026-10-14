@@ -93,9 +93,10 @@ gateway_ip() {
 # deploy_chart [extra --set flags]: later flags win, so phase 2 overrides phase 1.
 # TLS verification is skipped because one issuer is the kind cluster's own API server,
 # served with a self-signed cert.
-# bootstrap.nodeServices is fail closed by default; this is a local dev mesh whose
-# nodes host whatever example service is being tested, so grant them everything
-# explicitly here rather than weakening the chart default.
+# bootstrap.nodeServices and bootstrap.nodePublish are fail closed by default;
+# this is a local dev mesh whose nodes host whatever example service is being
+# tested, so grant them everything explicitly here rather than weakening the
+# chart default.
 deploy_chart() {
   "${HELM}" --kube-context "${KCTX}" upgrade --install agentmesh "${PROJECT_ROOT}/charts/agentmesh" --timeout 10m \
     --namespace "${NAMESPACE}" \
@@ -104,6 +105,7 @@ deploy_chart() {
     --set controlPlane.allowedAudiences="${ALLOWED_AUDIENCES//,/\\,}" \
     --set controlPlane.insecureSkipTlsVerify=true \
     --set 'bootstrap.nodeServices={*}' \
+    --set 'bootstrap.nodePublish={*}' \
     --set 'bootstrap.nodeLabels={*}' \
     --set 'bootstrap.nodeMembers={mesh:system:authenticated}' \
     --set gateway.enabled=true \

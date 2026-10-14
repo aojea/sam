@@ -536,7 +536,7 @@ func defaultDevPolicyRoles() []*api.PolicyRole {
 	return []*api.PolicyRole{
 		{Name: "mesh-admin", AllowedServices: []string{"*"}, AllowedTargets: []string{"*"}},
 		{Name: api.RoleRouter, AllowedServices: []string{"*"}, AllowedTargets: []string{"*"}},
-		{Name: api.RoleNode, AllowedServices: []string{"*"}, AllowedTargets: []string{"*"}, AllowedLabels: []string{"*"}},
+		{Name: api.RoleNode, AllowedServices: []string{"*"}, AllowedPublish: []string{"*"}, AllowedTargets: []string{"*"}, AllowedLabels: []string{"*"}},
 	}
 }
 

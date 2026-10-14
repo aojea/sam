@@ -11,6 +11,14 @@ export const BASELINE_DATALOG = {
     "allow if service($type, $name), granted_service_all($type)",
     "allow if service($type, $name), granted_service_all_types(true)"
   ],
+  "publish_policies": [
+    "allow if publish($type, $name), granted_publish_exact($type, $name)",
+    "allow if publish($type, $name), granted_publish_set($type, $set), $set.contains($name)",
+    "allow if publish($type, $name), granted_publish_prefix($type, $prefix), $name.starts_with($prefix)",
+    "allow if publish($type, $name), granted_publish_suffix($type, $suffix), $name.ends_with($suffix)",
+    "allow if publish($type, $name), granted_publish_all($type)",
+    "allow if publish($type, $name), granted_publish_all_types(true)"
+  ],
   "rules": [
     "allow_network_target($fact, $val) <- target_fact($fact, $val), granted_target_exact($fact, $val)",
     "allow_network_target($fact, $val) <- target_fact($fact, $val), granted_target_set($fact, $set), $set.contains($val)",
@@ -52,6 +60,8 @@ export const BASELINE_DATALOG = {
   "fact_time": "time",
   "fact_role": "role",
   "fact_target_fact": "target_fact",
+  "fact_publish": "publish",
+  "catalog_target": "mesh.catalog",
   "fact_tar_block": "tar_block",
   "tar_block_source_pattern": "^tar_block\\(\"([A-Za-z0-9_-]+)\"\\);?\\s*$",
   "http_method_syntax": "^[A-Z][A-Z0-9-]{0,31}$",

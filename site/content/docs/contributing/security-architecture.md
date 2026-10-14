@@ -605,3 +605,14 @@ response directly).
    a router's routing table admits authenticated peer routers only. A
    directory lookup and a gossip subscription are mesh data, so this covers
    reads as much as writes.
+8. A member serves only what its credential grants. `PolicyRole.allowed_publish`
+   is minted as `granted_publish_*` facts, the dual of `allowed_services`, and
+   `api.PublishPolicies` decide them over a `publish(type, name)` fact. The
+   router a member announces a directory record to checks the grant against
+   the credential it holds from the handshake and refuses the record otherwise
+   (`result="denied"`); every caller, `agentmesh-node` and both SDKs, checks it
+   on the provider's credential before sending a request for a named service,
+   so a record is never trusted for who may serve a name. A member's own record
+   under its peer ID and the catalog name no service. A delegated credential
+   grants publishing nothing. An egress destination's `served_by` is its
+   publish grant, minted with the destination.

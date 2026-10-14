@@ -21,6 +21,7 @@ import {
   AuthResponseSchema,
   MemberCredentialSchema,
   TaskAuthorizationRuleSchema,
+  type AuthFrame,
   type AuthResponse,
   type OIDCSession,
 } from "./gen/agentmesh_pb.ts";
@@ -120,6 +121,11 @@ export function encodeAuthFrame(biscuit: Uint8Array, targetService = ""): Uint8A
 }
 
 /** The peer's answer to an AuthResponse, carrying its own biscuit on success. */
+/** Reads back an AuthFrame this member built (encodeAuthFrame). */
+export function decodeAuthFrame(bytes: Uint8Array): AuthFrame {
+  return fromBinary(AuthFrameSchema, bytes);
+}
+
 export function decodeAuthResponse(bytes: Uint8Array): AuthResponse {
   return fromBinary(AuthResponseSchema, bytes);
 }

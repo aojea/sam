@@ -115,7 +115,7 @@ func a2aEgressGate(node *AgentMeshNode, w http.ResponseWriter, r *http.Request, 
 			http.Error(w, "Invalid peer ID", http.StatusBadRequest)
 			return r, false
 		}
-		if err := node.VerifyPeerLabels(r.Context(), pid, required); err != nil {
+		if err := node.VerifyProvider(r.Context(), pid, required, route.serviceType+"://"+route.serviceName); err != nil {
 			logger.Warnf("[A2A] label gate refused egress to %s: %v", route.peerID, err)
 			text, status := labelGateStatus(err, "Required labels not attested by provider")
 			http.Error(w, text, status)

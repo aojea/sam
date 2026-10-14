@@ -44,13 +44,27 @@ from .test_session import CP, CP_KEY, libp2p_host
 FIXTURE = json.loads((Path(__file__).resolve().parents[2] / "testdata" / "service_keys.json").read_text())
 
 
-def mint(peer_id: str, role: str, labels: dict[str, str] | None = None) -> bytes:
+def mint(peer_id: str, role: str, labels: dict[str, str] | None = None, publish: tuple[str, ...] = ("mcp://calc",)) -> bytes:
+    """A credential as the control plane issues one to a member whose role
+    grants publishing the given services (allowed_publish syntax, as
+    granted_publish_* facts); a provider's needs the grant for what it serves."""
     code = "node({p}); expiration(2035-01-01T00:00:00Z); role({r});"
     params = {"p": peer_id, "r": role}
     for i, (k, v) in enumerate((labels or {}).items()):
         code += f" label({{k{i}}}, {{v{i}}});"
         params[f"k{i}"] = k
         params[f"v{i}"] = v
+    for i, svc in enumerate(publish):
+        scheme, sep, name = svc.partition("://")
+        if not sep:
+            code += " granted_publish_all_types(true);"
+        elif name == "*":
+            code += f" granted_publish_all({{pt{i}}});"
+            params[f"pt{i}"] = scheme
+        else:
+            code += f" granted_publish_exact({{pt{i}}}, {{pn{i}}});"
+            params[f"pt{i}"] = scheme
+            params[f"pn{i}"] = name
     return ba.BiscuitBuilder(code, params).build(CP.private_key).to_bytes()
 
 
@@ -129,10 +143,10 @@ def mcp_stream_handler(provider_biscuit: bytes, served: list[str]):
     return handle
 
 
-async def start_provider(nursery, labels=None, role=ROLE_NODE):
+async def start_provider(nursery, labels=None, role=ROLE_NODE, publish=("mcp://calc",)):
     identity = Identity.generate()
     host = libp2p_host(identity)
-    biscuit = mint(identity.peer_id, role, labels)
+    biscuit = mint(identity.peer_id, role, labels, publish)
     served: list[str] = []
     host.set_stream_handler(MCP_PROTOCOL, mcp_stream_handler(biscuit, served))
     started = trio.Event()
@@ -235,6 +249,23 @@ def test_tools_over_the_mesh_stream():
                 with pytest.raises(AuthRejectedError, match="lacks expected role 'mesh:role:node'"):
                     async with open_mcp_session(caller, router.get_id(), frame(caller_biscuit, "mcp://calc"), [CP_KEY], egress_require_labels={"region": "eu"}):
                         pass
+
+                # Only a node granted the service is its provider, as agentmesh-node's
+                # checkProvider requires: the directory names whoever announced calc,
+                # the credential says who may serve it. A grant by type or for
+                # everything serves too; the provider's own catalog needs none.
+                for publish, ok in ((("mcp://weather",), False), ((), False), (("mcp://*",), True), (("*",), True)):
+                    other, other_addr, _ = await start_provider(nursery, publish=publish)
+                    await caller.connect(info_from_p2p_addr(other_addr))
+                    if ok:
+                        async with open_mcp_session(caller, other.get_id(), frame(caller_biscuit, "mcp://calc"), [CP_KEY]):
+                            pass
+                    else:
+                        with pytest.raises(AuthRejectedError, match="is not granted serving mcp://calc"):
+                            async with open_mcp_session(caller, other.get_id(), frame(caller_biscuit, "mcp://calc"), [CP_KEY]):
+                                pass
+                        async with open_mcp_session(caller, other.get_id(), frame(caller_biscuit, ""), [CP_KEY]):
+                            pass
             nursery.cancel_scope.cancel()
 
     async def with_timeout():

@@ -122,6 +122,44 @@ func TestCheckPeerLabels(t *testing.T) {
 			t.Errorf("a node's biscuit with no requirement must pass: %v", err)
 		}
 	})
+
+	// A call that names a service is sent only to a provider whose credential
+	// grants serving it, whatever the directory said; a call that names none
+	// (the peer's catalog) needs no grant.
+	t.Run("the provider must be granted the service the call names", func(t *testing.T) {
+		mintPublish := func(publish ...string) []byte {
+			role := &api.PolicyRole{Name: api.RoleNode, AllowedPublish: publish}
+			b, err := identity.MintBootstrapBiscuitToken(cpPriv, providerPeer, api.RoleNode, expiry, []*api.PolicyRole{role}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return b
+		}
+		for name, tc := range map[string]struct {
+			publish []string
+			service string
+			wantErr bool
+		}{
+			"granted by name":            {publish: []string{"mcp://calc"}, service: "mcp://calc"},
+			"granted by type":            {publish: []string{"mcp://*"}, service: "mcp://calc"},
+			"granted everything":         {publish: []string{"*"}, service: "inference://llm"},
+			"another service":            {publish: []string{"mcp://calc"}, service: "mcp://weather", wantErr: true},
+			"another type":               {publish: []string{"mcp://*"}, service: "inference://calc", wantErr: true},
+			"no grant at all":            {publish: nil, service: "mcp://calc", wantErr: true},
+			"no grant, no service named": {publish: nil, service: ""},
+			"a service that is not one":  {publish: []string{"*"}, service: "calc", wantErr: true},
+		} {
+			t.Run(name, func(t *testing.T) {
+				err := node.checkProvider(mintPublish(tc.publish...), providerPeer, nil, tc.service)
+				if (err != nil) != tc.wantErr {
+					t.Fatalf("checkProvider(%v, %q) = %v, wantErr %v", tc.publish, tc.service, err, tc.wantErr)
+				}
+				if tc.wantErr && tc.service != "calc" && !errors.Is(err, ErrProviderNotGranted) {
+					t.Fatalf("err = %v, want ErrProviderNotGranted so the caller is told the provider is enrolled and not granted", err)
+				}
+			})
+		}
+	})
 }
 
 // The egress floor is the operator's, and a caller cannot waive it by asking

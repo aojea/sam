@@ -40,7 +40,7 @@ from .auth import (
     AuthRejectedError,
     read_bounded_varint_prefixed_bytes,
 )
-from .biscuit import BiscuitVerificationError, VerifiedBiscuit, require_role, verify_peer_biscuit
+from .biscuit import BiscuitVerificationError, VerifiedBiscuit, require_publish, require_role, verify_peer_biscuit
 from .controlplane import ROLE_NODE
 from .host import open_stream
 
@@ -132,6 +132,8 @@ async def open_mcp_session(
             provider = verify_peer_biscuit(resp.biscuit, str(peer_id), trusted_keys)
             # Only nodes host services; a router's or an admin's credential is a member, not a provider.
             require_role(provider, ROLE_NODE)
+            # And only a node the policy lets serve the named service is one.
+            require_publish(provider, pb.AuthFrame.FromString(frame).target_service)
         except BiscuitVerificationError as err:
             raise AuthRejectedError(str(peer_id), f"provider credential rejected: {err}") from err
         require_labels(provider, required_labels)

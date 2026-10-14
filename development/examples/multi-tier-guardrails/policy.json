@@ -9,6 +9,7 @@
         "mcp://orders-db",
         "egress://api.github.com"
       ],
+      "allowed_publish": ["a2a://support.acme", "inference://office-llm", "mcp://orders-db"],
       "allowed_targets": ["*"],
       "allowed_labels": [
         "env=staging",

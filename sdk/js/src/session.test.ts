@@ -70,6 +70,10 @@ function mint(peerId: string, role: string, expiration = "2035-01-01T00:00:00Z",
   b.addFact(wasm.Fact.fromString(`client_peer_id(${JSON.stringify(peerId)})`));
   b.addFact(wasm.Fact.fromString(`expiration(${expiration})`));
   b.addFact(wasm.Fact.fromString(`role(${JSON.stringify(role)})`));
+  if (role === ROLE_NODE) {
+    // The node role of these meshes serves everything.
+    b.addFact(wasm.Fact.fromString("granted_publish_all_types(true)"));
+  }
   for (const [k, v] of Object.entries(labels)) {
     b.addFact(wasm.Fact.fromString(`label(${JSON.stringify(k)}, ${JSON.stringify(v)})`));
   }

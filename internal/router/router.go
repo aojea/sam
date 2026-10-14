@@ -32,6 +32,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/eclipse-biscuit/biscuit-go/v2"
 	"github.com/google/agentmesh/api"
 	cpclient "github.com/google/agentmesh/internal/controlplane/client"
 	"github.com/google/agentmesh/internal/identity"
@@ -243,11 +244,18 @@ func (r *Router) admitPeer(p peer.ID, expiry time.Time) {
 	}
 }
 
+// memberCredential is a verified credential and the key that verified it.
+type memberCredential struct {
+	biscuit *biscuit.Biscuit
+	key     ed25519.PublicKey
+}
+
 // forgetPeer is the reverse of admitPeer, and drops the circuit addresses
 // recordReservation put in the peerstore: the relay drops the reservation
 // with the connection.
 func (r *Router) forgetPeer(p peer.ID) {
 	r.authenticatedPeers.Delete(p)
+	r.credentials.Delete(p)
 	if r.Host != nil {
 		r.Host.ConnManager().UntagPeer(p, memberTag)
 		r.Host.Peerstore().UpdateAddrs(p, r.reservationTTL(), 0)
@@ -331,7 +339,10 @@ type Router struct {
 	PubSub             *pubsub.PubSub
 	EventTopic         *pubsub.Topic
 	authenticatedPeers sync.Map
-	bannedPeers        sync.Map
+	// credentials is the credential each admitted member presented, as
+	// memberCredential, for what the directory checks against it.
+	credentials sync.Map
+	bannedPeers sync.Map
 	// directory is how the mesh keeps its directory, read from /info at
 	// start (syncDirectory); records is the records this router holds.
 	directory api.DirectorySettings
@@ -1619,6 +1630,7 @@ func (r *Router) HandleAuthHandshake(s network.Stream) {
 	}
 
 	r.admitPeer(remotePeer, expiry)
+	r.credentials.Store(remotePeer, memberCredential{biscuit: b, key: verifyingKey})
 	authHandshakesTotal.WithLabelValues(handshakeOK).Inc()
 	logger.Infof("[AuthN] Successfully authenticated peer %s", remotePeer)
 	// A router that proves the router role is a peer router from here on,

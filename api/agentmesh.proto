@@ -351,6 +351,14 @@ message PolicyRole {
   repeated string allowed_labels = 5;
   // HTTP narrowing of allowed_services entries; see HTTPGrant.
   repeated HTTPGrant http = 6;
+  // Services a member with this role may serve, in the syntax of
+  // allowed_services ("mcp://calc", "inference://*", "*"). A role serves
+  // nothing it is not granted here: a router keeps a member's record only
+  // for a service its credential grants, and a caller sends a request to
+  // a provider it found by name only when the provider's credential does.
+  // An egress destination needs no entry: served_by grants it to the
+  // nodes it selects.
+  repeated string allowed_publish = 7;
 }
 
 // HTTPGrant narrows one allowed_services entry to HTTP methods and paths.

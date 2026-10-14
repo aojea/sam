@@ -429,7 +429,7 @@ func handleConnectTunnel(node *AgentMeshNode, w http.ResponseWriter, r *http.Req
 		if decErr != nil {
 			continue
 		}
-		if err := node.VerifyPeerLabels(r.Context(), targetPeer, requiredLabels); err != nil {
+		if err := node.VerifyProvider(r.Context(), targetPeer, requiredLabels, api.ServiceTypeStringEgress+"://"+host); err != nil {
 			logger.Warnf("[Egress] CONNECT label gate refused egress to %s: %v", targetPeer, err)
 			denied = denied || !errors.Is(err, ErrProviderUnreachable)
 			continue

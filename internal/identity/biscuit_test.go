@@ -764,3 +764,61 @@ func TestVerifyBiscuitAndGetExpiry(t *testing.T) {
 		t.Error("token bound to another peer admitted")
 	}
 }
+
+// A role's allowed_publish is minted as granted_publish_* facts, which
+// RequirePublish decides with api.PublishPolicies: the same patterns as
+// allowed_services, and the same matching. A delegated subject gets none:
+// it is a caller the actor speaks for, not a member that serves.
+func TestMintBiscuitToken_PublishFacts(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := peer.ID("publisher")
+	roles := []*api.PolicyRole{{Name: "publisher", AllowedPublish: []string{"mcp://calc", "mcp://weather", "inference://*", "a2a://*.agents", "mcp://tools.*"}}}
+	data, err := MintBootstrapBiscuitToken(priv, p, "publisher", time.Now().Add(time.Hour), roles, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := biscuit.Unmarshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		svcType, svcName string
+		granted          bool
+	}{
+		{"mcp", "calc", true},
+		{"mcp", "weather", true},
+		{"mcp", "clock", false},
+		{"inference", "anything", true},
+		{"a2a", "helper.agents", true},
+		{"a2a", "helper", false},
+		{"mcp", "tools.v2", true},
+		{"mcp", "tools", false},
+		{"egress", "api.github.com", false},
+	} {
+		err := RequirePublish(b, pub, tc.svcType, tc.svcName, testTimeout)
+		if (err == nil) != tc.granted {
+			t.Errorf("RequirePublish(%s://%s) = %v, want granted %v", tc.svcType, tc.svcName, err, tc.granted)
+		}
+	}
+
+	none, err := MintBootstrapBiscuitToken(priv, p, "publisher", time.Now().Add(time.Hour), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nb, _ := biscuit.Unmarshal(none)
+	if err := RequirePublish(nb, pub, "mcp", "calc", testTimeout); err == nil {
+		t.Error("a credential minted under no policy role grants publishing nothing")
+	}
+
+	delegated, err := MintDelegatedBiscuitToken(priv, jwt.MapClaims{"sub": "user"}, p, time.Now().Add(time.Hour), []string{"publisher"}, roles, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, _ := biscuit.Unmarshal(delegated)
+	if err := RequirePublish(db, pub, "mcp", "calc", testTimeout); err == nil {
+		t.Error("a delegated credential grants publishing nothing")
+	}
+}

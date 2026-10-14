@@ -40,9 +40,10 @@ if TYPE_CHECKING:
 _REQUEST_TIMEOUT = 60.0
 
 
-def split_mesh_url(url: httpx.URL) -> tuple[str, str]:
-    """(peer ID, request target) of a mesh URL; the target is the
-    /<type>/<name>/<path>?<query> the peer's ingress takes."""
+def split_mesh_url(url: httpx.URL) -> tuple[str, str, str]:
+    """(peer ID, service, request target) of a mesh URL: the service is
+    "<type>://<name>", the target the /<type>/<name>/<path>?<query> the
+    peer's ingress takes."""
     raw = url.raw_path.decode("latin-1")
     path, _, query = raw.partition("?")
     if not path.startswith(MESH_PATH_PREFIX):
@@ -51,7 +52,7 @@ def split_mesh_url(url: httpx.URL) -> tuple[str, str]:
     parts = rest.split("/")
     if not peer_id or len(parts) < 2 or not parts[0] or not parts[1]:
         raise httpx.UnsupportedProtocol(f"a mesh URL names a peer, a service type and a name, got {url}")
-    return peer_id, "/" + rest + (f"?{query}" if query else "")
+    return peer_id, f"{parts[0]}://{parts[1]}", "/" + rest + (f"?{query}" if query else "")
 
 
 class _BodyStream(httpx.AsyncByteStream):
@@ -76,8 +77,8 @@ class MeshTransport(httpx.AsyncBaseTransport):
         self._timeout = timeout
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        peer_text, target = split_mesh_url(request.url)
-        peer_id = await self._session._egress_peer(peer_text)  # noqa: SLF001 - the session's verified egress path, not a caller option
+        peer_text, service, target = split_mesh_url(request.url)
+        peer_id = await self._session._egress_peer(peer_text, service)  # noqa: SLF001 - the session's verified egress path, not a caller option
         body = await request.aread()
         headers = {k.decode("latin-1"): v.decode("latin-1") for k, v in request.headers.raw}
         biscuit = getattr(self._session, "biscuit", None) or self._session.mesh.credential.biscuit

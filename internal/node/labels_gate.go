@@ -99,6 +99,11 @@ const (
 // is the mesh's state and a caller may retry it; the second is a verdict.
 var ErrProviderUnreachable = errors.New("provider unreachable")
 
+// ErrProviderNotGranted marks a provider whose credential does not grant
+// serving the service the call names: it is enrolled and reachable, and
+// not who the policy says serves that name.
+var ErrProviderNotGranted = errors.New("provider not granted the service")
+
 // How reaching a provider for its credential went; the label values of
 // providerReachTotal. The caller sees one 502 for all of the failures, so
 // the counter tells them apart: the relay refusing the circuit, the dial
@@ -198,19 +203,29 @@ func (n *AgentMeshNode) egressFloor() map[string]string {
 	return n.nodeConfig.EgressRequireLabels
 }
 
-// VerifyPeerLabels ensures the peer holds control-plane-attested labels
+// VerifyPeerLabels is VerifyProvider for a peer reached for no named
+// service: its catalog, or a call that names the peer alone.
+func (n *AgentMeshNode) VerifyPeerLabels(ctx context.Context, peerID peer.ID, required map[string]string) error {
+	return n.VerifyProvider(ctx, peerID, required, "")
+}
+
+// VerifyProvider ensures the peer is a provider this node may send a request
+// to: it holds a control-plane-attested credential bound to it, with labels
 // satisfying every pair of the caller's requirement and every pair of the
-// operator's egress floor. Positive verdicts are cached.
+// operator's egress floor, and, when the call names a service
+// ("<type>://<name>"), one that grants serving it: a member that announced a
+// name it may not serve is refused here whatever the directory says.
+// Positive verdicts are cached.
 //
 // The gate runs whenever either exists. A caller that requires nothing is
 // still held to the floor — the whole point of a floor is that the party being
 // constrained does not get to opt out of it by saying nothing.
-func (n *AgentMeshNode) VerifyPeerLabels(ctx context.Context, peerID peer.ID, required map[string]string) error {
+func (n *AgentMeshNode) VerifyProvider(ctx context.Context, peerID peer.ID, required map[string]string, service string) error {
 	floor := n.egressFloor()
 	// No early return for an empty requirement: with nothing to attest this
 	// still verifies that the peer holds a control-plane-signed biscuit bound
 	// to it, which is what makes a discovered peer a provider at all.
-	key := labelGateKey(peerID, required, floor)
+	key := labelGateKey(peerID, required, floor) + "=svc=" + service
 	if until, ok := n.peerLabelGate.Get(key); ok && time.Now().Before(until) {
 		return nil
 	}
@@ -221,7 +236,7 @@ func (n *AgentMeshNode) VerifyPeerLabels(ctx context.Context, peerID peer.ID, re
 		return fmt.Errorf("provider %s labels unverifiable: %w: %w", peerID, ErrProviderUnreachable, err)
 	}
 	providerReachTotal.WithLabelValues(reachOK).Inc()
-	if err := n.checkPeerLabels(providerBiscuit, peerID, required); err != nil {
+	if err := n.checkProvider(providerBiscuit, peerID, required, service); err != nil {
 		return err
 	}
 
@@ -229,10 +244,16 @@ func (n *AgentMeshNode) VerifyPeerLabels(ctx context.Context, peerID peer.ID, re
 	return nil
 }
 
-// checkPeerLabels verifies the provider's biscuit (control-plane signature,
-// expiry, binding to peerID) and evaluates the caller's requirement and the
-// operator's egress floor against its attested facts.
+// checkPeerLabels is checkProvider for no named service.
 func (n *AgentMeshNode) checkPeerLabels(providerBiscuit []byte, peerID peer.ID, required map[string]string) error {
+	return n.checkProvider(providerBiscuit, peerID, required, "")
+}
+
+// checkProvider verifies the provider's biscuit (control-plane signature,
+// expiry, binding to peerID) and evaluates the caller's requirement, the
+// operator's egress floor and, for a named service, the publish grant
+// against its attested facts.
+func (n *AgentMeshNode) checkProvider(providerBiscuit []byte, peerID peer.ID, required map[string]string, service string) error {
 	floor := n.egressFloor()
 	if len(providerBiscuit) == 0 {
 		return fmt.Errorf("provider %s returned no identity biscuit; not an enrolled peer (required labels %v, egress floor %v)", peerID, required, floor)
@@ -285,6 +306,16 @@ func (n *AgentMeshNode) checkPeerLabels(providerBiscuit []byte, peerID peer.ID, 
 			return fmt.Errorf("provider %s does not attest every label of the caller requirement %v and the egress floor %v: %w", peerID, required, floor, err)
 		}
 		return fmt.Errorf("provider %s does not attest every label of %v: %w", peerID, required, err)
+	}
+	if service != "" && service != "system://"+api.CatalogTarget {
+		// The catalog is every node's own and names no published service.
+		svcType, svcName := api.ParseServiceTarget(service)
+		if svcType == "" || svcName == "" {
+			return fmt.Errorf("service %q must be <type>://<name>", service)
+		}
+		if err := identity.RequirePublish(b, key, svcType, svcName, n.BiscuitTimeout); err != nil {
+			return fmt.Errorf("%w: %w", ErrProviderNotGranted, err)
+		}
 	}
 	return nil
 }

@@ -118,9 +118,9 @@ spec:
             -d '{
               "roles": [
                 {"name": "mesh-admin", "allowed_services": ["*"], "allowed_targets": ["*"]},
-                {"name": "mesh:role:agentmesh-box", "allowed_services": ["*"], "allowed_targets": ["*"]},
+                {"name": "mesh:role:agentmesh-box", "allowed_services": ["*"], "allowed_publish": ["*"], "allowed_targets": ["*"]},
                 {"name": "mesh:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]},
-                {"name": "mesh:role:node", "allowed_services": {{ toJson .Values.bootstrap.nodeServices }}, "allowed_targets": ["*"], "allowed_labels": {{ toJson .Values.bootstrap.nodeLabels }}}
+                {"name": "mesh:role:node", "allowed_services": {{ toJson .Values.bootstrap.nodeServices }}, "allowed_publish": {{ toJson .Values.bootstrap.nodePublish }}, "allowed_targets": ["*"], "allowed_labels": {{ toJson .Values.bootstrap.nodeLabels }}}
               ],
               "bindings": {{ toJson $bindings }}
             }' \

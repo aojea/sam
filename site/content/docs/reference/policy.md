@@ -18,6 +18,7 @@ back from `GET /admin/policy`, edited in the console, or given to
     {
       "name": "mesh:role:node",
       "allowed_services": ["system://mesh.catalog"],
+      "allowed_publish": ["mcp://code-reviewer", "mcp://build-runner.*", "inference://*"],
       "allowed_labels": ["region=*", "team=platform"]
     },
     {
@@ -66,6 +67,7 @@ notice.
 |---|---|---|
 | `name` | string, required, unique | The role name. `mesh:role:node` and `mesh:role:router` are the roles that the two binaries request at enrollment. Any other name is an ordinary role. |
 | `allowed_services` | list of service patterns | Services that holders may call. |
+| `allowed_publish` | list of service patterns | Services that holders may serve. A router keeps a member's directory record only for a service its credential grants here, and a caller sends a request to a provider it reached by name only when the provider's credential does. If absent, holders may publish nothing. See [Publishing](#publishing). |
 | `allowed_targets` | list of target patterns | Nodes that holders may call. If absent, any node may be called. |
 | `allowed_labels` | list of label patterns | Labels that a node holding this role may declare at enrollment. If absent, no labels may be declared. |
 | `custom_datalog` | list of Datalog statements | Facts are minted into the credentials of holders. Rules are distributed to nodes and applied when a holder is verified. |
@@ -94,6 +96,30 @@ The same holds for `target_unrestricted(true)` below.
 
 `system://mesh.catalog` is the built-in discovery service that every node
 runs. A role that should be able to list the tools of a node needs it.
+
+### Publishing
+
+`allowed_publish` takes the same patterns and compiles them to
+`granted_publish_*` facts: `granted_publish_exact("mcp", "calculator")`,
+`granted_publish_all("mcp")`, `granted_publish_all_types(true)` and so on.
+They say what a member may serve, where `allowed_services` says what it may
+call, and the two are independent: a role that may call `mcp://calc` may
+not serve it unless granted here.
+
+Two parties check the grant, on the holder's own credential. The router a
+member announces a record to refuses a record for a service the grant does
+not cover (`agentmesh_router_directory_requests_total{op="provide",result="denied"}`),
+so a member cannot put itself in the directory under a name it may not
+serve. A caller that reaches a provider by name, from the directory or by
+peer ID, verifies the provider's credential before sending the request and
+refuses a provider the grant does not cover, so a record that reached the
+directory some other way is still not called. `agentmesh-node` and both
+SDKs make the check; a member's own record under its peer ID, and a node's
+catalog (`system://mesh.catalog`), name no service and need no grant.
+
+An egress destination needs no entry: `served_by` selects the nodes that
+serve it, and the control plane mints `granted_publish_exact("egress", "<name>")`
+into their credentials with the destination.
 
 ### Target patterns
 

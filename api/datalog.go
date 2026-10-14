@@ -165,6 +165,23 @@ const (
 	// Example Datalog: allow if service("mcp", "calculator"), granted_service_set("mcp", $set), $set.contains("calculator")
 	FactGrantedServiceSet = "granted_service_set"
 
+	// The granted_publish_* facts are the granted_service_* facts for the
+	// other direction: what a member may serve, as a role's allowed_publish
+	// grants it. A router verifies them before it keeps a member's record and
+	// a caller before it sends a request to a provider it found by name, with
+	// PublishPolicies over a publish($type, $name) fact. They carry the same
+	// terms as their granted_service_* counterpart.
+	FactGrantedPublishAllTypes = "granted_publish_all_types"
+	FactGrantedPublishAll      = "granted_publish_all"
+	FactGrantedPublishSuffix   = "granted_publish_suffix"
+	FactGrantedPublishPrefix   = "granted_publish_prefix"
+	FactGrantedPublishExact    = "granted_publish_exact"
+	FactGrantedPublishSet      = "granted_publish_set"
+
+	// FactPublish is the service a verifier asks about: publish("mcp", "calc").
+	// Added by the verifier, never carried in a token.
+	FactPublish = "publish"
+
 	// FactGrantedTargetAllTypes allows target access to all network targets (unrestricted).
 	// Contains: biscuit.Bool(true) (marker fact)
 	FactGrantedTargetAllTypes = "granted_target_all_types"
@@ -419,6 +436,13 @@ var (
 	// AllowIfTruePolicy is the static policy "allow if true" used during token verification.
 	AllowIfTruePolicy biscuit.Policy
 
+	// PublishPolicies decide whether a member may serve a service: over its
+	// own credential and a publish($type, $name) fact, one allows when a
+	// granted_publish_* fact covers the service, and no policy matching is a
+	// refusal. The router runs them before it keeps a member's record, a
+	// caller before it sends a request to a provider it found by name.
+	PublishPolicies []biscuit.Policy
+
 	// BaselineSources is the Datalog text every variable above is parsed from.
 	// The SDKs embed this text (see hack/gen-sdk-datalog) so that a provider
 	// written in another language evaluates the same authorizer as agentmesh-node.
@@ -430,6 +454,8 @@ var (
 type DatalogSources struct {
 	// Policies are the service allow policies (BaselinePolicies).
 	Policies []string `json:"policies"`
+	// PublishPolicies decide whether a member may serve a service (PublishPolicies).
+	PublishPolicies []string `json:"publish_policies"`
 	// Rules derive allow_network_target from target grants (BaselineRules).
 	Rules []string `json:"rules"`
 	// HTTPRules derive service grants from narrowed grants (BaselineHTTPRules).
@@ -480,6 +506,24 @@ func init() {
 			panic(fmt.Sprintf("failed to parse baseline policy %d: %v", i, err))
 		}
 		BaselinePolicies = append(BaselinePolicies, p)
+	}
+
+	// Publish policies: the service policies with publish() for service()
+	// and granted_publish_* for granted_service_*.
+	BaselineSources.PublishPolicies = []string{
+		fmt.Sprintf(`allow if %s($type, $name), %s($type, $name)`, FactPublish, FactGrantedPublishExact),
+		fmt.Sprintf(`allow if %s($type, $name), %s($type, $set), $set.contains($name)`, FactPublish, FactGrantedPublishSet),
+		fmt.Sprintf(`allow if %s($type, $name), %s($type, $prefix), $name.starts_with($prefix)`, FactPublish, FactGrantedPublishPrefix),
+		fmt.Sprintf(`allow if %s($type, $name), %s($type, $suffix), $name.ends_with($suffix)`, FactPublish, FactGrantedPublishSuffix),
+		fmt.Sprintf(`allow if %s($type, $name), %s($type)`, FactPublish, FactGrantedPublishAll),
+		fmt.Sprintf(`allow if %s($type, $name), %s(true)`, FactPublish, FactGrantedPublishAllTypes),
+	}
+	for i, pStr := range BaselineSources.PublishPolicies {
+		p, err := parser.FromStringPolicy(pStr)
+		if err != nil {
+			panic(fmt.Sprintf("failed to parse publish policy %d: %v", i, err))
+		}
+		PublishPolicies = append(PublishPolicies, p)
 	}
 
 	// 2. Target Evaluation Rules
@@ -759,6 +803,34 @@ func isExactTarget(targetStr string) (tFact, tVal string, exact bool) {
 		tFact = FactNode
 	}
 	return tFact, tVal, BuildTargetDatalogFact(targetStr).Name == FactGrantedTargetExact
+}
+
+// publishFactNames maps each granted_service_* fact to its granted_publish_*
+// counterpart.
+var publishFactNames = map[string]string{
+	FactGrantedServiceAllTypes: FactGrantedPublishAllTypes,
+	FactGrantedServiceAll:      FactGrantedPublishAll,
+	FactGrantedServiceSuffix:   FactGrantedPublishSuffix,
+	FactGrantedServicePrefix:   FactGrantedPublishPrefix,
+	FactGrantedServiceExact:    FactGrantedPublishExact,
+	FactGrantedServiceSet:      FactGrantedPublishSet,
+}
+
+// BuildPublishDatalogFacts translates a role's allowed_publish patterns into
+// granted_publish_* facts, the same way and with the same terms as
+// BuildServiceDatalogFacts does for allowed_services.
+func BuildPublishDatalogFacts(services []string) []biscuit.Fact {
+	facts := BuildServiceDatalogFacts(services)
+	for i := range facts {
+		facts[i].Name = publishFactNames[facts[i].Name]
+	}
+	return facts
+}
+
+// PublishFact is the fact a verifier adds to ask whether a credential grants
+// serving a service: publish("<type>", "<name>").
+func PublishFact(svcType, svcName string) biscuit.Fact {
+	return biscuit.Fact{Predicate: biscuit.Predicate{Name: FactPublish, IDs: []biscuit.Term{biscuit.String(svcType), biscuit.String(svcName)}}}
 }
 
 // BuildServiceDatalogFacts translates a list of service patterns into a minimal set of Datalog facts.

@@ -180,6 +180,7 @@ func startSDKMesh(t *testing.T) *sdkMesh {
     allowed_labels: ["zone=*"]
   - name: %s
     allowed_services: ["*"]
+    allowed_publish: ["*"]
     allowed_targets: ["*"]
     allowed_labels: ["region=*", "team=*"]
 bindings:

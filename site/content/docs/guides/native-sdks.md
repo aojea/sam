@@ -914,9 +914,12 @@ never forwarded. The connection is encrypted end to end between the two
 peers; the router forwards ciphertext.
 
 Under the open development policy of `agentmesh-one`, every member holds the
-`node` role and that role may call any service. On a shared mesh the policy
-grants a role the services it may call (`allowed_services: ["a2a://agent"]`
-or a pattern) and the members it may reach; see
+`node` role and that role may call and serve any service. On a shared mesh
+the policy grants a role the services it may call (`allowed_services:
+["a2a://agent"]` or a pattern) and the members it may reach, and grants the
+agent's own role the service it serves (`allowed_publish: ["a2a://agent"]`):
+a caller verifies that grant on the agent's credential before sending a
+request, and refuses an agent that lacks it; see
 [Mesh policy](../../reference/policy/). A refused caller receives `403`.
 
 ## Beyond the examples

@@ -75,7 +75,10 @@ replica count.
    holds. A member announces each service it publishes and where it is
    reached; the router keeps the record and places it on the routers
    closest to the key, as many as the mesh's replication (`/info`). A
-   record lives for the mesh's record TTL after its last announcement,
+   record is kept only for a service the member's credential grants serving
+   (the role's `allowed_publish`), checked against the credential the
+   handshake presented; a record for anything else is refused. A record
+   lives for the mesh's record TTL after its last announcement,
    and an announcement replaces the addresses of the one before; a member
    that stops a service or leaves withdraws its records, and the router
    withdraws them from the same routers. A member asks for providers of
@@ -134,7 +137,7 @@ The metrics address exposes, next to the Go runtime metrics:
 | `agentmesh_router_connected_peers`, `agentmesh_router_authenticated_peers`, `agentmesh_router_banned_peers` | Peers in each state. |
 | `agentmesh_router_peer_routers{state}` | Other routers this one knows, from the control plane's list or a handshake that proved the router role: `listed`, and `authenticated` for those it currently holds a mutual authentication with. The two differ while a federation pass is pending or a peer router is down. |
 | `agentmesh_router_dht_routing_table_size` | Peer routers in the DHT's routing table: the authenticated peer routers, since nothing else enters it. |
-| `agentmesh_router_directory_requests_total{op,result}`, `agentmesh_router_directory_request_seconds{op}` | Directory requests served, by operation (`provide`, `withdraw`, `find_providers`, `find_peer`; `place` is a record or withdrawal another router put here, `lookup` a find another router ran here) and result (`ok`, `empty`, `invalid`, `error`), with the time each took. |
+| `agentmesh_router_directory_requests_total{op,result}`, `agentmesh_router_directory_request_seconds{op}` | Directory requests served, by operation (`provide`, `withdraw`, `find_providers`, `find_peer`; `place` is a record or withdrawal another router put here, `lookup` a find another router ran here) and result (`ok`, `empty`, `invalid`, `denied` for a record naming a service the member's credential does not grant serving, `error`), with the time each took. |
 | `agentmesh_router_directory_records` | Directory records this router holds: its own members' and the copies placed on it. |
 | `agentmesh_router_directory_records_expired_total` | Records dropped because their provider stopped announcing them for the mesh's record TTL. |
 | `agentmesh_router_directory_placements_total{result}` | Copies of a member's record, or of its withdrawal, this router placed on the routers closest to the key. |

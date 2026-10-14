@@ -28,7 +28,7 @@ import {
   goAwayReasonName,
   goAwayStreamHandler,
 } from "./auth.ts";
-import { ROLE_ROUTER, attenuateBiscuit, requireRole, sealBiscuit, type VerifiedBiscuit } from "./biscuit.ts";
+import { ROLE_ROUTER, attenuateBiscuit, requirePublish, requireRole, sealBiscuit, type VerifiedBiscuit } from "./biscuit.ts";
 import { ROLE_NODE } from "./controlplane.ts";
 import { encodeAuthFrame } from "./credential.ts";
 import { canonicalPeerId } from "./identity.ts";
@@ -1111,26 +1111,28 @@ export class MeshSession {
    * way agentmesh-node's egress proxy does for /mesh/<peer>/<type>/<name>/<path>.
    */
   async request(peer: Peer, targetService: string, path: string, options: HTTPRequestOptions = {}): Promise<HTTPResponse> {
-    const conn = await this.#egressConnection(peer, options.signal);
+    const conn = await this.#egressConnection(peer, targetService, options.signal);
     return httpRequestOverStream(conn, this.biscuit, targetService, path, options);
   }
 
   /**
    * The connection an HTTP call goes out on, its peer verified as an enrolled
-   * node holding the floor before anything is sent (agentmesh-node's VerifyPeerLabels).
+   * node holding the floor and granted the service before anything is sent
+   * (agentmesh-node's VerifyProvider).
    */
-  async #egressConnection(peer: Peer, signal?: AbortSignal): Promise<Connection> {
+  async #egressConnection(peer: Peer, targetService: string, signal?: AbortSignal): Promise<Connection> {
     const conn = await this.connect(peer, signal);
-    const peerId = conn.remotePeer.toString();
-    const until = this.#egressVerdicts.get(peerId);
+    const verdict = `${conn.remotePeer.toString()}|${targetService}`;
+    const until = this.#egressVerdicts.get(verdict);
     if (until !== undefined && until.getTime() > Date.now()) {
       return conn;
     }
     const provider = await authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys);
     // Only nodes host services; a router's or an admin's credential is a member, not a provider.
     requireRole(provider, ROLE_NODE);
+    await requirePublish(provider, targetService);
     requireEgressLabels(provider, this.#egressRequireLabels);
-    this.#egressVerdicts.set(peerId, new Date(Date.now() + EGRESS_VERDICT_TTL_MS));
+    this.#egressVerdicts.set(verdict, new Date(Date.now() + EGRESS_VERDICT_TTL_MS));
     return conn;
   }
 
@@ -1143,8 +1145,9 @@ export class MeshSession {
   fetch(): typeof fetch {
     return async (input, init) => {
       const request = new Request(input, init);
-      const { peerId } = splitMeshURL(new URL(request.url));
-      const conn = await this.#egressConnection(peerId, request.signal);
+      const { peerId, target } = splitMeshURL(new URL(request.url));
+      const [svcType = "", svcName = ""] = target.slice(1).split("/");
+      const conn = await this.#egressConnection(peerId, `${svcType}://${svcName}`, request.signal);
       const streamOptions: { signal?: AbortSignal } = {};
       if (init?.signal !== undefined && init.signal !== null) {
         streamOptions.signal = init.signal;

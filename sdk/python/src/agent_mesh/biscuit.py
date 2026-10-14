@@ -57,6 +57,9 @@ class VerifiedBiscuit:
     labels: dict[str, str] = field(default_factory=dict)
     task_rules: list[agentmesh_pb2.TaskAuthorizationRule] = field(default_factory=list)
     actor_node: Optional[str] = None
+    # The token as received, for what is decided over its facts after
+    # verification (require_publish).
+    token: bytes = b""
 
 
 def _limits() -> ba.AuthorizerLimits:
@@ -157,6 +160,7 @@ def verify_peer_biscuit(
         labels=labels,
         task_rules=task_rules,
         actor_node=actor_nodes[0] if actor_nodes else None,
+        token=bytes(biscuit),
     )
 
 
@@ -295,4 +299,27 @@ def require_role(verified: VerifiedBiscuit, role: str) -> None:
     """Requires role(<role>) on an already verified token, as identity.RequireRole."""
     if role not in verified.roles:
         raise BiscuitVerificationError(f"biscuit lacks expected role {role!r}")
+
+
+def require_publish(verified: VerifiedBiscuit, target_service: str) -> None:
+    """Requires that an already verified provider credential grants serving
+    target_service ("<type>://<name>"), as identity.RequirePublish: the
+    directory names whoever announced the service, only the credential says
+    who may serve it. The provider's own catalog names no service and needs
+    no grant; so does an empty target."""
+    if target_service == "" or target_service == f"system://{_DATALOG['catalog_target']}":
+        return
+    scheme, sep, name = target_service.partition("://")
+    if not sep or not scheme or not name:
+        raise BiscuitVerificationError(f"service {target_service!r} must be <type>://<name>")
+    token = ba.Biscuit.from_bytes(verified.token, ba.PublicKey.from_bytes(bytes(verified.verifying_key), ba.Algorithm.Ed25519))
+    builder = ba.AuthorizerBuilder()
+    builder.set_limits(_limits())
+    builder.add_fact(ba.Fact(_DATALOG["fact_publish"] + "({t}, {n})", {"t": scheme, "n": name}))
+    for policy in _DATALOG["publish_policies"]:
+        builder.add_policy(ba.Policy(policy))
+    try:
+        builder.build(token).authorize()
+    except Exception as err:  # noqa: BLE001 - no policy matched
+        raise BiscuitVerificationError(f"peer {verified.peer_id} is not granted serving {target_service}") from err
 

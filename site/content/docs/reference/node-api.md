@@ -233,8 +233,11 @@ server-sent events as they are found, and the stream ends with
 /mesh/<peer-id>/<type>/<name>/<path...>
 ```
 
-The node verifies the peer's credential and, if set, the operator's
-`egress.require_labels`. It then opens an authenticated stream (presenting the
+The node verifies the peer's credential: that it is an enrolled node, that
+its role grants serving `<type>://<name>` (`allowed_publish`), and, if set,
+the operator's `egress.require_labels`. A peer whose credential does not
+grant the service is refused with `403`, whatever the directory said about
+it. It then opens an authenticated stream (presenting the
 caller's Task Biscuit when one was supplied in `X-Mesh-Authentication`) and
 forwards the request to `/<type>/<name>/<path>` on the peer, which proxies it
 to the backend. Headers pass through, including `Authorization`. Paths that

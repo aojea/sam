@@ -45,7 +45,7 @@ from .auth import (
     go_away_stream_handler,
 )
 from .authorizer import ProviderAuthorizerOptions
-from .biscuit import ROLE_ROUTER, VerifiedBiscuit, attenuate_biscuit, require_role, seal_biscuit
+from .biscuit import ROLE_ROUTER, VerifiedBiscuit, attenuate_biscuit, require_publish, require_role, seal_biscuit
 from .controlplane import ROLE_NODE
 from .credential import encode_auth_frame
 from .discovery import DiscoveredProvider, find_peer, find_providers, parse_service_target, peer_key, provide, service_key, withdraw
@@ -998,22 +998,25 @@ class MeshSession:
     ) -> HTTPResponse:
         """Calls an inference or A2A service on a provider over /libp2p-http,
         the way agentmesh-node's egress proxy does for /mesh/<peer>/<type>/<name>/<path>."""
-        peer_id = await self._egress_peer(peer)
+        peer_id = await self._egress_peer(peer, target_service)
         return await http_request_over_stream(
             self.host, peer_id, self.biscuit, target_service, path, method=method, headers=headers, body=body
         )
 
-    async def _egress_peer(self, peer: Peer) -> ID:
+    async def _egress_peer(self, peer: Peer, target_service: str) -> ID:
         """The peer an HTTP call goes out to, verified as an enrolled node
-        holding the floor before anything is sent (agentmesh-node's VerifyPeerLabels)."""
+        holding the floor and granted the service before anything is sent
+        (agentmesh-node's VerifyProvider)."""
         peer_id = await self.connect(peer)
-        if self._egress_verdicts.get(str(peer_id), 0.0) > time.monotonic():
+        verdict = f"{peer_id}|{target_service}"
+        if self._egress_verdicts.get(verdict, 0.0) > time.monotonic():
             return peer_id
         provider = await authenticate_with_peer(self.host, peer_id, self.mesh.auth_frame(), self.mesh.credential.control_plane_keys)
         # Only nodes host services; a router's or an admin's credential is a member, not a provider.
         require_role(provider, ROLE_NODE)
+        require_publish(provider, target_service)
         require_egress_labels(provider, self.egress_require_labels)
-        self._egress_verdicts[str(peer_id)] = time.monotonic() + EGRESS_VERDICT_TTL
+        self._egress_verdicts[verdict] = time.monotonic() + EGRESS_VERDICT_TTL
         return peer_id
 
     async def accept_a2a(self, target: Union[str, HTTPHandler], *, name: str = DEFAULT_A2A_NAME) -> str:

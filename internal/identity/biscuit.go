@@ -436,6 +436,9 @@ func mintBiscuitWithBindingAndRand(rng io.Reader, signingKey ed25519.PrivateKey,
 	// Narrowed grants (PolicyRole.http) are minted per entry: they are keyed
 	// by the entry they narrow, so there is nothing to merge across roles.
 	var allHTTP []*api.HTTPGrant
+	// What the holder may serve. A delegated subject serves nothing: it is a
+	// caller the actor node speaks for, not a member that publishes.
+	var allPublish []string
 	for _, role := range roles {
 		if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 			Name: api.FactRole,
@@ -463,6 +466,9 @@ func mintBiscuitWithBindingAndRand(rng io.Reader, signingKey ed25519.PrivateKey,
 			allServices = append(allServices, plainServices...)
 			allHTTP = append(allHTTP, narrowed...)
 			allTargets = append(allTargets, pr.AllowedTargets...)
+			if !delegated {
+				allPublish = append(allPublish, pr.AllowedPublish...)
+			}
 
 			for _, customEntry := range pr.CustomDatalog {
 				trimmed := strings.TrimRight(strings.TrimSpace(customEntry), ";")
@@ -502,6 +508,11 @@ func mintBiscuitWithBindingAndRand(rng io.Reader, signingKey ed25519.PrivateKey,
 	for _, fact := range api.BuildTargetDatalogFacts(allTargets) {
 		if err := addFact(fact); err != nil {
 			errs = append(errs, fmt.Errorf("failed to add target fact: %w", err))
+		}
+	}
+	for _, fact := range api.BuildPublishDatalogFacts(allPublish) {
+		if err := addFact(fact); err != nil {
+			errs = append(errs, fmt.Errorf("failed to add publish fact: %w", err))
 		}
 	}
 
@@ -801,6 +812,25 @@ func RequireRole(b *biscuit.Biscuit, key ed25519.PublicKey, expectedRole string,
 
 	if err := authorizer.Authorize(); err != nil {
 		return fmt.Errorf("biscuit lacks expected role %q: %w", expectedRole, err)
+	}
+	return nil
+}
+
+// RequirePublish reports whether the credential grants serving the service
+// svcType://svcName: api.PublishPolicies over the token's granted_publish_*
+// facts and a publish() fact. b must have passed verification and key must
+// be the key that verified it; what is decided here is the grant alone.
+func RequirePublish(b *biscuit.Biscuit, key ed25519.PublicKey, svcType, svcName string, timeout time.Duration) error {
+	authorizer, err := b.Authorizer(key, AuthorizerOptions(timeout)...)
+	if err != nil {
+		return fmt.Errorf("failed to create authorizer: %w", err)
+	}
+	authorizer.AddFact(api.PublishFact(svcType, svcName))
+	for _, p := range api.PublishPolicies {
+		authorizer.AddPolicy(p)
+	}
+	if err := authorizer.Authorize(); err != nil {
+		return fmt.Errorf("credential does not grant serving %s://%s", svcType, svcName)
 	}
 	return nil
 }

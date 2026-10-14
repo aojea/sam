@@ -698,20 +698,22 @@ class PolicyConfigUpdateResponse(_message.Message):
     def __init__(self, success: bool = ..., error: _Optional[str] = ...) -> None: ...
 
 class PolicyRole(_message.Message):
-    __slots__ = ["allowed_labels", "allowed_services", "allowed_targets", "custom_datalog", "http", "name"]
+    __slots__ = ["allowed_labels", "allowed_publish", "allowed_services", "allowed_targets", "custom_datalog", "http", "name"]
     ALLOWED_LABELS_FIELD_NUMBER: _ClassVar[int]
+    ALLOWED_PUBLISH_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_SERVICES_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_TARGETS_FIELD_NUMBER: _ClassVar[int]
     CUSTOM_DATALOG_FIELD_NUMBER: _ClassVar[int]
     HTTP_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     allowed_labels: _containers.RepeatedScalarFieldContainer[str]
+    allowed_publish: _containers.RepeatedScalarFieldContainer[str]
     allowed_services: _containers.RepeatedScalarFieldContainer[str]
     allowed_targets: _containers.RepeatedScalarFieldContainer[str]
     custom_datalog: _containers.RepeatedScalarFieldContainer[str]
     http: _containers.RepeatedCompositeFieldContainer[HTTPGrant]
     name: str
-    def __init__(self, name: _Optional[str] = ..., allowed_targets: _Optional[_Iterable[str]] = ..., allowed_services: _Optional[_Iterable[str]] = ..., custom_datalog: _Optional[_Iterable[str]] = ..., allowed_labels: _Optional[_Iterable[str]] = ..., http: _Optional[_Iterable[_Union[HTTPGrant, _Mapping]]] = ...) -> None: ...
+    def __init__(self, name: _Optional[str] = ..., allowed_targets: _Optional[_Iterable[str]] = ..., allowed_services: _Optional[_Iterable[str]] = ..., custom_datalog: _Optional[_Iterable[str]] = ..., allowed_labels: _Optional[_Iterable[str]] = ..., http: _Optional[_Iterable[_Union[HTTPGrant, _Mapping]]] = ..., allowed_publish: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class RegisterServiceRequest(_message.Message):
     __slots__ = ["command", "service", "target_url"]

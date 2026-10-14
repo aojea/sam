@@ -147,21 +147,28 @@ must use the A2A 1.0 format. Older formats are refused. The
 
 ## Making it reachable
 
-Declaring a service publishes it, but nobody can call it until the mesh
-policy grants access. Two conditions must hold:
+Declaring a service is not enough on its own: the mesh policy has to let
+this node serve it and let callers call it. Three conditions must hold:
 
-1. The caller's identity resolves to a role whose `allowed_services`
+1. This node's identity resolves to a role whose `allowed_publish`
+   includes `mcp://calculator`, or a pattern that covers it. Without it the
+   router refuses the node's directory record and callers refuse the node
+   as a provider, whatever the node declares in its configuration: the
+   configuration says what the node offers, the policy says what the mesh
+   lets it serve.
+2. The caller's identity resolves to a role whose `allowed_services`
    includes `mcp://calculator`, or a pattern that covers it.
-2. If that role has `allowed_targets`, one of them matches this node's
+3. If that role has `allowed_targets`, one of them matches this node's
    identity: its peer ID as `node:<id>`, or a claim from the identity it
    enrolled with.
 
-A policy that grants the service to a role bound to your users:
+A policy that lets nodes serve the calculator and grants it to a role bound
+to your users:
 
 ```json
 {
   "roles": [
-    { "name": "mesh:role:node", "allowed_labels": ["region=*"] },
+    { "name": "mesh:role:node", "allowed_publish": ["mcp://calculator"], "allowed_labels": ["region=*"] },
     { "name": "calc-users", "allowed_services": ["mcp://calculator"] }
   ],
   "bindings": [

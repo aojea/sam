@@ -1237,6 +1237,11 @@ func (s *SQLStore) saveMeshPolicyTx(ctx context.Context, tx *sql.Tx, roles []*ap
 				return err
 			}
 		}
+		for _, svc := range r.AllowedPublish {
+			if _, err := tx.ExecContext(ctx, s.rebind("INSERT INTO role_permissions (role_name, resource_type, resource_value) VALUES (?, 'publish', ?)"), r.Name, svc); err != nil {
+				return err
+			}
+		}
 		// One row per narrowed entry, as protojson: the shape is the proto's
 		// and a new HTTPGrant field needs no schema change here.
 		for _, g := range r.Http {
@@ -1312,6 +1317,8 @@ func (s *SQLStore) GetMeshPolicy(ctx context.Context) ([]*api.PolicyRole, []*api
 				r.CustomDatalog = append(r.CustomDatalog, resValue)
 			case "label":
 				r.AllowedLabels = append(r.AllowedLabels, resValue)
+			case "publish":
+				r.AllowedPublish = append(r.AllowedPublish, resValue)
 			case "http":
 				g := &api.HTTPGrant{}
 				if err := protojson.Unmarshal([]byte(resValue), g); err != nil {

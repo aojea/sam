@@ -49,13 +49,26 @@ let caller: Libp2p;
 let callerBiscuit: Uint8Array;
 const servedTargets: string[] = [];
 
-function mint(peerId: string, role: string, labels: Record<string, string> = {}): Uint8Array {
+// mint is a credential as the control plane issues one to a member whose
+// role grants publishing the given services (allowed_publish syntax, as
+// granted_publish_* facts); a provider's needs the grant for what it serves.
+function mint(peerId: string, role: string, labels: Record<string, string> = {}, publish: string[] = ["mcp://calc"]): Uint8Array {
   const b = wasm.Biscuit.builder();
   b.addFact(wasm.Fact.fromString(`node(${JSON.stringify(peerId)})`));
   b.addFact(wasm.Fact.fromString("expiration(2035-01-01T00:00:00Z)"));
   b.addFact(wasm.Fact.fromString(`role(${JSON.stringify(role)})`));
   for (const [k, v] of Object.entries(labels)) {
     b.addFact(wasm.Fact.fromString(`label(${JSON.stringify(k)}, ${JSON.stringify(v)})`));
+  }
+  for (const svc of publish) {
+    const m = /^([a-z0-9]+):\/\/(.+)$/.exec(svc);
+    if (m === null) {
+      b.addFact(wasm.Fact.fromString("granted_publish_all_types(true)"));
+    } else if (m[2] === "*") {
+      b.addFact(wasm.Fact.fromString(`granted_publish_all(${JSON.stringify(m[1])})`));
+    } else {
+      b.addFact(wasm.Fact.fromString(`granted_publish_exact(${JSON.stringify(m[1])}, ${JSON.stringify(m[2])})`));
+    }
   }
   return b.build(cpKeyPair.getPrivateKey()).toBytes();
 }
@@ -164,12 +177,12 @@ test("required labels are checked on the provider's credential", async () => {
   const ok = await openMCPSession(conn, frame("mcp://calc"), [cpKey], { requiredLabels: { region: "eu" } });
   await ok.close();
   await assert.rejects(openMCPSession(conn, frame("mcp://calc"), [cpKey], { requiredLabels: { region: "us" } }), LabelsNotSatisfiedError);
-  assert.throws(() => requireLabels({ peerId: "p", expiration: new Date(), verifyingKey: cpKey, roles: [], labels: {}, taskRules: [] }, { team: "x" }), /team=x/);
+  assert.throws(() => requireLabels({ peerId: "p", expiration: new Date(), verifyingKey: cpKey, roles: [], labels: {}, taskRules: [], token: new Uint8Array() }, { team: "x" }), /team=x/);
 });
 
 test("a requirement of several labels is met only by every one of them, as agentmesh-node's checkPeerLabels", () => {
   // The cases of internal/node/labels_gate_test.go, run through the SDK's predicate.
-  const attesting = (labels: Record<string, string>) => ({ peerId: "p", expiration: new Date(), verifyingKey: cpKey, roles: [], labels, taskRules: [] });
+  const attesting = (labels: Record<string, string>) => ({ peerId: "p", expiration: new Date(), verifyingKey: cpKey, roles: [], labels, taskRules: [], token: new Uint8Array() });
   // exact match
   requireLabels(attesting({ region: "us-east-1" }), { region: "us-east-1" });
   // every pair of two attested
@@ -190,7 +203,7 @@ test("a requirement of several labels is met only by every one of them, as agent
 });
 
 test("the egress floor is met only by every one of its pairs, as agentmesh-node's api.LabelCheck", () => {
-  const attesting = (labels: Record<string, string>) => ({ peerId: "p", expiration: new Date(), verifyingKey: cpKey, roles: [], labels, taskRules: [] });
+  const attesting = (labels: Record<string, string>) => ({ peerId: "p", expiration: new Date(), verifyingKey: cpKey, roles: [], labels, taskRules: [], token: new Uint8Array() });
   requireEgressLabels(attesting({ region: "eu", team: "platform" }), { region: "eu" });
   requireEgressLabels(attesting({ region: "eu", team: "platform" }), { region: "eu", team: "platform" });
   // one pair short is a refusal that names the whole floor
@@ -239,6 +252,32 @@ test("only a node is a provider, as agentmesh-node's checkPeerLabels requires", 
   try {
     const conn = await caller.dial(provider.getMultiaddrs()[0] as Parameters<typeof caller.dial>[0]);
     await assert.rejects(openMCPSession(conn, frame("mcp://calc"), [cpKey], {}, { region: "eu" }), /lacks expected role "mesh:role:node"/);
+  } finally {
+    providerBiscuit = nodeBiscuit;
+  }
+});
+
+test("only a node granted the service is its provider, as agentmesh-node's checkProvider requires", async () => {
+  // The directory names whoever announced calc; the provider's credential
+  // says who may serve it. A grant by type or for everything serves too;
+  // the provider's own catalog needs none.
+  const nodeBiscuit = providerBiscuit;
+  try {
+    for (const [publish, ok] of [
+      [["mcp://weather"], false],
+      [[], false],
+      [["mcp://*"], true],
+      [["*"], true],
+    ] as Array<[string[], boolean]>) {
+      providerBiscuit = mint(provider.peerId.toString(), ROLE_NODE, { region: "eu" }, publish);
+      const conn = await caller.dial(provider.getMultiaddrs()[0] as Parameters<typeof caller.dial>[0]);
+      if (ok) {
+        await (await openMCPSession(conn, frame("mcp://calc"), [cpKey])).close();
+      } else {
+        await assert.rejects(openMCPSession(conn, frame("mcp://calc"), [cpKey]), /is not granted serving mcp:\/\/calc/);
+        await (await openMCPSession(conn, frame(""), [cpKey])).close();
+      }
+    }
   } finally {
     providerBiscuit = nodeBiscuit;
   }

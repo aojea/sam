@@ -828,7 +828,7 @@ func TestEgressProxyEnforcesFloor(t *testing.T) {
 	nodeA.keysMu.Unlock()
 
 	// nodeA attests jurisdiction=eu and nothing else.
-	nodeAIdentity, err := identity.MintBootstrapBiscuitToken(rootPriv, nodeA.Host.ID(), api.RoleNode, time.Now().Add(time.Hour), nil, map[string]string{"jurisdiction": "eu"})
+	nodeAIdentity, err := identity.MintBootstrapBiscuitToken(rootPriv, nodeA.Host.ID(), api.RoleNode, time.Now().Add(time.Hour), publishEverything, map[string]string{"jurisdiction": "eu"})
 	if err != nil {
 		t.Fatalf("mint nodeA identity: %v", err)
 	}

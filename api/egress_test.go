@@ -151,3 +151,36 @@ func TestBuildEgressServingRules(t *testing.T) {
 		t.Fatalf("rendered rules do not parse back: %v", err)
 	}
 }
+
+// served_by is who serves a destination, so the nodes it selects get the
+// publish grant for egress://<name> with their roles, and nobody else.
+func TestWithEgressPublish(t *testing.T) {
+	policyRoles := []*PolicyRole{{Name: "node", AllowedPublish: []string{"mcp://calc"}}, {Name: "other"}}
+	egress := []*EgressDestination{
+		{Name: "api.github.com", ServedBy: []string{"node"}},
+		{Name: "mam.internal.example.com", ServedBy: []string{"site=eu"}},
+		{Name: "nobody.example", ServedBy: []string{"pep"}},
+	}
+	got := WithEgressPublish(policyRoles, egress, []string{"node"}, map[string]string{"site": "eu"})
+	var node *PolicyRole
+	for _, r := range got {
+		if r.GetName() == "node" {
+			node = r
+		}
+	}
+	want := []string{"mcp://calc", "egress://api.github.com", "egress://mam.internal.example.com"}
+	if node == nil || !slices.Equal(node.AllowedPublish, want) {
+		t.Fatalf("node role publishes %v, want %v", node.GetAllowedPublish(), want)
+	}
+	if slices.Equal(policyRoles[0].AllowedPublish, want) {
+		t.Fatal("the policy's own role entry was changed in place")
+	}
+	if len(WithEgressPublish(policyRoles, egress, []string{"other"}, nil)) != len(policyRoles) || len(WithEgressPublish(policyRoles, egress, []string{"other"}, nil)[1].AllowedPublish) != 0 {
+		t.Fatal("a role no destination selects got a grant")
+	}
+	// A role the policy does not define gets an entry with the grant alone.
+	got = WithEgressPublish(nil, egress, []string{"mesh:role:node"}, map[string]string{"site": "eu"})
+	if len(got) != 1 || got[0].GetName() != "mesh:role:node" || !slices.Equal(got[0].AllowedPublish, []string{"egress://mam.internal.example.com"}) {
+		t.Fatalf("undefined role: got %v", got)
+	}
+}

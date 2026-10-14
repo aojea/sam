@@ -84,6 +84,9 @@ CP_KEY = CP.public_key.to_bytes()
 
 def mint(peer_id: str, role: str, expiration: str = "2035-01-01T00:00:00Z", labels: dict[str, str] | None = None, signer: ba.KeyPair = CP) -> bytes:
     code = "node({p}); client_peer_id({p}); expiration(" + expiration + "); role({r});"
+    if role == ROLE_NODE:
+        # The node role of these meshes serves everything.
+        code += " granted_publish_all_types(true);"
     params = {"p": peer_id, "r": role}
     for i, (k, v) in enumerate((labels or {}).items()):
         code += f" label({{k{i}}}, {{v{i}}});"

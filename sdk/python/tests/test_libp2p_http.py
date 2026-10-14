@@ -186,7 +186,7 @@ class FakeSession:
         self.host = host
         self.mesh = _Mesh(_Credential(biscuit))
 
-    async def _egress_peer(self, peer) -> ID:
+    async def _egress_peer(self, peer, target_service) -> ID:
         return ID.from_base58(str(peer))
 
 
@@ -410,8 +410,8 @@ def test_an_in_process_handler_sees_the_verified_caller():
 
 def test_mesh_urls_name_a_peer_and_a_service():
     peer = "12D3KooWJ2Yhy3CKwVPDw7AnkxN5HbZbb65xDoRif54hdXXUzh1U"
-    assert split_mesh_url(httpx.URL(f"http://mesh/mesh/{peer}/a2a/agent")) == (peer, "/a2a/agent")
-    assert split_mesh_url(httpx.URL(f"http://anything:1/mesh/{peer}/inference/llm/v1/models?x=1")) == (peer, "/inference/llm/v1/models?x=1")
+    assert split_mesh_url(httpx.URL(f"http://mesh/mesh/{peer}/a2a/agent")) == (peer, "a2a://agent", "/a2a/agent")
+    assert split_mesh_url(httpx.URL(f"http://anything:1/mesh/{peer}/inference/llm/v1/models?x=1")) == (peer, "inference://llm", "/inference/llm/v1/models?x=1")
     for bad in ("http://mesh/a2a/agent", f"http://mesh/mesh/{peer}", f"http://mesh/mesh/{peer}/a2a", f"http://mesh/mesh//a2a/agent"):
         with pytest.raises(httpx.UnsupportedProtocol):
             split_mesh_url(httpx.URL(bad))

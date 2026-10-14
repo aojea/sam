@@ -127,7 +127,7 @@ curl -s -X POST \
     "roles": [
       {"name": "admin", "allowed_services": ["*"], "allowed_targets": ["*"]},
       {"name": "mesh:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]},
-      {"name": "mesh:role:node", "allowed_services": ["*"], "allowed_targets": ["*"]}
+      {"name": "mesh:role:node", "allowed_services": ["*"], "allowed_publish": ["*"], "allowed_targets": ["*"]}
     ],
     "bindings": [
       {"role": "admin", "members": ["mesh:system:authenticated"]},

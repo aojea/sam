@@ -90,7 +90,7 @@ type openAIFacade struct {
 	// when a requirement exists): verifies the provider's
 	// control-plane-attested labels before any request data is sent
 	// (see labels_gate.go).
-	verifyPeerLabels func(ctx context.Context, peerID string, required map[string]string) error
+	verifyPeerLabels func(ctx context.Context, peerID, service string, required map[string]string) error
 	authorizeLocal   func(ctx context.Context, serviceName, method, path string) error
 
 	ttl     time.Duration
@@ -128,12 +128,12 @@ func newOpenAIFacade(node *AgentMeshNode, egress http.Handler) *openAIFacade {
 		},
 		localLabels: node.labels,
 		egressFloor: node.egressFloor,
-		verifyPeerLabels: func(ctx context.Context, peerID string, required map[string]string) error {
+		verifyPeerLabels: func(ctx context.Context, peerID, service string, required map[string]string) error {
 			pid, err := peer.Decode(peerID)
 			if err != nil {
 				return fmt.Errorf("invalid peer ID %q: %w", peerID, err)
 			}
-			return node.VerifyPeerLabels(ctx, pid, required)
+			return node.VerifyProvider(ctx, pid, required, api.ServiceTypeStringInference+"://"+service)
 		},
 		authorizeLocal: func(ctx context.Context, serviceName, method, path string) error {
 			callerBiscuit := CallerBiscuitFromContext(ctx)
@@ -410,7 +410,7 @@ func (f *openAIFacade) handleCompletions(w http.ResponseWriter, r *http.Request)
 			}
 			// No backoff on failure: the verdict is requirement-scoped,
 			// the provider stays eligible for unconstrained requests.
-			if err := f.verifyPeerLabels(r.Context(), p.peerID, requiredLabels); err != nil {
+			if err := f.verifyPeerLabels(r.Context(), p.peerID, p.service, requiredLabels); err != nil {
 				// With no caller requirement what failed is the floor or the
 				// peer's own identity; attribute it so the operator can tell
 				// their floor apart from a caller's requirement.

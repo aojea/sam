@@ -25,8 +25,9 @@ A node publishes services, each with a type and a name: `mcp://calculator`,
 `inference://vllm-eu`, `a2a://triage`, `egress://bigquery.googleapis.com`, and
 the built-in `system://mesh.catalog` that answers discovery queries.
 
-Standing mesh roles grant access to services by name (`allowed_services`) and
-can narrow HTTP methods and paths (`http`). On top of standing roles, a
+Standing mesh roles grant access to services by name (`allowed_services`),
+grant the right to serve them (`allowed_publish`) and can narrow HTTP
+methods and paths (`http`). On top of standing roles, a
 holder can append `TaskAuthorizationRule` blocks (`tar_block`) to scope a
 token for a single task or sub-agent hop—narrowing which services, MCP tools
 (`operation.allowed_tools`), HTTP methods and paths
@@ -46,6 +47,7 @@ from a file (`--policy-file`).
 {
   "name": "developer",
   "allowed_services": ["mcp://code-reviewer", "mcp://build-runner.*", "inference://*"],
+  "allowed_publish": ["mcp://build-runner.*"],
   "allowed_targets": ["group:dev-nodes"],
   "allowed_labels": ["region=*"],
   "http": [
@@ -59,6 +61,11 @@ from a file (`--policy-file`).
   can stand for the whole name, for a leading component (`mcp://*.internal`)
   or for a trailing one (`mcp://build-runner.*`). A bare `*` means every
   service.
+- `allowed_publish`: the services holders may serve, in the same syntax.
+  A member announces a service to the directory, and is accepted as its
+  provider by callers, only when its own credential grants it here. If
+  absent, holders may publish nothing. Calling and serving are granted
+  separately: a role that may call `mcp://calculator` does not serve it.
 - `allowed_targets`: the nodes holders may call, as facts about the
   destination node's identity: `node:<peer-id>`, `user:<sub>`,
   `email:<addr>`, `group:<name>`, `idp_role:<name>`, or `*`. If absent, any

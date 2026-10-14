@@ -39,7 +39,8 @@ helm upgrade --install agentmesh ./charts/agentmesh \
   --set controlPlane.workloadIssuer="$ISSUER" \
   --set controlPlane.insecureSkipTlsVerify=true \
   --set bootstrap.nodeMembers='{user:system:serviceaccount:agentmesh-nodes:calc-mcp-agentmesh-node}' \
-  --set bootstrap.nodeServices='{mcp://calculator,system://mesh.catalog}'
+  --set bootstrap.nodeServices='{mcp://calculator,system://mesh.catalog}' \
+  --set bootstrap.nodePublish='{mcp://calculator}'
 ```
 
 `controlPlane.workloadIssuer` marks the cluster issuer as a workload identity
@@ -51,11 +52,14 @@ for a public provider. On a managed cluster the issuer is often public (on
 GKE: `https://container.googleapis.com/v1/projects/.../clusters/...`) and
 does not need the flag.
 
-The three `bootstrap.*` values write the initial policy:
+The four `bootstrap.*` values write the initial policy:
 
 - `nodeMembers`: the identities that may enroll as `mesh:role:node`. If
   empty, no node can join until you post a policy.
 - `nodeServices`: the services that nodes may call. If empty, nodes can call
+  nothing.
+- `nodePublish`: the services that nodes may serve: announce to the
+  directory and be accepted as a provider of. If empty, nodes can publish
   nothing.
 - `nodeLabels`: the label patterns that nodes may attest. If empty, nodes
   cannot declare labels.

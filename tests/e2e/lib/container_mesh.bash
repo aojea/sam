@@ -474,6 +474,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --set console.enabled=false
       --set 'router.externalAddrs={/dns4/agentmesh-router/tcp/4501}'
       --set 'bootstrap.nodeServices={mcp://calculator,mcp://db-agent,mcp://http-tool,mcp://stdio-tool,a2a://echo,system://mesh.catalog}'
+      --set 'bootstrap.nodePublish={mcp://calculator,mcp://db-agent,mcp://http-tool,mcp://stdio-tool,a2a://echo}'
       --set 'bootstrap.nodeMembers={user:test-user}'
       --set 'bootstrap.nodeLabels={region=*}')
     if ! "${helm_bin}" "${helm_args[@]}"; then

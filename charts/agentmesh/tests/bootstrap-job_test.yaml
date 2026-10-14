@@ -63,7 +63,7 @@ tests:
     asserts:
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: '"name": "mesh:role:node", "allowed_services": \[\]'
+          pattern: '"name": "mesh:role:node", "allowed_services": \[\], "allowed_publish": \[\]'
 
   - it: no identity may enroll as a node by default (fail closed)
     documentSelector:
@@ -93,10 +93,11 @@ tests:
     set:
       bootstrap:
         nodeServices: ["mcp://calculator", "system://mesh.catalog"]
+        nodePublish: ["mcp://calculator"]
     asserts:
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: '"name": "mesh:role:node", "allowed_services": \["mcp://calculator","system://mesh.catalog"\]'
+          pattern: '"name": "mesh:role:node", "allowed_services": \["mcp://calculator","system://mesh.catalog"\], "allowed_publish": \["mcp://calculator"\]'
 
   - it: node role grants only the configured label patterns
     documentSelector:
