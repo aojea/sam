@@ -176,26 +176,6 @@ message DiscoveredProvider {
   string srv_description = 4;
 }
 
-// ServiceAnnounce is gossiped by a node on per-key topics (see
-// DiscoveryTopic) while those topics have subscribers. It is a routing
-// hint signed at the pubsub layer by the announcing peer: consumers use
-// it for freshness and load awareness, never for authorization.
-message ServiceAnnounce {
-  string peer_id = 1;
-  ServiceType type = 2;
-  string service_name = 3;
-  // Routing keys served by this service: model IDs for inference,
-  // tool names for MCP.
-  repeated string keys = 4;
-  // Operator-declared labels (e.g. "region"). Operator claims always
-  // take precedence over runtime-derived values.
-  map<string, string> labels = 5;
-  // Runtime load hints; zero values mean unknown.
-  uint32 active_requests = 6;
-  double latency_ewma_ms = 7;
-  google.protobuf.Timestamp announce_time = 8;
-}
-
 message ControlPlaneInfoResponse {
   string oidc_issuer = 1;
   string client_id = 2;

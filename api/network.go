@@ -15,8 +15,6 @@
 package api
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -55,11 +53,6 @@ const (
 
 	// GossipControlPlaneSync is the GossipSub topic used by the control plane to sync cluster state.
 	GossipControlPlaneSync = "/mesh/control-plane/sync/v1"
-
-	// DiscoveryTopicPrefix is the GossipSub topic namespace for interest-scoped
-	// service announcements (ServiceAnnounce messages). Full topics are built
-	// with DiscoveryTopic; the version segment allows wire evolution.
-	DiscoveryTopicPrefix = "/mesh/discovery/v1"
 
 	// DefaultAudience is the default audience string used in OIDC token validation.
 	DefaultAudience = "agentmesh-audience"
@@ -386,23 +379,6 @@ func ServiceTypeToString(t ServiceType) (string, error) {
 	default:
 		return "", fmt.Errorf("invalid or unspecified service type")
 	}
-}
-
-// DiscoveryTopic returns the GossipSub topic for announcements about one
-// routing key (a model ID for inference, a tool name for MCP). Keys are
-// hashed so topic names stay bounded; consumers match exact keys from the
-// ServiceAnnounce payload, so hash collisions only merge announcement
-// streams, never routing decisions.
-func DiscoveryTopic(t ServiceType, key string) (string, error) {
-	typeStr, err := ServiceTypeToString(t)
-	if err != nil {
-		return "", err
-	}
-	if key == "" {
-		return "", fmt.Errorf("discovery topic key cannot be empty")
-	}
-	sum := sha256.Sum256([]byte(key))
-	return fmt.Sprintf("%s/%s/%s", DiscoveryTopicPrefix, typeStr, hex.EncodeToString(sum[:8])), nil
 }
 
 // ============================================================================

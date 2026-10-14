@@ -20,49 +20,6 @@ import (
 	"strings"
 )
 
-// Caps for ServiceAnnounce fields: announcements are unsolicited gossip, so
-// receivers bound every dimension before processing.
-const (
-	MaxAnnounceKeys      = 64
-	MaxAnnounceLabels    = 16
-	MaxAnnounceStringLen = 256
-)
-
-// ValidateServiceAnnounce bounds and sanity-checks a gossiped announcement.
-// Origin authenticity and freshness are the receiver's responsibility.
-func ValidateServiceAnnounce(a *ServiceAnnounce) error {
-	if a == nil {
-		return fmt.Errorf("announce is nil")
-	}
-	if a.GetPeerId() == "" || len(a.GetPeerId()) > MaxAnnounceStringLen {
-		return fmt.Errorf("invalid peer_id")
-	}
-	if _, err := ServiceTypeToString(a.GetType()); err != nil {
-		return fmt.Errorf("invalid type: %w", err)
-	}
-	if a.GetServiceName() == "" || len(a.GetServiceName()) > MaxAnnounceStringLen {
-		return fmt.Errorf("invalid service_name")
-	}
-	if len(a.GetKeys()) == 0 || len(a.GetKeys()) > MaxAnnounceKeys {
-		return fmt.Errorf("keys count %d out of range [1, %d]", len(a.GetKeys()), MaxAnnounceKeys)
-	}
-	for _, k := range a.GetKeys() {
-		if k == "" || len(k) > MaxAnnounceStringLen {
-			return fmt.Errorf("invalid key %q", k)
-		}
-	}
-	if len(a.GetLabels()) > MaxAnnounceLabels {
-		return fmt.Errorf("labels count %d exceeds %d", len(a.GetLabels()), MaxAnnounceLabels)
-	}
-	if err := ValidateLabels(a.GetLabels()); err != nil {
-		return fmt.Errorf("invalid labels: %w", err)
-	}
-	if a.GetAnnounceTime() == nil || !a.GetAnnounceTime().IsValid() || a.GetAnnounceTime().AsTime().Unix() <= 0 {
-		return fmt.Errorf("missing or invalid announce_time")
-	}
-	return nil
-}
-
 // ValidateServiceFormat ensures the service string follows the explicit URI format.
 func ValidateServiceFormat(svc string) error {
 	if svc == "*" {

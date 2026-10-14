@@ -831,33 +831,6 @@ class STSTokenResponse(_message.Message):
     task_name: str
     def __init__(self, jwt: _Optional[str] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., subject: _Optional[str] = ..., roles: _Optional[_Iterable[str]] = ..., task_name: _Optional[str] = ...) -> None: ...
 
-class ServiceAnnounce(_message.Message):
-    __slots__ = ["active_requests", "announce_time", "keys", "labels", "latency_ewma_ms", "peer_id", "service_name", "type"]
-    class LabelsEntry(_message.Message):
-        __slots__ = ["key", "value"]
-        KEY_FIELD_NUMBER: _ClassVar[int]
-        VALUE_FIELD_NUMBER: _ClassVar[int]
-        key: str
-        value: str
-        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
-    ACTIVE_REQUESTS_FIELD_NUMBER: _ClassVar[int]
-    ANNOUNCE_TIME_FIELD_NUMBER: _ClassVar[int]
-    KEYS_FIELD_NUMBER: _ClassVar[int]
-    LABELS_FIELD_NUMBER: _ClassVar[int]
-    LATENCY_EWMA_MS_FIELD_NUMBER: _ClassVar[int]
-    PEER_ID_FIELD_NUMBER: _ClassVar[int]
-    SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
-    TYPE_FIELD_NUMBER: _ClassVar[int]
-    active_requests: int
-    announce_time: _timestamp_pb2.Timestamp
-    keys: _containers.RepeatedScalarFieldContainer[str]
-    labels: _containers.ScalarMap[str, str]
-    latency_ewma_ms: float
-    peer_id: str
-    service_name: str
-    type: ServiceType
-    def __init__(self, peer_id: _Optional[str] = ..., type: _Optional[_Union[ServiceType, str]] = ..., service_name: _Optional[str] = ..., keys: _Optional[_Iterable[str]] = ..., labels: _Optional[_Mapping[str, str]] = ..., active_requests: _Optional[int] = ..., latency_ewma_ms: _Optional[float] = ..., announce_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
-
 class ServiceInfo(_message.Message):
     __slots__ = ["description", "name", "type"]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
