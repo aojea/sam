@@ -41,6 +41,7 @@ func TestBuildPolicyRules(t *testing.T) {
 			Name:            "test-role",
 			AllowedTargets:  []string{"*", "node:" + nodeCID, "node:not-a-peer-id", "custom-fact:custom-val", "legacy-peer"},
 			AllowedServices: []string{"*:*", "mcp:*", "mcp:*.suffix", "mcp:prefix.*", "mcp:exact"},
+			AllowedPublish:  []string{"mcp://*", "a2a://echo"},
 			CustomDatalog: []string{
 				"custom_rule($x) <- fact($x), $x > 3;",
 				"custom_fact(\"hello\")",
@@ -66,6 +67,8 @@ func TestBuildPolicyRules(t *testing.T) {
 		"granted_service_suffix(\"mcp\", \".suffix\") <- role(\"test-role\")":                        false,
 		"granted_service_prefix(\"mcp\", \"prefix.\") <- role(\"test-role\")":                        false,
 		"granted_service_set(\"mcp\", [\"exact\"]) <- role(\"test-role\")":                           false,
+		"granted_publish_all(\"mcp\") <- role(\"test-role\")":                                        false,
+		"granted_publish_set(\"a2a\", [\"echo\"]) <- role(\"test-role\")":                            false,
 		"target_unrestricted(true) <- role(\"test-role\")":                                           false,
 		"target_restricted(true) <- role(\"test-role\")":                                             false,
 		"granted_target_set(\"node\", [\"" + nodeID + "\", \"legacy-peer\"]) <- role(\"test-role\")": false,

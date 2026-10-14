@@ -182,6 +182,7 @@ type AgentMeshNode struct {
 	trustedKeys           []TrustedKey
 	keysMu                sync.RWMutex
 	MeshPolicyRules       []biscuit.Rule
+	meshPolicyTexts       []string
 	MeshPolicyMu          sync.RWMutex
 	// pendingEgress holds assignments that arrived before Start created the
 	// service registry (SyncControlPlane runs first); Start applies them.
@@ -2699,10 +2700,18 @@ func (n *AgentMeshNode) syncMeshPolicy(ctx context.Context) error {
 	}
 
 	n.MeshPolicyMu.Lock()
+	changed := n.meshPolicyTexts != nil && !slices.Equal(n.meshPolicyTexts, policyResp.DatalogRules)
 	n.MeshPolicyRules = rules
+	n.meshPolicyTexts = policyResp.DatalogRules
 	n.MeshPolicyMu.Unlock()
 
 	logger.Infof("Successfully synchronized mesh policy (%d rules)", len(rules))
+	if changed && n.reprovideTrigger != nil {
+		// The policy decides what this node may publish; a record the
+		// directory refused under the previous one is announced again now.
+		logger.Info("Mesh policy changed; announcing this node's records again")
+		n.triggerReprovide()
+	}
 	return nil
 }
 

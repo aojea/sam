@@ -732,7 +732,13 @@ class MeshSession:
             peer_id = await self.connect(peer)
             frame = encode_auth_frame(self.biscuit, target_service)
             async with open_mcp_session(
-                self.host, peer_id, frame, self.mesh.credential.control_plane_keys, required_labels=required_labels, egress_require_labels=self.egress_require_labels
+                self.host,
+                peer_id,
+                frame,
+                self.mesh.credential.control_plane_keys,
+                required_labels=required_labels,
+                egress_require_labels=self.egress_require_labels,
+                policy_rules=self.policy_rules,
             ) as opened_session:
                 yield opened_session
 
@@ -757,7 +763,7 @@ class MeshSession:
     def policy_rules(self) -> list[str]:
         """The mesh policy rules this member evaluates for callers, as the
         control plane rendered them (PolicyConfigGetResponse.datalog_rules).
-        Empty until accept_a2a() or sync_policy()."""
+        Empty until the first control plane sync, accept_a2a() or sync_policy()."""
         return list(self._policy_rules or [])
 
     async def sync_policy(self) -> None:
@@ -781,11 +787,13 @@ class MeshSession:
             if len(self._held_router_ids) < self._want_routers():
                 await self.top_up_routers()
             self._relay_trigger.set()
-            if self.endpoint is not None:
-                try:
-                    await self.sync_policy()
-                except Exception as err:  # noqa: BLE001 - the last good policy stays in force
-                    result.errors.append(f"policy: {err}")
+            # Callers evaluate the policy too: it is what grants a provider the
+            # service it serves (require_publish), not only what an A2A
+            # endpoint authorizes its callers with.
+            try:
+                await self.sync_policy()
+            except Exception as err:  # noqa: BLE001 - the last good policy stays in force
+                result.errors.append(f"policy: {err}")
             return result
 
     def trigger_sync(self) -> None:
@@ -1014,7 +1022,7 @@ class MeshSession:
         provider = await authenticate_with_peer(self.host, peer_id, self.mesh.auth_frame(), self.mesh.credential.control_plane_keys)
         # Only nodes host services; a router's or an admin's credential is a member, not a provider.
         require_role(provider, ROLE_NODE)
-        require_publish(provider, target_service)
+        require_publish(provider, target_service, self.policy_rules)
         require_egress_labels(provider, self.egress_require_labels)
         self._egress_verdicts[verdict] = time.monotonic() + EGRESS_VERDICT_TTL
         return peer_id

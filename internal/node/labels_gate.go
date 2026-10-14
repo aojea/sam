@@ -313,7 +313,10 @@ func (n *AgentMeshNode) checkProvider(providerBiscuit []byte, peerID peer.ID, re
 		if svcType == "" || svcName == "" {
 			return fmt.Errorf("service %q must be <type>://<name>", service)
 		}
-		if err := identity.RequirePublish(b, key, svcType, svcName, n.BiscuitTimeout); err != nil {
+		n.MeshPolicyMu.RLock()
+		meshRules := n.MeshPolicyRules
+		n.MeshPolicyMu.RUnlock()
+		if err := identity.RequirePublish(b, key, svcType, svcName, meshRules, n.BiscuitTimeout); err != nil {
 			return fmt.Errorf("%w: %w", ErrProviderNotGranted, err)
 		}
 	}

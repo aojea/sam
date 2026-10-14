@@ -15,6 +15,7 @@
 package controlplane
 
 import (
+	"strings"
 	"testing"
 
 	jwt "github.com/golang-jwt/jwt/v5"
@@ -120,6 +121,28 @@ func TestResolveRolesWildcardsAndValidation(t *testing.T) {
 		}
 		if err := ValidatePolicyConfig(cfg); err == nil {
 			t.Errorf("ValidatePolicyConfig accepted invalid member %q", bad)
+		}
+	}
+}
+
+func TestValidatePolicyConfigAllowedPublish(t *testing.T) {
+	role := func(publish ...string) *api.PolicyConfig {
+		return &api.PolicyConfig{
+			Roles:    []*api.PolicyRole{{Name: "r1", AllowedPublish: publish}},
+			Bindings: []*api.PolicyBinding{{Role: "r1", Members: []string{"user:alice"}}},
+		}
+	}
+	for _, ok := range [][]string{nil, {"*"}, {"mcp://*"}, {"mcp://calc", "a2a://echo"}, {"egress://api.github.com"}} {
+		if err := ValidatePolicyConfig(role(ok...)); err != nil {
+			t.Errorf("ValidatePolicyConfig rejected allowed_publish %q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"calc", "mcp:calc", "mcp://calc?x=1", "mcp://calc#f", ""} {
+		err := ValidatePolicyConfig(role(bad))
+		if err == nil {
+			t.Errorf("ValidatePolicyConfig accepted allowed_publish %q", bad)
+		} else if !strings.Contains(err.Error(), "allowed_publish") {
+			t.Errorf("rejecting allowed_publish %q, the error does not name the field: %v", bad, err)
 		}
 	}
 }

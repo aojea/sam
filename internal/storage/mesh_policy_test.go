@@ -46,8 +46,10 @@ func TestMeshPolicyRoundTripsEveryRoleField(t *testing.T) {
 		AllowedServices: []string{"mcp://tool"},
 		CustomDatalog:   []string{`region("emea")`},
 		AllowedLabels:   []string{"region=*"},
-		AllowedPublish:  []string{"mcp://tool", "inference://*"},
-		Http:            []*api.HTTPGrant{{Service: "mcp://tool", Methods: []string{"GET"}, Paths: []string{"/v1/*"}}},
+		// Sorted as the store reads them back: the order of a list has no
+		// meaning in the policy, and a stable one is what tells a change.
+		AllowedPublish: []string{"inference://*", "mcp://tool"},
+		Http:           []*api.HTTPGrant{{Service: "mcp://tool", Methods: []string{"GET"}, Paths: []string{"/v1/*"}}},
 	}
 
 	if err := store.SaveMeshPolicy(ctx, []*api.PolicyRole{want}, nil); err != nil {

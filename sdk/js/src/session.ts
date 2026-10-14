@@ -907,7 +907,7 @@ export class MeshSession {
    */
   async openMCP(peer: Peer, targetService: string, options: MCPSessionOptions = {}): Promise<MCPSession> {
     const conn = await this.connect(peer, options.signal);
-    return openMCPSession(conn, encodeAuthFrame(this.biscuit, targetService), this.mesh.credential.controlPlaneKeys, options, this.#egressRequireLabels);
+    return openMCPSession(conn, encodeAuthFrame(this.biscuit, targetService), this.mesh.credential.controlPlaneKeys, { ...options, policyRules: this.policyRules }, this.#egressRequireLabels);
   }
 
   /** Lists the tools a provider serves for a service. */
@@ -1006,12 +1006,13 @@ export class MeshSession {
     if (!this.#closed) {
       void this.keepRelay().catch(() => {});
     }
-    if (this.endpoint !== undefined) {
-      try {
-        await this.syncPolicy();
-      } catch (err) {
-        result.errors.push(`policy: ${err instanceof Error ? err.message : String(err)}`);
-      }
+    // Callers evaluate the policy too: it is what grants a provider the
+    // service it serves (requirePublish), not only what an A2A endpoint
+    // authorizes its callers with.
+    try {
+      await this.syncPolicy();
+    } catch (err) {
+      result.errors.push(`policy: ${err instanceof Error ? err.message : String(err)}`);
     }
     return result;
   }
@@ -1095,7 +1096,7 @@ export class MeshSession {
   /**
    * The mesh policy rules this member evaluates for callers, as the control
    * plane rendered them (PolicyConfigGetResponse.datalog_rules). Empty until
-   * acceptA2A() or syncPolicy().
+   * the first control plane sync, acceptA2A() or syncPolicy().
    */
   get policyRules(): string[] {
     return this.#policyRules ?? [];
@@ -1130,7 +1131,7 @@ export class MeshSession {
     const provider = await authenticateWithPeer(conn, this.mesh.authFrame(), this.mesh.credential.controlPlaneKeys);
     // Only nodes host services; a router's or an admin's credential is a member, not a provider.
     requireRole(provider, ROLE_NODE);
-    await requirePublish(provider, targetService);
+    await requirePublish(provider, targetService, this.policyRules);
     requireEgressLabels(provider, this.#egressRequireLabels);
     this.#egressVerdicts.set(verdict, new Date(Date.now() + EGRESS_VERDICT_TTL_MS));
     return conn;

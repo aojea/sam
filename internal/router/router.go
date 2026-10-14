@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -342,6 +343,10 @@ type Router struct {
 	// credentials is the credential each admitted member presented, as
 	// memberCredential, for what the directory checks against it.
 	credentials sync.Map
+	// policy is the mesh policy as the control plane renders it
+	// (PolicyConfigGetResponse.datalog_rules), what a member's credential is
+	// evaluated with besides its own facts; nil until the first sync.
+	policy      atomic.Pointer[meshPolicy]
 	bannedPeers sync.Map
 	// directory is how the mesh keeps its directory, read from /info at
 	// start (syncDirectory); records is the records this router holds.
@@ -374,7 +379,8 @@ type Router struct {
 	// only the last biscuit it issued.
 	refreshMu sync.Mutex
 
-	keysSyncTrigger chan struct{}
+	keysSyncTrigger   chan struct{}
+	policySyncTrigger chan struct{}
 
 	// Control contexts
 	ctx      context.Context
@@ -409,11 +415,12 @@ func NewRouter(ctx context.Context, config Options) (*Router, error) {
 	}
 
 	return &Router{
-		config:           config,
-		ctx:              ctx,
-		cancel:           cancel,
-		handshakeLimiter: handshakeLimiter,
-		keysSyncTrigger:  make(chan struct{}, 1),
+		config:            config,
+		ctx:               ctx,
+		cancel:            cancel,
+		handshakeLimiter:  handshakeLimiter,
+		keysSyncTrigger:   make(chan struct{}, 1),
+		policySyncTrigger: make(chan struct{}, 1),
 	}, nil
 }
 
@@ -592,9 +599,10 @@ func (r *Router) Start() (retErr error) {
 	})
 
 	// 5. Start background routines
-	r.wg.Add(8)
+	r.wg.Add(9)
 	go r.runLeaseRenewalLoop()
 	go r.runKeysSyncLoop()
+	go r.runPolicySyncLoop()
 	go r.runFederationLoop()
 	go r.runBiscuitRenewalLoop()
 	go r.runShedLoop()
@@ -1043,6 +1051,9 @@ func (r *Router) listenForControlPlaneEvents(ctx context.Context) {
 		case api.MeshEvent_KEY_ROTATION:
 			logger.Infof("[Router Event] Received KEY_ROTATION event, triggering key sync")
 			r.triggerKeysSync()
+		case api.MeshEvent_POLICY_UPDATE:
+			logger.Infof("[Router Event] Received POLICY_UPDATE event, triggering policy sync")
+			r.triggerPolicySync()
 		}
 	}
 }
@@ -1070,6 +1081,80 @@ func (r *Router) runKeysSyncLoop() {
 			logger.Errorf("Failed keys sync: %v", err)
 		}
 	}
+}
+
+func (r *Router) triggerPolicySync() {
+	select {
+	case r.policySyncTrigger <- struct{}{}:
+	default:
+	}
+}
+
+// runPolicySyncLoop pulls the mesh policy at start, on each POLICY_UPDATE
+// event and every PolicySyncInterval: the event is best effort, the pull is
+// what bounds how long a policy change takes to reach this router.
+func (r *Router) runPolicySyncLoop() {
+	defer r.wg.Done()
+	ticker := time.NewTicker(r.config.PolicySyncInterval)
+	defer ticker.Stop()
+
+	for {
+		if err := r.syncPolicy(); err != nil {
+			logger.Errorf("Failed policy sync: %v", err)
+		}
+		select {
+		case <-ticker.C:
+		case <-r.policySyncTrigger:
+		case <-r.ctx.Done():
+			return
+		}
+	}
+}
+
+// syncPolicy replaces the mesh policy rules with what the control plane
+// renders now. The text is the contract: the router adds it to the
+// authorizer and derives nothing from roles and bindings itself.
+func (r *Router) syncPolicy() error {
+	r.keysMu.RLock()
+	biscuit := r.credential.biscuit
+	r.keysMu.RUnlock()
+	if len(biscuit) == 0 {
+		return errors.New("router has no credential yet")
+	}
+	resp, err := r.controlPlane(10*time.Second).FetchPolicy(r.ctx, biscuit)
+	if err != nil {
+		return err
+	}
+	if len(resp.ProtoReflect().GetUnknown()) > 0 {
+		return fmt.Errorf("control plane %s predates datalog_rules in its policy response; upgrade the control plane", r.config.ControlPlaneURL)
+	}
+	rules, err := api.ParseDatalogRules(resp.DatalogRules)
+	if err != nil {
+		return fmt.Errorf("mesh policy carries an unparseable rule: %w", err)
+	}
+	before := r.policy.Swap(&meshPolicy{rules: rules, texts: resp.DatalogRules})
+	if before == nil || !slices.Equal(before.texts, resp.DatalogRules) {
+		logger.Infof("Synced mesh policy (%d rules)", len(rules))
+	} else {
+		logger.Debugf("Synced mesh policy (%d rules, unchanged)", len(rules))
+	}
+	return nil
+}
+
+// meshPolicy is one synced rendering of the mesh policy: the rules the
+// authorizer runs and the text they were parsed from, to tell a change.
+type meshPolicy struct {
+	rules []biscuit.Rule
+	texts []string
+}
+
+// meshPolicyRules is the mesh policy as last synced; empty before the first
+// sync, when only a credential's own facts decide.
+func (r *Router) meshPolicyRules() []biscuit.Rule {
+	if p := r.policy.Load(); p != nil {
+		return p.rules
+	}
+	return nil
 }
 
 func (r *Router) runLeaseRenewalLoop() {

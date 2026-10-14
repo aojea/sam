@@ -44,6 +44,7 @@ import {
   KeysResponseSchema,
   MeshEvent_Type,
   MeshEventSchema,
+  PolicyConfigGetResponseSchema,
   TokenRefreshResponseSchema,
 } from "./gen/agentmesh_pb.ts";
 import { Identity } from "./identity.ts";
@@ -124,6 +125,9 @@ class FakeControlPlane {
             }),
           ),
         );
+      }
+      if (req.method === "GET" && path === "/policies") {
+        return proto(toBinary(PolicyConfigGetResponseSchema, create(PolicyConfigGetResponseSchema, { datalogRules: ['granted_publish_all_types(true) <- role("mesh:role:node")'] })));
       }
       if (req.method === "POST" && path === "/refresh") {
         this.refreshes++;

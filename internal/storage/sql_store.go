@@ -1272,9 +1272,11 @@ func (s *SQLStore) saveMeshPolicyTx(ctx context.Context, tx *sql.Tx, roles []*ap
 	return nil
 }
 
-// GetMeshPolicy retrieves the entire mesh policy as structured data.
+// GetMeshPolicy retrieves the entire mesh policy as structured data, in an
+// order that does not change between reads: the policy is rendered to text
+// a member compares with the last text it fetched to tell a change.
 func (s *SQLStore) GetMeshPolicy(ctx context.Context) ([]*api.PolicyRole, []*api.PolicyBinding, error) {
-	rolesRows, err := s.db.QueryContext(ctx, s.rebind("SELECT name FROM roles"))
+	rolesRows, err := s.db.QueryContext(ctx, s.rebind("SELECT name FROM roles ORDER BY name"))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1296,7 +1298,7 @@ func (s *SQLStore) GetMeshPolicy(ctx context.Context) ([]*api.PolicyRole, []*api
 		return nil, nil, err
 	}
 
-	permsRows, err := s.db.QueryContext(ctx, s.rebind("SELECT role_name, resource_type, resource_value FROM role_permissions"))
+	permsRows, err := s.db.QueryContext(ctx, s.rebind("SELECT role_name, resource_type, resource_value FROM role_permissions ORDER BY role_name, resource_type, resource_value"))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1332,32 +1334,26 @@ func (s *SQLStore) GetMeshPolicy(ctx context.Context) ([]*api.PolicyRole, []*api
 		return nil, nil, err
 	}
 
-	bindingsRows, err := s.db.QueryContext(ctx, s.rebind("SELECT role_name, member FROM role_bindings"))
+	bindingsRows, err := s.db.QueryContext(ctx, s.rebind("SELECT role_name, member FROM role_bindings ORDER BY role_name, member"))
 	if err != nil {
 		return nil, nil, err
 	}
 	defer func() { _ = bindingsRows.Close() }()
 
-	bindingsMap := make(map[string]*api.PolicyBinding)
+	var bindings []*api.PolicyBinding
 	for bindingsRows.Next() {
 		var roleName, member string
 		if err := bindingsRows.Scan(&roleName, &member); err != nil {
 			return nil, nil, err
 		}
-		b, ok := bindingsMap[roleName]
-		if !ok {
-			b = &api.PolicyBinding{Role: roleName}
-			bindingsMap[roleName] = b
+		if n := len(bindings); n > 0 && bindings[n-1].Role == roleName {
+			bindings[n-1].Members = append(bindings[n-1].Members, member)
+			continue
 		}
-		b.Members = append(b.Members, member)
+		bindings = append(bindings, &api.PolicyBinding{Role: roleName, Members: []string{member}})
 	}
 	if err := bindingsRows.Err(); err != nil {
 		return nil, nil, err
-	}
-
-	var bindings []*api.PolicyBinding
-	for _, b := range bindingsMap {
-		bindings = append(bindings, b)
 	}
 
 	return roles, bindings, nil

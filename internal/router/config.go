@@ -41,6 +41,7 @@ type Options struct {
 	ListenAddrs        []string
 	ExternalAddrs      []string
 	KeysSyncInterval   time.Duration
+	PolicySyncInterval time.Duration
 	LeaseRenewInterval time.Duration
 	OIDCProvider       string // For OIDC enrollment
 	OIDCToken          string // OIDC JWT token for enrollment
@@ -120,6 +121,9 @@ func (o *Options) Default() {
 	}
 	if o.KeysSyncInterval <= 0 {
 		o.KeysSyncInterval = 5 * time.Minute
+	}
+	if o.PolicySyncInterval <= 0 {
+		o.PolicySyncInterval = 15 * time.Minute
 	}
 	if o.LeaseRenewInterval <= 0 {
 		o.LeaseRenewInterval = 30 * time.Second

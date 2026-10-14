@@ -466,4 +466,26 @@ func TestDirectoryDeniesWhatTheCredentialDoesNotGrant(t *testing.T) {
 	if resp := ask(t, member, a.Host.ID(), provide(calc, "mcp://calculator")); resp.GetError() == "" {
 		t.Fatal("stored with no credential held; want a refusal")
 	}
+
+	// The mesh policy the router synced grants too: a credential carrying
+	// role("member") and no publish fact is granted what the policy gives
+	// that role now, so a policy change does not wait for the member's next
+	// credential.
+	member = attach(t, a)
+	if resp := ask(t, member, a.Host.ID(), provide(weather, "mcp://weather")); resp.GetError() == "" {
+		t.Fatal("stored under a policy granting nothing; want a refusal")
+	}
+	rules, _ := api.BuildPolicyRules([]*api.PolicyRole{{Name: "member", AllowedPublish: []string{"mcp://weather"}}}, nil)
+	texts := api.PolicyRuleTexts(rules)
+	parsed, err := api.ParseDatalogRules(texts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.policy.Store(&meshPolicy{rules: parsed, texts: texts})
+	if resp := ask(t, member, a.Host.ID(), provide(weather, "mcp://weather")); resp.GetError() != "" {
+		t.Fatalf("refused under a policy granting the role mcp://weather: %s", resp.GetError())
+	}
+	if resp := ask(t, member, a.Host.ID(), provide(calc, "mcp://calculator")); resp.GetError() == "" {
+		t.Fatal("stored mcp://calculator under a policy granting the role mcp://weather only; want a refusal")
+	}
 }

@@ -244,7 +244,10 @@ func (e *directoryDeniedError) Error() string { return e.err.Error() }
 func (e *directoryDeniedError) Unwrap() error { return e.err }
 
 // requirePublish checks the admitted member's credential grants serving
-// the service a record names. A record under the member's own peer key
+// the service a record names: its own granted_publish_* facts, or those
+// the mesh policy rules derive from its role() and label() facts, so that
+// a policy change reaches the directory at the next sync and not at the
+// member's next credential. A record under the member's own peer key
 // names no service and needs no grant: a member may always say where it
 // is reached.
 func (r *Router) requirePublish(provider peer.ID, svcType api.ServiceType, svcName string) error {
@@ -260,7 +263,7 @@ func (r *Router) requirePublish(provider peer.ID, svcType api.ServiceType, svcNa
 		return &directoryDeniedError{service: typeStr + "://" + svcName, err: errors.New("no credential held for the member")}
 	}
 	cred := v.(memberCredential)
-	if err := identity.RequirePublish(cred.biscuit, cred.key, typeStr, svcName, r.config.BiscuitTimeout); err != nil {
+	if err := identity.RequirePublish(cred.biscuit, cred.key, typeStr, svcName, r.meshPolicyRules(), r.config.BiscuitTimeout); err != nil {
 		return &directoryDeniedError{service: typeStr + "://" + svcName, err: err}
 	}
 	return nil

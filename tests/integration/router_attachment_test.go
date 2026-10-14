@@ -53,6 +53,10 @@ type routerFixture struct {
 // test sets it before starting its routers and clears it after.
 var extraRouterArgs []string
 
+// extraControlPlaneArgs is appended to the control plane startAttachmentMesh
+// starts; a test sets it before starting the mesh and clears it after.
+var extraControlPlaneArgs []string
+
 // gauge reads one metric from the router's /metrics, by its full name with
 // labels, and fails when it is not there.
 func (r *routerFixture) gauge(t *testing.T, name string) float64 {
@@ -374,14 +378,14 @@ bindings:
 	}
 
 	m.cpPort = getFreePort(t)
-	cpCmd := exec.Command(cpBin,
+	cpCmd := exec.Command(cpBin, append([]string{
 		"--bind-address", fmt.Sprintf("127.0.0.1:%d", m.cpPort),
 		"--admin-token-path", tokenPath(t, testAdminToken),
-		"--db-dsn", filepath.Join(m.tmpDir, "cp.db")+"?_pragma=journal_mode(DELETE)&_pragma=busy_timeout(5000)",
+		"--db-dsn", filepath.Join(m.tmpDir, "cp.db") + "?_pragma=journal_mode(DELETE)&_pragma=busy_timeout(5000)",
 		"--issuer", oidcURL,
 		"--insecure-skip-tls-verify",
 		"--mesh-reconnect-interval", "500ms",
-	)
+	}, extraControlPlaneArgs...)...)
 	cpLog := filepath.Join(m.tmpDir, "control-plane.log")
 	cpLogFile, err := os.Create(cpLog)
 	if err != nil {

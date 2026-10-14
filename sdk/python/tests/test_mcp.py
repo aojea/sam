@@ -266,6 +266,18 @@ def test_tools_over_the_mesh_stream():
                                 pass
                         async with open_mcp_session(caller, other.get_id(), frame(caller_biscuit, ""), [CP_KEY]):
                             pass
+
+                # The mesh policy the session synced grants too, from the
+                # provider's role: a policy change reaches the caller at its
+                # next sync, not at the provider's next credential.
+                ungranted, ungranted_addr, _ = await start_provider(nursery, publish=())
+                await caller.connect(info_from_p2p_addr(ungranted_addr))
+                rules = [f'granted_publish_set("mcp", ["calc"]) <- role("{ROLE_NODE}")']
+                async with open_mcp_session(caller, ungranted.get_id(), frame(caller_biscuit, "mcp://calc"), [CP_KEY], policy_rules=rules):
+                    pass
+                with pytest.raises(AuthRejectedError, match="is not granted serving mcp://weather"):
+                    async with open_mcp_session(caller, ungranted.get_id(), frame(caller_biscuit, "mcp://weather"), [CP_KEY], policy_rules=rules):
+                        pass
             nursery.cancel_scope.cancel()
 
     async def with_timeout():

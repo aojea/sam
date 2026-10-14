@@ -267,17 +267,23 @@ func WithEgressPublish(policyRoles []*PolicyRole, egress []*EgressDestination, r
 }
 
 // BuildEgressServingRules grants each destination to the nodes that serve it:
-// granted_service_exact("egress", name) <- role(r) or <- label(k, v) for every
-// served_by entry. The serving node evaluates its own credential when a local
-// client asks for the destination, so the grant has to reach it; the rules
-// travel with the mesh policy like every other grant.
+// granted_service_exact("egress", name) and granted_publish_exact("egress", name)
+// <- role(r) or <- label(k, v) for every served_by entry. The serving node
+// evaluates its own credential when a local client asks for the destination,
+// and the router and the callers evaluate it when the node publishes, so
+// both grants have to reach them; the rules travel with the mesh policy like
+// every other grant.
 func BuildEgressServingRules(egress []*EgressDestination) []PolicyRule {
 	var rules []PolicyRule
 	for _, d := range egress {
 		if d == nil || ValidateEgressName(d.GetName()) != nil {
 			continue
 		}
-		head := biscuit.Predicate{Name: FactGrantedServiceExact, IDs: []biscuit.Term{biscuit.String(ServiceTypeStringEgress), biscuit.String(d.GetName())}}
+		destination := []biscuit.Term{biscuit.String(ServiceTypeStringEgress), biscuit.String(d.GetName())}
+		heads := []biscuit.Predicate{
+			{Name: FactGrantedServiceExact, IDs: destination},
+			{Name: FactGrantedPublishExact, IDs: destination},
+		}
 		for _, sel := range d.GetServedBy() {
 			var body biscuit.Predicate
 			if key, value, isLabel := strings.Cut(sel, "="); isLabel {
@@ -291,8 +297,10 @@ func BuildEgressServingRules(egress []*EgressDestination) []PolicyRule {
 				}
 				body = biscuit.Predicate{Name: FactRole, IDs: []biscuit.Term{biscuit.String(sel)}}
 			}
-			r := biscuit.Rule{Head: head, Body: []biscuit.Predicate{body}}
-			rules = append(rules, PolicyRule{Rule: r, Text: renderRule(r)})
+			for _, head := range heads {
+				r := biscuit.Rule{Head: head, Body: []biscuit.Predicate{body}}
+				rules = append(rules, PolicyRule{Rule: r, Text: renderRule(r)})
+			}
 		}
 	}
 	return rules

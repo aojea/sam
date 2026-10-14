@@ -301,12 +301,15 @@ def require_role(verified: VerifiedBiscuit, role: str) -> None:
         raise BiscuitVerificationError(f"biscuit lacks expected role {role!r}")
 
 
-def require_publish(verified: VerifiedBiscuit, target_service: str) -> None:
+def require_publish(verified: VerifiedBiscuit, target_service: str, policy_rules: Sequence[str] = ()) -> None:
     """Requires that an already verified provider credential grants serving
     target_service ("<type>://<name>"), as identity.RequirePublish: the
     directory names whoever announced the service, only the credential says
-    who may serve it. The provider's own catalog names no service and needs
-    no grant; so does an empty target."""
+    who may serve it. policy_rules is the mesh policy as the session synced
+    it; it derives grants from the credential's role() and label() facts, so
+    a policy change reaches this check before the provider's credential is
+    minted again. The provider's own catalog names no service and needs no
+    grant; so does an empty target."""
     if target_service == "" or target_service == f"system://{_DATALOG['catalog_target']}":
         return
     scheme, sep, name = target_service.partition("://")
@@ -316,6 +319,8 @@ def require_publish(verified: VerifiedBiscuit, target_service: str) -> None:
     builder = ba.AuthorizerBuilder()
     builder.set_limits(_limits())
     builder.add_fact(ba.Fact(_DATALOG["fact_publish"] + "({t}, {n})", {"t": scheme, "n": name}))
+    for rule in policy_rules:
+        builder.add_rule(ba.Rule(rule))
     for policy in _DATALOG["publish_policies"]:
         builder.add_policy(ba.Policy(policy))
     try:

@@ -278,6 +278,16 @@ test("only a node granted the service is its provider, as agentmesh-node's check
         await (await openMCPSession(conn, frame(""), [cpKey])).close();
       }
     }
+
+    // The mesh policy the session synced grants too, from the provider's
+    // role: a policy change reaches the caller at its next sync, not at
+    // the provider's next credential.
+    providerBiscuit = mint(provider.peerId.toString(), ROLE_NODE, { region: "eu" }, []);
+    const rules = [`granted_publish_set("mcp", ["calc"]) <- role(${JSON.stringify(ROLE_NODE)})`];
+    let conn = await caller.dial(provider.getMultiaddrs()[0] as Parameters<typeof caller.dial>[0]);
+    await (await openMCPSession(conn, frame("mcp://calc"), [cpKey], { policyRules: rules })).close();
+    conn = await caller.dial(provider.getMultiaddrs()[0] as Parameters<typeof caller.dial>[0]);
+    await assert.rejects(openMCPSession(conn, frame("mcp://weather"), [cpKey], { policyRules: rules }), /is not granted serving mcp:\/\/weather/);
   } finally {
     providerBiscuit = nodeBiscuit;
   }

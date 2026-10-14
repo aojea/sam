@@ -101,6 +101,8 @@ class FakeControlPlane:
             return 200, pb.KeysResponse(public_keys=[k.pub for k in self.keys], sign_time=unsigned.sign_time, signatures=[k.identity.sign(payload) for k in self.keys]).SerializeToString()
         if (method, path) == ("GET", "/info"):
             return 200, pb.ControlPlaneInfoResponse(router_addresses=[self.router_addr], banned_peer_ids=self.banned).SerializeToString()
+        if (method, path) == ("GET", "/policies"):
+            return 200, pb.PolicyConfigGetResponse(datalog_rules=['granted_publish_all_types(true) <- role("mesh:role:node")']).SerializeToString()
         if (method, path) == ("POST", "/refresh"):
             self.refreshes += 1
             presented = base64.b64decode(headers["Authorization"].removeprefix("Bearer "))

@@ -77,7 +77,9 @@ replica count.
    closest to the key, as many as the mesh's replication (`/info`). A
    record is kept only for a service the member's credential grants serving
    (the role's `allowed_publish`), checked against the credential the
-   handshake presented; a record for anything else is refused. A record
+   handshake presented and the mesh policy the router synced, so a grant
+   added to a role reaches the directory at the next pass; a record for
+   anything else is refused. A record
    lives for the mesh's record TTL after its last announcement,
    and an announcement replaces the addresses of the one before; a member
    that stops a service or leaves withdraws its records, and the router

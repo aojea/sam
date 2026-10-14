@@ -159,6 +159,35 @@ func TestCheckPeerLabels(t *testing.T) {
 				}
 			})
 		}
+
+		// The synced mesh policy grants too, from the provider's role, so a
+		// policy change reaches the caller at its next sync and not at the
+		// provider's next credential.
+		t.Run("granted by the mesh policy", func(t *testing.T) {
+			ungranted := mintPublish()
+			if err := node.checkProvider(ungranted, providerPeer, nil, "mcp://calc"); !errors.Is(err, ErrProviderNotGranted) {
+				t.Fatalf("checkProvider before the policy = %v, want ErrProviderNotGranted", err)
+			}
+			rules, _ := api.BuildPolicyRules([]*api.PolicyRole{{Name: api.RoleNode, AllowedPublish: []string{"mcp://calc"}}}, nil)
+			parsed, err := api.ParseDatalogRules(api.PolicyRuleTexts(rules))
+			if err != nil {
+				t.Fatal(err)
+			}
+			node.MeshPolicyMu.Lock()
+			node.MeshPolicyRules = parsed
+			node.MeshPolicyMu.Unlock()
+			t.Cleanup(func() {
+				node.MeshPolicyMu.Lock()
+				node.MeshPolicyRules = nil
+				node.MeshPolicyMu.Unlock()
+			})
+			if err := node.checkProvider(ungranted, providerPeer, nil, "mcp://calc"); err != nil {
+				t.Fatalf("checkProvider with the policy granting the node role mcp://calc = %v", err)
+			}
+			if err := node.checkProvider(ungranted, providerPeer, nil, "mcp://weather"); !errors.Is(err, ErrProviderNotGranted) {
+				t.Fatalf("checkProvider(mcp://weather) = %v, want ErrProviderNotGranted: the policy grants mcp://calc only", err)
+			}
+		})
 	})
 }
 

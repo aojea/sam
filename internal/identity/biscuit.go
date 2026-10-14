@@ -818,14 +818,20 @@ func RequireRole(b *biscuit.Biscuit, key ed25519.PublicKey, expectedRole string,
 
 // RequirePublish reports whether the credential grants serving the service
 // svcType://svcName: api.PublishPolicies over the token's granted_publish_*
-// facts and a publish() fact. b must have passed verification and key must
-// be the key that verified it; what is decided here is the grant alone.
-func RequirePublish(b *biscuit.Biscuit, key ed25519.PublicKey, svcType, svcName string, timeout time.Duration) error {
+// facts, those the mesh policy rules derive from its role() and label()
+// facts, and a publish() fact. The rules are what a policy change reaches a
+// verifier through before the holder's credential is minted again. b must
+// have passed verification and key must be the key that verified it; what
+// is decided here is the grant alone.
+func RequirePublish(b *biscuit.Biscuit, key ed25519.PublicKey, svcType, svcName string, policyRules []biscuit.Rule, timeout time.Duration) error {
 	authorizer, err := b.Authorizer(key, AuthorizerOptions(timeout)...)
 	if err != nil {
 		return fmt.Errorf("failed to create authorizer: %w", err)
 	}
 	authorizer.AddFact(api.PublishFact(svcType, svcName))
+	for _, r := range policyRules {
+		authorizer.AddRule(r)
+	}
 	for _, p := range api.PublishPolicies {
 		authorizer.AddPolicy(p)
 	}

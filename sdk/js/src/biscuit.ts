@@ -281,7 +281,7 @@ export function requireRole(verified: VerifiedBiscuit, role: string): void {
  * who may serve it. The provider's own catalog names no service and needs
  * no grant; so does an empty target.
  */
-export async function requirePublish(verified: VerifiedBiscuit, targetService: string): Promise<void> {
+export async function requirePublish(verified: VerifiedBiscuit, targetService: string, policyRules: readonly string[] = []): Promise<void> {
   if (targetService === "" || targetService === `system://${BASELINE_DATALOG.catalog_target}`) {
     return;
   }
@@ -293,6 +293,12 @@ export async function requirePublish(verified: VerifiedBiscuit, targetService: s
   const token = wasm.Biscuit.fromBytes(verified.token, wasm.PublicKey.fromBytes(verified.verifyingKey, wasm.SignatureAlgorithm.Ed25519));
   const builder = new wasm.AuthorizerBuilder();
   builder.addFact(wasm.Fact.fromString(`${BASELINE_DATALOG.fact_publish}(${JSON.stringify(m[1])}, ${JSON.stringify(m[2])})`));
+  // The mesh policy derives grants from the credential's role() and label()
+  // facts, so a policy change reaches this check before the provider's
+  // credential is minted again.
+  for (const r of policyRules) {
+    builder.addRule(wasm.Rule.fromString(r));
+  }
   for (const policy of BASELINE_DATALOG.publish_policies) {
     builder.addPolicy(wasm.Policy.fromString(policy));
   }

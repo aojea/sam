@@ -121,6 +121,17 @@ An egress destination needs no entry: `served_by` selects the nodes that
 serve it, and the control plane mints `granted_publish_exact("egress", "<name>")`
 into their credentials with the destination.
 
+A change to `allowed_publish` takes effect without a new credential. The
+grant is also rendered into the policy text as
+`granted_publish_*(...) <- role("<role>")` (and `<- label(...)` for
+`served_by`), and every verifier adds that text to its authorizer: the
+router, a node and an SDK member at their next sync, all of them at once on
+the `POLICY_UPDATE` event
+the control plane publishes. A node whose policy text changed announces its
+services again, so a record the router refused under the previous policy is
+in the directory within the sync interval; until then the router answers
+`credential does not grant serving <service>`, which the node logs.
+
 ### Target patterns
 
 `fact:value`, where `fact` is one of the identity facts that a node's
@@ -343,8 +354,9 @@ At enrollment, refresh, and token exchange, the control plane resolves the
 identity's roles from the bindings and mints into the credential one `role()`
 fact per role and the compiled `granted_*` facts of every role. The control
 plane also renders the policy as Datalog rules served as `datalog_rules` at
-`GET /policies`. Nodes fetch this text (`--control-plane-sync-interval`, 15
-minutes) and add it to their authorizer as it arrives.
+`GET /policies`. Nodes, routers and SDK members fetch this text
+(`--control-plane-sync-interval`, 15 minutes) and add it to their authorizer
+as it arrives.
 
 At the destination node, in this order:
 

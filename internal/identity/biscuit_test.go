@@ -798,7 +798,7 @@ func TestMintBiscuitToken_PublishFacts(t *testing.T) {
 		{"mcp", "tools", false},
 		{"egress", "api.github.com", false},
 	} {
-		err := RequirePublish(b, pub, tc.svcType, tc.svcName, testTimeout)
+		err := RequirePublish(b, pub, tc.svcType, tc.svcName, nil, testTimeout)
 		if (err == nil) != tc.granted {
 			t.Errorf("RequirePublish(%s://%s) = %v, want granted %v", tc.svcType, tc.svcName, err, tc.granted)
 		}
@@ -809,8 +809,26 @@ func TestMintBiscuitToken_PublishFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	nb, _ := biscuit.Unmarshal(none)
-	if err := RequirePublish(nb, pub, "mcp", "calc", testTimeout); err == nil {
+	if err := RequirePublish(nb, pub, "mcp", "calc", nil, testTimeout); err == nil {
 		t.Error("a credential minted under no policy role grants publishing nothing")
+	}
+
+	// The mesh policy rules reach a verifier before the holder's credential
+	// is minted again: a credential carrying only role("publisher") is
+	// granted what the current policy gives that role, and only that.
+	rules, warnings := api.BuildPolicyRules(roles, nil)
+	if len(warnings) != 0 {
+		t.Fatalf("BuildPolicyRules warnings: %v", warnings)
+	}
+	parsed, err := api.ParseDatalogRules(api.PolicyRuleTexts(rules))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RequirePublish(nb, pub, "mcp", "calc", parsed, testTimeout); err != nil {
+		t.Errorf("the policy rules grant role publisher mcp://calc, RequirePublish = %v", err)
+	}
+	if err := RequirePublish(nb, pub, "mcp", "clock", parsed, testTimeout); err == nil {
+		t.Error("the policy rules do not grant role publisher mcp://clock, RequirePublish = nil")
 	}
 
 	delegated, err := MintDelegatedBiscuitToken(priv, jwt.MapClaims{"sub": "user"}, p, time.Now().Add(time.Hour), []string{"publisher"}, roles, nil, false)
@@ -818,7 +836,7 @@ func TestMintBiscuitToken_PublishFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	db, _ := biscuit.Unmarshal(delegated)
-	if err := RequirePublish(db, pub, "mcp", "calc", testTimeout); err == nil {
+	if err := RequirePublish(db, pub, "mcp", "calc", nil, testTimeout); err == nil {
 		t.Error("a delegated credential grants publishing nothing")
 	}
 }

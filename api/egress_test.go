@@ -142,7 +142,9 @@ func TestBuildEgressServingRules(t *testing.T) {
 	texts := PolicyRuleTexts(rules)
 	want := []string{
 		`granted_service_exact("egress", "api.github.com") <- role("pep")`,
+		`granted_publish_exact("egress", "api.github.com") <- role("pep")`,
 		`granted_service_exact("egress", "api.github.com") <- label("site", "eu")`,
+		`granted_publish_exact("egress", "api.github.com") <- label("site", "eu")`,
 	}
 	if !slices.Equal(texts, want) {
 		t.Errorf("rules = %v, want %v", texts, want)

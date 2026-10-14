@@ -91,6 +91,8 @@ export interface MCPSessionOptions {
   /** Labels the provider's credential must all carry, e.g. { region: "eu", compliance: "gdpr" }. */
   requiredLabels?: Record<string, string>;
   signal?: AbortSignal;
+  /** The mesh policy as the session synced it (Session.policyRules); set by the session, not the caller. */
+  policyRules?: readonly string[];
 }
 
 /** An open MCP session with a provider on the mesh. */
@@ -174,7 +176,7 @@ export async function openMCPSession(
     // Only nodes host services; a router's or an admin's credential is a member, not a provider.
     requireRole(provider, ROLE_NODE);
     // And only a node the policy lets serve the named service is one.
-    await requirePublish(provider, decodeAuthFrame(frame).targetService);
+    await requirePublish(provider, decodeAuthFrame(frame).targetService, options.policyRules);
     requireLabels(provider, options.requiredLabels);
     requireEgressLabels(provider, egressRequireLabels);
   } catch (err) {

@@ -112,11 +112,13 @@ async def open_mcp_session(
     *,
     required_labels: Optional[Mapping[str, str]] = None,
     egress_require_labels: Optional[Mapping[str, str]] = None,
+    policy_rules: Sequence[str] = (),
 ) -> AsyncIterator[tuple[ClientSession, VerifiedBiscuit]]:
     """Opens /mesh/mcp/1.0.0 to a connected provider with `frame`, this member's
     AuthFrame naming the service, verifies the provider and yields an
     initialized MCP ClientSession with the provider's credential; egress_require_labels
-    is the session's, not the caller's (require_egress_labels)."""
+    and policy_rules are the session's, not the caller's (require_egress_labels,
+    Session.policy_rules)."""
     stream = await open_stream(host, peer_id, MCP_PROTOCOL, AUTH_HANDSHAKE_TIMEOUT)
     try:
         with trio.fail_after(AUTH_HANDSHAKE_TIMEOUT):
@@ -133,7 +135,7 @@ async def open_mcp_session(
             # Only nodes host services; a router's or an admin's credential is a member, not a provider.
             require_role(provider, ROLE_NODE)
             # And only a node the policy lets serve the named service is one.
-            require_publish(provider, pb.AuthFrame.FromString(frame).target_service)
+            require_publish(provider, pb.AuthFrame.FromString(frame).target_service, policy_rules)
         except BiscuitVerificationError as err:
             raise AuthRejectedError(str(peer_id), f"provider credential rejected: {err}") from err
         require_labels(provider, required_labels)
