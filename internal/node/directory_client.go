@@ -43,7 +43,9 @@ type Directory interface {
 	// Provide announces this member as a provider of key, at the
 	// addresses it announces, to a router it is attached to; the router
 	// keeps the record and places it on the routers closest to the key.
-	Provide(ctx context.Context, key []byte) error
+	// service is what the record is about, "<type>://<name>", and "" for
+	// the member's own record under its peer key.
+	Provide(ctx context.Context, key []byte, service string) error
 	// Withdraw removes this member's record under key from the router it is
 	// attached to and from the routers the record was placed on.
 	Withdraw(ctx context.Context, key []byte) error
@@ -112,12 +114,12 @@ type routerDirectory struct {
 	announced []multiaddr.Multiaddr // the addresses of the record last announced
 }
 
-func (d *routerDirectory) Provide(ctx context.Context, key []byte) error {
+func (d *routerDirectory) Provide(ctx context.Context, key []byte, service string) error {
 	addrs := d.addrs()
 	if len(addrs) > api.DirectoryMaxAddrs {
 		addrs = addrs[:api.DirectoryMaxAddrs]
 	}
-	rec := &api.DirectoryProvide{Key: key, Addrs: make([]string, 0, len(addrs))}
+	rec := &api.DirectoryProvide{Key: key, Service: service, Addrs: make([]string, 0, len(addrs))}
 	for _, a := range addrs {
 		rec.Addrs = append(rec.Addrs, a.String())
 	}

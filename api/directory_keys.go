@@ -15,6 +15,7 @@
 package api
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"strings"
@@ -70,4 +71,33 @@ func ValidateDirectoryKey(key []byte) error {
 		return fmt.Errorf("directory key must be a sha256 multihash of %d bytes, got %d", DirectoryKeyBytes, len(key))
 	}
 	return nil
+}
+
+// ServiceOfRecord parses the service a record names, "<type>://<name>",
+// and reports whether key is one of that service's: by name or by type.
+// A record that names no service is the provider's own, under PeerKey.
+// This is what a router checks before it keeps a member's record, so that
+// a member announces itself, and the services it names, and nothing else.
+func ServiceOfRecord(provider peer.ID, key []byte, service string) (ServiceType, string, error) {
+	if service == "" {
+		if !bytes.Equal(key, PeerKey(provider)) {
+			return ServiceType_SERVICE_TYPE_UNSPECIFIED, "", fmt.Errorf("a record naming no service is the provider's own, under its peer key")
+		}
+		return ServiceType_SERVICE_TYPE_UNSPECIFIED, "", nil
+	}
+	typeStr, name := ParseServiceTarget(service)
+	t, err := ParseServiceType(typeStr)
+	if err != nil || t == ServiceType_SERVICE_TYPE_UNSPECIFIED || name == "" || name == "*" {
+		return ServiceType_SERVICE_TYPE_UNSPECIFIED, "", fmt.Errorf("service %q must be <type>://<name>", service)
+	}
+	for _, n := range []string{name, ""} {
+		k, err := ServiceKey(t, n)
+		if err != nil {
+			return ServiceType_SERVICE_TYPE_UNSPECIFIED, "", err
+		}
+		if bytes.Equal(key, k) {
+			return t, name, nil
+		}
+	}
+	return ServiceType_SERVICE_TYPE_UNSPECIFIED, "", fmt.Errorf("key is not %s's, by name or by type", service)
 }

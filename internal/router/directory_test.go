@@ -104,8 +104,10 @@ func ask(t *testing.T, from host.Host, router peer.ID, req *api.DirectoryRequest
 	return &resp
 }
 
-func provide(key []byte, addrs ...string) *api.DirectoryRequest {
-	return &api.DirectoryRequest{Request: &api.DirectoryRequest_Provide{Provide: &api.DirectoryProvide{Key: key, Addrs: addrs}}}
+// provide is a member's record for service under key; a service of ""
+// is the member's own record under its peer key.
+func provide(key []byte, service string, addrs ...string) *api.DirectoryRequest {
+	return &api.DirectoryRequest{Request: &api.DirectoryRequest_Provide{Provide: &api.DirectoryProvide{Key: key, Service: service, Addrs: addrs}}}
 }
 
 func findProviders(key []byte) *api.DirectoryRequest {
@@ -145,10 +147,10 @@ func TestDirectoryRecordsAreFoundFromAnyRouter(t *testing.T) {
 		t.Fatal(err)
 	}
 	memberAddr := member.Addrs()[0].String() + "/p2p/" + member.ID().String()
-	if resp := ask(t, member, a.Host.ID(), provide(key, memberAddr)); resp.GetError() != "" {
+	if resp := ask(t, member, a.Host.ID(), provide(key, "mcp://calculator", memberAddr)); resp.GetError() != "" {
 		t.Fatalf("provide refused: %s", resp.GetError())
 	}
-	if resp := ask(t, member, a.Host.ID(), provide(api.PeerKey(member.ID()), memberAddr)); resp.GetError() != "" {
+	if resp := ask(t, member, a.Host.ID(), provide(api.PeerKey(member.ID()), "", memberAddr)); resp.GetError() != "" {
 		t.Fatalf("provide of the peer key refused: %s", resp.GetError())
 	}
 
@@ -219,9 +221,11 @@ func TestDirectoryRecordsAreFoundFromAnyRouter(t *testing.T) {
 	})
 }
 
-// A member can only announce itself: a record naming another provider, an
-// address of another peer, or a key that is not a sha256 multihash is
-// refused and counted as invalid, and nothing is stored.
+// A member can only announce itself and the services it names: a record
+// naming another provider, an address of another peer, a key that is not
+// a sha256 multihash, or a key that is not the named service's (nor the
+// member's own peer key when no service is named) is refused and counted
+// as invalid, and nothing is stored.
 func TestDirectoryRefusesWhatAMemberMayNotAnnounce(t *testing.T) {
 	a := newDirectoryRouter(t)
 	member := attach(t, a)
@@ -229,11 +233,15 @@ func TestDirectoryRefusesWhatAMemberMayNotAnnounce(t *testing.T) {
 	key, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_MCP, "calculator")
 
 	for name, req := range map[string]*api.DirectoryRequest{
-		"another provider":              {Request: &api.DirectoryRequest_Provide{Provide: &api.DirectoryProvide{Key: key, Provider: stranger.ID().String()}}},
-		"another peer's address":        provide(key, stranger.Addrs()[0].String()+"/p2p/"+stranger.ID().String()),
-		"a key that is not a multihash": provide([]byte("calculator")),
-		"a lookup of such a key":        findProviders([]byte("calculator")),
-		"a peer id that is not one":     findPeer(peer.ID("nobody")),
+		"another provider":                      {Request: &api.DirectoryRequest_Provide{Provide: &api.DirectoryProvide{Key: key, Provider: stranger.ID().String()}}},
+		"another peer's address":                provide(key, "mcp://calculator", stranger.Addrs()[0].String()+"/p2p/"+stranger.ID().String()),
+		"a key that is not a multihash":         provide([]byte("calculator"), "mcp://calculator"),
+		"a key that is not the named service's": provide(key, "mcp://weather"),
+		"a service key naming no service":       provide(key, ""),
+		"a peer key naming a service":           provide(api.PeerKey(member.ID()), "mcp://calculator"),
+		"another peer's key":                    provide(api.PeerKey(stranger.ID()), ""),
+		"a lookup of such a key":                findProviders([]byte("calculator")),
+		"a peer id that is not one":             findPeer(peer.ID("nobody")),
 	} {
 		t.Run(name, func(t *testing.T) {
 			op := directoryOpProvide
@@ -270,7 +278,7 @@ func TestDirectoryPlacementNamesTheProvider(t *testing.T) {
 	member := attach(t, a)
 	key, _ := api.ServiceKey(api.ServiceType_SERVICE_TYPE_INFERENCE, "")
 	memberAddr := member.Addrs()[0].String() + "/p2p/" + member.ID().String()
-	if resp := ask(t, member, a.Host.ID(), provide(key, memberAddr)); resp.GetError() != "" {
+	if resp := ask(t, member, a.Host.ID(), provide(key, "inference://llm", memberAddr)); resp.GetError() != "" {
 		t.Fatalf("provide refused: %s", resp.GetError())
 	}
 	provs := held(b, key)
@@ -299,10 +307,10 @@ func TestDirectoryWithdrawAndReplace(t *testing.T) {
 	oldAddr := "/ip4/10.0.0.1/tcp/4001/p2p/" + member.ID().String()
 	newAddr := "/ip4/10.0.0.2/tcp/4001/p2p/" + member.ID().String()
 
-	if resp := ask(t, member, a.Host.ID(), provide(key, oldAddr)); resp.GetError() != "" {
+	if resp := ask(t, member, a.Host.ID(), provide(key, "mcp://calculator", oldAddr)); resp.GetError() != "" {
 		t.Fatalf("provide refused: %s", resp.GetError())
 	}
-	if resp := ask(t, member, a.Host.ID(), provide(key, newAddr)); resp.GetError() != "" {
+	if resp := ask(t, member, a.Host.ID(), provide(key, "mcp://calculator", newAddr)); resp.GetError() != "" {
 		t.Fatalf("second provide refused: %s", resp.GetError())
 	}
 	for name, router := range map[string]*Router{"own router": a, "placed on": b} {

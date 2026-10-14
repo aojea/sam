@@ -808,7 +808,7 @@ func (n *AgentMeshNode) announceAll(ctx context.Context) int {
 	withheld := n.services.ReprovideAll(ctx)
 	provideCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := n.Directory.Provide(provideCtx, api.PeerKey(n.Host.ID())); err != nil && ctx.Err() == nil && !errors.Is(err, errNoDirectoryRouter) {
+	if err := n.Directory.Provide(provideCtx, api.PeerKey(n.Host.ID()), ""); err != nil && ctx.Err() == nil && !errors.Is(err, errNoDirectoryRouter) {
 		// With no router attached the directory client has said so already.
 		logger.Warnf("[Directory] Announcing where this node is reached: %v", err)
 	}

@@ -240,13 +240,17 @@ message DirectoryRequest {
 // addrs. A key is a sha256 multihash: of "mesh:service:<type>[:<name>]" for
 // a service, of "mesh:peer:<peer_id>" for the member itself. A record lives
 // for the mesh's record TTL after its last announcement; announcing it
-// again replaces its addresses. provider is set only between routers, by
-// the router that holds the member, and refused from anyone else: a member
-// can only announce itself.
+// again replaces its addresses. service names the service a record is
+// about, "<type>://<name>", and the router refuses a key that is not that
+// service's by name or by type; a record naming no service is the
+// member's own, under its peer key. provider is set only between routers,
+// by the router that holds the member, and refused from anyone else: a
+// member can only announce itself.
 message DirectoryProvide {
   bytes key = 1;
   repeated string addrs = 2;
   string provider = 3;
+  string service = 4;
 }
 
 // DirectoryWithdraw removes the sender's record under key, from the router

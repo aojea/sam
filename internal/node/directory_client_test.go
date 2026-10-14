@@ -192,7 +192,7 @@ func TestRouterDirectoryAsksTheAttachedRouters(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := directory.Provide(ctx, key); err != nil {
+	if err := directory.Provide(ctx, key, "mcp://calculator"); err != nil {
 		t.Fatalf("Provide: %v", err)
 	}
 	if got := dir1.providers(key); len(got) != 1 || got[0] != member.ID() {

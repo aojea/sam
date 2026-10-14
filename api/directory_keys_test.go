@@ -68,3 +68,41 @@ func TestDirectoryKeys(t *testing.T) {
 		}
 	}
 }
+
+// A record is the provider's own, under its peer key, or a service's, by
+// name or by type, and the key must be that of the service it names.
+func TestServiceOfRecord(t *testing.T) {
+	provider := peer.ID("12D3KooWprovider")
+	stranger := peer.ID("12D3KooWstranger")
+	calc, _ := ServiceKey(ServiceType_SERVICE_TYPE_MCP, "calc")
+	mcp, _ := ServiceKey(ServiceType_SERVICE_TYPE_MCP, "")
+	for name, tc := range map[string]struct {
+		key     []byte
+		service string
+		wantErr bool
+		wantTyp ServiceType
+	}{
+		"own peer key":                  {key: PeerKey(provider), service: ""},
+		"service by name":               {key: calc, service: "mcp://calc", wantTyp: ServiceType_SERVICE_TYPE_MCP},
+		"service by type":               {key: mcp, service: "mcp://calc", wantTyp: ServiceType_SERVICE_TYPE_MCP},
+		"another peer's key":            {key: PeerKey(stranger), service: "", wantErr: true},
+		"service key naming no service": {key: calc, service: "", wantErr: true},
+		"peer key naming a service":     {key: PeerKey(provider), service: "mcp://calc", wantErr: true},
+		"key of another service":        {key: calc, service: "mcp://weather", wantErr: true},
+		"key of another type":           {key: calc, service: "inference://calc", wantErr: true},
+		"service without a name":        {key: mcp, service: "mcp://", wantErr: true},
+		"service with a wildcard name":  {key: mcp, service: "mcp://*", wantErr: true},
+		"service of an unknown type":    {key: calc, service: "ftp://calc", wantErr: true},
+		"service that is not a target":  {key: calc, service: "calc", wantErr: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			typ, svcName, err := ServiceOfRecord(provider, tc.key, tc.service)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ServiceOfRecord(%q) err = %v, wantErr %v", tc.service, err, tc.wantErr)
+			}
+			if err == nil && tc.service != "" && (typ != tc.wantTyp || svcName != "calc") {
+				t.Fatalf("ServiceOfRecord(%q) = %v, %q; want %v, calc", tc.service, typ, svcName, tc.wantTyp)
+			}
+		})
+	}
+}

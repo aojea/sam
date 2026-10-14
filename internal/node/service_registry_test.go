@@ -34,7 +34,7 @@ type fakeDHT struct {
 	count     int32
 }
 
-func (f *fakeDHT) Provide(ctx context.Context, key []byte) error {
+func (f *fakeDHT) Provide(ctx context.Context, key []byte, service string) error {
 	n := atomic.AddInt32(&f.count, 1)
 	f.calls = append(f.calls, key)
 	if f.failNth > 0 && int(n) == f.failNth {

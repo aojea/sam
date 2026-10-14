@@ -1643,14 +1643,18 @@ func (*DirectoryRequest_Withdraw) isDirectoryRequest_Request() {}
 // addrs. A key is a sha256 multihash: of "mesh:service:<type>[:<name>]" for
 // a service, of "mesh:peer:<peer_id>" for the member itself. A record lives
 // for the mesh's record TTL after its last announcement; announcing it
-// again replaces its addresses. provider is set only between routers, by
-// the router that holds the member, and refused from anyone else: a member
-// can only announce itself.
+// again replaces its addresses. service names the service a record is
+// about, "<type>://<name>", and the router refuses a key that is not that
+// service's by name or by type; a record naming no service is the
+// member's own, under its peer key. provider is set only between routers,
+// by the router that holds the member, and refused from anyone else: a
+// member can only announce itself.
 type DirectoryProvide struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Key           []byte                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
 	Addrs         []string               `protobuf:"bytes,2,rep,name=addrs,proto3" json:"addrs,omitempty"`
 	Provider      string                 `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
+	Service       string                 `protobuf:"bytes,4,opt,name=service,proto3" json:"service,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1702,6 +1706,13 @@ func (x *DirectoryProvide) GetAddrs() []string {
 func (x *DirectoryProvide) GetProvider() string {
 	if x != nil {
 		return x.Provider
+	}
+	return ""
+}
+
+func (x *DirectoryProvide) GetService() string {
+	if x != nil {
+		return x.Service
 	}
 	return ""
 }
@@ -6068,11 +6079,12 @@ const file_api_agentmesh_proto_rawDesc = "" +
 	"\x0efind_providers\x18\x02 \x01(\v2$.agentmesh.v1.DirectoryFindProvidersH\x00R\rfindProviders\x12>\n" +
 	"\tfind_peer\x18\x03 \x01(\v2\x1f.agentmesh.v1.DirectoryFindPeerH\x00R\bfindPeer\x12=\n" +
 	"\bwithdraw\x18\x04 \x01(\v2\x1f.agentmesh.v1.DirectoryWithdrawH\x00R\bwithdrawB\t\n" +
-	"\arequest\"V\n" +
+	"\arequest\"p\n" +
 	"\x10DirectoryProvide\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\fR\x03key\x12\x14\n" +
 	"\x05addrs\x18\x02 \x03(\tR\x05addrs\x12\x1a\n" +
-	"\bprovider\x18\x03 \x01(\tR\bprovider\"A\n" +
+	"\bprovider\x18\x03 \x01(\tR\bprovider\x12\x18\n" +
+	"\aservice\x18\x04 \x01(\tR\aservice\"A\n" +
 	"\x11DirectoryWithdraw\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\fR\x03key\x12\x1a\n" +
 	"\bprovider\x18\x02 \x01(\tR\bprovider\"@\n" +

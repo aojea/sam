@@ -245,14 +245,16 @@ class DirectoryParameters(_message.Message):
     def __init__(self, replication: _Optional[int] = ..., reprovide_interval: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ..., record_ttl: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ...) -> None: ...
 
 class DirectoryProvide(_message.Message):
-    __slots__ = ["addrs", "key", "provider"]
+    __slots__ = ["addrs", "key", "provider", "service"]
     ADDRS_FIELD_NUMBER: _ClassVar[int]
     KEY_FIELD_NUMBER: _ClassVar[int]
     PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    SERVICE_FIELD_NUMBER: _ClassVar[int]
     addrs: _containers.RepeatedScalarFieldContainer[str]
     key: bytes
     provider: str
-    def __init__(self, key: _Optional[bytes] = ..., addrs: _Optional[_Iterable[str]] = ..., provider: _Optional[str] = ...) -> None: ...
+    service: str
+    def __init__(self, key: _Optional[bytes] = ..., addrs: _Optional[_Iterable[str]] = ..., provider: _Optional[str] = ..., service: _Optional[str] = ...) -> None: ...
 
 class DirectoryRequest(_message.Message):
     __slots__ = ["find_peer", "find_providers", "provide", "withdraw"]

@@ -29,7 +29,7 @@ import (
 // announce a key and to withdraw it. Production wires this to the node's
 // Directory; tests use a fake.
 type directoryProvider interface {
-	Provide(ctx context.Context, key []byte) error
+	Provide(ctx context.Context, key []byte, service string) error
 	Withdraw(ctx context.Context, key []byte) error
 }
 
@@ -156,13 +156,13 @@ func (r *ServiceRegistry) Register(ctx context.Context, svc Service) error {
 	} else {
 		nameCtx, nameCancel := context.WithTimeout(ctx, 5*time.Second)
 		defer nameCancel()
-		if err := r.dht.Provide(nameCtx, nameKey); err != nil {
+		if err := r.dht.Provide(nameCtx, nameKey, serviceTarget(info)); err != nil {
 			logger.Warnf("[ServiceRegistry] Announcing %s by name: %v", info.Name, err)
 		}
 
 		typeCtx, typeCancel := context.WithTimeout(ctx, 5*time.Second)
 		defer typeCancel()
-		if err := r.dht.Provide(typeCtx, typeKey); err != nil {
+		if err := r.dht.Provide(typeCtx, typeKey, serviceTarget(info)); err != nil {
 			logger.Warnf("[ServiceRegistry] Announcing %s by type: %v", info.Name, err)
 		}
 	}
@@ -216,6 +216,15 @@ func (r *ServiceRegistry) Unregister(ctx context.Context, name string) error {
 	}
 	logger.Infof("[ServiceRegistry] Unregistered %s", name)
 	return nil
+}
+
+// serviceTarget is a service as a record names it, "<type>://<name>".
+func serviceTarget(info *api.ServiceInfo) string {
+	typeStr, err := api.ServiceTypeToString(info.GetType())
+	if err != nil {
+		return ""
+	}
+	return typeStr + "://" + info.GetName()
 }
 
 // withdraw removes one of the registry's records from the directory. A
@@ -359,7 +368,7 @@ Loop:
 					continue
 				}
 				provideCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-				if err := r.dht.Provide(provideCtx, key); err != nil && ctx.Err() == nil {
+				if err := r.dht.Provide(provideCtx, key, serviceTarget(info)); err != nil && ctx.Err() == nil {
 					logger.Warnf("[ServiceRegistry] Announcing %s/%s again: %v", info.Type, info.Name, err)
 				}
 				cancel()

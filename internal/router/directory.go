@@ -258,13 +258,20 @@ func (r *Router) directoryProvide(ctx context.Context, remote peer.ID, q *api.Di
 	if err != nil {
 		return nil, invalidDirectoryRequest("%w", err)
 	}
+	if !placed {
+		// The member's own router checks what the record is about; a placed
+		// copy was checked by the router that holds the member.
+		if _, _, err := api.ServiceOfRecord(provider, q.GetKey(), q.GetService()); err != nil {
+			return nil, invalidDirectoryRequest("%w", err)
+		}
+	}
 	if r.records == nil {
 		return nil, errDirectoryNotUp
 	}
 	r.records.put(q.GetKey(), provider, addrs, time.Now())
 	if !placed {
 		r.placeRecord(ctx, provider, &api.DirectoryRequest{Request: &api.DirectoryRequest_Provide{Provide: &api.DirectoryProvide{
-			Key: q.GetKey(), Addrs: q.GetAddrs(), Provider: provider.String(),
+			Key: q.GetKey(), Addrs: q.GetAddrs(), Provider: provider.String(), Service: q.GetService(),
 		}}})
 	}
 	return &api.DirectoryResponse{}, nil
