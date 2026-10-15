@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="google/agentmesh"
-INSTALL_DIR="/usr/local/bin"
+INSTALL_DIR="${AGENTMESH_INSTALL_DIR:-${INSTALL_DIR:-/usr/local/bin}}"
 
 echo "Installing Agent Mesh from $REPO..."
 
@@ -49,13 +49,9 @@ if ! curl -sfL -o checksums.txt "${CHECKSUMS_URL}"; then
     exit 1
 fi
 
-# Construct download URL (matches goreleaser name template, with fallback for pre-rename tags)
+# Construct download URL (matches goreleaser name template)
 TAR_NAME="agentmesh_${OS_NAME}_${ARCH_NAME}.tar.gz"
 EXPECTED_SUM=$(awk -v f="${TAR_NAME}" '$2 == f {print $1}' checksums.txt)
-if [ -z "${EXPECTED_SUM}" ]; then
-    TAR_NAME="sam_${OS_NAME}_${ARCH_NAME}.tar.gz"
-    EXPECTED_SUM=$(awk -v f="${TAR_NAME}" '$2 == f {print $1}' checksums.txt)
-fi
 if [ -z "${EXPECTED_SUM}" ]; then
     echo "Error: archive for ${OS_NAME}_${ARCH_NAME} not found in checksums.txt"
     exit 1
@@ -87,7 +83,7 @@ tar -xzf "${TAR_NAME}"
 
 echo "Installing to ${INSTALL_DIR} (may require sudo)..."
 INSTALLED_BINS=()
-for b in agentmesh-one agentmesh-node agentmesh-control-plane agentmesh-router mcp-client agentmesh-console sam-one sam-node sam-control-plane sam-router sam-console; do
+for b in agentmesh-one agentmesh-node agentmesh-control-plane agentmesh-router mcp-client agentmesh-console; do
     if [ -f "$b" ]; then
         INSTALLED_BINS+=("$b")
     fi
