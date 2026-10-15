@@ -1124,7 +1124,9 @@ func (s *SQLStore) DeleteSilentBootstrapNodes(ctx context.Context, before, ephem
 
 // DeleteStaleEnrollmentRequests implements Store.
 func (s *SQLStore) DeleteStaleEnrollmentRequests(ctx context.Context, before, ephemeralBefore time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM enrollment_requests WHERE COALESCE(resolved_at, created_at) < ?`), before.UnixMilli())
+	// The OR form, rather than COALESCE over the two columns, lets an index
+	// on either column serve the predicate.
+	res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM enrollment_requests WHERE resolved_at < ? OR (resolved_at IS NULL AND created_at < ?)`), before.UnixMilli(), before.UnixMilli())
 	if err != nil {
 		return 0, err
 	}
@@ -1132,7 +1134,7 @@ func (s *SQLStore) DeleteStaleEnrollmentRequests(ctx context.Context, before, ep
 	if err != nil {
 		return 0, err
 	}
-	res, err = s.db.ExecContext(ctx, s.rebind(`DELETE FROM enrollment_requests WHERE COALESCE(resolved_at, created_at) < ? AND token_id IN (SELECT id FROM bootstrap_tokens WHERE ephemeral = ?)`), ephemeralBefore.UnixMilli(), true)
+	res, err = s.db.ExecContext(ctx, s.rebind(`DELETE FROM enrollment_requests WHERE (resolved_at < ? OR (resolved_at IS NULL AND created_at < ?)) AND token_id IN (SELECT id FROM bootstrap_tokens WHERE ephemeral = ?)`), ephemeralBefore.UnixMilli(), ephemeralBefore.UnixMilli(), true)
 	if err != nil {
 		return regular, err
 	}

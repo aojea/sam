@@ -181,6 +181,7 @@ func (s *Server) pruneCatalog(now time.Time) {
 	for peerID := range snap {
 		if _, ok := keep[peerID]; !ok {
 			delete(s.catalog, peerID)
+			logger.Debugw("Dropped service report of a node no longer admitted", "peer_id", peerID)
 			dropped++
 		}
 	}
