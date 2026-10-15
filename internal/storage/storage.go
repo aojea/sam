@@ -248,6 +248,15 @@ type Store interface {
 	// the rotation that followed a successful claim failed.
 	ReleaseKeyRotationClaim(ctx context.Context, now time.Time, interval time.Duration) error
 
+	// ScheduleKeyRotationIfUnset sets the first rotation deadline of a store
+	// that never had one, and reports whether it did. A store that already
+	// carries a deadline, due or not, is left as it is.
+	ScheduleKeyRotationIfUnset(ctx context.Context, at time.Time) (bool, error)
+
+	// NextKeyRotation is the deadline ClaimKeyRotation will honour: the
+	// instant the next rotation is due, zero when none was ever scheduled.
+	NextKeyRotation(ctx context.Context) (time.Time, error)
+
 	// SaveInitialKey sets the initial key pair if no keys exist yet.
 	SaveInitialKey(ctx context.Context, priv ed25519.PrivateKey, pub ed25519.PublicKey) error
 

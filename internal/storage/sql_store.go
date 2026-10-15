@@ -857,6 +857,31 @@ func (s *SQLStore) ReleaseKeyRotationClaim(ctx context.Context, now time.Time, i
 	return err
 }
 
+// ScheduleKeyRotationIfUnset implements Store.
+func (s *SQLStore) ScheduleKeyRotationIfUnset(ctx context.Context, at time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx, s.rebind(`UPDATE rotation_lock SET next_rotation_at = ? WHERE id = 1 AND next_rotation_at = 0`), at.UnixMilli())
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
+// NextKeyRotation implements Store.
+func (s *SQLStore) NextKeyRotation(ctx context.Context) (time.Time, error) {
+	var ms int64
+	if err := s.db.QueryRowContext(ctx, `SELECT next_rotation_at FROM rotation_lock WHERE id = 1`).Scan(&ms); err != nil {
+		return time.Time{}, err
+	}
+	if ms == 0 {
+		return time.Time{}, nil
+	}
+	return time.UnixMilli(ms), nil
+}
+
 // RotateKeys implements Store.
 func (s *SQLStore) RotateKeys(ctx context.Context, newPriv ed25519.PrivateKey, newPub ed25519.PublicKey, gracePeriod time.Duration) error {
 	tx, err := s.db.BeginTx(ctx, nil)

@@ -149,6 +149,13 @@ with `403`). The console uses these routes.
 - **Bans propagate in two ways.** `/info` lists banned peer IDs for nodes and
   routers that start or restart. A signed mesh event reaches the ones that
   are already running.
+- **The rotation deadline is in the database.** The first rotation is due
+  one `--key-rotation-interval` after the first start, each rotation sets
+  the next, and every replica checks the deadline at least once a minute.
+  A control plane that restarts more often than it rotates still rotates on
+  time, and one that was down when a rotation was due rotates on its first
+  check. `agentmesh_control_plane_next_key_rotation_timestamp_seconds` is
+  the deadline; a value in the past is a rotation that is not happening.
 - **Node records are garbage-collected.** A node whose session has expired is
   deleted after `--node-retention`. A node enrolled with a bootstrap token
   has no session; its record is deleted once it has not refreshed its

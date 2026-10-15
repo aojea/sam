@@ -344,6 +344,7 @@ func TestMetricsEndpointServesMeshStateAndRuntime(t *testing.T) {
 		"agentmesh_control_plane_routers_active 0",
 		"agentmesh_control_plane_mesh_connected_peers 0",
 		`agentmesh_control_plane_storage_rows{table="nodes"} 0`,
+		"agentmesh_control_plane_next_key_rotation_timestamp_seconds ",
 		`agentmesh_control_plane_storage_rows{table="enrollment_requests"} 0`,
 		"agentmesh_control_plane_catalog_entries ",
 		`agentmesh_control_plane_storage_rows_deleted_total{table="routers"} `,

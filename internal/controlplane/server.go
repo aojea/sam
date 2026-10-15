@@ -300,6 +300,19 @@ func (s *Server) Init() error {
 	} else if err != nil {
 		return fmt.Errorf("failed to query initial keyring status: %w", err)
 	}
+	// The rotation deadline lives in the store, shared by the replicas and
+	// kept across restarts; a store that never had one gets its first an
+	// interval from now.
+	if interval := s.config.KeyRotationInterval; interval > 0 {
+		first := time.Now().Add(interval)
+		scheduled, err := s.store.ScheduleKeyRotationIfUnset(ctx, first)
+		if err != nil {
+			return fmt.Errorf("failed to schedule the first key rotation: %w", err)
+		}
+		if scheduled {
+			logger.Infof("First key rotation scheduled at %s", first.UTC().Format(time.RFC3339))
+		}
+	}
 
 	// Bootstrap Policy is now disabled; starting default closed.
 
@@ -514,61 +527,77 @@ func (s *Server) getProviders() map[string]*oidc.Provider {
 	return pCopy
 }
 
+// keyRotationCheckInterval is how often a replica asks the store whether a
+// rotation is due: a tenth of the interval, at most once a minute. The
+// deadline itself lives in the store, so a replica that restarts more often
+// than the interval still rotates on time.
+func keyRotationCheckInterval(interval time.Duration) time.Duration {
+	return min(time.Minute, interval/10)
+}
+
+// runKeyRotationLoop rotates the signing keys when the deadline the store
+// holds (set by Init, advanced by each rotation) has passed. The check runs
+// well within the interval, so a control plane that restarts more often
+// than it rotates still rotates on time instead of never.
 func (s *Server) runKeyRotationLoop() {
 	defer s.wg.Done()
-	if s.config.KeyRotationInterval <= 0 {
+	interval := s.config.KeyRotationInterval
+	if interval <= 0 {
 		return
 	}
 
-	ticker := time.NewTicker(s.config.KeyRotationInterval)
+	ticker := time.NewTicker(keyRotationCheckInterval(interval))
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			// Replicas share one DB but tick independently; only the replica
-			// that wins this claim may rotate for the current window.
-			now := time.Now()
-			claimed, err := s.store.ClaimKeyRotation(s.ctx, now, s.config.KeyRotationInterval)
-			if err != nil {
-				logger.Errorf("Failed to claim key rotation window: %v", err)
-				continue
-			}
-			if !claimed {
-				logger.Debug("Skipping key rotation: another replica already claimed this window")
-				continue
-			}
-
-			logger.Info("Rotating Biscuit signing keys...")
-			newPub, newPriv, err := ed25519.GenerateKey(rand.Reader)
-			if err != nil {
-				logger.Errorf("Failed to generate key pair for rotation: %v", err)
-				// Give up the window so a retry isn't stuck waiting a full interval.
-				if relErr := s.store.ReleaseKeyRotationClaim(s.ctx, now, s.config.KeyRotationInterval); relErr != nil {
-					logger.Errorf("Failed to release key rotation claim: %v", relErr)
-				}
-				continue
-			}
-			err = s.store.RotateKeys(s.ctx, newPriv, newPub, s.config.KeyGracePeriod)
-			if err != nil {
-				logger.Errorf("Failed to rotate keyring: %v", err)
-				// Same as above: don't let a failed rotation strand the mesh
-				// on unrotated keys until the next full interval.
-				if relErr := s.store.ReleaseKeyRotationClaim(s.ctx, now, s.config.KeyRotationInterval); relErr != nil {
-					logger.Errorf("Failed to release key rotation claim: %v", relErr)
-				}
-			} else {
-				logger.Infof("Key rotation committed. New current public key: %s", hex.EncodeToString(newPub))
-				if _, oidcErr := s.RotateOIDCKey(s.config.KeyGracePeriod); oidcErr != nil {
-					logger.Warnf("Failed to rotate OIDC signing key: %v", oidcErr)
-				}
-				if err := s.getMeshAdapter().PublishEvent(s.ctx, api.MeshEvent_KEY_ROTATION, "", newPub); err != nil {
-					logger.Warnf("Failed to publish KEY_ROTATION event to mesh: %v", err)
-				}
-			}
+			s.rotateKeysIfDue(time.Now())
 		case <-s.ctx.Done():
 			return
 		}
+	}
+}
+
+// rotateKeysIfDue claims the rotation window and rotates when it is due.
+// Replicas share one store and check independently; only the one that wins
+// the claim rotates for this window.
+func (s *Server) rotateKeysIfDue(now time.Time) {
+	interval := s.config.KeyRotationInterval
+	claimed, err := s.store.ClaimKeyRotation(s.ctx, now, interval)
+	if err != nil {
+		logger.Errorf("Failed to claim key rotation window: %v", err)
+		return
+	}
+	if !claimed {
+		return
+	}
+
+	logger.Info("Rotating Biscuit signing keys...")
+	newPub, newPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		logger.Errorf("Failed to generate key pair for rotation: %v", err)
+		// Give up the window so a retry isn't stuck waiting a full interval.
+		if relErr := s.store.ReleaseKeyRotationClaim(s.ctx, now, interval); relErr != nil {
+			logger.Errorf("Failed to release key rotation claim: %v", relErr)
+		}
+		return
+	}
+	if err := s.store.RotateKeys(s.ctx, newPriv, newPub, s.config.KeyGracePeriod); err != nil {
+		logger.Errorf("Failed to rotate keyring: %v", err)
+		// Same as above: don't let a failed rotation strand the mesh
+		// on unrotated keys until the next full interval.
+		if relErr := s.store.ReleaseKeyRotationClaim(s.ctx, now, interval); relErr != nil {
+			logger.Errorf("Failed to release key rotation claim: %v", relErr)
+		}
+		return
+	}
+	logger.Infof("Key rotation committed. New current public key: %s; next rotation at %s", hex.EncodeToString(newPub), now.Add(interval).UTC().Format(time.RFC3339))
+	if _, oidcErr := s.RotateOIDCKey(s.config.KeyGracePeriod); oidcErr != nil {
+		logger.Warnf("Failed to rotate OIDC signing key: %v", oidcErr)
+	}
+	if err := s.getMeshAdapter().PublishEvent(s.ctx, api.MeshEvent_KEY_ROTATION, "", newPub); err != nil {
+		logger.Warnf("Failed to publish KEY_ROTATION event to mesh: %v", err)
 	}
 }
 

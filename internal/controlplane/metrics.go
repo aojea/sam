@@ -113,6 +113,9 @@ type meshSnapshot struct {
 	// the retiring one stops verifying; zero when there is none.
 	signingKeys       int
 	retiringKeyExpiry time.Time
+	// nextKeyRotation is when the store says the next rotation is due; a
+	// value in the past is a rotation no replica has performed.
+	nextKeyRotation time.Time
 	// storageRows is the row count of every table the control plane keeps
 	// bounded; a table that grows past its retention is a reaper that
 	// stopped working.
@@ -145,6 +148,7 @@ type meshStateCollector struct {
 	meshPeersDesc    *prometheus.Desc
 	signingKeysDesc  *prometheus.Desc
 	retiringKeyDesc  *prometheus.Desc
+	nextRotationDesc *prometheus.Desc
 	storageRowsDesc  *prometheus.Desc
 	scrapeOKDesc     *prometheus.Desc
 	scrapeSampleDesc *prometheus.Desc
@@ -200,6 +204,10 @@ func newMeshStateCollector(store storage.Store) *meshStateCollector {
 			"agentmesh_control_plane_retiring_key_expiry_timestamp_seconds",
 			"Unix time the retiring signing key stops verifying; absent when no rotation is in its grace period",
 			nil, nil),
+		nextRotationDesc: prometheus.NewDesc(
+			"agentmesh_control_plane_next_key_rotation_timestamp_seconds",
+			"Unix time the next signing key rotation is due; in the past when it is overdue",
+			nil, nil),
 		storageRowsDesc: prometheus.NewDesc(
 			"agentmesh_control_plane_storage_rows",
 			"Rows in a control plane store table",
@@ -219,7 +227,7 @@ func (c *meshStateCollector) Describe(ch chan<- *prometheus.Desc) {
 	for _, d := range []*prometheus.Desc{
 		c.nodesDesc, c.usersDesc, c.requestsDesc, c.tokensDesc, c.routersDesc,
 		c.routerPeersDesc, c.routerDHTDesc, c.routerLeaseDesc, c.meshPeersDesc,
-		c.signingKeysDesc, c.retiringKeyDesc, c.storageRowsDesc, c.scrapeOKDesc, c.scrapeSampleDesc,
+		c.signingKeysDesc, c.retiringKeyDesc, c.nextRotationDesc, c.storageRowsDesc, c.scrapeOKDesc, c.scrapeSampleDesc,
 	} {
 		ch <- d
 	}
@@ -265,6 +273,9 @@ func (c *meshStateCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.signingKeysDesc, prometheus.GaugeValue, float64(s.signingKeys))
 	if !s.retiringKeyExpiry.IsZero() {
 		ch <- prometheus.MustNewConstMetric(c.retiringKeyDesc, prometheus.GaugeValue, float64(s.retiringKeyExpiry.Unix()))
+	}
+	if !s.nextKeyRotation.IsZero() {
+		ch <- prometheus.MustNewConstMetric(c.nextRotationDesc, prometheus.GaugeValue, float64(s.nextKeyRotation.Unix()))
 	}
 	for table, n := range s.storageRows {
 		ch <- prometheus.MustNewConstMetric(c.storageRowsDesc, prometheus.GaugeValue, float64(n), table)
@@ -348,6 +359,10 @@ func readMeshSnapshot(ctx context.Context, store storage.Store, now time.Time) (
 	}
 
 	snap.storageRows, err = store.CountRows(ctx)
+	if err != nil {
+		return snap, err
+	}
+	snap.nextKeyRotation, err = store.NextKeyRotation(ctx)
 	if err != nil {
 		return snap, err
 	}

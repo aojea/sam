@@ -225,6 +225,53 @@ func TestClaimKeyRotation(t *testing.T) {
 	}
 }
 
+func TestScheduleKeyRotationIfUnset(t *testing.T) {
+	store := newTestStore(t)
+	defer func() { _ = store.Close() }()
+	ctx := context.Background()
+	t0 := time.Now().Truncate(time.Millisecond)
+	interval := 24 * time.Hour
+
+	next, err := store.NextKeyRotation(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !next.IsZero() {
+		t.Fatalf("fresh store has a rotation deadline %s, want none", next)
+	}
+
+	// The first replica to start schedules; a replica starting later, or
+	// the same one restarting, leaves the deadline alone.
+	scheduled, err := store.ScheduleKeyRotationIfUnset(ctx, t0.Add(interval))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !scheduled {
+		t.Fatal("first schedule on a fresh store was not applied")
+	}
+	scheduled, err = store.ScheduleKeyRotationIfUnset(ctx, t0.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scheduled {
+		t.Fatal("a second schedule replaced the deadline; want it kept")
+	}
+	if next, _ = store.NextKeyRotation(ctx); !next.Equal(t0.Add(interval)) {
+		t.Fatalf("deadline = %s, want %s", next, t0.Add(interval))
+	}
+
+	// Not due before the deadline, due at it; a claim moves it one interval on.
+	if claimed, _ := store.ClaimKeyRotation(ctx, t0.Add(interval-time.Second), interval); claimed {
+		t.Fatal("claim before the deadline succeeded")
+	}
+	if claimed, _ := store.ClaimKeyRotation(ctx, t0.Add(interval), interval); !claimed {
+		t.Fatal("claim at the deadline failed")
+	}
+	if next, _ = store.NextKeyRotation(ctx); !next.Equal(t0.Add(2 * interval)) {
+		t.Fatalf("deadline after the claim = %s, want %s", next, t0.Add(2*interval))
+	}
+}
+
 func TestReleaseKeyRotationClaim(t *testing.T) {
 	store := newTestStore(t)
 	defer func() { _ = store.Close() }()
