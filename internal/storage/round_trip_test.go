@@ -17,6 +17,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strconv"
@@ -385,6 +386,52 @@ func TestDeleteStaleEnrollmentRecords(t *testing.T) {
 	slices.Sort(tokenIDs)
 	if want := []string{"ephemeral", "just-expired", "live", "old-with-recent-request"}; !slices.Equal(tokenIDs, want) {
 		t.Errorf("remaining tokens = %v, want %v", tokenIDs, want)
+	}
+}
+
+func TestCountEnrollmentRequestsByStatus(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+	if err := store.SaveBootstrapToken(ctx, &BootstrapToken{ID: "tok", TokenHash: "hash", Role: api.RoleNode, MaxUsages: 10, CreatedAt: now, ExpiresAt: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	for i, status := range []api.EnrollmentStatus{
+		api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING,
+		api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED,
+		api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED,
+		api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED,
+	} {
+		if err := store.CreateEnrollmentRequest(ctx, &EnrollmentRequest{
+			ID: fmt.Sprintf("req-%d", i), PeerID: fmt.Sprintf("peer-%d", i), PublicKey: []byte("pub"), TokenID: "tok", Status: status, CreatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	counts, err := store.CountEnrollmentRequests(ctx)
+	if err != nil {
+		t.Fatalf("CountEnrollmentRequests: %v", err)
+	}
+	want := map[api.EnrollmentStatus]int64{
+		api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING:  1,
+		api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED: 2,
+		api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED: 1,
+	}
+	if len(counts) != len(want) {
+		t.Fatalf("counts = %v, want %v", counts, want)
+	}
+	for status, n := range want {
+		if counts[status] != n {
+			t.Errorf("%s = %d, want %d", status, counts[status], n)
+		}
+	}
+	// The list and the count agree, so the admin view and the gauge do.
+	list, err := store.ListEnrollmentRequests(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 4 {
+		t.Errorf("ListEnrollmentRequests returned %d, want 4", len(list))
 	}
 }
 

@@ -1965,6 +1965,26 @@ func (s *SQLStore) CountNodes(ctx context.Context, now time.Time) ([]NodeCount, 
 	return counts, rows.Err()
 }
 
+// CountEnrollmentRequests implements Store.
+func (s *SQLStore) CountEnrollmentRequests(ctx context.Context) (map[api.EnrollmentStatus]int64, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM enrollment_requests GROUP BY status`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count enrollment requests: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	counts := make(map[api.EnrollmentStatus]int64)
+	for rows.Next() {
+		var status int32
+		var n int64
+		if err := rows.Scan(&status, &n); err != nil {
+			return nil, fmt.Errorf("failed to scan enrollment request count: %w", err)
+		}
+		counts[api.EnrollmentStatus(status)] = n
+	}
+	return counts, rows.Err()
+}
+
 // ListBootstrapTokens retrieves all bootstrap tokens.
 func (s *SQLStore) ListBootstrapTokens(ctx context.Context) ([]BootstrapToken, error) {
 	query := s.rebind(`SELECT id, token_hash, role, owner_id, max_usages, usages_count, description, created_at, expires_at, revoked_at, autonomous_recovery, ephemeral FROM bootstrap_tokens ORDER BY created_at DESC`)

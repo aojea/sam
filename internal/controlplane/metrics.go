@@ -323,12 +323,14 @@ func readMeshSnapshot(ctx context.Context, store storage.Store, now time.Time) (
 	}
 	snap.users = len(users)
 
-	reqs, err := store.ListEnrollmentRequests(ctx)
+	// A count, not a list: the table holds one row per enrollment within the
+	// retention, tens of thousands on a busy mesh, and this runs every 30s.
+	requests, err := store.CountEnrollmentRequests(ctx)
 	if err != nil {
 		return snap, err
 	}
-	for _, r := range reqs {
-		snap.enrollmentRequests[enrollmentStatusLabel(r.Status)]++
+	for status, n := range requests {
+		snap.enrollmentRequests[enrollmentStatusLabel(status)] += int(n)
 	}
 
 	tokens, err := store.ListBootstrapTokens(ctx)

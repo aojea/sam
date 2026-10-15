@@ -377,6 +377,9 @@ type Store interface {
 	// CountNodes counts every enrolled node by role and by its state at now.
 	CountNodes(ctx context.Context, now time.Time) ([]NodeCount, error)
 
+	// CountEnrollmentRequests counts the enrollment requests by status.
+	CountEnrollmentRequests(ctx context.Context) (map[api.EnrollmentStatus]int64, error)
+
 	// DeleteExpiredNodes removes enrolled nodes whose session expired before
 	// the given time and that are not banned, returning how many went. A
 	// lapsed session already refuses every refresh, so the row only records
