@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -69,6 +70,92 @@ func (m *oidcMember) refresh(t *testing.T, cpURL, jwt string) (int, string) {
 		t.Fatal(err)
 	}
 	body, err := proto.Marshal(&api.TokenRefreshRequest{ChallengeUnixMs: ts, ChallengeSignature: sig, Jwt: jwt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, cpURL+"/refresh", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString(m.biscuit))
+	req.Header.Set("Content-Type", "application/x-protobuf")
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatalf("POST /refresh: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusOK {
+		var refreshed api.TokenRefreshResponse
+		if err := proto.Unmarshal(data, &refreshed); err != nil {
+			t.Fatal(err)
+		}
+		m.biscuit = refreshed.BiscuitToken
+	}
+	return resp.StatusCode, string(data)
+}
+
+// bootstrapMember is a member enrolled with a bootstrap token, driven over
+// the control plane API alone: the test decides when it refreshes.
+type bootstrapMember struct {
+	priv    crypto.PrivKey
+	peerID  peer.ID
+	biscuit []byte
+}
+
+// enrollBootstrapMember spends one use of token at POST /enroll.
+func enrollBootstrapMember(t *testing.T, cpURL, token string) *bootstrapMember {
+	t.Helper()
+	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pID, err := peer.IDFromPrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := crypto.MarshalPublicKey(priv.GetPublic())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := time.Now().UnixMilli()
+	sig, err := priv.Sign(api.EnrollChallenge(pID.String(), ts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := proto.Marshal(&api.BootstrapEnrollRequest{
+		BootstrapToken: token, PeerId: pID.String(), PublicKey: pub, RequestedRole: api.RoleNode,
+		ChallengeUnixMs: ts, ChallengeSignature: sig,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(cpURL+"/enroll", "application/x-protobuf", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /enroll: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /enroll: %d %s", resp.StatusCode, data)
+	}
+	var enrolled api.BootstrapEnrollResponse
+	if err := proto.Unmarshal(data, &enrolled); err != nil {
+		t.Fatal(err)
+	}
+	if enrolled.Status != api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED || len(enrolled.BiscuitToken) == 0 {
+		t.Fatalf("POST /enroll answered %s: %s", enrolled.Status, enrolled.ErrorMessage)
+	}
+	return &bootstrapMember{priv: priv, peerID: pID, biscuit: enrolled.BiscuitToken}
+}
+
+// refresh is one POST /refresh with the member's current credential; on
+// success the member holds the new one. It returns the status and body.
+func (m *bootstrapMember) refresh(t *testing.T, cpURL string) (int, string) {
+	t.Helper()
+	ts := time.Now().UnixMilli()
+	sig, err := m.priv.Sign(api.RefreshChallenge(m.peerID.String(), ts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := proto.Marshal(&api.TokenRefreshRequest{ChallengeUnixMs: ts, ChallengeSignature: sig})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,8 +357,8 @@ func TestLapsedMembersAreCollected(t *testing.T) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	if v, ok := controlPlaneMetric(t, cpURL, "agentmesh_control_plane_nodes_deleted_total"); !ok || v != leaving {
-		t.Errorf("nodes_deleted_total = %v (present %v), want %d", v, ok, leaving)
+	if v, ok := controlPlaneMetric(t, cpURL, `agentmesh_control_plane_nodes_deleted_total{reason="session"}`); !ok || v != leaving {
+		t.Errorf("nodes_deleted_total{reason=session} = %v (present %v), want %d", v, ok, leaving)
 	}
 	stopRefreshing()
 	if err := <-refreshed; err != nil {
@@ -283,4 +370,119 @@ func TestLapsedMembersAreCollected(t *testing.T) {
 	if nodes := fetchAdminStatus(t, cpPort, testAdminToken).GetEnrolledNodes(); len(nodes) != 1 {
 		t.Fatalf("admin status after the sweep lists %d nodes, want 1", len(nodes))
 	}
+}
+
+// TestSilentEphemeralMembersAreForgotten is the ladder's fleet and the
+// probe's identities in seconds. A bootstrap enrollment has no session, so
+// a member that leaves used to stay enrolled forever; it is now forgotten
+// once it has not refreshed for the retention, and a member an ephemeral
+// token enrolled, which the ladder and the probes mint, within the
+// ephemeral retention. A regular member that is silent for less than the
+// retention, and one that refreshes, stay.
+func TestSilentEphemeralMembersAreForgotten(t *testing.T) {
+	tmpDir := t.TempDir()
+	oidcURL, _ := startCustomMockOIDC(t)
+	policyFile := filepath.Join(tmpDir, "policies.yaml")
+	if err := os.WriteFile(policyFile, []byte("roles: []\nbindings: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Ephemeral members are kept for a second after their last refresh,
+	// regular ones for an hour; the GC sweeps every second for the shorter
+	// of the two to matter.
+	cpPort, _ := startControlPlane(t, tmpDir, oidcURL, policyFile,
+		"--auto-approve-enrollment",
+		"--ephemeral-node-retention", "1s",
+		"--node-retention", "10s",
+	)
+	cpURL := fmt.Sprintf("http://127.0.0.1:%d", cpPort)
+
+	const fleet = 12
+	ephemeralToken := mintBootstrapTokenWithUses(t, cpURL, testAdminToken, fleet, true)
+	regularToken := mintBootstrapTokenWithUses(t, cpURL, testAdminToken, 2, false)
+	silent := enrollBootstrapMember(t, cpURL, regularToken)
+	refreshing := enrollBootstrapMember(t, cpURL, regularToken)
+	members := make([]*bootstrapMember, fleet)
+	for i := range members {
+		members[i] = enrollBootstrapMember(t, cpURL, ephemeralToken)
+	}
+	enrolledAt := time.Now()
+	if got := len(fetchAdminStatus(t, cpPort, testAdminToken).GetEnrolledNodes()); got != fleet+2 {
+		t.Fatalf("admin status lists %d nodes right after enrollment, want %d", got, fleet+2)
+	}
+	for _, n := range fetchAdminStatus(t, cpPort, testAdminToken).GetEnrolledNodes() {
+		if n.GetEphemeral() != (n.GetPeerId() != silent.peerID.String() && n.GetPeerId() != refreshing.peerID.String()) {
+			t.Fatalf("node %s ephemeral=%v, want the flag on the fleet's members only", n.GetPeerId(), n.GetEphemeral())
+		}
+	}
+
+	// The fleet falls silent and is forgotten; the regular members stay,
+	// the one that refreshes with its row's last refresh moving.
+	if status, body := refreshing.refresh(t, cpURL); status != http.StatusOK {
+		t.Fatalf("refresh: %d %s", status, body)
+	}
+	deadline := time.Now().Add(8 * time.Second)
+	for {
+		nodes := fetchAdminStatus(t, cpPort, testAdminToken).GetEnrolledNodes()
+		if len(nodes) == 2 {
+			var left []string
+			for _, n := range nodes {
+				left = append(left, n.GetPeerId())
+			}
+			slices.Sort(left)
+			want := []string{silent.peerID.String(), refreshing.peerID.String()}
+			slices.Sort(want)
+			if !slices.Equal(left, want) {
+				t.Fatalf("after the sweep the status lists %v, want the two regular members %v", left, want)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d nodes still listed %s after the fleet enrolled; want the fleet forgotten after a second of silence", len(nodes), time.Since(enrolledAt))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if v, ok := controlPlaneMetric(t, cpURL, `agentmesh_control_plane_nodes_deleted_total{reason="ephemeral"}`); !ok || v != fleet {
+		t.Errorf("nodes_deleted_total{reason=ephemeral} = %v (present %v), want %d", v, ok, fleet)
+	}
+	if v, ok := controlPlaneMetric(t, cpURL, `agentmesh_control_plane_nodes_deleted_total{reason="silent"}`); !ok || v != 0 {
+		t.Errorf("nodes_deleted_total{reason=silent} = %v (present %v), want 0: the regular members are within their retention", v, ok)
+	}
+
+	// A forgotten member is a stranger: its credential still verifies, its
+	// row is gone, so it is told to enroll again. The regular ones refresh.
+	if status, body := members[0].refresh(t, cpURL); status != http.StatusUnauthorized {
+		t.Fatalf("refresh of a forgotten member: %d %s, want 401", status, strings.TrimSpace(body))
+	}
+	for _, m := range []*bootstrapMember{silent, refreshing} {
+		if status, body := m.refresh(t, cpURL); status != http.StatusOK {
+			t.Fatalf("refresh of a regular member after the sweep: %d %s", status, body)
+		}
+	}
+}
+
+// mintBootstrapTokenWithUses mints a node bootstrap token good for uses
+// enrollments, ephemeral or not.
+func mintBootstrapTokenWithUses(t *testing.T, cpURL, adminToken string, uses int, ephemeral bool) string {
+	t.Helper()
+	body, err := protojson.Marshal(&api.BootstrapTokenCreateRequest{Role: api.RoleNode, TtlHours: 1, MaxUsages: int32(uses), Description: "lifecycle", Ephemeral: ephemeral})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, cpURL+"/admin/bootstrap-tokens", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /admin/bootstrap-tokens: %d %s", resp.StatusCode, data)
+	}
+	var created api.BootstrapTokenCreateResponse
+	if err := protojson.Unmarshal(data, &created); err != nil {
+		t.Fatal(err)
+	}
+	return created.GetToken()
 }
