@@ -128,10 +128,14 @@ spec:
         args:
         - "--bind-address=0.0.0.0:8080"
         - "--db-driver=postgres"
-        - "--issuer=https://auth.sam-mesh.dev,https://container.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/${CLUSTER_REGION}/clusters/${CLUSTER_NAME}"
+        - "--issuer=https://auth.sam-mesh.dev"
+        # The cluster's service account tokens are workload identities: a
+        # 48h session renewed with a fresh token, no /user/* access.
+        - "--workload-issuer=https://container.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/${CLUSTER_REGION}/clusters/${CLUSTER_NAME}"
         - "--allowed-audiences=agentmesh-audience,agentmesh-control-plane-audience,sam-mesh-audience,sam-control-plane-audience"
         - "--auto-approve-enrollment"
         - "--key-grace-period=48h"
+        - "--node-retention=${NODE_RETENTION}"
         resources:
           requests:
             cpu: 100m

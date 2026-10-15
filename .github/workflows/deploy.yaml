@@ -361,6 +361,10 @@ jobs:
           # routers per member, six routers hold 10,000 members with one
           # router out for a rollout.
           VAR_ROUTER_HIGH_WATERMARK: ${{ vars.ROUTER_HIGH_WATERMARK }}
+          # How long the control plane keeps a lapsed or silent member's
+          # record. Unset is the binary's default, 720h; an environment that
+          # runs scale tests sets it to days so the sweep is observable.
+          VAR_NODE_RETENTION: ${{ vars.NODE_RETENTION }}
         run: |
           print_rollout_diagnostics() {
             local namespace="$1"
@@ -395,8 +399,9 @@ jobs:
           export CLUSTER_NAME="${VAR_CLUSTER_NAME}"
           export ROUTER_REPLICAS="${VAR_ROUTER_REPLICAS:-3}"
           export ROUTER_HIGH_WATERMARK="${VAR_ROUTER_HIGH_WATERMARK:-6000}"
+          export NODE_RETENTION="${VAR_NODE_RETENTION:-720h}"
 
-          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/agentmesh-control-plane-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG} ${NODE_RETENTION}' < .github/k8s/agentmesh-control-plane-template.yaml | kubectl apply -f -
           envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG} ${ROUTER_REPLICAS} ${ROUTER_HIGH_WATERMARK}' < .github/k8s/agentmesh-router-template.yaml | kubectl apply -f -
           envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/agentmesh-console-template.yaml | kubectl apply -f -
           envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID}' < .github/k8s/dns-sync-cronjob-template.yaml | kubectl apply -f -
