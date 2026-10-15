@@ -237,5 +237,14 @@ for step in "${STEPS[@]}"; do
 done
 
 log "ladder complete: ${resident} members resident; holding until Ctrl-C or ${HOLD}"
-# Stay until the first minion's hold ends or the operator interrupts.
-while rssh "${STARTED_MINIONS[0]}" "pgrep -x agentmesh-bench >/dev/null"; do sleep 60; done
+# Stay until the first minion's hold ends or the operator interrupts. The
+# check tells "the run ended" (pgrep exits 1) from "ssh did not get through"
+# (255): an IAP tunnel drops now and then, and a dropped session must not
+# end a hold that carries thousands of members.
+while :; do
+  rc=0
+  rssh "${STARTED_MINIONS[0]}" "pgrep -x agentmesh-bench >/dev/null" || rc=$?
+  if [[ $rc -eq 1 ]]; then break; fi
+  if [[ $rc -ne 0 ]]; then log "could not reach ${STARTED_MINIONS[0]} to check the hold (ssh exit ${rc}); checking again"; fi
+  sleep 60
+done
