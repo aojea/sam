@@ -31,8 +31,11 @@ import (
 
 // The members RunJoin starts are whatever binary it is pointed at. Here that
 // is this test binary again, re-entered through TestMain as a node that
-// answers /readyz and the two sidecar routes the journey uses, with its
-// behaviour set through the environment the children inherit.
+// answers /readyz and the two sidecar routes the journey uses on its Unix
+// socket, with its behaviour set through the environment the children
+// inherit. Like the real node it binds no loopback port unless told to, and
+// it refuses to be told: a fleet of a thousand on one host collided with the
+// kernel's ephemeral range when every member had one.
 
 func TestMain(m *testing.M) {
 	if os.Getenv("AGENTMESH_BENCH_FAKE_NODE") == "1" {
@@ -42,11 +45,14 @@ func TestMain(m *testing.M) {
 }
 
 func fakeNode(args []string) int {
-	var metricsAddr, socket, tokenPath string
+	var socket, tokenPath string
 	for i := 0; i < len(args)-1; i++ {
 		switch args[i] {
-		case "--metrics-addr":
-			metricsAddr = args[i+1]
+		case "--metrics-addr", "--bind-addr":
+			if args[i+1] != "" {
+				fmt.Fprintln(os.Stderr, "fake node: a member must not bind a loopback port:", args[i], args[i+1])
+				return 4
+			}
 		case "--socket-path":
 			socket = args[i+1]
 		case "--bootstrap-token-path":
@@ -78,15 +84,14 @@ func fakeNode(args []string) int {
 		return true
 	}
 
-	metrics := http.NewServeMux()
-	metrics.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+	sidecar := http.NewServeMux()
+	sidecar.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
 		if !ready() {
 			http.Error(w, "not ready", http.StatusServiceUnavailable)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
 	})
-	sidecar := http.NewServeMux()
 	sidecar.HandleFunc("/mesh/service/discover", func(w http.ResponseWriter, _ *http.Request) {
 		var out []map[string]string
 		for _, p := range providers {
@@ -104,17 +109,11 @@ func fakeNode(args []string) int {
 		_, _ = fmt.Fprint(w, `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","serverInfo":{"name":"fake","version":"0"}}}`)
 	})
 
-	tcp, err := net.Listen("tcp", metricsAddr)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "fake node:", err)
-		return 1
-	}
 	unix, err := net.Listen("unix", socket)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fake node:", err)
 		return 1
 	}
-	go func() { _ = http.Serve(tcp, metrics) }()  //nolint:gosec // a test double
 	go func() { _ = http.Serve(unix, sidecar) }() //nolint:gosec // a test double
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGTERM, os.Interrupt)
@@ -152,35 +151,7 @@ func fakeFleet(t *testing.T, count int, env map[string]string) JoinOptions {
 		ControlPlane:       "http://127.0.0.1:1",
 		BootstrapTokenPath: token,
 		Service:            "everything",
-		MetricsBasePort:    freePortBase(t, count),
 	}
-}
-
-// freePortBase finds count consecutive free loopback ports.
-func freePortBase(t *testing.T, count int) int {
-	t.Helper()
-	for attempt := 0; attempt < 20; attempt++ {
-		l, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		base := l.Addr().(*net.TCPAddr).Port
-		_ = l.Close()
-		free := true
-		for i := 1; i < count; i++ {
-			probe, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", base+i))
-			if err != nil {
-				free = false
-				break
-			}
-			_ = probe.Close()
-		}
-		if free {
-			return base
-		}
-	}
-	t.Fatal("no run of free ports")
-	return 0
 }
 
 func TestRunJoinTimesEachStageAndRetriesStaleProviders(t *testing.T) {

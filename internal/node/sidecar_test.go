@@ -399,7 +399,8 @@ func TestSidecarServerAuthEnforcement(t *testing.T) {
 		needsToken     bool
 	}{
 		{"healthz is public", "GET", "/healthz", http.StatusOK, false},
-		{"readyz is public", "GET", "/readyz", http.StatusOK, false},
+		// Public, and honest: this node holds no router, so it is not ready.
+		{"readyz is public", "GET", "/readyz", http.StatusServiceUnavailable, false},
 		// Liveness says nothing; metrics name peers and count their traffic.
 		{"metrics is protected", "GET", "/metrics", http.StatusUnauthorized, false},
 		// Services are declared in configuration only: the former runtime

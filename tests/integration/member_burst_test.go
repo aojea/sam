@@ -16,7 +16,6 @@ package integration_test
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/http/httptest"
 	"os"
@@ -92,7 +91,6 @@ func TestMemberBurstJoinsConcurrently(t *testing.T) {
 		Service:            "everything",
 		ReadyTimeout:       30 * time.Second,
 		CallTimeout:        30 * time.Second,
-		MetricsBasePort:    reservePortBlock(t, members),
 		NodeArgs:           []string{"--allow-loopback"},
 		Log:                testLogWriter{t},
 	})
@@ -132,29 +130,6 @@ func TestMemberBurstJoinsConcurrently(t *testing.T) {
 	}
 	t.Logf("%d members: ready p50 %.0f ms p95 %.0f ms; journey p50 %.0f ms p95 %.0f ms max %.0f ms; %d call attempts",
 		members, report.ReadyMs.P50, report.ReadyMs.P95, report.JourneyMs.P50, report.JourneyMs.P95, report.JourneyMs.Max, report.CallAttempts)
-}
-
-// reservePortBlock finds n consecutive free loopback ports in the reserved
-// range and returns the first.
-func reservePortBlock(t *testing.T, n int) int {
-	t.Helper()
-	for range 50 {
-		base := getFreePort(t)
-		free := true
-		for i := 1; i < n; i++ {
-			l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", base+i))
-			if err != nil {
-				free = false
-				break
-			}
-			_ = l.Close()
-		}
-		if free {
-			return base
-		}
-	}
-	t.Fatalf("no run of %d free ports", n)
-	return 0
 }
 
 // logTail returns the last part of a log file, for a failure message.

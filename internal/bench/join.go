@@ -93,10 +93,6 @@ type JoinOptions struct {
 	// SampleInterval is how often each resident member is read during Hold.
 	SampleInterval time.Duration
 
-	// MetricsBasePort is the first of Count consecutive loopback ports;
-	// member i serves /readyz on MetricsBasePort+i.
-	MetricsBasePort int
-
 	// NodeArgs are appended to every member's command line as given.
 	NodeArgs []string
 
@@ -208,6 +204,7 @@ const (
 	// and one that takes a minute is not asked a thousand times.
 	readyPollMin      = 50 * time.Millisecond
 	readyPollMax      = 500 * time.Millisecond
+	readyTimeout      = 2 * time.Second
 	callRetryInterval = 5 * time.Second
 	requestTimeout    = 30 * time.Second
 	teardownGrace     = 10 * time.Second
@@ -222,17 +219,19 @@ const (
 const mcpInitialize = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"agentmesh-bench","version":"0"}}}`
 
 type member struct {
-	index       int
-	dir         string
-	socket      string
-	metricsAddr string
-	readyz      string
-	logPath     string
-	cmd         *exec.Cmd
-	logFile     *os.File
-	started     time.Time
-	exited      chan struct{}
-	exitErr     error
+	index  int
+	dir    string
+	socket string
+	// client speaks to the member over its Unix socket: readiness, discovery
+	// and the first call. A member binds no loopback port, so a fleet of any
+	// size cannot collide with the kernel's ephemeral range.
+	client  *http.Client
+	logPath string
+	cmd     *exec.Cmd
+	logFile *os.File
+	started time.Time
+	exited  chan struct{}
+	exitErr error
 
 	readyAt    time.Time
 	calledAt   time.Time
@@ -364,9 +363,6 @@ func (o *JoinOptions) setDefaults() {
 	if o.SampleInterval <= 0 {
 		o.SampleInterval = 10 * time.Second
 	}
-	if o.MetricsBasePort <= 0 {
-		o.MetricsBasePort = 20000
-	}
 }
 
 func (o *JoinOptions) logf(format string, args ...any) {
@@ -378,14 +374,13 @@ func (o *JoinOptions) logf(format string, args ...any) {
 
 func newMember(opts JoinOptions, i int) *member {
 	dir := filepath.Join(opts.Dir, fmt.Sprintf("member-%04d", i))
-	metricsAddr := fmt.Sprintf("127.0.0.1:%d", opts.MetricsBasePort+i)
+	socket := filepath.Join(dir, "node.sock")
 	return &member{
-		index:       i,
-		dir:         dir,
-		socket:      filepath.Join(dir, "node.sock"),
-		metricsAddr: metricsAddr,
-		readyz:      "http://" + metricsAddr + "/readyz",
-		logPath:     filepath.Join(dir, "node.log"),
+		index:   i,
+		dir:     dir,
+		socket:  socket,
+		client:  unixClient(socket),
+		logPath: filepath.Join(dir, "node.log"),
 	}
 }
 
@@ -407,7 +402,6 @@ func (m *member) start(opts JoinOptions) error {
 		"--data-dir", m.dir,
 		"--socket-path", m.socket,
 		"--bind-addr=",
-		"--metrics-addr", m.metricsAddr,
 		"--listen", "/ip4/0.0.0.0/tcp/0",
 		"--listen", "/ip4/0.0.0.0/udp/0/quic-v1",
 	}
@@ -456,11 +450,10 @@ func journey(ctx context.Context, opts JoinOptions, m *member) {
 // waitReady polls the member's /readyz, which answers 200 only once the node
 // holds an authenticated connection to a router.
 func (m *member) waitReady(ctx context.Context, timeout time.Duration) error {
-	client := &http.Client{Timeout: 2 * time.Second}
 	deadline := time.Now().Add(timeout)
 	interval := readyPollMin
 	for {
-		if isReady(ctx, client, m.readyz) {
+		if m.isReady(ctx) {
 			m.readyAt = time.Now()
 			return nil
 		}
@@ -481,12 +474,14 @@ func (m *member) waitReady(ctx context.Context, timeout time.Duration) error {
 	}
 }
 
-func isReady(ctx context.Context, client *http.Client, url string) bool {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func (m *member) isReady(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, readyTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost/readyz", nil)
 	if err != nil {
 		return false
 	}
-	resp, err := client.Do(req)
+	resp, err := m.client.Do(req)
 	if err != nil {
 		return false
 	}
@@ -500,7 +495,7 @@ func isReady(ctx context.Context, client *http.Client, url string) bool {
 // deadline: a provider record can name a peer a rollout just replaced, and a
 // member that joined seconds ago has a thin routing table.
 func (m *member) firstCall(ctx context.Context, opts JoinOptions) error {
-	client := unixClient(m.socket)
+	client := m.client
 	defer client.CloseIdleConnections()
 	deadline := m.readyAt.Add(opts.CallTimeout)
 	lastErr := "none discovered"
@@ -691,12 +686,11 @@ func hold(ctx context.Context, opts JoinOptions, members []*member) *HoldReport 
 	report := &HoldReport{}
 	var outages []time.Duration
 
-	client := &http.Client{Timeout: 2 * time.Second}
 	start := time.Now()
 	end := start.Add(opts.Hold)
 	for {
 		now := time.Now()
-		ready := sampleReady(ctx, client, members)
+		ready := sampleReady(ctx, members)
 		count := 0
 		for i, m := range members {
 			if ready[i] {
@@ -759,7 +753,7 @@ func hold(ctx context.Context, opts JoinOptions, members []*member) *HoldReport 
 }
 
 // sampleReady reads every member's /readyz, a bounded number at a time.
-func sampleReady(ctx context.Context, client *http.Client, members []*member) []bool {
+func sampleReady(ctx context.Context, members []*member) []bool {
 	ready := make([]bool, len(members))
 	sem := make(chan struct{}, sampleConcurrency)
 	var wg sync.WaitGroup
@@ -772,7 +766,7 @@ func sampleReady(ctx context.Context, client *http.Client, members []*member) []
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			ready[i] = isReady(ctx, client, m.readyz)
+			ready[i] = m.isReady(ctx)
 		}()
 	}
 	wg.Wait()

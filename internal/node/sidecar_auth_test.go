@@ -19,6 +19,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // TestConstantTimeEqual is a correctness check, not a timing one: a timing
@@ -54,6 +57,80 @@ func TestConstantTimeEqual(t *testing.T) {
 	// with an empty configured token, but the function should not pretend.
 	if !constantTimeEqual("", "") {
 		t.Error("constantTimeEqual(\"\", \"\") = false, want true")
+	}
+}
+
+// TestSidecarReadyzFollowsTheMeshConnection pins that the sidecar's /readyz
+// says what the metrics listener's does: 503 until the node holds an
+// authenticated, connected router, then 200, on the socket and on TCP. A
+// harness that reads readiness over the socket, as agentmesh-bench does so
+// that a member binds no loopback port, learns the same thing a kubelet
+// probing the metrics port would.
+func TestSidecarReadyzFollowsTheMeshConnection(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = host.Close() }()
+	node := &AgentMeshNode{
+		Host:           host,
+		Store:          store,
+		BiscuitTimeout: 500 * time.Millisecond,
+		services:       NewServiceRegistry(&fakeDHT{}, 0),
+	}
+	node.Directory = &routerDirectory{host: host, routers: node.attachedRouters, addrs: host.Addrs}
+	socketPath := filepath.Join(t.TempDir(), "agentmesh.sock")
+	srv, err := StartSidecarServer(node, "127.0.0.1:0", socketPath, "test-token", "", "", "")
+	if err != nil {
+		t.Fatalf("failed to start sidecar server: %v", err)
+	}
+	defer func() { _ = srv.Close() }()
+	socket := waitForSocket(t, socketPath)
+	tcp := &http.Client{Timeout: 2 * time.Second}
+
+	readyz := func(t *testing.T, client *http.Client, url string) int {
+		t.Helper()
+		resp, err := client.Get(url)
+		if err != nil {
+			t.Fatalf("GET %s: %v", url, err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		return resp.StatusCode
+	}
+	for name, url := range map[string]string{"socket": "http://localhost/readyz", "tcp": "http://" + node.BoundHTTPAddr + "/readyz"} {
+		client := socket
+		if name == "tcp" {
+			client = tcp
+		}
+		if code := readyz(t, client, url); code != http.StatusServiceUnavailable {
+			t.Errorf("%s /readyz = %d with no authenticated router, want 503", name, code)
+		}
+	}
+
+	routerHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = routerHost.Close() }()
+	if err := host.Connect(t.Context(), peer.AddrInfo{ID: routerHost.ID(), Addrs: routerHost.Addrs()}); err != nil {
+		t.Fatal(err)
+	}
+	node.mu.Lock()
+	node.authenticatedRouters = map[peer.ID]bool{routerHost.ID(): true}
+	node.mu.Unlock()
+	for name, url := range map[string]string{"socket": "http://localhost/readyz", "tcp": "http://" + node.BoundHTTPAddr + "/readyz"} {
+		client := socket
+		if name == "tcp" {
+			client = tcp
+		}
+		if code := readyz(t, client, url); code != http.StatusOK {
+			t.Errorf("%s /readyz = %d once a router is authenticated and connected, want 200", name, code)
+		}
 	}
 }
 

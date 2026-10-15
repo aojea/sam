@@ -282,7 +282,6 @@ func newJoinCmd() *cobra.Command {
 	flags.DurationVar(&opts.CallTimeout, "call-timeout", 120*time.Second, "Bound on one member's discovery and first call, from readiness")
 	flags.DurationVar(&opts.Hold, "hold", 0, "Keep the fleet resident this long after the journeys end, sampling readiness; 0 tears it down at once")
 	flags.DurationVar(&opts.SampleInterval, "sample-interval", 10*time.Second, "How often each resident member's readiness is read during --hold")
-	flags.IntVar(&opts.MetricsBasePort, "metrics-base-port", 20000, "Member i serves /readyz on 127.0.0.1:(port+i)")
 	flags.StringArrayVar(&opts.NodeArgs, "node-arg", nil, "Extra argument for every agentmesh-node, repeatable (e.g. --node-arg=--insecure-control-plane)")
 	flags.StringVar(&marker, "resident-marker", "", "File to create once the fleet is resident and the hold has begun")
 	flags.StringArrayVar(&scrape, "scrape", nil, "Metrics endpoint to record before and after the run, repeatable")

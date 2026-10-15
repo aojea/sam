@@ -259,16 +259,15 @@ summarize() {
 # a backgrounded function is a subshell, and a signal to it would not reach
 # the run inside.
 JOIN_CMD=()
-join_cmd() { # phase count base-port extra...
-  local phase="$1" count="$2" base="$3" a
-  shift 3
+join_cmd() { # phase count extra...
+  local phase="$1" count="$2" a
+  shift 2
   JOIN_CMD=("$AGENTMESH_BENCH" join
     --node-bin "$AGENTMESH_NODE"
     --control-plane "$CONTROL_PLANE"
     --bootstrap-token-path "$BOOTSTRAP_TOKEN_PATH"
     --service "$SERVICE"
     --count "$count"
-    --metrics-base-port "$base"
     --dir "$OUT/$phase"
     --label "phase=$phase" --label "count=$count" --label "burst=$COUNT" --label "host=$(hostname)"
     --out "$OUT/$phase.json")
@@ -288,7 +287,7 @@ rm -f "$OUT/resident"
 snapshot before
 event burst-start
 log "burst: ${COUNT} members at ${RAMP}/s, then holding ${HOLD}"
-join_cmd burst "$COUNT" 20000 --ramp "$RAMP" --hold "$HOLD" --resident-marker "$OUT/resident"
+join_cmd burst "$COUNT" --ramp "$RAMP" --hold "$HOLD" --resident-marker "$OUT/resident"
 "${JOIN_CMD[@]}" 2> "$OUT/burst.log" &
 JOIN_PID=$!
 while [[ ! -f "$OUT/resident" ]]; do
@@ -309,7 +308,7 @@ PY
 if (( LATE > 0 )); then
   event late-start
   log "late: ${LATE} members join the populated mesh"
-  join_cmd late "$LATE" 30000
+  join_cmd late "$LATE"
   "${JOIN_CMD[@]}" 2> "$OUT/late.log" || log "late phase did not run cleanly; see $OUT/late.log"
   event late-end
 fi
@@ -326,7 +325,7 @@ if (( ROLLOUT )); then
     # timer; a long bound here measures that wait instead of hiding it.
     event late-after-rollout-start
     log "late: ${LATE} members join behind the rollout"
-    join_cmd late-after-rollout "$LATE" 31000 --ready-timeout 600s
+    join_cmd late-after-rollout "$LATE" --ready-timeout 600s
     "${JOIN_CMD[@]}" 2> "$OUT/late-after-rollout.log" \
       || log "late-after-rollout phase did not run cleanly; see $OUT/late-after-rollout.log"
     event late-after-rollout-end

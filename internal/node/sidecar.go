@@ -47,7 +47,7 @@ func StartSidecarServer(node *AgentMeshNode, addr, socketPath, token, certFile, 
 
 	// Public endpoints
 	mux.HandleFunc("/healthz", handleHealthz)
-	mux.HandleFunc("/readyz", handleReadyz)
+	mux.HandleFunc("/readyz", handleReadyzFor(node))
 	mux.HandleFunc("/.well-known/oauth-protected-resource", func(w http.ResponseWriter, r *http.Request) {
 		handleOAuthProtectedResource(node, w, r)
 	})
@@ -315,7 +315,7 @@ func StartUnauthSidecarServer(controlPlaneURL, addr, socketPath, certFile, keyFi
 
 	// Public endpoints
 	mux.HandleFunc("/healthz", handleHealthz)
-	mux.HandleFunc("/readyz", handleReadyz)
+	mux.HandleFunc("/readyz", handleReadyzFor(nil))
 
 	// Mount Unauthenticated MCP handler
 	mcpHandler := NewUnauthenticatedMCPHandler(controlPlaneURL)
@@ -383,10 +383,20 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func handleReadyz(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte("OK")); err != nil {
-		logger.Errorf("Failed to write response: %v", err)
+// handleReadyzFor answers 200 only once the node holds an authenticated
+// connection to a router, the same answer the metrics listener gives, so a
+// probe or a harness reading either listener learns the same thing. A node
+// without an identity yet (nil) is not ready.
+func handleReadyzFor(node *AgentMeshNode) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		if node == nil || node.debugReady() != nil || !node.IsConnected() {
+			http.Error(w, "not connected to the mesh", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte("OK")); err != nil {
+			logger.Errorf("Failed to write response: %v", err)
+		}
 	}
 }
 
