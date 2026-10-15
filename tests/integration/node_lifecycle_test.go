@@ -448,6 +448,41 @@ func TestSilentEphemeralMembersAreForgotten(t *testing.T) {
 		t.Errorf("nodes_deleted_total{reason=silent} = %v (present %v), want 0: the regular members are within their retention", v, ok)
 	}
 
+	// The fleet's enrollment requests go with its rows: auto-approval wrote
+	// one per member, and a table of approved requests from members long
+	// gone is what the testnet accumulated a hundred thousand of. The two
+	// regular members' requests are within their retention and stay.
+	if v, ok := controlPlaneMetric(t, cpURL, `agentmesh_control_plane_storage_rows_deleted_total{table="enrollment_requests"}`); !ok || v != fleet {
+		t.Errorf("storage_rows_deleted_total{table=enrollment_requests} = %v (present %v), want %d", v, ok, fleet)
+	}
+	requests := fetchAdminEnrollments(t, cpURL, testAdminToken)
+	if len(requests) != 2 {
+		var left []string
+		for _, r := range requests {
+			left = append(left, r.GetPeerId())
+		}
+		t.Errorf("%d enrollment requests remain after the sweep (%v), want the two regular members' only", len(requests), left)
+	}
+	for _, r := range requests {
+		if r.GetPeerId() != silent.peerID.String() && r.GetPeerId() != refreshing.peerID.String() {
+			t.Errorf("enrollment request of %s survived the sweep; it belongs to the forgotten fleet", r.GetPeerId())
+		}
+	}
+	// Both tokens are within their hour; no lease was ever taken.
+	for _, series := range []string{
+		`agentmesh_control_plane_storage_rows_deleted_total{table="bootstrap_tokens"}`,
+		`agentmesh_control_plane_storage_rows_deleted_total{table="routers"}`,
+	} {
+		if v, ok := controlPlaneMetric(t, cpURL, series); !ok || v != 0 {
+			t.Errorf("%s = %v (present %v), want 0", series, v, ok)
+		}
+	}
+	for _, table := range []string{"nodes", "enrollment_requests", "bootstrap_tokens", "routers"} {
+		if _, ok := controlPlaneMetric(t, cpURL, fmt.Sprintf(`agentmesh_control_plane_storage_rows{table="%s"}`, table)); !ok {
+			t.Errorf("/metrics lacks agentmesh_control_plane_storage_rows{table=%q}", table)
+		}
+	}
+
 	// A forgotten member is a stranger: its credential still verifies, its
 	// row is gone, so it is told to enroll again. The regular ones refresh.
 	if status, body := members[0].refresh(t, cpURL); status != http.StatusUnauthorized {
@@ -458,6 +493,31 @@ func TestSilentEphemeralMembersAreForgotten(t *testing.T) {
 			t.Fatalf("refresh of a regular member after the sweep: %d %s", status, body)
 		}
 	}
+}
+
+// fetchAdminEnrollments lists every enrollment request the control plane
+// still holds.
+func fetchAdminEnrollments(t *testing.T, cpURL, adminToken string) []*api.EnrollmentRequest {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, cpURL+"/admin/enrollments", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatalf("GET /admin/enrollments: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /admin/enrollments: %d %s", resp.StatusCode, data)
+	}
+	var list api.EnrollmentRequestListResponse
+	if err := protojson.Unmarshal(data, &list); err != nil {
+		t.Fatalf("decode /admin/enrollments: %v", err)
+	}
+	return list.GetRequests()
 }
 
 // mintBootstrapTokenWithUses mints a node bootstrap token good for uses

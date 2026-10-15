@@ -20,6 +20,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+
+	"github.com/google/agentmesh/internal/storage"
 )
 
 const (
@@ -60,28 +62,133 @@ const (
 	deletedReasonEphemeral = "ephemeral"
 )
 
+var storageRowsDeletedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "agentmesh_control_plane_storage_rows_deleted_total",
+	Help: "Rows the storage GC removed from a table other than nodes: enrollment requests older than the retention, bootstrap tokens expired for the retention that no request refers to, router leases expired for the retention",
+}, []string{"table"})
+
+var catalogEntries = promauto.NewGauge(prometheus.GaugeOpts{
+	Name: "agentmesh_control_plane_catalog_entries",
+	Help: "Service reports the control plane holds in memory, one per node that reported since it was admitted",
+})
+
+const (
+	tableEnrollmentRequests = "enrollment_requests"
+	tableBootstrapTokens    = "bootstrap_tokens"
+	tableRouters            = "routers"
+)
+
 func init() {
 	for _, reason := range []string{deletedReasonSession, deletedReasonSilent, deletedReasonEphemeral} {
 		nodesDeletedTotal.WithLabelValues(reason)
 	}
+	for _, table := range []string{tableEnrollmentRequests, tableBootstrapTokens, tableRouters} {
+		storageRowsDeletedTotal.WithLabelValues(table)
+	}
 }
 
 // runNodeGCLoop sweeps once at start and then hourly. Replicas each sweep
-// against the shared database; the delete is idempotent, so the race is
+// against the shared database; the deletes are idempotent, so the race is
 // harmless and not worth a claim.
 func (s *Server) runNodeGCLoop() {
 	defer s.wg.Done()
-	s.gcExpiredNodes(time.Now())
+	s.gcStorage(time.Now())
 
 	ticker := time.NewTicker(nodeGCInterval(s.config.NodeRetention))
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			s.gcExpiredNodes(time.Now())
+			s.gcStorage(time.Now())
 		case <-s.ctx.Done():
 			return
 		}
+	}
+}
+
+// gcStorage is one sweep over everything that grows with mesh activity: the
+// node records, the enrollment requests, the bootstrap tokens, the router
+// leases, and the in-memory service catalog. Each step logs its own failure
+// and the next one still runs, so one table's trouble does not let another
+// grow.
+func (s *Server) gcStorage(now time.Time) {
+	s.gcExpiredNodes(now)
+	s.gcEnrollmentRecords(now)
+	s.pruneCatalog(now)
+}
+
+// gcEnrollmentRecords deletes the enrollment requests resolved, or left
+// pending, more than NodeRetention ago (EphemeralNodeRetention when an
+// ephemeral token made them), then the bootstrap tokens that expired more
+// than NodeRetention ago and that no remaining request refers to, then the
+// router leases expired for as long. Requests go before tokens because a
+// request refers to its token.
+func (s *Server) gcEnrollmentRecords(now time.Time) {
+	ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
+	defer cancel()
+
+	before := now.Add(-s.config.NodeRetention)
+	requests, err := s.store.DeleteStaleEnrollmentRequests(ctx, before, now.Add(-s.config.EphemeralNodeRetention))
+	if err != nil {
+		logger.Errorf("Failed to delete stale enrollment requests: %v", err)
+	} else if requests > 0 {
+		storageRowsDeletedTotal.WithLabelValues(tableEnrollmentRequests).Add(float64(requests))
+		logger.Infof("Deleted %d enrollment requests older than the retention", requests)
+	}
+
+	tokens, err := s.store.DeleteExpiredBootstrapTokens(ctx, before)
+	if err != nil {
+		logger.Errorf("Failed to delete expired bootstrap tokens: %v", err)
+	} else if tokens > 0 {
+		storageRowsDeletedTotal.WithLabelValues(tableBootstrapTokens).Add(float64(tokens))
+		logger.Infof("Deleted %d bootstrap tokens expired more than %s ago", tokens, s.config.NodeRetention)
+	}
+
+	leases, err := s.store.DeleteExpiredRouterLeases(ctx, before)
+	if err != nil {
+		logger.Errorf("Failed to delete expired router leases: %v", err)
+	} else if leases > 0 {
+		storageRowsDeletedTotal.WithLabelValues(tableRouters).Add(float64(leases))
+		logger.Infof("Deleted %d router leases expired more than %s ago", leases, s.config.NodeRetention)
+	}
+}
+
+// pruneCatalog forgets the service report of every peer that is no longer
+// an admitted node: its enrollment lapsed, was collected or was banned on
+// another replica. The console already hides such reports; this keeps the
+// cache from holding one entry per member that ever joined until the next
+// restart.
+func (s *Server) pruneCatalog(now time.Time) {
+	ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
+	defer cancel()
+
+	snap := s.catalogSnapshot()
+	if len(snap) == 0 {
+		catalogEntries.Set(0)
+		return
+	}
+	admitted, err := s.store.ListNodes(ctx, storage.NodeFilter{States: []storage.NodeState{storage.NodeAdmitted}, Now: now})
+	if err != nil {
+		logger.Errorf("Failed to list admitted nodes to prune the service catalog: %v", err)
+		return
+	}
+	keep := make(map[string]struct{}, len(admitted))
+	for i := range admitted {
+		keep[admitted[i].PeerID] = struct{}{}
+	}
+	dropped := 0
+	s.catalogMu.Lock()
+	for peerID := range snap {
+		if _, ok := keep[peerID]; !ok {
+			delete(s.catalog, peerID)
+			dropped++
+		}
+	}
+	remaining := len(s.catalog)
+	s.catalogMu.Unlock()
+	catalogEntries.Set(float64(remaining))
+	if dropped > 0 {
+		logger.Infof("Dropped %d service reports of nodes no longer admitted, %d remain", dropped, remaining)
 	}
 }
 

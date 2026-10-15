@@ -303,6 +303,143 @@ func TestDeleteSilentBootstrapNodes(t *testing.T) {
 	}
 }
 
+func TestDeleteStaleEnrollmentRecords(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+	day := 24 * time.Hour
+	token := func(id string, expiresAt time.Time, ephemeral bool) {
+		t.Helper()
+		if err := store.SaveBootstrapToken(ctx, &BootstrapToken{
+			ID: id, TokenHash: "hash-" + id, Role: api.RoleNode, MaxUsages: 10,
+			CreatedAt: expiresAt.Add(-day), ExpiresAt: expiresAt, Ephemeral: ephemeral,
+		}); err != nil {
+			t.Fatalf("token %s: %v", id, err)
+		}
+	}
+	request := func(id, tokenID string, createdAt time.Time, resolvedAt *time.Time) {
+		t.Helper()
+		if err := store.CreateEnrollmentRequest(ctx, &EnrollmentRequest{
+			ID: id, PeerID: "peer-" + id, PublicKey: []byte("pub"), TokenID: tokenID,
+			Status: api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED, CreatedAt: createdAt, ResolvedAt: resolvedAt,
+		}); err != nil {
+			t.Fatalf("request %s: %v", id, err)
+		}
+	}
+	at := func(ago time.Duration) *time.Time { ts := now.Add(-ago); return &ts }
+
+	// A token still in use, one that expired long ago but whose request is
+	// recent, one expired long ago with an old request, an ephemeral one
+	// whose requests are two hours old, and one that just expired.
+	token("live", now.Add(day), false)
+	token("old-with-recent-request", now.Add(-40*day), false)
+	token("old", now.Add(-40*day), false)
+	token("ephemeral", now.Add(-2*time.Hour), true)
+	token("just-expired", now.Add(-time.Hour), false)
+	request("live-1", "live", now.Add(-time.Hour), at(time.Hour))
+	request("recent-on-old-token", "old-with-recent-request", now.Add(-41*day), at(2*day))
+	request("old-resolved", "old", now.Add(-41*day), at(40*day))
+	request("old-pending", "old", now.Add(-41*day), nil)
+	request("ephemeral-1", "ephemeral", now.Add(-2*time.Hour), at(2*time.Hour))
+	request("ephemeral-2", "ephemeral", now.Add(-2*time.Hour), at(2*time.Hour))
+	request("ephemeral-fresh", "ephemeral", now.Add(-10*time.Minute), at(10*time.Minute))
+
+	requests, err := store.DeleteStaleEnrollmentRequests(ctx, now.Add(-30*day), now.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("DeleteStaleEnrollmentRequests: %v", err)
+	}
+	if requests != 4 {
+		t.Errorf("deleted %d requests, want 4 (old-resolved, old-pending, ephemeral-1, ephemeral-2)", requests)
+	}
+	left, err := store.ListEnrollmentRequests(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var leftIDs []string
+	for _, r := range left {
+		leftIDs = append(leftIDs, r.ID)
+	}
+	slices.Sort(leftIDs)
+	if want := []string{"ephemeral-fresh", "live-1", "recent-on-old-token"}; !slices.Equal(leftIDs, want) {
+		t.Errorf("remaining requests = %v, want %v", leftIDs, want)
+	}
+
+	// "old" lost both requests and goes; "old-with-recent-request" is still
+	// referred to and stays; "ephemeral" keeps its fresh request; "just-expired"
+	// is within the retention.
+	tokens, err := store.DeleteExpiredBootstrapTokens(ctx, now.Add(-30*day))
+	if err != nil {
+		t.Fatalf("DeleteExpiredBootstrapTokens: %v", err)
+	}
+	if tokens != 1 {
+		t.Errorf("deleted %d tokens, want 1 (old)", tokens)
+	}
+	remaining, err := store.ListBootstrapTokens(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokenIDs []string
+	for i := range remaining {
+		tokenIDs = append(tokenIDs, remaining[i].ID)
+	}
+	slices.Sort(tokenIDs)
+	if want := []string{"ephemeral", "just-expired", "live", "old-with-recent-request"}; !slices.Equal(tokenIDs, want) {
+		t.Errorf("remaining tokens = %v, want %v", tokenIDs, want)
+	}
+}
+
+func TestDeleteExpiredRouterLeases(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+	lease := func(id string, expiresAt time.Time) {
+		t.Helper()
+		if err := store.UpsertRouterLease(ctx, &RouterLease{
+			PeerID: id, Addresses: []string{"/ip4/127.0.0.1/tcp/1"}, LastRenewal: expiresAt.Add(-time.Minute), ExpiresAt: expiresAt,
+		}); err != nil {
+			t.Fatalf("lease %s: %v", id, err)
+		}
+	}
+	lease("live", now.Add(time.Minute))
+	lease("lapsed-today", now.Add(-time.Hour))
+	lease("gone", now.Add(-40*24*time.Hour))
+
+	deleted, err := store.DeleteExpiredRouterLeases(ctx, now.Add(-30*24*time.Hour))
+	if err != nil {
+		t.Fatalf("DeleteExpiredRouterLeases: %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("deleted %d leases, want 1 (gone)", deleted)
+	}
+	counts, err := store.CountRows(ctx)
+	if err != nil {
+		t.Fatalf("CountRows: %v", err)
+	}
+	if counts["routers"] != 2 {
+		t.Errorf("routers rows = %d, want 2 (live, lapsed-today); counts %v", counts["routers"], counts)
+	}
+	active, err := store.GetActiveRouters(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 1 || active[0].PeerID != "live" {
+		t.Errorf("active routers = %+v, want only live", active)
+	}
+}
+
+func TestCountRowsCoversEveryGrowingTable(t *testing.T) {
+	store := newTestStore(t)
+	counts, err := store.CountRows(context.Background())
+	if err != nil {
+		t.Fatalf("CountRows: %v", err)
+	}
+	for _, table := range []string{"nodes", "enrollment_requests", "bootstrap_tokens", "routers", "revoked_biscuits", "banned_identities", "users", "keyring"} {
+		if _, ok := counts[table]; !ok {
+			t.Errorf("CountRows lacks %q: %v", table, counts)
+		}
+	}
+}
+
 func TestDeleteExpiredNodesSparesBannedAndUnbounded(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

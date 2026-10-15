@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	dto "github.com/prometheus/client_model/go"
+
 	"github.com/google/agentmesh/api"
 	"github.com/google/agentmesh/internal/storage"
 )
@@ -136,6 +138,102 @@ func TestGCForgetsSilentBootstrapMembers(t *testing.T) {
 	}
 	if got := counterValue(t, nodesDeletedTotal, deletedReasonEphemeral) - ephemeralBefore; got != 1 {
 		t.Errorf("nodes_deleted_total{reason=ephemeral} advanced by %v, want 1", got)
+	}
+}
+
+// One sweep also bounds the records enrollment leaves behind: the requests,
+// the tokens that made them, the router leases, and the in-memory service
+// catalog. Every table the testnet audit found growing is covered here.
+func TestGCStorageBoundsEnrollmentRecordsAndCatalog(t *testing.T) {
+	store := newMetricsTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+	day := 24 * time.Hour
+
+	if err := store.SaveBootstrapToken(ctx, &storage.BootstrapToken{
+		ID: "old", TokenHash: "hash-old", Role: api.RoleNode, MaxUsages: 10, CreatedAt: now.Add(-41 * day), ExpiresAt: now.Add(-40 * day),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveBootstrapToken(ctx, &storage.BootstrapToken{
+		ID: "live", TokenHash: "hash-live", Role: api.RoleNode, MaxUsages: 10, CreatedAt: now, ExpiresAt: now.Add(day),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resolved := now.Add(-40 * day)
+	if err := store.CreateEnrollmentRequest(ctx, &storage.EnrollmentRequest{
+		ID: "old-request", PeerID: "old-peer", PublicKey: []byte("pub"), TokenID: "old",
+		Status: api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED, CreatedAt: now.Add(-41 * day), ResolvedAt: &resolved,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateEnrollmentRequest(ctx, &storage.EnrollmentRequest{
+		ID: "live-request", PeerID: "live-peer", PublicKey: []byte("pub"), TokenID: "live",
+		Status: api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING, CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, lease := range []struct {
+		id        string
+		expiresAt time.Time
+	}{{"router-live", now.Add(time.Minute)}, {"router-gone", now.Add(-40 * day)}} {
+		if err := store.UpsertRouterLease(ctx, &storage.RouterLease{PeerID: lease.id, Addresses: []string{"/ip4/127.0.0.1/tcp/1"}, LastRenewal: now, ExpiresAt: lease.expiresAt}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// An admitted node that reported services, and a report left by a node
+	// whose row the sweep already collected.
+	admitted, gone := "admitted-peer", "gone-peer"
+	if err := store.EnrollNode(ctx, &storage.EnrolledNode{
+		PeerID: admitted, PublicKey: []byte("pub"), Biscuit: []byte("b"), Role: api.RoleNode, EnrollmentType: "BOOTSTRAP", EnrolledAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := NewServer(Options{
+		DriverName: "sqlite", DataSourceName: "unused", OIDCIssuer: "https://issuer",
+		NodeRetention: 30 * day, EphemeralNodeRetention: time.Hour,
+	}, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = srv.Close() }()
+	srv.catalog[admitted] = nodeCatalogEntry{ReportedAt: now}
+	srv.catalog[gone] = nodeCatalogEntry{ReportedAt: now}
+
+	before := map[string]float64{}
+	for _, table := range []string{tableEnrollmentRequests, tableBootstrapTokens, tableRouters} {
+		before[table] = counterValue(t, storageRowsDeletedTotal, table)
+	}
+
+	srv.gcStorage(now)
+
+	for table, want := range map[string]float64{tableEnrollmentRequests: 1, tableBootstrapTokens: 1, tableRouters: 1} {
+		if got := counterValue(t, storageRowsDeletedTotal, table) - before[table]; got != want {
+			t.Errorf("storage_rows_deleted_total{table=%s} advanced by %v, want %v", table, got, want)
+		}
+	}
+	counts, err := store.CountRows(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for table, want := range map[string]int64{"enrollment_requests": 1, "bootstrap_tokens": 1, "routers": 1, "nodes": 1} {
+		if counts[table] != want {
+			t.Errorf("%s has %d rows after the sweep, want %d", table, counts[table], want)
+		}
+	}
+	if _, ok := srv.catalogSnapshot()[gone]; ok {
+		t.Errorf("catalog still holds the report of a node that is no longer enrolled")
+	}
+	if _, ok := srv.catalogSnapshot()[admitted]; !ok {
+		t.Errorf("catalog dropped the report of an admitted node")
+	}
+	var m dto.Metric
+	if err := catalogEntries.Write(&m); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.GetGauge().GetValue(); got != 1 {
+		t.Errorf("catalog_entries = %v, want 1", got)
 	}
 }
 

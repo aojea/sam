@@ -1122,6 +1122,61 @@ func (s *SQLStore) DeleteSilentBootstrapNodes(ctx context.Context, before, ephem
 	return regular, ephemeral, err
 }
 
+// DeleteStaleEnrollmentRequests implements Store.
+func (s *SQLStore) DeleteStaleEnrollmentRequests(ctx context.Context, before, ephemeralBefore time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM enrollment_requests WHERE COALESCE(resolved_at, created_at) < ?`), before.UnixMilli())
+	if err != nil {
+		return 0, err
+	}
+	regular, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	res, err = s.db.ExecContext(ctx, s.rebind(`DELETE FROM enrollment_requests WHERE COALESCE(resolved_at, created_at) < ? AND token_id IN (SELECT id FROM bootstrap_tokens WHERE ephemeral = ?)`), ephemeralBefore.UnixMilli(), true)
+	if err != nil {
+		return regular, err
+	}
+	ephemeral, err := res.RowsAffected()
+	return regular + ephemeral, err
+}
+
+// DeleteExpiredBootstrapTokens implements Store. The NOT EXISTS keeps the
+// foreign key from enrollment_requests.token_id satisfied: a token goes once
+// its requests have.
+func (s *SQLStore) DeleteExpiredBootstrapTokens(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM bootstrap_tokens WHERE expires_at < ? AND NOT EXISTS (SELECT 1 FROM enrollment_requests r WHERE r.token_id = bootstrap_tokens.id)`), before.UnixMilli())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// DeleteExpiredRouterLeases implements Store.
+func (s *SQLStore) DeleteExpiredRouterLeases(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM routers WHERE expires_at < ?`), before.UnixMilli())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// countedTables are the tables whose row counts the control plane reports;
+// every one of them grows with mesh activity and has a reaper or a bound.
+var countedTables = []string{"nodes", "enrollment_requests", "bootstrap_tokens", "routers", "revoked_biscuits", "banned_identities", "users", "keyring"}
+
+// CountRows implements Store.
+func (s *SQLStore) CountRows(ctx context.Context) (map[string]int64, error) {
+	counts := make(map[string]int64, len(countedTables))
+	for _, table := range countedTables {
+		var n int64
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&n); err != nil {
+			return nil, fmt.Errorf("count %s: %w", table, err)
+		}
+		counts[table] = n
+	}
+	return counts, nil
+}
+
 // ListBannedPeerIDs implements Store.
 func (s *SQLStore) ListBannedPeerIDs(ctx context.Context) ([]string, error) {
 	query := s.rebind(`SELECT peer_id FROM nodes WHERE banned = ?`)

@@ -158,9 +158,21 @@ with `403`). The console uses these routes.
   identity on every restart, so without this the node table would only grow.
   `agentmesh_control_plane_nodes_deleted_total{reason}` counts the deletions:
   `session`, `silent`, `ephemeral`.
+- **The records around an enrollment are garbage-collected with it.** The
+  same sweep deletes enrollment requests resolved, or left pending, for
+  `--node-retention` (for `--ephemeral-node-retention` when an ephemeral
+  token made them), bootstrap tokens that expired `--node-retention` ago and
+  that no remaining request refers to, and router leases that expired
+  `--node-retention` ago. It also drops the service report held in memory
+  for every node that is no longer admitted.
+  `agentmesh_control_plane_storage_rows_deleted_total{table}` counts these
+  deletions; `agentmesh_control_plane_storage_rows{table}` is the size of
+  each table, and a table that keeps growing past its retention is a sweep
+  that is failing, which the log says.
 
 ## Metrics
 
 `/metrics` exposes `agentmesh_control_plane_*` counters and gauges: enrolled nodes
 by role and state, active routers, mesh-connected peers as reported by
-router leases, per-route request counts and latencies, and the Go runtime.
+router leases, rows per store table, service reports held in memory,
+per-route request counts and latencies, and the Go runtime.

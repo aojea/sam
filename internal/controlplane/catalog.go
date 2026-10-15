@@ -93,6 +93,7 @@ func (s *Server) dropCatalogEntry(peerID string) {
 	}
 	s.catalogMu.Lock()
 	delete(s.catalog, pID.String())
+	catalogEntries.Set(float64(len(s.catalog)))
 	s.catalogMu.Unlock()
 }
 
@@ -144,6 +145,7 @@ func (s *Server) HandleNodeCatalog(w http.ResponseWriter, r *http.Request) {
 		Services:   req.Services,
 		ReportedAt: time.Now(),
 	}
+	catalogEntries.Set(float64(len(s.catalog)))
 	s.catalogMu.Unlock()
 
 	w.WriteHeader(http.StatusNoContent)

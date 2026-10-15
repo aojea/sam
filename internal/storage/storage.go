@@ -385,6 +385,28 @@ type Store interface {
 	// regular and how many ephemeral rows went.
 	DeleteSilentBootstrapNodes(ctx context.Context, before, ephemeralBefore time.Time) (regular, ephemeral int64, err error)
 
+	// DeleteStaleEnrollmentRequests removes enrollment requests created, or
+	// resolved, before `before`, and before `ephemeralBefore` when the token
+	// that made them is ephemeral. A resolved request is a record of a
+	// decision; a pending one that old was abandoned by its enrollee long
+	// ago. It returns how many went.
+	DeleteStaleEnrollmentRequests(ctx context.Context, before, ephemeralBefore time.Time) (int64, error)
+
+	// DeleteExpiredBootstrapTokens removes tokens that expired before
+	// `before` and that no enrollment request refers to any more; a token
+	// is the proof a member gave once, and once its requests are gone
+	// nothing points at it. It returns how many went.
+	DeleteExpiredBootstrapTokens(ctx context.Context, before time.Time) (int64, error)
+
+	// DeleteExpiredRouterLeases removes router leases that expired before
+	// `before`. A router that comes back leases again under its peer ID; a
+	// lease long expired is a router that is gone. It returns how many went.
+	DeleteExpiredRouterLeases(ctx context.Context, before time.Time) (int64, error)
+
+	// CountRows counts the rows of every table whose size the control plane
+	// reports, keyed by table name.
+	CountRows(ctx context.Context) (map[string]int64, error)
+
 	// ListBootstrapTokens retrieves all bootstrap tokens.
 	ListBootstrapTokens(ctx context.Context) ([]BootstrapToken, error)
 
