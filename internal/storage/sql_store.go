@@ -927,6 +927,9 @@ func (s *SQLStore) EnrollNode(ctx context.Context, node *EnrolledNode) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal labels: %w", err)
 	}
+	if node.EnrolledAt.IsZero() {
+		node.EnrolledAt = time.Now()
+	}
 
 	var query string
 	if s.isPostgres() {

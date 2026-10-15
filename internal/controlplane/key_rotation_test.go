@@ -87,7 +87,11 @@ func TestRotateKeysIfDueFollowsTheStoredDeadline(t *testing.T) {
 	if got := keys(); got != 2 {
 		t.Fatalf("a check past the deadline did not rotate: %d keys, want 2", got)
 	}
-	if next, _ = store.NextKeyRotation(ctx); !next.Equal(late.Add(interval).Truncate(time.Millisecond)) {
+	next, err = store.NextKeyRotation(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !next.Equal(late.Add(interval).Truncate(time.Millisecond)) {
 		t.Fatalf("deadline after the late rotation = %s, want %s", next, late.Add(interval))
 	}
 	srv.rotateKeysIfDue(late.Add(time.Minute))

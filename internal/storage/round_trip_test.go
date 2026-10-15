@@ -435,6 +435,34 @@ func TestCountEnrollmentRequestsByStatus(t *testing.T) {
 	}
 }
 
+// A node written without a last-seen instant is seen now, not at the zero
+// time: the silent-member sweep would otherwise collect it on the control
+// plane's first sweep, which raced with every test that enrolled a node
+// this way (TestUserStatusAndTenancy failed so in CI).
+func TestEnrollNodeWithoutEnrolledAtIsSeenNow(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	before := time.Now().Add(-time.Second)
+	node := &EnrolledNode{PeerID: "fresh", PublicKey: []byte("pub"), Biscuit: []byte("b"), Role: api.RoleNode}
+	if err := store.EnrollNode(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetNode(ctx, "fresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.EnrolledAt.Before(before) {
+		t.Fatalf("EnrolledAt = %s, want about now", got.EnrolledAt)
+	}
+	regular, ephemeral, err := store.DeleteSilentBootstrapNodes(ctx, time.Now().Add(-30*24*time.Hour), time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if regular != 0 || ephemeral != 0 {
+		t.Fatalf("the sweep deleted regular=%d ephemeral=%d rows; a node enrolled now is not silent", regular, ephemeral)
+	}
+}
+
 func TestDeleteExpiredRouterLeases(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

@@ -256,18 +256,34 @@ func TestScheduleKeyRotationIfUnset(t *testing.T) {
 	if scheduled {
 		t.Fatal("a second schedule replaced the deadline; want it kept")
 	}
-	if next, _ = store.NextKeyRotation(ctx); !next.Equal(t0.Add(interval)) {
+	next, err = store.NextKeyRotation(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !next.Equal(t0.Add(interval)) {
 		t.Fatalf("deadline = %s, want %s", next, t0.Add(interval))
 	}
 
 	// Not due before the deadline, due at it; a claim moves it one interval on.
-	if claimed, _ := store.ClaimKeyRotation(ctx, t0.Add(interval-time.Second), interval); claimed {
+	claimed, err := store.ClaimKeyRotation(ctx, t0.Add(interval-time.Second), interval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed {
 		t.Fatal("claim before the deadline succeeded")
 	}
-	if claimed, _ := store.ClaimKeyRotation(ctx, t0.Add(interval), interval); !claimed {
+	claimed, err = store.ClaimKeyRotation(ctx, t0.Add(interval), interval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !claimed {
 		t.Fatal("claim at the deadline failed")
 	}
-	if next, _ = store.NextKeyRotation(ctx); !next.Equal(t0.Add(2 * interval)) {
+	next, err = store.NextKeyRotation(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !next.Equal(t0.Add(2 * interval)) {
 		t.Fatalf("deadline after the claim = %s, want %s", next, t0.Add(2*interval))
 	}
 }

@@ -269,7 +269,9 @@ type Store interface {
 	// ListUsers retrieves all registered users.
 	ListUsers(ctx context.Context) ([]User, error)
 
-	// EnrollNode registers or updates a node enrollment.
+	// EnrollNode registers or updates a node enrollment. EnrolledAt is when
+	// the member was last seen; unset, it is recorded as now, never as the
+	// zero time, which the silent-member sweep would read as decades ago.
 	EnrollNode(ctx context.Context, node *EnrolledNode) error
 
 	// GetNode retrieves node enrollment details.
