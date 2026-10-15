@@ -3984,8 +3984,14 @@ type BootstrapTokenCreateRequest struct {
 	// because a node that can always recover holds a credential that never
 	// expires.
 	AutonomousRecovery bool `protobuf:"varint,6,opt,name=autonomous_recovery,json=autonomousRecovery,proto3" json:"autonomous_recovery,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Copied onto every node the token enrolls: such a node is forgotten
+	// soon after it falls silent (the control plane's
+	// --ephemeral-node-retention, an hour by default) instead of being kept
+	// for --node-retention. For members that come and go: a fleet in a scale
+	// test, a probe, a CI job.
+	Ephemeral     bool `protobuf:"varint,7,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *BootstrapTokenCreateRequest) Reset() {
@@ -4056,6 +4062,13 @@ func (x *BootstrapTokenCreateRequest) GetDescription() string {
 func (x *BootstrapTokenCreateRequest) GetAutonomousRecovery() bool {
 	if x != nil {
 		return x.AutonomousRecovery
+	}
+	return false
+}
+
+func (x *BootstrapTokenCreateRequest) GetEphemeral() bool {
+	if x != nil {
+		return x.Ephemeral
 	}
 	return false
 }
@@ -4154,6 +4167,7 @@ type BootstrapToken struct {
 	// or exhausted usages. Unset means never revoked.
 	RevokeTime         *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=revoke_time,json=revokeTime,proto3" json:"revoke_time,omitempty"`
 	AutonomousRecovery bool                   `protobuf:"varint,10,opt,name=autonomous_recovery,json=autonomousRecovery,proto3" json:"autonomous_recovery,omitempty"`
+	Ephemeral          bool                   `protobuf:"varint,11,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -4254,6 +4268,13 @@ func (x *BootstrapToken) GetRevokeTime() *timestamppb.Timestamp {
 func (x *BootstrapToken) GetAutonomousRecovery() bool {
 	if x != nil {
 		return x.AutonomousRecovery
+	}
+	return false
+}
+
+func (x *BootstrapToken) GetEphemeral() bool {
+	if x != nil {
+		return x.Ephemeral
 	}
 	return false
 }
@@ -4546,8 +4567,11 @@ type EnrolledNode struct {
 	ExpireTime         *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=expire_time,json=expireTime,proto3" json:"expire_time,omitempty"`
 	Banned             bool                   `protobuf:"varint,9,opt,name=banned,proto3" json:"banned,omitempty"`
 	AutonomousRecovery bool                   `protobuf:"varint,10,opt,name=autonomous_recovery,json=autonomousRecovery,proto3" json:"autonomous_recovery,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// The node was enrolled by an ephemeral token and is forgotten soon after
+	// it falls silent.
+	Ephemeral     bool `protobuf:"varint,11,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EnrolledNode) Reset() {
@@ -4646,6 +4670,13 @@ func (x *EnrolledNode) GetBanned() bool {
 func (x *EnrolledNode) GetAutonomousRecovery() bool {
 	if x != nil {
 		return x.AutonomousRecovery
+	}
+	return false
+}
+
+func (x *EnrolledNode) GetEphemeral() bool {
+	if x != nil {
+		return x.Ephemeral
 	}
 	return false
 }
@@ -6328,7 +6359,7 @@ const file_api_agentmesh_proto_rawDesc = "" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\"E\n" +
 	"\x13TokenRevokeResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\xdb\x01\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\xf9\x01\n" +
 	"\x1bBootstrapTokenCreateRequest\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x19\n" +
 	"\bowner_id\x18\x02 \x01(\tR\aownerId\x12\x1b\n" +
@@ -6336,14 +6367,15 @@ const file_api_agentmesh_proto_rawDesc = "" +
 	"\n" +
 	"max_usages\x18\x04 \x01(\x05R\tmaxUsages\x12 \n" +
 	"\vdescription\x18\x05 \x01(\tR\vdescription\x12/\n" +
-	"\x13autonomous_recovery\x18\x06 \x01(\bR\x12autonomousRecovery\"\xb0\x01\n" +
+	"\x13autonomous_recovery\x18\x06 \x01(\bR\x12autonomousRecovery\x12\x1c\n" +
+	"\tephemeral\x18\a \x01(\bR\tephemeral\"\xb0\x01\n" +
 	"\x1cBootstrapTokenCreateResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05token\x18\x02 \x01(\tR\x05token\x12\x12\n" +
 	"\x04role\x18\x03 \x01(\tR\x04role\x12\x19\n" +
 	"\bowner_id\x18\x04 \x01(\tR\aownerId\x12;\n" +
 	"\vexpire_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"expireTime\"\x9b\x03\n" +
+	"expireTime\"\xb9\x03\n" +
 	"\x0eBootstrapToken\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04role\x18\x02 \x01(\tR\x04role\x12\x19\n" +
@@ -6359,7 +6391,8 @@ const file_api_agentmesh_proto_rawDesc = "" +
 	"\vrevoke_time\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"revokeTime\x12/\n" +
 	"\x13autonomous_recovery\x18\n" +
-	" \x01(\bR\x12autonomousRecovery\"R\n" +
+	" \x01(\bR\x12autonomousRecovery\x12\x1c\n" +
+	"\tephemeral\x18\v \x01(\bR\tephemeral\"R\n" +
 	"\x1aBootstrapTokenListResponse\x124\n" +
 	"\x06tokens\x18\x01 \x03(\v2\x1c.agentmesh.v1.BootstrapTokenR\x06tokens\"\xac\x03\n" +
 	"\x11EnrollmentRequest\x12\x0e\n" +
@@ -6384,7 +6417,7 @@ const file_api_agentmesh_proto_rawDesc = "" +
 	"\x05email\x18\x03 \x01(\tR\x05email\x12\x12\n" +
 	"\x04role\x18\x04 \x01(\tR\x04role\x12;\n" +
 	"\vcreate_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"createTime\"\xde\x03\n" +
+	"createTime\"\xfc\x03\n" +
 	"\fEnrolledNode\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x12\n" +
 	"\x04role\x18\x02 \x01(\tR\x04role\x12'\n" +
@@ -6399,7 +6432,8 @@ const file_api_agentmesh_proto_rawDesc = "" +
 	"expireTime\x12\x16\n" +
 	"\x06banned\x18\t \x01(\bR\x06banned\x12/\n" +
 	"\x13autonomous_recovery\x18\n" +
-	" \x01(\bR\x12autonomousRecovery\x1a9\n" +
+	" \x01(\bR\x12autonomousRecovery\x12\x1c\n" +
+	"\tephemeral\x18\v \x01(\bR\tephemeral\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8d\x02\n" +

@@ -231,6 +231,10 @@ afterwards:
 # on the token, at mint time
 -d '{"role":"mesh:role:node","max_usages":10,"autonomous_recovery":true}'
 
+# members that come and go (a fleet, a probe, a CI job): forgotten an hour
+# after they stop refreshing instead of kept for --node-retention
+-d '{"role":"mesh:role:node","max_usages":1000,"ephemeral":true}'
+
 # on an enrolled node
 curl -fsS -X POST https://mesh.example.com/admin/nodes/<peer-id>/autonomous-recovery \
   -H "Authorization: Bearer $AGENTMESH_ADMIN_TOKEN" -H "Content-Type: application/json" \

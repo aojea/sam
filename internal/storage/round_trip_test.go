@@ -124,6 +124,7 @@ func TestEnrolledNodeRoundTripsEveryField(t *testing.T) {
 		ExpiresAt:      time.Now().Add(time.Hour),
 		// Non-default so the round trip proves the column is read back.
 		AutonomousRecovery: true,
+		Ephemeral:          true,
 	}
 	// Banned is never set by enrollment; a node cannot un-ban itself by
 	// re-enrolling. TestReEnrollmentKeepsAnExistingBan covers that.
@@ -252,6 +253,56 @@ func TestReEnrollmentKeepsAnExistingBan(t *testing.T) {
 // Expiry-based deletion must never take a ban with it, nor touch a node that
 // never had a session bound: the first is how a node is kept out, the second
 // has no expiry to have lapsed.
+// A bootstrap row has no session, so what decides its deletion is how long
+// ago it last refreshed, with a shorter retention for a member an ephemeral
+// token enrolled. Rows with a session, and banned rows, are left to
+// DeleteExpiredNodes and to nobody.
+func TestDeleteSilentBootstrapNodes(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+	enroll := func(id, kind string, lastRefresh, expiresAt time.Time, ephemeral bool) {
+		t.Helper()
+		if err := store.EnrollNode(ctx, &EnrolledNode{
+			PeerID: id, PublicKey: []byte("pub"), Biscuit: []byte("b"), Role: api.RoleNode,
+			EnrollmentType: kind, EnrolledAt: lastRefresh, ExpiresAt: expiresAt, Ephemeral: ephemeral,
+		}); err != nil {
+			t.Fatalf("enroll %s: %v", id, err)
+		}
+	}
+	var never time.Time
+	enroll("regular-fresh", "BOOTSTRAP", now.Add(-time.Hour), never, false)
+	enroll("regular-stale", "BOOTSTRAP", now.Add(-40*24*time.Hour), never, false)
+	enroll("ephemeral-fresh", "BOOTSTRAP", now.Add(-10*time.Minute), never, true)
+	enroll("ephemeral-stale", "BOOTSTRAP", now.Add(-2*time.Hour), never, true)
+	enroll("oidc-stale", "OIDC", now.Add(-40*24*time.Hour), now.Add(50*24*time.Hour), false)
+	enroll("banned-stale", "BOOTSTRAP", now.Add(-40*24*time.Hour), never, false)
+	if err := store.SetNodeBanned(ctx, "banned-stale", true); err != nil {
+		t.Fatal(err)
+	}
+
+	regular, ephemeral, err := store.DeleteSilentBootstrapNodes(ctx, now.Add(-30*24*time.Hour), now.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("DeleteSilentBootstrapNodes: %v", err)
+	}
+	if regular != 1 || ephemeral != 1 {
+		t.Errorf("deleted regular=%d ephemeral=%d, want 1 and 1", regular, ephemeral)
+	}
+	nodes, err := store.ListNodes(ctx, NodeFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var left []string
+	for _, n := range nodes {
+		left = append(left, n.PeerID)
+	}
+	slices.Sort(left)
+	want := []string{"banned-stale", "ephemeral-fresh", "oidc-stale", "regular-fresh"}
+	if !slices.Equal(left, want) {
+		t.Errorf("remaining = %v, want %v", left, want)
+	}
+}
+
 func TestDeleteExpiredNodesSparesBannedAndUnbounded(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -445,6 +496,7 @@ func TestBootstrapTokenRoundTripsEveryField(t *testing.T) {
 		ExpiresAt:   time.Now().Add(time.Hour),
 		// Non-default so the round trip proves the column is read back.
 		AutonomousRecovery: true,
+		Ephemeral:          true,
 	}
 	// RevokedAt is never set at creation - only RevokeBootstrapToken sets it,
 	// covered separately below.

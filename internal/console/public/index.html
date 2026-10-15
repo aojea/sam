@@ -355,6 +355,12 @@
                                 <label for="token-desc" class="field-label">Description</label>
                                 <input type="text" id="token-desc" class="field-input" placeholder="Token purpose">
                             </div>
+                            <div class="input-group field">
+                                <label for="token-ephemeral" class="field-label">
+                                    <input type="checkbox" id="token-ephemeral"> Ephemeral members
+                                </label>
+                                <small class="field-hint">Nodes enrolled with this token are forgotten an hour after they stop refreshing, instead of being kept for the node retention. For members that come and go: a fleet in a scale test, a probe, a CI job.</small>
+                            </div>
                             <div class="input-group field" id="token-recovery-group">
                                 <label for="token-recovery" class="field-label">
                                     <input type="checkbox" id="token-recovery"> Autonomous recovery
@@ -387,6 +393,7 @@
                                     <th>Owner</th>
                                     <th>Usages</th>
                                     <th>Expires</th>
+                                    <th>Members</th>
                                     <th>Recovery</th>
                                     <th>Status</th>
                                     <th>Actions</th>

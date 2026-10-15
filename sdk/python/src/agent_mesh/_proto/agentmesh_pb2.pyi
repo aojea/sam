@@ -116,10 +116,11 @@ class BootstrapEnrollResponse(_message.Message):
     def __init__(self, status: _Optional[_Union[EnrollmentStatus, str]] = ..., biscuit_token: _Optional[bytes] = ..., poll_interval_seconds: _Optional[int] = ..., error_message: _Optional[str] = ..., control_plane_public_key: _Optional[bytes] = ..., router_addresses: _Optional[_Iterable[str]] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class BootstrapToken(_message.Message):
-    __slots__ = ["autonomous_recovery", "create_time", "description", "expire_time", "id", "max_usages", "owner_id", "revoke_time", "role", "usages_count"]
+    __slots__ = ["autonomous_recovery", "create_time", "description", "ephemeral", "expire_time", "id", "max_usages", "owner_id", "revoke_time", "role", "usages_count"]
     AUTONOMOUS_RECOVERY_FIELD_NUMBER: _ClassVar[int]
     CREATE_TIME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    EPHEMERAL_FIELD_NUMBER: _ClassVar[int]
     EXPIRE_TIME_FIELD_NUMBER: _ClassVar[int]
     ID_FIELD_NUMBER: _ClassVar[int]
     MAX_USAGES_FIELD_NUMBER: _ClassVar[int]
@@ -130,6 +131,7 @@ class BootstrapToken(_message.Message):
     autonomous_recovery: bool
     create_time: _timestamp_pb2.Timestamp
     description: str
+    ephemeral: bool
     expire_time: _timestamp_pb2.Timestamp
     id: str
     max_usages: int
@@ -137,23 +139,25 @@ class BootstrapToken(_message.Message):
     revoke_time: _timestamp_pb2.Timestamp
     role: str
     usages_count: int
-    def __init__(self, id: _Optional[str] = ..., role: _Optional[str] = ..., owner_id: _Optional[str] = ..., max_usages: _Optional[int] = ..., usages_count: _Optional[int] = ..., description: _Optional[str] = ..., create_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., revoke_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., autonomous_recovery: bool = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., role: _Optional[str] = ..., owner_id: _Optional[str] = ..., max_usages: _Optional[int] = ..., usages_count: _Optional[int] = ..., description: _Optional[str] = ..., create_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., revoke_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., autonomous_recovery: bool = ..., ephemeral: bool = ...) -> None: ...
 
 class BootstrapTokenCreateRequest(_message.Message):
-    __slots__ = ["autonomous_recovery", "description", "max_usages", "owner_id", "role", "ttl_hours"]
+    __slots__ = ["autonomous_recovery", "description", "ephemeral", "max_usages", "owner_id", "role", "ttl_hours"]
     AUTONOMOUS_RECOVERY_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    EPHEMERAL_FIELD_NUMBER: _ClassVar[int]
     MAX_USAGES_FIELD_NUMBER: _ClassVar[int]
     OWNER_ID_FIELD_NUMBER: _ClassVar[int]
     ROLE_FIELD_NUMBER: _ClassVar[int]
     TTL_HOURS_FIELD_NUMBER: _ClassVar[int]
     autonomous_recovery: bool
     description: str
+    ephemeral: bool
     max_usages: int
     owner_id: str
     role: str
     ttl_hours: int
-    def __init__(self, role: _Optional[str] = ..., owner_id: _Optional[str] = ..., ttl_hours: _Optional[int] = ..., max_usages: _Optional[int] = ..., description: _Optional[str] = ..., autonomous_recovery: bool = ...) -> None: ...
+    def __init__(self, role: _Optional[str] = ..., owner_id: _Optional[str] = ..., ttl_hours: _Optional[int] = ..., max_usages: _Optional[int] = ..., description: _Optional[str] = ..., autonomous_recovery: bool = ..., ephemeral: bool = ...) -> None: ...
 
 class BootstrapTokenCreateResponse(_message.Message):
     __slots__ = ["expire_time", "id", "owner_id", "role", "token"]
@@ -372,7 +376,7 @@ class EnrollResponse(_message.Message):
     def __init__(self, biscuit_token: _Optional[bytes] = ..., error_message: _Optional[str] = ..., control_plane_public_key: _Optional[bytes] = ..., router_addresses: _Optional[_Iterable[str]] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class EnrolledNode(_message.Message):
-    __slots__ = ["autonomous_recovery", "banned", "claims_json", "enroll_time", "enrollment_type", "expire_time", "labels", "owner_id", "peer_id", "role"]
+    __slots__ = ["autonomous_recovery", "banned", "claims_json", "enroll_time", "enrollment_type", "ephemeral", "expire_time", "labels", "owner_id", "peer_id", "role"]
     class LabelsEntry(_message.Message):
         __slots__ = ["key", "value"]
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -385,6 +389,7 @@ class EnrolledNode(_message.Message):
     CLAIMS_JSON_FIELD_NUMBER: _ClassVar[int]
     ENROLLMENT_TYPE_FIELD_NUMBER: _ClassVar[int]
     ENROLL_TIME_FIELD_NUMBER: _ClassVar[int]
+    EPHEMERAL_FIELD_NUMBER: _ClassVar[int]
     EXPIRE_TIME_FIELD_NUMBER: _ClassVar[int]
     LABELS_FIELD_NUMBER: _ClassVar[int]
     OWNER_ID_FIELD_NUMBER: _ClassVar[int]
@@ -395,12 +400,13 @@ class EnrolledNode(_message.Message):
     claims_json: str
     enroll_time: _timestamp_pb2.Timestamp
     enrollment_type: str
+    ephemeral: bool
     expire_time: _timestamp_pb2.Timestamp
     labels: _containers.ScalarMap[str, str]
     owner_id: str
     peer_id: str
     role: str
-    def __init__(self, peer_id: _Optional[str] = ..., role: _Optional[str] = ..., enrollment_type: _Optional[str] = ..., claims_json: _Optional[str] = ..., owner_id: _Optional[str] = ..., labels: _Optional[_Mapping[str, str]] = ..., enroll_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., banned: bool = ..., autonomous_recovery: bool = ...) -> None: ...
+    def __init__(self, peer_id: _Optional[str] = ..., role: _Optional[str] = ..., enrollment_type: _Optional[str] = ..., claims_json: _Optional[str] = ..., owner_id: _Optional[str] = ..., labels: _Optional[_Mapping[str, str]] = ..., enroll_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., expire_time: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., banned: bool = ..., autonomous_recovery: bool = ..., ephemeral: bool = ...) -> None: ...
 
 class EnrollmentRequest(_message.Message):
     __slots__ = ["create_time", "id", "labels", "peer_id", "resolve_time", "resolved_by", "status", "token_id"]

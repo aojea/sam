@@ -3212,8 +3212,10 @@ func TestBootstrapTokenOwnerPropagatesToNode(t *testing.T) {
 	const ownerSub = "owner-sub-id"
 	userJWT := mintToken(map[string]interface{}{"sub": ownerSub, "email": "owner@example.com"})
 
+	// Ephemeral is a restriction on the members, not a privilege, so a user
+	// may set it on the tokens they mint.
 	req, _ := http.NewRequest(http.MethodPost, baseURL+"/user/bootstrap-tokens",
-		bytes.NewBufferString(`{"role":"`+api.RoleNode+`","max_usages":1}`))
+		bytes.NewBufferString(`{"role":"`+api.RoleNode+`","max_usages":1,"ephemeral":true}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+userJWT)
 	resp, err := client.Do(req)
@@ -3269,6 +3271,16 @@ func TestBootstrapTokenOwnerPropagatesToNode(t *testing.T) {
 	}
 	if enrolled.OwnerID != ownerSub {
 		t.Errorf("enrolled node owner = %q, want %q", enrolled.OwnerID, ownerSub)
+	}
+	if !enrolled.Ephemeral {
+		t.Error("enrolled node is not ephemeral; the token's flag must be copied onto the node")
+	}
+	tokens, err := store.ListBootstrapTokens(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tokens) != 1 || !tokens[0].Ephemeral {
+		t.Errorf("stored tokens = %+v, want one ephemeral token", tokens)
 	}
 }
 

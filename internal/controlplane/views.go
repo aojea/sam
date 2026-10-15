@@ -46,6 +46,7 @@ func bootstrapTokenView(t *storage.BootstrapToken) *api.BootstrapToken {
 		CreateTime:         timestampOrNil(t.CreatedAt),
 		ExpireTime:         timestampOrNil(t.ExpiresAt),
 		AutonomousRecovery: t.AutonomousRecovery,
+		Ephemeral:          t.Ephemeral,
 	}
 	if t.RevokedAt != nil {
 		v.RevokeTime = timestamppb.New(*t.RevokedAt)
@@ -116,6 +117,7 @@ func enrolledNodeView(n *storage.EnrolledNode, withClaims bool) *api.EnrolledNod
 		ExpireTime:         timestampOrNil(n.ExpiresAt),
 		Banned:             n.Banned,
 		AutonomousRecovery: n.AutonomousRecovery,
+		Ephemeral:          n.Ephemeral,
 	}
 	if withClaims {
 		v.ClaimsJson = n.ClaimsJSON

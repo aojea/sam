@@ -779,6 +779,7 @@ function renderBootstrapTokensTable(tokens) {
             ? `<span class="badge badge-rejected">Revoked</span>`
             : `<span class="badge badge-approved">Active</span>`;
         const recovery = token.autonomous_recovery ? 'Autonomous' : 'Manual';
+        const members = token.ephemeral ? 'Ephemeral' : 'Regular';
         const action = revoked
             ? '-'
             : `<button class="btn btn-sm btn-danger" onclick="revokeBootstrapToken('${escapeHTML(token.id)}')">Revoke</button>`;
@@ -789,6 +790,7 @@ function renderBootstrapTokensTable(tokens) {
                 <td><code>${escapeHTML(token.owner_id || '-')}</code></td>
                 <td>${escapeHTML(String(token.usages_count || 0))} / ${escapeHTML(String(token.max_usages || 0))}</td>
                 <td>${escapeHTML(expiresAt)}</td>
+                <td>${members}</td>
                 <td>${recovery}</td>
                 <td>${status}</td>
                 <td>${action}</td>
@@ -810,6 +812,7 @@ window.generateBootstrapToken = async function() {
     const ttl_hours = parseInt(document.getElementById('token-ttl').value, 10) || 24;
     const description = document.getElementById('token-desc').value;
     const autonomous_recovery = document.getElementById('token-recovery').checked;
+    const ephemeral = document.getElementById('token-ephemeral').checked;
 
     const payload = {
         role,
@@ -823,6 +826,9 @@ window.generateBootstrapToken = async function() {
     }
     if (autonomous_recovery) {
         payload.autonomous_recovery = true;
+    }
+    if (ephemeral) {
+        payload.ephemeral = true;
     }
 
     try {

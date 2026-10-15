@@ -36,31 +36,32 @@ import (
 )
 
 var (
-	bindAddress           string
-	pprofAddr             string
-	dbDriver              string
-	dbDSN                 string
-	dbDSNPath             string
-	oidcIssuer            string
-	workloadIssuer        string
-	oidcClientID          string
-	allowedAudiencesFlag  string
-	keyRotationInterval   time.Duration
-	keyGracePeriod        time.Duration
-	leaseDuration         time.Duration
-	dhtReplication        int
-	dhtReprovideInterval  time.Duration
-	biscuitTTL            time.Duration
-	oidcSessionTTL        time.Duration
-	workloadSessionTTL    time.Duration
-	nodeRetention         time.Duration
-	meshReconnectInterval time.Duration
-	adminTokenPath        string
-	stsIssuerURL          string
-	insecureSkipTLSVerify bool
-	logLevel              string
-	logFormat             string
-	autoApproveEnrollment bool
+	bindAddress            string
+	pprofAddr              string
+	dbDriver               string
+	dbDSN                  string
+	dbDSNPath              string
+	oidcIssuer             string
+	workloadIssuer         string
+	oidcClientID           string
+	allowedAudiencesFlag   string
+	keyRotationInterval    time.Duration
+	keyGracePeriod         time.Duration
+	leaseDuration          time.Duration
+	dhtReplication         int
+	dhtReprovideInterval   time.Duration
+	biscuitTTL             time.Duration
+	oidcSessionTTL         time.Duration
+	workloadSessionTTL     time.Duration
+	nodeRetention          time.Duration
+	ephemeralNodeRetention time.Duration
+	meshReconnectInterval  time.Duration
+	adminTokenPath         string
+	stsIssuerURL           string
+	insecureSkipTLSVerify  bool
+	logLevel               string
+	logFormat              string
+	autoApproveEnrollment  bool
 )
 
 var logger = golog.Logger("agentmesh-control-plane-cli")
@@ -102,6 +103,9 @@ func main() {
 			if nodeRetention <= 0 {
 				logger.Fatalf("--node-retention must be positive, got %s: node records are never kept forever", nodeRetention)
 			}
+			if ephemeralNodeRetention <= 0 {
+				logger.Fatalf("--ephemeral-node-retention must be positive, got %s", ephemeralNodeRetention)
+			}
 
 			var auds []string
 			for _, aud := range strings.Split(allowedAudiencesFlag, ",") {
@@ -126,27 +130,28 @@ func main() {
 			}()
 
 			opts := controlplane.Options{
-				ListenAddr:            bindAddress,
-				DriverName:            dbDriver,
-				DataSourceName:        dbDSN,
-				OIDCIssuer:            oidcIssuer,
-				WorkloadIssuer:        workloadIssuer,
-				OIDCClientID:          oidcClientID,
-				AllowedAudiences:      auds,
-				LeaseDuration:         leaseDuration,
-				KeyRotationInterval:   keyRotationInterval,
-				KeyGracePeriod:        keyGracePeriod,
-				DHTReplication:        dhtReplication,
-				DHTReprovideInterval:  dhtReprovideInterval,
-				InsecureSkipTLSVerify: insecureSkipTLSVerify,
-				BiscuitTimeout:        10 * time.Second,
-				BiscuitTTL:            biscuitTTL,
-				OIDCSessionTTL:        oidcSessionTTL,
-				WorkloadSessionTTL:    workloadSessionTTL,
-				NodeRetention:         nodeRetention,
-				AdminToken:            adminToken,
-				AutoApproveEnrollment: autoApproveEnrollment,
-				STSIssuerURL:          stsIssuerURL,
+				ListenAddr:             bindAddress,
+				DriverName:             dbDriver,
+				DataSourceName:         dbDSN,
+				OIDCIssuer:             oidcIssuer,
+				WorkloadIssuer:         workloadIssuer,
+				OIDCClientID:           oidcClientID,
+				AllowedAudiences:       auds,
+				LeaseDuration:          leaseDuration,
+				KeyRotationInterval:    keyRotationInterval,
+				KeyGracePeriod:         keyGracePeriod,
+				DHTReplication:         dhtReplication,
+				DHTReprovideInterval:   dhtReprovideInterval,
+				InsecureSkipTLSVerify:  insecureSkipTLSVerify,
+				BiscuitTimeout:         10 * time.Second,
+				BiscuitTTL:             biscuitTTL,
+				OIDCSessionTTL:         oidcSessionTTL,
+				WorkloadSessionTTL:     workloadSessionTTL,
+				NodeRetention:          nodeRetention,
+				EphemeralNodeRetention: ephemeralNodeRetention,
+				AdminToken:             adminToken,
+				AutoApproveEnrollment:  autoApproveEnrollment,
+				STSIssuerURL:           stsIssuerURL,
 			}
 
 			srv, err := controlplane.NewServer(opts, store)
@@ -206,7 +211,8 @@ func main() {
 	rootCmd.Flags().DurationVar(&biscuitTTL, "biscuit-ttl", api.BiscuitTokenTTL, "Lifespan minted into every issued Biscuit's expiration fact. Capped to the OIDC token's own expiry when shorter.")
 	rootCmd.Flags().DurationVar(&oidcSessionTTL, "oidc-session-ttl", api.OIDCSessionTTL, "How long an OIDC enrollment stays refreshable before the identity must re-authenticate with the OIDC provider. Shorter values keep the provider authoritative for offboarding at the cost of more frequent interactive re-enrollment.")
 	rootCmd.Flags().DurationVar(&workloadSessionTTL, "workload-session-ttl", controlplane.DefaultWorkloadSessionTTL, "How long a workload-issuer enrollment stays refreshable without presenting a fresh platform JWT on /refresh.")
-	rootCmd.Flags().DurationVar(&nodeRetention, "node-retention", controlplane.DefaultNodeRetention, "How long an enrolled node's record is kept after its session expired before it is deleted. Banned nodes are always kept. Must be positive: records are never kept forever.")
+	rootCmd.Flags().DurationVar(&nodeRetention, "node-retention", controlplane.DefaultNodeRetention, "How long an enrolled node's record is kept after its session expired, or after its last refresh for a node enrolled with a bootstrap token, before it is deleted. Banned nodes are always kept. Must be positive: records are never kept forever.")
+	rootCmd.Flags().DurationVar(&ephemeralNodeRetention, "ephemeral-node-retention", controlplane.DefaultEphemeralNodeRetention, "--node-retention for a node enrolled with an ephemeral bootstrap token: how long after its last refresh its record is kept. For members that come and go: a fleet in a scale test, a probe, a CI job.")
 	rootCmd.Flags().DurationVar(&meshReconnectInterval, "mesh-reconnect-interval", controlplane.DefaultMeshReconnectInterval, "How often the event publisher re-reads the router leases and dials any router it is not connected to.")
 	rootCmd.Flags().StringVar(&adminTokenPath, "admin-token-path", "", "Path to file containing the token for authenticating policy REST API requests (or env AGENTMESH_ADMIN_TOKEN)")
 	rootCmd.Flags().StringVar(&stsIssuerURL, "sts-issuer-url", "", "Canonical external URL of this control plane for OIDC/STS issuer and discovery metadata (or env AGENTMESH_STS_ISSUER_URL)")

@@ -138,8 +138,12 @@ type ControlPlaneTunables struct {
 	// refreshable without presenting a fresh platform JWT on /refresh.
 	WorkloadSessionTTL time.Duration
 	// NodeRetention is how long a node record is kept after its session
-	// expired before the control plane deletes it.
+	// expired, or after its last refresh for a bootstrap enrollment, before
+	// the control plane deletes it.
 	NodeRetention time.Duration
+	// EphemeralNodeRetention is NodeRetention for a node an ephemeral
+	// bootstrap token enrolled.
+	EphemeralNodeRetention time.Duration
 	// ManualEnrollment queues bootstrap enrollments for admin approval
 	// instead of auto-approving them.
 	ManualEnrollment bool
@@ -279,25 +283,26 @@ func (s *Server) Start(ctx context.Context) (retErr error) {
 	// exists. Public traffic reaches the same handlers via the router's
 	// HTTP fallback mux.
 	cp, err := controlplane.NewServer(controlplane.Options{
-		ListenAddr:            "127.0.0.1:0",
-		DriverName:            s.opts.DBDriver,
-		DataSourceName:        s.opts.DBDSN,
-		OIDCIssuer:            s.opts.OIDCIssuer,
-		WorkloadIssuer:        s.opts.WorkloadIssuer,
-		OIDCClientID:          s.opts.OIDCClientID,
-		AllowedAudiences:      s.opts.AllowedAudiences,
-		LeaseDuration:         s.opts.ControlPlane.LeaseDuration,
-		KeyRotationInterval:   s.opts.ControlPlane.KeyRotationInterval,
-		DHTReplication:        s.opts.ControlPlane.DHTReplication,
-		DHTReprovideInterval:  s.opts.ControlPlane.DHTReprovideInterval,
-		KeyGracePeriod:        s.opts.ControlPlane.KeyGracePeriod,
-		BiscuitTTL:            s.opts.ControlPlane.BiscuitTTL,
-		WorkloadSessionTTL:    s.opts.ControlPlane.WorkloadSessionTTL,
-		NodeRetention:         s.opts.ControlPlane.NodeRetention,
-		BiscuitTimeout:        10 * time.Second,
-		AdminToken:            s.adminToken,
-		AutoApproveEnrollment: !s.opts.ControlPlane.ManualEnrollment,
-		STSIssuerURL:          s.opts.ExternalURL,
+		ListenAddr:             "127.0.0.1:0",
+		DriverName:             s.opts.DBDriver,
+		DataSourceName:         s.opts.DBDSN,
+		OIDCIssuer:             s.opts.OIDCIssuer,
+		WorkloadIssuer:         s.opts.WorkloadIssuer,
+		OIDCClientID:           s.opts.OIDCClientID,
+		AllowedAudiences:       s.opts.AllowedAudiences,
+		LeaseDuration:          s.opts.ControlPlane.LeaseDuration,
+		KeyRotationInterval:    s.opts.ControlPlane.KeyRotationInterval,
+		DHTReplication:         s.opts.ControlPlane.DHTReplication,
+		DHTReprovideInterval:   s.opts.ControlPlane.DHTReprovideInterval,
+		KeyGracePeriod:         s.opts.ControlPlane.KeyGracePeriod,
+		BiscuitTTL:             s.opts.ControlPlane.BiscuitTTL,
+		WorkloadSessionTTL:     s.opts.ControlPlane.WorkloadSessionTTL,
+		NodeRetention:          s.opts.ControlPlane.NodeRetention,
+		EphemeralNodeRetention: s.opts.ControlPlane.EphemeralNodeRetention,
+		BiscuitTimeout:         10 * time.Second,
+		AdminToken:             s.adminToken,
+		AutoApproveEnrollment:  !s.opts.ControlPlane.ManualEnrollment,
+		STSIssuerURL:           s.opts.ExternalURL,
 	}, store)
 	if err != nil {
 		return fmt.Errorf("failed to create control plane: %w", err)

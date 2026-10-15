@@ -2184,6 +2184,7 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 			EnrolledAt:         time.Now(),
 			ExpiresAt:          time.Time{},
 			AutonomousRecovery: tokenRecord.AutonomousRecovery,
+			Ephemeral:          tokenRecord.Ephemeral,
 		}
 		if err := s.store.EnrollNode(ctx, nodeRecord); err != nil {
 			logger.Errorf("Failed to enroll active bootstrap node: %v", err)
@@ -2570,6 +2571,7 @@ func (s *Server) HandleAdminBootstrapTokens(w http.ResponseWriter, r *http.Reque
 		CreatedAt:          time.Now(),
 		ExpiresAt:          time.Now().Add(time.Duration(req.GetTtlHours()) * time.Hour),
 		AutonomousRecovery: req.GetAutonomousRecovery(),
+		Ephemeral:          req.GetEphemeral(),
 	}
 
 	if err := s.store.SaveBootstrapToken(r.Context(), tokenRecord); err != nil {
@@ -2793,6 +2795,7 @@ func (s *Server) HandleAdminEnrollmentAction(w http.ResponseWriter, r *http.Requ
 			EnrolledAt:         time.Now(),
 			ExpiresAt:          time.Time{},
 			AutonomousRecovery: tokenRecord.AutonomousRecovery,
+			Ephemeral:          tokenRecord.Ephemeral,
 		}
 		if err := s.store.EnrollNode(ctx, nodeRecord); err != nil {
 			logger.Errorf("Failed to enroll active bootstrap node: %v", err)
@@ -3281,6 +3284,7 @@ func (s *Server) HandleUserBootstrapTokens(w http.ResponseWriter, r *http.Reques
 		CreatedAt:          time.Now(),
 		ExpiresAt:          time.Now().Add(time.Duration(req.GetTtlHours()) * time.Hour),
 		AutonomousRecovery: req.GetAutonomousRecovery(),
+		Ephemeral:          req.GetEphemeral(),
 	}
 
 	if err := s.store.SaveBootstrapToken(r.Context(), tokenRecord); err != nil {

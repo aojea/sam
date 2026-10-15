@@ -667,6 +667,12 @@ message BootstrapTokenCreateRequest {
   // because a node that can always recover holds a credential that never
   // expires.
   bool autonomous_recovery = 6;
+  // Copied onto every node the token enrolls: such a node is forgotten
+  // soon after it falls silent (the control plane's
+  // --ephemeral-node-retention, an hour by default) instead of being kept
+  // for --node-retention. For members that come and go: a fleet in a scale
+  // test, a probe, a CI job.
+  bool ephemeral = 7;
 }
 
 // BootstrapTokenCreateResponse is returned (201) when a token is minted.
@@ -694,6 +700,7 @@ message BootstrapToken {
   // or exhausted usages. Unset means never revoked.
   google.protobuf.Timestamp revoke_time = 9;
   bool autonomous_recovery = 10;
+  bool ephemeral = 11;
 }
 
 message BootstrapTokenListResponse {
@@ -746,6 +753,9 @@ message EnrolledNode {
   google.protobuf.Timestamp expire_time = 8;
   bool banned = 9;
   bool autonomous_recovery = 10;
+  // The node was enrolled by an ephemeral token and is forgotten soon after
+  // it falls silent.
+  bool ephemeral = 11;
 }
 
 // RouterLease is a router's current registration with the control plane.

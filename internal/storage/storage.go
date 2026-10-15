@@ -110,11 +110,17 @@ type EnrolledNode struct {
 	// forgotten or stolen machine from rejoining on its own. Only ever set
 	// server-side, from the token that enrolled the node or by an admin.
 	AutonomousRecovery bool
+	// Ephemeral marks a member enrolled by an ephemeral bootstrap token: a
+	// fleet member, a probe, a CI job. Such a member is forgotten soon after
+	// it falls silent (DeleteSilentBootstrapNodes), where a regular one is
+	// kept for the full retention. Copied from the token at enrollment.
+	Ephemeral bool
 }
 
 // NodeState is what CheckAdmission says of a node at some instant. "admitted"
 // is not liveness: a node that enrolled once and went away stays admitted
-// until its session expires.
+// until its session expires, or, for a bootstrap enrollment that has none,
+// until it has been silent for the retention and is deleted.
 type NodeState string
 
 const (
@@ -184,6 +190,9 @@ type BootstrapToken struct {
 	// AutonomousRecovery is copied onto every node this token enrolls; see
 	// EnrolledNode.AutonomousRecovery.
 	AutonomousRecovery bool
+	// Ephemeral is copied onto every node this token enrolls; see
+	// EnrolledNode.Ephemeral.
+	Ephemeral bool
 }
 
 // IsRevoked reports whether the token has been explicitly revoked, as
@@ -364,8 +373,17 @@ type Store interface {
 	// lapsed session already refuses every refresh, so the row only records
 	// that the node once existed; a ban, by contrast, is the row, and must
 	// outlive the session it was placed on. Nodes with no session bound
-	// (zero ExpiresAt) are never removed.
+	// (zero ExpiresAt) are not removed here; see DeleteSilentBootstrapNodes.
 	DeleteExpiredNodes(ctx context.Context, before time.Time) (int64, error)
+
+	// DeleteSilentBootstrapNodes removes enrolled nodes that have no session
+	// bound (a bootstrap enrollment) and are not banned, whose last refresh
+	// (EnrolledAt, which a refresh rewrites) is before `before`, or before
+	// `ephemeralBefore` for a node an ephemeral token enrolled. A member
+	// that refreshes keeps its row; one that fell silent for the retention
+	// is forgotten, and enrolls again if it comes back. It returns how many
+	// regular and how many ephemeral rows went.
+	DeleteSilentBootstrapNodes(ctx context.Context, before, ephemeralBefore time.Time) (regular, ephemeral int64, err error)
 
 	// ListBootstrapTokens retrieves all bootstrap tokens.
 	ListBootstrapTokens(ctx context.Context) ([]BootstrapToken, error)

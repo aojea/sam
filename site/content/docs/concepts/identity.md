@@ -188,7 +188,13 @@ Refresh without a fresh platform JWT is bounded by the **session**, which is
 a record on the control plane, not a field in the token. A human OIDC session
 lasts `--oidc-session-ttl` (90 days by default), and a workload OIDC session
 (`--workload-issuer`) lasts `--workload-session-ttl` (48 hours by default). A
-bootstrap enrollment has no session expiry. A ban also acts on the session
+bootstrap enrollment has no session expiry: the token was the proof the member
+gave once, and refreshing on its key is what keeps it enrolled. Its record is
+kept for `--node-retention` (30 days) after its last refresh and then deleted,
+as a self-hosted CI runner is removed after a fortnight without connecting; a
+member that comes back later enrolls again. A token minted with `ephemeral`
+enrolls members kept for `--ephemeral-node-retention` (an hour) instead, for
+fleets, probes and CI jobs that come and go. A ban also acts on the session
 record.
 
 A node that enrolled interactively with `--offline-access` also keeps an OIDC

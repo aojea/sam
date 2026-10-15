@@ -39,7 +39,8 @@ agentmesh-control-plane admin unban --peer <id>     lift a ban
 | `--lease-duration` | `15m` | How long a router lease lasts without renewal. |
 | `--dht-replication` | `3` | How many routers each record a member announces is placed on: the router it announced to keeps it, and places a copy on this many routers closest to the key. A record on three routers survives two of them down at once; each replica more is a copy more of every record. Members are not concerned: they ask the routers they hold. Published on `/info`; every router of the mesh runs on it. |
 | `--dht-reprovide-interval` | `5m` | How often a member re-announces each service it publishes. A provider that stopped without unpublishing stays listed for three intervals, which is how long routers keep a record after its last announcement; the mesh pays its providers divided by the interval in announcements a minute. Published on `/info`. |
-| `--node-retention` | `720h` (30 days) | How long the record of an enrolled node is kept after its session expires. Banned nodes are kept forever. Must be positive; records are never kept forever. |
+| `--node-retention` | `720h` (30 days) | How long the record of an enrolled node is kept after its session expires, or, for a node enrolled with a bootstrap token, after its last refresh. Banned nodes are kept forever. Must be positive; records are never kept forever. |
+| `--ephemeral-node-retention` | `1h` | `--node-retention` for a node enrolled with an ephemeral bootstrap token (`BootstrapTokenCreateRequest.ephemeral`): how long after its last refresh its record is kept. For members that come and go: a fleet in a scale test, a probe, a CI job. |
 | `--mesh-reconnect-interval` | `30s` | How often the event publisher re-reads the router leases and dials any router it is not connected to. On each router it runs the mesh handshake with a credential it mints for its own peer under the signing key, with the role `mesh:role:control-plane`, so the router holds its connection as a member's. |
 | `--log-level` | `info` | `debug`, `info`, `warn`, `error`. |
 | `--log-format` | `text` | `text` or `json`. |
@@ -112,7 +113,7 @@ names; unknown fields are rejected.
 | `GET /admin/policy` | The mesh policy as `PolicyConfig`, the same document `POST /policies` takes. |
 | `POST /policies`, `PUT /policies` | Replace the mesh policy. The body is `PolicyConfig`, so a misspelt grant fails instead of being dropped. |
 | `GET /admin/bootstrap-tokens` | `BootstrapTokenListResponse`: every token, including revoked and expired ones. |
-| `POST /admin/bootstrap-tokens` | Mint a token. Body `BootstrapTokenCreateRequest`: `role` (required), `ttl_hours` (default 24), `max_usages` (default 1), `description`, `autonomous_recovery` (default false). Returns `201` with `BootstrapTokenCreateResponse`: `id`, `token` (shown once), `role`, `expire_time`. |
+| `POST /admin/bootstrap-tokens` | Mint a token. Body `BootstrapTokenCreateRequest`: `role` (required), `ttl_hours` (default 24), `max_usages` (default 1), `description`, `autonomous_recovery` (default false), `ephemeral` (default false: nodes enrolled with the token are kept for `--ephemeral-node-retention` after their last refresh instead of `--node-retention`). Returns `201` with `BootstrapTokenCreateResponse`: `id`, `token` (shown once), `role`, `expire_time`. |
 | `DELETE /admin/bootstrap-tokens/{id}` | Revoke a token. Can be repeated. The token stays in the list with `revoke_time` set. |
 | `GET /admin/enrollments` | `EnrollmentRequestListResponse`: bootstrap enrollment requests, pending and decided. |
 | `POST /admin/enrollments/{id}/approve` | Approve. Spends a token usage. Checks the token again, and checks the labels against the role's `allowed_labels`. |
@@ -149,9 +150,14 @@ with `403`). The console uses these routes.
   routers that start or restart. A signed mesh event reaches the ones that
   are already running.
 - **Node records are garbage-collected.** A node whose session has expired is
-  deleted after `--node-retention`. A node without a persistent data
-  directory enrolls a new identity on every restart, so without this the
-  node table would only grow.
+  deleted after `--node-retention`. A node enrolled with a bootstrap token
+  has no session; its record is deleted once it has not refreshed its
+  credential for `--node-retention`, or for `--ephemeral-node-retention`
+  when the token was ephemeral, and a node that comes back after that
+  enrolls again. A node without a persistent data directory enrolls a new
+  identity on every restart, so without this the node table would only grow.
+  `agentmesh_control_plane_nodes_deleted_total{reason}` counts the deletions:
+  `session`, `silent`, `ephemeral`.
 
 ## Metrics
 

@@ -568,6 +568,19 @@ var migrations = []migration{
 			`CREATE INDEX IF NOT EXISTS idx_nodes_enrolled_at ON nodes (enrolled_at, peer_id)`,
 		},
 	},
+	{
+		// An ephemeral token enrolls members that are forgotten soon after
+		// they fall silent; the flag is copied onto each node it enrolls.
+		version: 20,
+		postgres: []string{
+			`ALTER TABLE bootstrap_tokens ADD COLUMN IF NOT EXISTS ephemeral BOOLEAN DEFAULT FALSE NOT NULL`,
+			`ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ephemeral BOOLEAN DEFAULT FALSE NOT NULL`,
+		},
+		sqlite: []string{
+			`ALTER TABLE bootstrap_tokens ADD COLUMN ephemeral BOOLEAN DEFAULT FALSE NOT NULL`,
+			`ALTER TABLE nodes ADD COLUMN ephemeral BOOLEAN DEFAULT FALSE NOT NULL`,
+		},
+	},
 }
 
 var meshPrefixMigration = []string{
@@ -893,16 +906,16 @@ func (s *SQLStore) EnrollNode(ctx context.Context, node *EnrolledNode) error {
 	var query string
 	if s.isPostgres() {
 		query = s.rebind(`
-			INSERT INTO nodes (peer_id, public_key, biscuit_token, role, enrollment_type, claims_json, owner_id, labels_json, enrolled_at, expires_at, autonomous_recovery, banned) 
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE)
+			INSERT INTO nodes (peer_id, public_key, biscuit_token, role, enrollment_type, claims_json, owner_id, labels_json, enrolled_at, expires_at, autonomous_recovery, ephemeral, banned) 
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE)
 			ON CONFLICT (peer_id) 
-			DO UPDATE SET public_key = EXCLUDED.public_key, biscuit_token = EXCLUDED.biscuit_token, role = EXCLUDED.role, enrollment_type = EXCLUDED.enrollment_type, claims_json = EXCLUDED.claims_json, owner_id = EXCLUDED.owner_id, labels_json = EXCLUDED.labels_json, enrolled_at = EXCLUDED.enrolled_at, expires_at = EXCLUDED.expires_at, autonomous_recovery = EXCLUDED.autonomous_recovery`)
+			DO UPDATE SET public_key = EXCLUDED.public_key, biscuit_token = EXCLUDED.biscuit_token, role = EXCLUDED.role, enrollment_type = EXCLUDED.enrollment_type, claims_json = EXCLUDED.claims_json, owner_id = EXCLUDED.owner_id, labels_json = EXCLUDED.labels_json, enrolled_at = EXCLUDED.enrolled_at, expires_at = EXCLUDED.expires_at, autonomous_recovery = EXCLUDED.autonomous_recovery, ephemeral = EXCLUDED.ephemeral`)
 	} else {
 		query = s.rebind(`
-			INSERT INTO nodes (peer_id, public_key, biscuit_token, role, enrollment_type, claims_json, owner_id, labels_json, enrolled_at, expires_at, autonomous_recovery, banned) 
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+			INSERT INTO nodes (peer_id, public_key, biscuit_token, role, enrollment_type, claims_json, owner_id, labels_json, enrolled_at, expires_at, autonomous_recovery, ephemeral, banned) 
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 			ON CONFLICT (peer_id) 
-			DO UPDATE SET public_key = excluded.public_key, biscuit_token = excluded.biscuit_token, role = excluded.role, enrollment_type = excluded.enrollment_type, claims_json = excluded.claims_json, owner_id = excluded.owner_id, labels_json = excluded.labels_json, enrolled_at = excluded.enrolled_at, expires_at = excluded.expires_at, autonomous_recovery = excluded.autonomous_recovery`)
+			DO UPDATE SET public_key = excluded.public_key, biscuit_token = excluded.biscuit_token, role = excluded.role, enrollment_type = excluded.enrollment_type, claims_json = excluded.claims_json, owner_id = excluded.owner_id, labels_json = excluded.labels_json, enrolled_at = excluded.enrolled_at, expires_at = excluded.expires_at, autonomous_recovery = excluded.autonomous_recovery, ephemeral = excluded.ephemeral`)
 	}
 
 	ownerIDNull := sql.NullString{String: node.OwnerID, Valid: node.OwnerID != ""}
@@ -918,13 +931,14 @@ func (s *SQLStore) EnrollNode(ctx context.Context, node *EnrolledNode) error {
 		node.EnrolledAt.UnixMilli(),
 		node.ExpiresAt.UnixMilli(),
 		node.AutonomousRecovery,
+		node.Ephemeral,
 	)
 	return err
 }
 
 // GetNode implements Store.
 func (s *SQLStore) GetNode(ctx context.Context, peerID string) (*EnrolledNode, error) {
-	query := s.rebind(`SELECT peer_id, public_key, biscuit_token, role, enrollment_type, claims_json, owner_id, labels_json, enrolled_at, expires_at, banned, autonomous_recovery FROM nodes WHERE peer_id = ?`)
+	query := s.rebind(`SELECT peer_id, public_key, biscuit_token, role, enrollment_type, claims_json, owner_id, labels_json, enrolled_at, expires_at, banned, autonomous_recovery, ephemeral FROM nodes WHERE peer_id = ?`)
 	var node EnrolledNode
 	var claimsJSON, ownerID, labelsJSON sql.NullString
 	var enrolledAtUnix, expiresAtUnix int64
@@ -941,6 +955,7 @@ func (s *SQLStore) GetNode(ctx context.Context, peerID string) (*EnrolledNode, e
 		&expiresAtUnix,
 		&node.Banned,
 		&node.AutonomousRecovery,
+		&node.Ephemeral,
 	)
 	if claimsJSON.Valid {
 		node.ClaimsJSON = claimsJSON.String
@@ -1084,6 +1099,27 @@ func (s *SQLStore) DeleteExpiredNodes(ctx context.Context, before time.Time) (in
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// DeleteSilentBootstrapNodes implements Store. Two statements, one per
+// retention, each leading with banned and expires_at so the
+// (banned, expires_at) index narrows them to the unbounded rows.
+func (s *SQLStore) DeleteSilentBootstrapNodes(ctx context.Context, before, ephemeralBefore time.Time) (int64, int64, error) {
+	query := s.rebind(`DELETE FROM nodes WHERE banned = ? AND expires_at <= 0 AND ephemeral = ? AND enrolled_at < ?`)
+	res, err := s.db.ExecContext(ctx, query, false, false, before.UnixMilli())
+	if err != nil {
+		return 0, 0, err
+	}
+	regular, err := res.RowsAffected()
+	if err != nil {
+		return 0, 0, err
+	}
+	res, err = s.db.ExecContext(ctx, query, false, true, ephemeralBefore.UnixMilli())
+	if err != nil {
+		return regular, 0, err
+	}
+	ephemeral, err := res.RowsAffected()
+	return regular, ephemeral, err
 }
 
 // ListBannedPeerIDs implements Store.
@@ -1444,13 +1480,13 @@ func (s *SQLStore) SaveBootstrapToken(ctx context.Context, token *BootstrapToken
 	var query string
 	if s.isPostgres() {
 		query = s.rebind(`
-			INSERT INTO bootstrap_tokens (id, token_hash, role, owner_id, max_usages, usages_count, description, created_at, expires_at, autonomous_recovery)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO bootstrap_tokens (id, token_hash, role, owner_id, max_usages, usages_count, description, created_at, expires_at, autonomous_recovery, ephemeral)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (id) DO NOTHING`)
 	} else {
 		query = s.rebind(`
-			INSERT INTO bootstrap_tokens (id, token_hash, role, owner_id, max_usages, usages_count, description, created_at, expires_at, autonomous_recovery)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO bootstrap_tokens (id, token_hash, role, owner_id, max_usages, usages_count, description, created_at, expires_at, autonomous_recovery, ephemeral)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (id) DO NOTHING`)
 	}
 	ownerIDNull := sql.NullString{String: token.OwnerID, Valid: token.OwnerID != ""}
@@ -1465,13 +1501,14 @@ func (s *SQLStore) SaveBootstrapToken(ctx context.Context, token *BootstrapToken
 		token.CreatedAt.UnixMilli(),
 		token.ExpiresAt.UnixMilli(),
 		token.AutonomousRecovery,
+		token.Ephemeral,
 	)
 	return err
 }
 
 // GetBootstrapToken retrieves a bootstrap token by its ID (sha256 hash).
 func (s *SQLStore) GetBootstrapToken(ctx context.Context, id string) (*BootstrapToken, error) {
-	query := s.rebind(`SELECT id, token_hash, role, owner_id, max_usages, usages_count, description, created_at, expires_at, revoked_at, autonomous_recovery FROM bootstrap_tokens WHERE id = ?`)
+	query := s.rebind(`SELECT id, token_hash, role, owner_id, max_usages, usages_count, description, created_at, expires_at, revoked_at, autonomous_recovery, ephemeral FROM bootstrap_tokens WHERE id = ?`)
 	var t BootstrapToken
 	var created, expires int64
 	var ownerID sql.NullString
@@ -1488,6 +1525,7 @@ func (s *SQLStore) GetBootstrapToken(ctx context.Context, id string) (*Bootstrap
 		&expires,
 		&revokedAt,
 		&t.AutonomousRecovery,
+		&t.Ephemeral,
 	)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
@@ -1707,7 +1745,7 @@ func (s *SQLStore) ListNodes(ctx context.Context, filter NodeFilter) ([]Enrolled
 	}
 	// Neither blob is read: a list is a view of the rows, and the biscuit is
 	// a 2 KB column per row that only GetNode's single-row callers need.
-	query := `SELECT peer_id, role, enrollment_type, claims_json, owner_id, labels_json, enrolled_at, expires_at, banned, autonomous_recovery FROM nodes` + where + ` ORDER BY enrolled_at DESC, peer_id DESC`
+	query := `SELECT peer_id, role, enrollment_type, claims_json, owner_id, labels_json, enrolled_at, expires_at, banned, autonomous_recovery, ephemeral FROM nodes` + where + ` ORDER BY enrolled_at DESC, peer_id DESC`
 	if filter.Limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, filter.Limit)
@@ -1734,6 +1772,7 @@ func (s *SQLStore) ListNodes(ctx context.Context, filter NodeFilter) ([]Enrolled
 			&expiresAtUnix,
 			&node.Banned,
 			&node.AutonomousRecovery,
+			&node.Ephemeral,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan enrolled node: %w", err)
@@ -1846,7 +1885,7 @@ func (s *SQLStore) CountNodes(ctx context.Context, now time.Time) ([]NodeCount, 
 
 // ListBootstrapTokens retrieves all bootstrap tokens.
 func (s *SQLStore) ListBootstrapTokens(ctx context.Context) ([]BootstrapToken, error) {
-	query := s.rebind(`SELECT id, token_hash, role, owner_id, max_usages, usages_count, description, created_at, expires_at, revoked_at, autonomous_recovery FROM bootstrap_tokens ORDER BY created_at DESC`)
+	query := s.rebind(`SELECT id, token_hash, role, owner_id, max_usages, usages_count, description, created_at, expires_at, revoked_at, autonomous_recovery, ephemeral FROM bootstrap_tokens ORDER BY created_at DESC`)
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query bootstrap tokens: %w", err)
@@ -1872,6 +1911,7 @@ func (s *SQLStore) ListBootstrapTokens(ctx context.Context) ([]BootstrapToken, e
 			&expires,
 			&revokedAt,
 			&t.AutonomousRecovery,
+			&t.Ephemeral,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan bootstrap token: %w", err)

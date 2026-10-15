@@ -16,13 +16,13 @@ package controlplane
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/agentmesh/api"
 	"github.com/google/agentmesh/internal/storage"
-	dto "github.com/prometheus/client_model/go"
 )
 
 func TestGCExpiredNodesAppliesRetention(t *testing.T) {
@@ -53,8 +53,7 @@ func TestGCExpiredNodesAppliesRetention(t *testing.T) {
 	}
 	defer func() { _ = srv.Close() }()
 
-	var before dto.Metric
-	_ = nodesDeletedTotal.Write(&before)
+	before := counterValue(t, nodesDeletedTotal, deletedReasonSession)
 
 	srv.gcExpiredNodes(now)
 
@@ -70,11 +69,73 @@ func TestGCExpiredNodesAppliesRetention(t *testing.T) {
 			t.Error("lapsed-8d survived a 7d retention")
 		}
 	}
+	if got := counterValue(t, nodesDeletedTotal, deletedReasonSession) - before; got != 1 {
+		t.Errorf("nodes_deleted_total{reason=session} advanced by %v, want 1", got)
+	}
+}
 
-	var after dto.Metric
-	_ = nodesDeletedTotal.Write(&after)
-	if got := after.GetCounter().GetValue() - before.GetCounter().GetValue(); got != 1 {
-		t.Errorf("agentmesh_control_plane_nodes_deleted_total advanced by %v, want 1", got)
+// A bootstrap enrollment has no session, so the sweep judges it by its last
+// refresh: a member that did not refresh for the retention is forgotten, a
+// member an ephemeral token enrolled after the ephemeral retention, and one
+// that refreshed recently stays whichever token enrolled it. The ladder's
+// ten thousand members per run left exactly these rows on the testnet.
+func TestGCForgetsSilentBootstrapMembers(t *testing.T) {
+	store := newMetricsTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	enroll := func(id string, lastRefresh time.Time, ephemeral bool) {
+		t.Helper()
+		if err := store.EnrollNode(ctx, &storage.EnrolledNode{
+			PeerID: id, PublicKey: []byte("pub"), Biscuit: []byte("b"), Role: api.RoleNode,
+			EnrollmentType: "BOOTSTRAP", EnrolledAt: lastRefresh, Ephemeral: ephemeral,
+		}); err != nil {
+			t.Fatalf("enroll %s: %v", id, err)
+		}
+	}
+	// Retention 7d, ephemeral retention 1h.
+	enroll("regular-fresh", now.Add(-time.Hour), false)
+	enroll("regular-6d", now.Add(-6*24*time.Hour), false)
+	enroll("regular-8d", now.Add(-8*24*time.Hour), false)
+	enroll("ephemeral-fresh", now.Add(-10*time.Minute), true)
+	enroll("ephemeral-2h", now.Add(-2*time.Hour), true)
+	enroll("banned-8d", now.Add(-8*24*time.Hour), false)
+	if err := store.SetNodeBanned(ctx, "banned-8d", true); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := NewServer(Options{
+		DriverName: "sqlite", DataSourceName: "unused", OIDCIssuer: "https://issuer",
+		NodeRetention: 7 * 24 * time.Hour, EphemeralNodeRetention: time.Hour,
+	}, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	silentBefore := counterValue(t, nodesDeletedTotal, deletedReasonSilent)
+	ephemeralBefore := counterValue(t, nodesDeletedTotal, deletedReasonEphemeral)
+
+	srv.gcExpiredNodes(now)
+
+	nodes, err := store.ListNodes(ctx, storage.NodeFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var left []string
+	for _, n := range nodes {
+		left = append(left, n.PeerID)
+	}
+	slices.Sort(left)
+	want := []string{"banned-8d", "ephemeral-fresh", "regular-6d", "regular-fresh"}
+	if !slices.Equal(left, want) {
+		t.Fatalf("after the sweep %v remain, want %v", left, want)
+	}
+	if got := counterValue(t, nodesDeletedTotal, deletedReasonSilent) - silentBefore; got != 1 {
+		t.Errorf("nodes_deleted_total{reason=silent} advanced by %v, want 1", got)
+	}
+	if got := counterValue(t, nodesDeletedTotal, deletedReasonEphemeral) - ephemeralBefore; got != 1 {
+		t.Errorf("nodes_deleted_total{reason=ephemeral} advanced by %v, want 1", got)
 	}
 }
 
