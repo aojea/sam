@@ -211,7 +211,7 @@ roles:
 		"-args", "{}",
 	)
 	if err != nil {
-		t.Fatalf("failed to query node: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+		t.Fatalf("failed to query node: %v\nstdout: %s\nstderr: %s\n--- node.log ---\n%s", err, stdout, stderr, readLog(t, nodeLogPath))
 	}
 	if !strings.Contains(stdout, "attached_routers") {
 		t.Fatalf("unexpected node response: %s", stdout)

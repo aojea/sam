@@ -1302,13 +1302,19 @@ func (n *AgentMeshNode) authenticateRouterSession(ctx context.Context, router pe
 	return nil
 }
 
+// readmitRetryDelays spaces the retries of a re-admission a router refused.
+// A credential refreshed right after a key rotation is signed by a key the
+// router may not have synced yet; it has within a few seconds, so the node
+// asks again instead of waiting a monitor interval with no router.
+var readmitRetryDelays = []time.Duration{500 * time.Millisecond, time.Second, 2 * time.Second}
+
 // readmitRouters presents the current credential to every router this node
 // holds an authenticated session with. A router admits a peer until the
 // biscuit it was shown expires, whatever the connection does, so a refreshed
 // credential must be shown on the live session or relay circuits to this
-// node are refused once the old one lapses. A router that refuses is
-// dropped from the authenticated set; the connection monitor then dials and
-// handshakes afresh.
+// node are refused once the old one lapses. A router that still refuses
+// after the retries is dropped from the authenticated set; the connection
+// monitor then dials and handshakes afresh.
 func (n *AgentMeshNode) readmitRouters(ctx context.Context) {
 	if n.Host == nil {
 		return
@@ -1318,16 +1324,36 @@ func (n *AgentMeshNode) readmitRouters(ctx context.Context) {
 		return
 	}
 	for _, router := range n.authenticatedRouterIDs() {
+		n.readmitRouter(ctx, router, biscuitBytes)
+	}
+}
+
+func (n *AgentMeshNode) readmitRouter(ctx context.Context, router peer.ID, biscuitBytes []byte) {
+	var err error
+	for attempt := 0; ; attempt++ {
 		routerCtx, cancel := context.WithTimeout(ctx, n.config.RouterConnectTimeout)
-		err := n.authenticateRouterSession(routerCtx, router, biscuitBytes)
+		err = n.authenticateRouterSession(routerCtx, router, biscuitBytes)
 		cancel()
-		if err != nil {
-			logger.Warnf("[AuthN] Router %s did not accept the refreshed credential; the connection monitor will re-handshake: %v", router, err)
-			n.mu.Lock()
-			delete(n.authenticatedRouters, router)
-			n.mu.Unlock()
+		if err == nil {
+			if attempt > 0 {
+				logger.Infow("[AuthN] Router accepted the refreshed credential on retry", "router", router, "attempt", attempt+1)
+			}
+			return
+		}
+		if attempt >= len(readmitRetryDelays) {
+			break
+		}
+		logger.Warnw("[AuthN] Router did not accept the refreshed credential; retrying", "router", router, "attempt", attempt+1, "retry_in", readmitRetryDelays[attempt], "error", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(readmitRetryDelays[attempt]):
 		}
 	}
+	logger.Warnw("[AuthN] Router did not accept the refreshed credential; the connection monitor will re-handshake", "router", router, "attempts", len(readmitRetryDelays)+1, "error", err)
+	n.mu.Lock()
+	delete(n.authenticatedRouters, router)
+	n.mu.Unlock()
 }
 
 func (n *AgentMeshNode) performRouterAuthHandshake(s network.Stream, biscuitBytes []byte, expectedRouter peer.ID) (bool, error) {
