@@ -113,7 +113,13 @@ func (s *Server) runNodeGCLoop() {
 // grow.
 func (s *Server) gcStorage(now time.Time) {
 	s.gcExpiredNodes(now)
+	if s.ctx.Err() != nil {
+		return
+	}
 	s.gcEnrollmentRecords(now)
+	if s.ctx.Err() != nil {
+		return
+	}
 	s.pruneCatalog(now)
 }
 
