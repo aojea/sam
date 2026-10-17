@@ -30,6 +30,7 @@ import (
 	mathrand "math/rand/v2"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -403,44 +404,128 @@ func meshSurface(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// discoverProviders resolves the OpenID discovery document of every issuer.
+//
+// The login issuers (--issuer) are operator-fixed and the control plane is
+// useless without them, so a failure there, after a bounded retry, is fatal:
+// a typo must stop the process where it is seen. The workload issuers
+// (--workload-issuer) come and go with the platforms that use them, often
+// in another cluster or cloud, and one being unreachable must not take down
+// enrollment, policy sync and token minting for everyone else. Those get one
+// bounded attempt here and, on failure, a background resolver that keeps
+// trying; until it succeeds a token from that issuer is refused with a line
+// that names it, and the gauge agentmesh_control_plane_workload_issuer_ready
+// says so.
 func (s *Server) discoverProviders() error {
-	s.providersMu.Lock()
-	defer s.providersMu.Unlock()
-
-	var issuers []string
+	var required, deferred []string
 	seen := make(map[string]bool)
-	addIssuer := func(iss string) {
+	for _, iss := range strings.Split(s.config.OIDCIssuer, ",") {
 		iss = strings.TrimSpace(iss)
 		if iss != "" && !seen[iss] {
 			seen[iss] = true
-			issuers = append(issuers, iss)
+			required = append(required, iss)
 		}
 	}
-	for _, iss := range strings.Split(s.config.OIDCIssuer, ",") {
-		addIssuer(iss)
+	addWorkload := func(iss string) {
+		iss = strings.TrimSpace(iss)
+		if iss != "" && !seen[iss] {
+			seen[iss] = true
+			deferred = append(deferred, iss)
+		}
 	}
 	for iss := range s.workloadIssuers {
-		addIssuer(iss)
+		addWorkload(iss)
 	}
 	for iss := range s.workloadEmailSuffixes {
-		addIssuer(iss)
+		addWorkload(iss)
 	}
+	sort.Strings(deferred)
 
-	for _, iss := range issuers {
-		tr := http.DefaultTransport.(*http.Transport).Clone()
-		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: s.config.InsecureSkipTLSVerify}
-		client := &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: tr,
-		}
-		providerCtx := oidc.ClientContext(s.ctx, client)
-		provider, err := discoverProviderWithRetry(providerCtx, iss, oidcDiscoveryMaxAttempts, oidcDiscoveryBaseDelay, oidcDiscoveryMaxDelay)
+	for _, iss := range required {
+		provider, err := s.discoverProvider(iss)
 		if err != nil {
 			return fmt.Errorf("failed to create provider for %s: %w", iss, err)
 		}
-		s.providers[iss] = provider
+		s.setProvider(iss, provider)
+	}
+	for _, iss := range deferred {
+		workloadIssuerReady.WithLabelValues(iss).Set(0)
+		provider, err := s.discoverProvider(iss)
+		if err != nil {
+			logger.Warnw("Workload issuer not resolved; tokens from it are refused until it answers", "issuer", iss, "error", err)
+			s.wg.Add(1)
+			go s.resolveWorkloadIssuer(iss)
+			continue
+		}
+		s.setProvider(iss, provider)
 	}
 	return nil
+}
+
+// discoverProvider runs one bounded discovery of iss with the server's HTTP
+// settings.
+func (s *Server) discoverProvider(iss string) (*oidc.Provider, error) {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: s.config.InsecureSkipTLSVerify}
+	client := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: tr,
+	}
+	providerCtx := oidc.ClientContext(s.ctx, client)
+	return discoverProviderWithRetry(providerCtx, iss, oidcDiscoveryMaxAttempts, oidcDiscoveryBaseDelay, oidcDiscoveryMaxDelay)
+}
+
+func (s *Server) setProvider(iss string, provider *oidc.Provider) {
+	s.providersMu.Lock()
+	defer s.providersMu.Unlock()
+	s.providers[iss] = provider
+	if s.workloadIssuers[iss] || len(s.workloadEmailSuffixes[iss]) > 0 {
+		workloadIssuerReady.WithLabelValues(iss).Set(1)
+	}
+}
+
+// Backoff for the background resolver of a workload issuer that did not
+// answer at start-up. Package variables so a test can shorten them.
+var (
+	workloadIssuerRetryBase = 5 * time.Second
+	workloadIssuerRetryMax  = 5 * time.Minute
+)
+
+// resolveWorkloadIssuer keeps trying the discovery of iss until it succeeds
+// or the server stops, with exponential backoff capped at
+// workloadIssuerRetryMax. Each failure is logged so the gap is readable from
+// the logs as well as from the gauge.
+func (s *Server) resolveWorkloadIssuer(iss string) {
+	defer s.wg.Done()
+	delay := workloadIssuerRetryBase
+	for attempt := 1; ; attempt++ {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		provider, err := s.discoverProvider(iss)
+		if err == nil {
+			s.setProvider(iss, provider)
+			logger.Infow("Workload issuer resolved; tokens from it are accepted", "issuer", iss, "attempts", attempt)
+			return
+		}
+		logger.Warnw("Workload issuer still not resolved", "issuer", iss, "attempt", attempt, "next_retry", delay.String(), "error", err)
+		if delay *= 2; delay > workloadIssuerRetryMax {
+			delay = workloadIssuerRetryMax
+		}
+	}
+}
+
+// jwtRefusalMessage turns a VerifyJWT error into the message the caller
+// receives, distinguishing a configured workload issuer whose discovery has
+// not succeeded yet from an issuer that was never configured.
+func (s *Server) jwtRefusalMessage(err error) string {
+	var unknown *identity.UnknownIssuerError
+	if errors.As(err, &unknown) && (s.workloadIssuers[unknown.Issuer] || len(s.workloadEmailSuffixes[unknown.Issuer]) > 0) {
+		return fmt.Sprintf("JWT validation failed: workload issuer %s is configured but its discovery document has not been resolved yet", unknown.Issuer)
+	}
+	return "JWT validation failed: " + err.Error()
 }
 
 // isWorkloadClaims reports whether verified JWT claims belong to a machine or
@@ -484,7 +569,8 @@ func (s *Server) sessionTTLForClaims(claims jwt.MapClaims) time.Duration {
 
 // Defaults for discoverProviderWithRetry; kept small enough that a real outage still
 // surfaces quickly (worst case ~15s) while riding out a transient hiccup during rollouts.
-const (
+// Package variables so a test can shorten them.
+var (
 	oidcDiscoveryMaxAttempts = 5
 	oidcDiscoveryBaseDelay   = 1 * time.Second
 	oidcDiscoveryMaxDelay    = 8 * time.Second
@@ -749,7 +835,7 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	claims, token, err := identity.VerifyJWT(ctx, req.Jwt, s.config.AllowedAudiences, s.getProviders())
 	if err != nil {
 		logger.Errorw("JWT verification failed", "peer_id", req.PeerId, "error", err)
-		http.Error(w, "JWT validation failed: "+err.Error(), http.StatusUnauthorized)
+		http.Error(w, s.jwtRefusalMessage(err), http.StatusUnauthorized)
 		return
 	}
 	// Bans and ownership are keyed on issuer|subject; a token without a
@@ -1135,7 +1221,7 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		cancel()
 		if err != nil {
 			logger.Warnw("Refresh JWT verification failed", "peer_id", canonical, "error", err)
-			http.Error(w, "JWT validation failed: "+err.Error(), http.StatusUnauthorized)
+			http.Error(w, s.jwtRefusalMessage(err), http.StatusUnauthorized)
 			return
 		}
 		if verifiedEmail(freshClaims) == "" {

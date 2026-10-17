@@ -23,6 +23,17 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// UnknownIssuerError is returned by VerifyJWT when the token names an issuer
+// that has no resolved provider: either one that was never configured, or one
+// whose OpenID discovery has not succeeded yet. The caller tells the two apart.
+type UnknownIssuerError struct {
+	Issuer string
+}
+
+func (e *UnknownIssuerError) Error() string {
+	return fmt.Sprintf("unknown issuer: %s", e.Issuer)
+}
+
 // VerifyJWT parses and cryptographically validates a JWT token against a list of allowed audiences
 // and resolved OIDC providers.
 func VerifyJWT(ctx context.Context, jwtStr string, allowedAudiences []string, providers map[string]*oidc.Provider) (jwt.MapClaims, *oidc.IDToken, error) {
@@ -37,7 +48,7 @@ func VerifyJWT(ctx context.Context, jwtStr string, allowedAudiences []string, pr
 
 	provider, ok := providers[iss]
 	if !ok {
-		return nil, nil, fmt.Errorf("unknown issuer: %s", iss)
+		return nil, nil, &UnknownIssuerError{Issuer: iss}
 	}
 
 	// SkipClientIDCheck because the verifier only knows how to match a single

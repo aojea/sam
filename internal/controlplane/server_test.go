@@ -46,6 +46,8 @@ import (
 	"github.com/google/agentmesh/internal/storage"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -4784,5 +4786,201 @@ func TestOptionsRefuseAnUnusableDirectory(t *testing.T) {
 				t.Fatalf("Validate accepted %+v", o)
 			}
 		})
+	}
+}
+
+// startTogglableMockOIDC is startCustomMockOIDC with a switch: while down, the
+// discovery document answers 503, the way an identity provider that has not
+// been deployed yet, or is mid-rollout, does.
+func startTogglableMockOIDC(t *testing.T) (issuer string, mint func(map[string]interface{}) string, setUp func(bool)) {
+	t.Helper()
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate rsa key: %v", err)
+	}
+	var up atomic.Bool
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	issuer = srv.URL
+
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		if !up.Load() {
+			http.Error(w, "not deployed yet", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"issuer":   issuer,
+			"jwks_uri": issuer + "/keys",
+		})
+	})
+	mux.HandleFunc("/keys", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"keys": []map[string]interface{}{{
+				"kty": "RSA", "alg": "RS256", "use": "sig", "kid": "mock-key",
+				"n": base64.RawURLEncoding.EncodeToString(privKey.N.Bytes()),
+				"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(privKey.E)).Bytes()),
+			}},
+		})
+	})
+	mint = func(custom map[string]interface{}) string {
+		claims := jwt.MapClaims{"iss": issuer, "aud": "agentmesh-audience", "exp": time.Now().Add(time.Hour).Unix()}
+		for k, v := range custom {
+			claims[k] = v
+		}
+		tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tok.Header["kid"] = "mock-key"
+		signed, err := tok.SignedString(privKey)
+		if err != nil {
+			t.Fatalf("sign token: %v", err)
+		}
+		return signed
+	}
+	return issuer, mint, up.Store
+}
+
+// gaugeValue reads a gauge the way a scraper would.
+func gaugeValue(t *testing.T, g prometheus.Gauge) float64 {
+	t.Helper()
+	var m dto.Metric
+	if err := g.Write(&m); err != nil {
+		t.Fatalf("read gauge: %v", err)
+	}
+	return m.GetGauge().GetValue()
+}
+
+// shortenDiscoveryBackoff makes start-up discovery and the background
+// resolver fast enough for a test, restoring the defaults afterwards.
+func shortenDiscoveryBackoff(t *testing.T) {
+	t.Helper()
+	attempts, base, maxDelay := oidcDiscoveryMaxAttempts, oidcDiscoveryBaseDelay, oidcDiscoveryMaxDelay
+	retryBase, retryMax := workloadIssuerRetryBase, workloadIssuerRetryMax
+	oidcDiscoveryMaxAttempts, oidcDiscoveryBaseDelay, oidcDiscoveryMaxDelay = 2, time.Millisecond, 5*time.Millisecond
+	workloadIssuerRetryBase, workloadIssuerRetryMax = 20*time.Millisecond, 100*time.Millisecond
+	t.Cleanup(func() {
+		oidcDiscoveryMaxAttempts, oidcDiscoveryBaseDelay, oidcDiscoveryMaxDelay = attempts, base, maxDelay
+		workloadIssuerRetryBase, workloadIssuerRetryMax = retryBase, retryMax
+	})
+}
+
+// TestLoginIssuerDiscoveryFailureIsFatal keeps the operator-facing issuer
+// strict: a --issuer that does not answer stops the control plane, so that a
+// typo is seen where it is made.
+func TestLoginIssuerDiscoveryFailureIsFatal(t *testing.T) {
+	shortenDiscoveryBackoff(t)
+	issuer, _, _ := startTogglableMockOIDC(t) // stays down
+
+	store, err := storage.NewSQLStore("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLStore: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	srv, err := NewServer(Options{
+		ListenAddr:       "127.0.0.1:0",
+		OIDCIssuer:       issuer,
+		AllowedAudiences: []string{"agentmesh-audience"},
+	}, store)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	err = srv.Start()
+	if err == nil {
+		_ = srv.Close()
+		t.Fatal("Start succeeded with an unreachable --issuer, want an error")
+	}
+	if !strings.Contains(err.Error(), "failed to create provider for "+issuer) {
+		t.Fatalf("Start error = %q, want it to name the issuer %s", err, issuer)
+	}
+}
+
+// TestWorkloadIssuerResolvedInBackground is the Cloud Run case: the hub is
+// deployed before the platform whose identities it will accept exists. The
+// control plane must start, refuse tokens from that issuer with a message
+// that says why, report it on the gauge, and accept them once the issuer
+// answers, without a restart.
+func TestWorkloadIssuerResolvedInBackground(t *testing.T) {
+	shortenDiscoveryBackoff(t)
+	loginIss, mintLogin := startCustomMockOIDC(t)
+	workloadIss, mintWorkload, setWorkloadUp := startTogglableMockOIDC(t)
+
+	srv, store, baseURL := setupTestServer(t, loginIss, func(o *Options) {
+		o.WorkloadIssuer = workloadIss
+	})
+	defer func() { _ = srv.Close() }()
+
+	if got := gaugeValue(t, workloadIssuerReady.WithLabelValues(workloadIss)); got != 0 {
+		t.Fatalf("workload_issuer_ready{%s} = %v at start with the issuer down, want 0", workloadIss, got)
+	}
+	if _, ok := srv.getProviders()[workloadIss]; ok {
+		t.Fatalf("provider for %s present although its discovery never answered", workloadIss)
+	}
+
+	ctx := context.Background()
+	if err := store.SavePolicyDocument(ctx,
+		[]*api.PolicyRole{{Name: api.RoleNode, AllowedServices: []string{"*"}, AllowedTargets: []string{"*"}}},
+		[]*api.PolicyBinding{{Role: api.RoleNode, Members: []string{api.SystemAuthenticated}}}, nil); err != nil {
+		t.Fatalf("SavePolicyDocument: %v", err)
+	}
+	nodePriv, nodePeerID, nodeBiscuit, _ := enrollTestNodeForSTS(t, baseURL, mintLogin)
+
+	exchange := func() (int, string) {
+		t.Helper()
+		ts := time.Now().UnixMilli()
+		sig, err := nodePriv.Sign(api.TokenExchangeChallenge(nodePeerID.String(), ts))
+		if err != nil {
+			t.Fatalf("sign challenge: %v", err)
+		}
+		body, err := proto.Marshal(&api.TokenExchangeRequest{
+			SubjectToken:       mintWorkload(map[string]interface{}{"sub": "spiffe://platform.example/workload/a"}),
+			ChallengeUnixMs:    ts,
+			ChallengeSignature: sig,
+		})
+		if err != nil {
+			t.Fatalf("Marshal TokenExchangeRequest: %v", err)
+		}
+		req, err := http.NewRequest(http.MethodPost, baseURL+"/token/exchange", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("NewRequest: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/x-protobuf")
+		req.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString(nodeBiscuit))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("POST /token/exchange: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("read /token/exchange body: %v", err)
+		}
+		return resp.StatusCode, string(respBody)
+	}
+
+	code, body := exchange()
+	if code != http.StatusUnauthorized {
+		t.Fatalf("exchange with the issuer unresolved returned %d %q, want 401", code, body)
+	}
+	if !strings.Contains(body, "workload issuer "+workloadIss+" is configured but its discovery document has not been resolved yet") {
+		t.Fatalf("exchange refusal = %q, want it to name the unresolved issuer", body)
+	}
+
+	setWorkloadUp(true)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, ok := srv.getProviders()[workloadIss]; ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("provider for %s not resolved within 5s of the issuer coming up", workloadIss)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := gaugeValue(t, workloadIssuerReady.WithLabelValues(workloadIss)); got != 1 {
+		t.Fatalf("workload_issuer_ready{%s} = %v after resolution, want 1", workloadIss, got)
+	}
+	if code, body := exchange(); code != http.StatusOK {
+		t.Fatalf("exchange after the issuer resolved returned %d %q, want 200", code, body)
 	}
 }

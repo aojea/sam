@@ -43,7 +43,7 @@ downloaded tunnel connector.
 | `--admin-token-path` | | File containing the admin token. Can also be set with `AGENTMESH_ADMIN_TOKEN`. Generated and saved to the data directory when neither is set. |
 | `--policy-file` | | Protojson `PolicyConfig` that seeds the mesh policy on first boot. Ignored once the database has a policy. Without it, first boot seeds an open development policy and logs a warning. |
 | `--issuer` | | External OIDC issuer(s), comma-separated. Optional. Without an issuer, enrollment works by token only. |
-| `--workload-issuer` | | Workload OIDC issuer(s), comma-separated (`<issuer>` or `<issuer>=<email-suffix>`). Automatically added to `--issuer` and refused at `/user/*` and `/oauth/authorize`. |
+| `--workload-issuer` | | Workload OIDC issuer(s), comma-separated (`<issuer>` or `<issuer>=<email-suffix>`). Automatically added to `--issuer` and refused at `/user/*` and `/oauth/authorize`. One that does not answer at start-up is resolved in the background and its tokens refused until then (`agentmesh_control_plane_workload_issuer_ready{issuer}`); a `--issuer` that does not answer is fatal. |
 | `--oidc-client-id` | first audience | Client ID advertised on `/info`. |
 | `--allowed-audiences` | `agentmesh-audience` | Accepted OIDC audiences. |
 | `--enroll-qr` | when stdout is a terminal | Print a device-enrollment QR code at startup. Only for `https` URLs. |

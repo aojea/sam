@@ -859,7 +859,7 @@ func (s *Server) mintDelegatedBiscuitFromJWT(
 
 	claims, token, err := identity.VerifyJWT(verifyCtx, subjectJWT, s.config.AllowedAudiences, s.getProviders())
 	if err != nil {
-		return nil, time.Time{}, "", nil, http.StatusUnauthorized, fmt.Errorf("JWT validation failed: %w", err)
+		return nil, time.Time{}, "", nil, http.StatusUnauthorized, errors.New(s.jwtRefusalMessage(err))
 	}
 	if !allowWorkload && s.isWorkloadClaims(claims) {
 		return nil, time.Time{}, "", nil, http.StatusForbidden, errWorkloadIdentity

@@ -46,6 +46,17 @@ var (
 		},
 		[]string{"route"},
 	)
+
+	// workloadIssuerReady is 1 when the OpenID discovery document of a
+	// --workload-issuer has been resolved and tokens from it are accepted,
+	// 0 while the control plane is still trying and refuses them.
+	workloadIssuerReady = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "agentmesh_control_plane_workload_issuer_ready",
+			Help: "1 when the workload issuer's OpenID discovery has been resolved and its tokens are accepted, 0 while it is unreachable",
+		},
+		[]string{"issuer"},
+	)
 )
 
 // observeRoute counts and times requests to one registered mux pattern. The
