@@ -129,7 +129,7 @@ func TestLoadOperatorSigningKeys(t *testing.T) {
 		}
 		_, err = loadOperatorSigningKeys(writeKeyFile(t, pemPKCS8(t, p384)))
 		if err == nil || !strings.Contains(err.Error(), "want P-256") {
-			t.Fatalf("err = %v, want P-256 complaint", err)
+			t.Fatalf("err = %v, want an error naming P-256 as the only accepted curve", err)
 		}
 	})
 
@@ -225,7 +225,7 @@ func TestReconcileEd25519Keyring(t *testing.T) {
 			t.Fatalf("GetCurrentKey: %v", err)
 		}
 		if !gotPub.Equal(pubOf(current)) {
-			t.Fatalf("current key = %s, want the operator key", keyFingerprint(gotPub))
+			t.Fatalf("current key = %s, want %s (the operator key)", keyFingerprint(gotPub), keyFingerprint(pubOf(current)))
 		}
 		valid := validPubs(t, store)
 		if !valid[string(pubOf(generated))] {
@@ -246,7 +246,7 @@ func TestReconcileEd25519Keyring(t *testing.T) {
 			t.Fatalf("GetCurrentKey: %v", err)
 		}
 		if !gotPub.Equal(pubOf(current)) {
-			t.Fatalf("current key = %s after rotation, want the new first key", keyFingerprint(gotPub))
+			t.Fatalf("current key = %s after rotation, want %s (the new first key)", keyFingerprint(gotPub), keyFingerprint(pubOf(current)))
 		}
 		if valid := validPubs(t, store); len(valid) != 2 || !valid[string(pubOf(previous))] {
 			t.Fatalf("valid keys = %d, want the previous key still valid", len(valid))
@@ -342,7 +342,7 @@ func TestServerOperatorSigningKeys(t *testing.T) {
 		t.Fatalf("GetCurrentKey: %v", err)
 	}
 	if !currentPub.Equal(edCurrent.Public().(ed25519.PublicKey)) {
-		t.Fatal("the signing key is not the first Ed25519 key in the file")
+		t.Fatalf("current key = %s, want %s (the first Ed25519 key in the file)", keyFingerprint(currentPub), keyFingerprint(edCurrent.Public().(ed25519.PublicKey)))
 	}
 
 	jwksResp, err := http.Get(baseURL + "/jwks")
