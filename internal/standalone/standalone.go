@@ -816,6 +816,17 @@ func prependInferredRouterAddr(path string, body []byte, inferredAddr string) ([
 			return nil, false
 		}
 		msg.RouterAddresses = prepend(msg.RouterAddresses)
+		// A member that reads /info prefers the per-router entries over the
+		// flat list (candidatesFromInfo), so the entry for this router must
+		// carry the inferred address too or the member dials only what the
+		// router could announce itself, which behind a PaaS front end is its
+		// loopback listener.
+		peerID := inferredAddrPeerID(inferredAddr)
+		for _, r := range msg.Routers {
+			if r.GetPeerId() == peerID {
+				r.Addresses = prepend(r.Addresses)
+			}
+		}
 		b, err := proto.Marshal(&msg)
 		return b, err == nil
 	case "/enroll", "/enroll/status":
@@ -837,6 +848,17 @@ func prependInferredRouterAddr(path string, body []byte, inferredAddr string) ([
 	default:
 		return nil, false
 	}
+}
+
+// inferredAddrPeerID returns the peer ID an inferred multiaddr ends in
+// (`.../p2p/<peerID>`), or "" when it has none.
+func inferredAddrPeerID(addr string) string {
+	const sep = "/p2p/"
+	i := strings.LastIndex(addr, sep)
+	if i < 0 {
+		return ""
+	}
+	return addr[i+len(sep):]
 }
 
 // inferredRequestMultiaddr derives `/dns4/<host>/tcp/<port>/ws(s)/p2p/<peerID>`

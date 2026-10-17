@@ -200,6 +200,38 @@ func TestPrependInferredRouterAddr(t *testing.T) {
 		t.Fatalf("EnrollResponse.RouterAddresses = %v, want [%s %s]", regOut.RouterAddresses, inferred, local)
 	}
 
+	// /info carries the per-router list a member prefers; the entry for this
+	// router gets the inferred address, another router's entry is untouched.
+	const otherPeer = "12D3KooWDk5pWkyxVERi6kt3TyRZCaXWqg441QEQxaGkn5rWHB21"
+	const otherAddr = "/dns4/router-b.example.com/tcp/443/wss/p2p/" + otherPeer
+	infoIn, _ := proto.Marshal(&api.ControlPlaneInfoResponse{
+		RouterAddresses: []string{local},
+		Routers: []*api.RouterInfo{
+			{PeerId: "12D3KooWBzUDQCkZhz2rWrYBhpjcCH8VnrRNcwCW6DoF36iADYrY", Addresses: []string{local}},
+			{PeerId: otherPeer, Addresses: []string{otherAddr}},
+		},
+	})
+	infoOutBytes, ok := prependInferredRouterAddr("/info", infoIn, inferred)
+	if !ok {
+		t.Fatal("prependInferredRouterAddr(/info) returned false")
+	}
+	var infoOut api.ControlPlaneInfoResponse
+	if err := proto.Unmarshal(infoOutBytes, &infoOut); err != nil {
+		t.Fatalf("Unmarshal ControlPlaneInfoResponse: %v", err)
+	}
+	if len(infoOut.RouterAddresses) != 2 || infoOut.RouterAddresses[0] != inferred || infoOut.RouterAddresses[1] != local {
+		t.Fatalf("ControlPlaneInfoResponse.RouterAddresses = %v, want [%s %s]", infoOut.RouterAddresses, inferred, local)
+	}
+	if len(infoOut.Routers) != 2 {
+		t.Fatalf("ControlPlaneInfoResponse.Routers has %d entries, want 2", len(infoOut.Routers))
+	}
+	if got := infoOut.Routers[0].Addresses; len(got) != 2 || got[0] != inferred || got[1] != local {
+		t.Fatalf("Routers[0].Addresses = %v, want [%s %s]", got, inferred, local)
+	}
+	if got := infoOut.Routers[1].Addresses; len(got) != 1 || got[0] != otherAddr {
+		t.Fatalf("Routers[1].Addresses = %v, want [%s] (another router's entry must not change)", got, otherAddr)
+	}
+
 	if returnsRouterAddresses("/refresh") {
 		t.Fatal("returnsRouterAddresses(/refresh) = true, want false")
 	}
