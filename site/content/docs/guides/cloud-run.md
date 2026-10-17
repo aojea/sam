@@ -52,6 +52,43 @@ instance for testing):
   --args="--data-dir=/data,--port=8080,--db-driver=postgres,--db-dsn=${POSTGRES_DSN}"
 ```
 
+### Operator-owned signing keys and policy without a database
+
+Without PostgreSQL every revision starts from an empty store, which means
+new signing keys: every credential the mesh issued stops verifying until each
+node re-enrolls. If you want the root of trust in your hands anyway, keep the
+keys in Secret Manager (wrap the secret with your own Cloud KMS key if you
+want) and mount them as a file; do the same with the policy:
+
+```bash
+openssl genpkey -algorithm ed25519 -out ed25519-v1.pem
+openssl genpkey -algorithm ec -pkeyopt ec_paramgen_curve:P-256 -out p256-v1.pem
+cat ed25519-v1.pem p256-v1.pem | gcloud secrets create mesh-signing-keys --data-file=-
+gcloud secrets create mesh-policy --data-file=policy.json
+SA=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')-compute@developer.gserviceaccount.com
+for s in mesh-signing-keys mesh-policy; do
+  gcloud secrets add-iam-policy-binding "$s" --member="serviceAccount:$SA" --role=roles/secretmanager.secretAccessor
+done
+gcloud run services update agentmesh-one --project "$PROJECT" --region "$REGION" \
+  --set-secrets=/etc/agentmesh/keys/signing-keys.pem=mesh-signing-keys:latest,/etc/agentmesh/policy.json=mesh-policy:latest \
+  --args="--data-dir=/data,--port=8080,--signing-key-path=/etc/agentmesh/keys/signing-keys.pem,--policy-file=/etc/agentmesh/policy.json"
+```
+
+(Cloud Run mounts one secret per directory, hence the two paths.) The
+control plane installs the keys and seeds the policy on every start, so a new
+revision changes neither; credentials issued before it keep verifying, and
+`/keys` and `/jwks` publish the same keys. Automatic rotation is off while the
+file is present; **you rotate**: generate the new key, put it first in the
+file, keep the previous one until every credential it signed has expired
+(the Biscuit TTL for Ed25519, the STS JWT lifetime for P-256), publish the new
+secret version, roll a revision, then drop the old key the same way.
+
+What this does not keep is the enrollment records: a node's own calls to the
+control plane (policy sync, catalog, refresh) answer `401 node credential
+required` after a revision until the node re-enrolls, which it does at its
+next renewal with the bootstrap token. The data plane is unaffected in the
+meantime. PostgreSQL keeps the records too.
+
 Why each Cloud Run flag matters:
 
 - `--min-instances 1 --max-instances 1`: the router's DHT and relay state

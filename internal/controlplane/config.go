@@ -38,6 +38,13 @@ type Options struct {
 	LeaseDuration       time.Duration
 	KeyRotationInterval time.Duration
 	KeyGracePeriod      time.Duration
+	// SigningKeyPath names a PEM file with the control plane's private
+	// signing keys (PKCS#8 or SEC 1): Ed25519 for Biscuits, P-256 for the
+	// ES256 JWTs. For each kind the first key signs and later keys only
+	// verify. When set, the operator owns rotation: the control plane
+	// installs these keys through its normal rotation path at start-up and
+	// never rotates on its own.
+	SigningKeyPath string
 	// DHTReplication and DHTReprovideInterval are the mesh's directory
 	// parameters, published on /info for every member and router
 	// (api.DirectoryParameters); 0 is the api default of each.

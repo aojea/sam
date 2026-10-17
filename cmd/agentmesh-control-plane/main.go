@@ -47,6 +47,7 @@ var (
 	allowedAudiencesFlag   string
 	keyRotationInterval    time.Duration
 	keyGracePeriod         time.Duration
+	signingKeyPath         string
 	leaseDuration          time.Duration
 	dhtReplication         int
 	dhtReprovideInterval   time.Duration
@@ -140,6 +141,7 @@ func main() {
 				LeaseDuration:          leaseDuration,
 				KeyRotationInterval:    keyRotationInterval,
 				KeyGracePeriod:         keyGracePeriod,
+				SigningKeyPath:         signingKeyPath,
 				DHTReplication:         dhtReplication,
 				DHTReprovideInterval:   dhtReprovideInterval,
 				InsecureSkipTLSVerify:  insecureSkipTLSVerify,
@@ -205,6 +207,7 @@ func main() {
 	rootCmd.Flags().StringVar(&allowedAudiencesFlag, "allowed-audiences", api.DefaultAudience, "Comma-separated list of allowed OIDC audiences")
 	rootCmd.Flags().DurationVar(&keyRotationInterval, "key-rotation-interval", 24*time.Hour, "Key rotation interval (e.g. 24h). 0 disables rotation.")
 	rootCmd.Flags().DurationVar(&keyGracePeriod, "key-grace-period", 1*time.Hour, "Key grace period for rotated keys.")
+	rootCmd.Flags().StringVar(&signingKeyPath, "signing-key-path", "", "PEM file with the control plane's private signing keys (PKCS#8 or SEC 1): Ed25519 for Biscuits, P-256 for the ES256 JWTs; the first key of each kind signs, later ones only verify. Turns automatic key rotation off: rotate by publishing a new first key and keeping the previous one for the grace period")
 	rootCmd.Flags().DurationVar(&leaseDuration, "lease-duration", 15*time.Minute, "Router lease registration TTL.")
 	rootCmd.Flags().IntVar(&dhtReplication, "dht-replication", api.DefaultDHTReplication, "How many routers hold each service a member publishes and answer each lookup: the routers closest to the key. Every member holds a session with each of them besides its --routers. More replicas survive more routers down at once; each one is a session more per key on every member. Published on /info for the whole mesh.")
 	rootCmd.Flags().DurationVar(&dhtReprovideInterval, "dht-reprovide-interval", api.DefaultReprovideInterval, "How often a member re-announces each service it publishes. A provider that stopped without unpublishing stays listed for three intervals; the mesh pays providers / interval announcements a minute. Published on /info for the whole mesh.")

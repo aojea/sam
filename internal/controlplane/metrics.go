@@ -57,6 +57,17 @@ var (
 		},
 		[]string{"issuer"},
 	)
+
+	// operatorSigningKeysGauge counts the signing keys the operator supplied
+	// through --signing-key-path, per algorithm; absent when the control
+	// plane generates and rotates its own.
+	operatorSigningKeysGauge = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "agentmesh_control_plane_operator_signing_keys",
+			Help: "Signing keys supplied by the operator (--signing-key-path) by algorithm; automatic rotation is off while any are present",
+		},
+		[]string{"algorithm"},
+	)
 )
 
 // observeRoute counts and times requests to one registered mux pattern. The

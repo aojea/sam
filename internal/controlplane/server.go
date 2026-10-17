@@ -141,7 +141,10 @@ type Server struct {
 	// resolving holds the workload issuers a background resolver is working
 	// on, so that a second pass over the configuration (Init is exported for
 	// embedders) starts no second resolver for the same issuer.
-	resolving             map[string]bool
+	resolving map[string]bool
+	// operatorKeys are the signing keys the operator supplied, nil when the
+	// control plane generates and rotates its own.
+	operatorKeys          *operatorSigningKeys
 	providers             map[string]*oidc.Provider
 	workloadIssuers       map[string]bool
 	workloadEmailSuffixes map[string][]string
@@ -191,6 +194,18 @@ func NewServer(config Options, store storage.Store) (*Server, error) {
 		return nil, err
 	}
 
+	var operatorKeys *operatorSigningKeys
+	if config.SigningKeyPath != "" {
+		var err error
+		operatorKeys, err = loadOperatorSigningKeys(config.SigningKeyPath)
+		if err != nil {
+			return nil, err
+		}
+		if err := reconcileES256Keyring(context.Background(), store, operatorKeys.es256, config.KeyGracePeriod); err != nil {
+			return nil, fmt.Errorf("operator signing keys: %w", err)
+		}
+	}
+
 	signer := config.OIDCSigner
 	if signer == nil {
 		var err error
@@ -224,6 +239,7 @@ func NewServer(config Options, store storage.Store) (*Server, error) {
 		oauthCodes:            make(map[string]*oauthAuthCode),
 		providers:             make(map[string]*oidc.Provider),
 		workloadIssuers:       workloadIssuers,
+		operatorKeys:          operatorKeys,
 		workloadEmailSuffixes: workloadEmailSuffixes,
 		catalog:               make(map[string]nodeCatalogEntry),
 		metricsRegistry:       reg,
@@ -292,6 +308,18 @@ func (s *Server) Start() error {
 func (s *Server) Init() error {
 	// Initialize Keyring
 	ctx := context.Background()
+	if s.operatorKeys != nil {
+		if err := reconcileEd25519Keyring(ctx, s.store, s.operatorKeys.ed25519, s.config.KeyGracePeriod); err != nil {
+			return fmt.Errorf("operator signing keys: %w", err)
+		}
+		operatorSigningKeysGauge.WithLabelValues("ed25519").Set(float64(len(s.operatorKeys.ed25519)))
+		operatorSigningKeysGauge.WithLabelValues("es256").Set(float64(len(s.operatorKeys.es256)))
+		logger.Infow("Signing keys are operator-managed; automatic key rotation is off",
+			"path", s.config.SigningKeyPath,
+			"ed25519_keys", len(s.operatorKeys.ed25519),
+			"es256_keys", len(s.operatorKeys.es256),
+			"rotation", "put the new key first in the file and keep the previous one for the grace period")
+	}
 	_, _, err := s.store.GetCurrentKey(ctx)
 	if err == storage.ErrNotFound {
 		logger.Info("Generating initial control plane signing keys...")
@@ -307,8 +335,9 @@ func (s *Server) Init() error {
 	}
 	// The rotation deadline lives in the store, shared by the replicas and
 	// kept across restarts; a store that never had one gets its first an
-	// interval from now.
-	if interval := s.config.KeyRotationInterval; interval > 0 {
+	// interval from now. Operator-managed keys rotate when the operator
+	// publishes a new file, never here.
+	if interval := s.config.KeyRotationInterval; interval > 0 && s.operatorKeys == nil {
 		first := time.Now().Add(interval)
 		scheduled, err := s.store.ScheduleKeyRotationIfUnset(ctx, first)
 		if err != nil {
@@ -327,8 +356,10 @@ func (s *Server) Init() error {
 	}
 
 	// Start key rotation routine
-	s.wg.Add(1)
-	go s.runKeyRotationLoop()
+	if s.operatorKeys == nil {
+		s.wg.Add(1)
+		go s.runKeyRotationLoop()
+	}
 
 	s.wg.Add(1)
 	go s.runNodeGCLoop()

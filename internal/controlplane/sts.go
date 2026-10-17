@@ -181,6 +181,14 @@ func decodeOIDCKeyPair(k storage.OIDCKeyPair) (es256KeyEntry, error) {
 	}, nil
 }
 
+// es256Kid is the key id of an ES256 key: the first 8 bytes of the SHA-256
+// of its uncompressed public point, in hex. A verifier that pinned a kid
+// from /jwks matches it whether the control plane or the operator made the key.
+func es256Kid(uncompressedPub []byte) string {
+	sum := sha256.Sum256(uncompressedPub)
+	return hex.EncodeToString(sum[:8])
+}
+
 func generateES256KeyEntry() (es256KeyEntry, error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -192,8 +200,7 @@ func generateES256KeyEntry() (es256KeyEntry, error) {
 	}
 	xBytes := uncompressed[1:33]
 	yBytes := uncompressed[33:65]
-	sum := sha256.Sum256(uncompressed)
-	kid := hex.EncodeToString(sum[:8])
+	kid := es256Kid(uncompressed)
 	return es256KeyEntry{
 		kid:  kid,
 		priv: priv,

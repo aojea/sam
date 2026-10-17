@@ -129,6 +129,10 @@ type ControlPlaneTunables struct {
 	KeyRotationInterval time.Duration
 	// KeyGracePeriod keeps rotated-out keys valid for verification.
 	KeyGracePeriod time.Duration
+	// SigningKeyPath is the operator's PEM file of signing keys; see
+	// controlplane.Options.SigningKeyPath. Empty lets the control plane
+	// generate and rotate its own.
+	SigningKeyPath string
 	// DHTReplication and DHTReprovideInterval are the mesh's directory
 	// parameters; see controlplane.Options.
 	DHTReplication       int
@@ -296,6 +300,7 @@ func (s *Server) Start(ctx context.Context) (retErr error) {
 		DHTReplication:         s.opts.ControlPlane.DHTReplication,
 		DHTReprovideInterval:   s.opts.ControlPlane.DHTReprovideInterval,
 		KeyGracePeriod:         s.opts.ControlPlane.KeyGracePeriod,
+		SigningKeyPath:         s.opts.ControlPlane.SigningKeyPath,
 		BiscuitTTL:             s.opts.ControlPlane.BiscuitTTL,
 		WorkloadSessionTTL:     s.opts.ControlPlane.WorkloadSessionTTL,
 		NodeRetention:          s.opts.ControlPlane.NodeRetention,
