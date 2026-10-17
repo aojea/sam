@@ -327,6 +327,16 @@ func (s *Server) Init() error {
 		go s.watchOperatorSigningKeys()
 	}
 	_, _, err := s.store.GetCurrentKey(ctx)
+	if err == nil && s.operatorKeys == nil {
+		// Keys in the store and no --signing-key-path: either this control
+		// plane generated them, or an operator used to supply them and the
+		// flag is gone. Rotation is about to be automatic either way; say so
+		// when no rotation was ever scheduled, which is how the second case
+		// looks.
+		if next, nerr := s.store.NextKeyRotation(ctx); nerr == nil && next.IsZero() && s.config.KeyRotationInterval > 0 {
+			logger.Warnw("Signing keys found in the store with no rotation schedule; automatic rotation takes over. If these keys were operator-managed, restore --signing-key-path", "first_rotation_in", s.config.KeyRotationInterval.String())
+		}
+	}
 	if err == storage.ErrNotFound {
 		logger.Info("Generating initial control plane signing keys...")
 		pub, priv, err := ed25519.GenerateKey(rand.Reader)

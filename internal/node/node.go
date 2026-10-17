@@ -146,7 +146,10 @@ func (n *AgentMeshNode) isAdmitted(p peer.ID) bool {
 type AgentMeshNode struct {
 	config Options
 	// enrollBootstrapFn is EnrollBootstrap unless a test injects the step.
-	enrollBootstrapFn    func(ctx context.Context, controlPlaneURL, bootstrapToken string) error
+	enrollBootstrapFn func(ctx context.Context, controlPlaneURL, bootstrapToken string) error
+	// lastReenroll is when recoverEnrollment last spent the bootstrap token.
+	lastReenroll         time.Time
+	reenrollMu           sync.Mutex
 	Host                 host.Host
 	Directory            Directory
 	PubSub               *pubsub.PubSub

@@ -16,10 +16,13 @@ package integration_test
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,6 +32,7 @@ import (
 	"time"
 
 	"github.com/google/agentmesh/api"
+	cpclient "github.com/google/agentmesh/internal/controlplane/client"
 	"github.com/google/agentmesh/internal/identity"
 	"github.com/google/agentmesh/internal/node"
 	"github.com/google/agentmesh/internal/standalone"
@@ -62,7 +66,8 @@ func TestOperatorSigningKeyRotationProcess(t *testing.T) {
 
 	keyFile := filepath.Join(t.TempDir(), "signing-keys.pem")
 	v1, v2 := newOperatorEd25519(t), newOperatorEd25519(t)
-	writeOperatorKeyFile(t, keyFile, v1)
+	es256 := newOperatorP256(t)
+	writeOperatorKeyFile(t, keyFile, es256, v1)
 
 	// The operator's grace period is the overlap during which a credential
 	// under the previous key still verifies.
@@ -112,7 +117,7 @@ func TestOperatorSigningKeyRotationProcess(t *testing.T) {
 	}
 
 	t.Run("live rotation without a restart", func(t *testing.T) {
-		writeOperatorKeyFile(t, keyFile, v2, v1)
+		writeOperatorKeyFile(t, keyFile, es256, v2, v1)
 		// The control plane re-reads the file on its own timer; the test is
 		// time-bounded, so ask for the pass directly.
 		hub.ReloadOperatorSigningKeys()
@@ -156,7 +161,7 @@ func TestOperatorSigningKeyRotationProcess(t *testing.T) {
 	})
 
 	t.Run("dropping the previous key refuses what it signed", func(t *testing.T) {
-		writeOperatorKeyFile(t, keyFile, v2)
+		writeOperatorKeyFile(t, keyFile, es256, v2)
 		if err := hub.Close(); err != nil {
 			t.Fatalf("hub.Close: %v", err)
 		}
@@ -166,11 +171,16 @@ func TestOperatorSigningKeyRotationProcess(t *testing.T) {
 		if err := identity.VerifyBiscuitRole(credV1, pubOf(v2), api.RoleNode, 5*time.Second); err == nil {
 			t.Fatal("a credential under the dropped key still verifies under the only published key")
 		}
-		if err := meshNode.SyncControlPlane(ctx); err != nil {
-			t.Fatalf("node did not recover after the key was dropped: %v", err)
-		}
+		// The node's credential, issued under v2 by the previous recovery,
+		// still verifies; that recovery was moments ago, so the control
+		// plane's 401 on this fresh store is reported, not answered with
+		// another spend of the bootstrap token until the cooldown passes.
 		if err := identity.VerifyBiscuitRole(meshNode.GetIdentity(), pubOf(v2), api.RoleNode, 5*time.Second); err != nil {
 			t.Fatalf("node's credential after the drop does not verify under v2: %v", err)
+		}
+		var se *cpclient.StatusError
+		if err := meshNode.SyncControlPlane(ctx); !errors.As(err, &se) || se.Code != http.StatusUnauthorized {
+			t.Fatalf("sync within the re-enrollment cooldown = %v, want the control plane's 401 reported", err)
 		}
 	})
 }
@@ -184,13 +194,29 @@ func newOperatorEd25519(t *testing.T) ed25519.PrivateKey {
 	return priv
 }
 
+func newOperatorP256(t *testing.T) *ecdsa.PrivateKey {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa.GenerateKey: %v", err)
+	}
+	return priv
+}
+
 func pubOf(k ed25519.PrivateKey) ed25519.PublicKey { return k.Public().(ed25519.PublicKey) }
 
-// writeOperatorKeyFile writes keys as PKCS#8 PEM blocks in order, the first
-// being the signing key, the way an operator publishes a rotation.
-func writeOperatorKeyFile(t *testing.T, path string, keys ...ed25519.PrivateKey) {
+// writeOperatorKeyFile writes keys as PKCS#8 PEM blocks in order; for each
+// kind the first is the signing key, the way an operator publishes a
+// rotation. The ES256 key is listed first here only so the Ed25519 order
+// reads left to right.
+func writeOperatorKeyFile(t *testing.T, path string, es256 *ecdsa.PrivateKey, keys ...ed25519.PrivateKey) {
 	t.Helper()
 	var data []byte
+	der, err := x509.MarshalPKCS8PrivateKey(es256)
+	if err != nil {
+		t.Fatalf("MarshalPKCS8PrivateKey (P-256): %v", err)
+	}
+	data = append(data, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})...)
 	for _, k := range keys {
 		der, err := x509.MarshalPKCS8PrivateKey(k)
 		if err != nil {

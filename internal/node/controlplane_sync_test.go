@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/agentmesh/api"
 )
@@ -109,6 +110,116 @@ func TestSyncRecoversWhenControlPlaneForgotNode(t *testing.T) {
 		}
 		if harness.node.controlPlaneForgotUs(err) {
 			t.Fatalf("a connection failure (%v) was taken for a 401", err)
+		}
+	})
+}
+
+// TestRecoverEnrollmentTrustsOnlyKnownKeys drives the real re-enrollment
+// exchange against a mock control plane. The node already has a trust
+// root; whoever answers the URL with a 401 and then an enrollment response
+// of its own making must not be able to replace it, and one attempt per
+// cooldown is all a 401 can cause.
+func TestRecoverEnrollmentTrustsOnlyKnownKeys(t *testing.T) {
+	prev := reenrollCooldown
+	reenrollCooldown = 50 * time.Millisecond
+	t.Cleanup(func() { reenrollCooldown = prev })
+
+	newHarness := func(t *testing.T, answer func(h *refreshHarness) *api.BootstrapEnrollResponse) (*refreshHarness, *atomic.Int32) {
+		t.Helper()
+		var enrolls atomic.Int32
+		harness := newRefreshHarness(t, func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "unexpected refresh", http.StatusInternalServerError)
+		})
+		mux := http.NewServeMux()
+		mux.HandleFunc("/keys", keysHandler(t, []ed25519.PublicKey{harness.cpPub}, []ed25519.PrivateKey{harness.cpPriv}))
+		mux.HandleFunc("/info", protoHandler(t, &api.ControlPlaneInfoResponse{}))
+		mux.HandleFunc("/policies", func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "Unauthorized: node credential required", http.StatusUnauthorized)
+		})
+		mux.HandleFunc("/enroll", func(w http.ResponseWriter, r *http.Request) {
+			enrolls.Add(1)
+			protoHandler(t, answer(harness))(w, r)
+		})
+		server := httptest.NewServer(mux)
+		t.Cleanup(server.Close)
+		if err := harness.node.Store.SaveControlPlaneURL(server.URL); err != nil {
+			t.Fatal(err)
+		}
+		tokenPath := filepath.Join(t.TempDir(), "join-token")
+		if err := os.WriteFile(tokenPath, []byte("mesh_tok_test"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		harness.node.config.BootstrapTokenPath = tokenPath
+		return harness, &enrolls
+	}
+
+	t.Run("an answer under an unknown key is refused and nothing is persisted", func(t *testing.T) {
+		_, roguePriv := mustGenerateKey(t)
+		roguePub := roguePriv.Public().(ed25519.PublicKey)
+		harness, enrolls := newHarness(t, func(h *refreshHarness) *api.BootstrapEnrollResponse {
+			return &api.BootstrapEnrollResponse{
+				Status:                api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED,
+				BiscuitToken:          mintRoleBiscuit(t, roguePriv, h.peerID, api.RoleNode),
+				ControlPlanePublicKey: roguePub,
+				RouterAddresses:       []string{"/dns4/rogue.example/tcp/443/wss/p2p/12D3KooWDk5pWkyxVERi6kt3TyRZCaXWqg441QEQxaGkn5rWHB21"},
+			}
+		})
+		if err := harness.node.SyncControlPlane(context.Background()); err == nil {
+			t.Fatal("sync succeeded although the only enrollment answer came from an unknown key")
+		}
+		if enrolls.Load() != 1 {
+			t.Fatalf("enroll attempts = %d, want 1", enrolls.Load())
+		}
+		harness.storedIdentityUnchanged(t)
+		cpPub, _, err := harness.node.Store.LoadMeshConfig()
+		if err != nil {
+			t.Fatalf("LoadMeshConfig: %v", err)
+		}
+		if !ed25519.PublicKey(cpPub).Equal(harness.cpPub) {
+			t.Fatal("the pinned control plane key was replaced by the one in a refused answer")
+		}
+		if harness.node.isTrustedKey(roguePub) {
+			t.Fatal("the key from a refused answer entered the trust set")
+		}
+	})
+
+	t.Run("an answer under a trusted key is accepted", func(t *testing.T) {
+		harness, enrolls := newHarness(t, func(h *refreshHarness) *api.BootstrapEnrollResponse {
+			return &api.BootstrapEnrollResponse{
+				Status:                api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED,
+				BiscuitToken:          mintRoleBiscuit(t, h.cpPriv, h.peerID, api.RoleNode),
+				ControlPlanePublicKey: h.cpPub,
+			}
+		})
+		// /policies answers 401 for ever here, so the retried pull still
+		// fails; what matters is that the credential was accepted.
+		_ = harness.node.SyncControlPlane(context.Background())
+		if enrolls.Load() != 1 {
+			t.Fatalf("enroll attempts = %d, want 1", enrolls.Load())
+		}
+		if string(harness.node.GetIdentity()) == string(harness.identity) {
+			t.Fatal("the node kept its old credential after an answer under a trusted key")
+		}
+	})
+
+	t.Run("one attempt per cooldown", func(t *testing.T) {
+		harness, enrolls := newHarness(t, func(h *refreshHarness) *api.BootstrapEnrollResponse {
+			return &api.BootstrapEnrollResponse{
+				Status:                api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED,
+				BiscuitToken:          mintRoleBiscuit(t, h.cpPriv, h.peerID, api.RoleNode),
+				ControlPlanePublicKey: h.cpPub,
+			}
+		})
+		for range 3 {
+			_ = harness.node.SyncControlPlane(context.Background())
+		}
+		if enrolls.Load() != 1 {
+			t.Fatalf("enroll attempts within the cooldown = %d, want 1", enrolls.Load())
+		}
+		time.Sleep(2 * reenrollCooldown)
+		_ = harness.node.SyncControlPlane(context.Background())
+		if enrolls.Load() != 2 {
+			t.Fatalf("enroll attempts after the cooldown = %d, want 2", enrolls.Load())
 		}
 	})
 }

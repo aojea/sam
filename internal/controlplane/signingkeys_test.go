@@ -101,7 +101,7 @@ func TestLoadOperatorSigningKeys(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MarshalECPrivateKey: %v", err)
 		}
-		path := writeKeyFile(t, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}))
+		path := writeKeyFile(t, pemPKCS8(t, edA), pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}))
 		keys, err := loadOperatorSigningKeys(path)
 		if err != nil {
 			t.Fatalf("loadOperatorSigningKeys: %v", err)
@@ -142,8 +142,19 @@ func TestLoadOperatorSigningKeys(t *testing.T) {
 
 	t.Run("empty file is refused", func(t *testing.T) {
 		_, err := loadOperatorSigningKeys(writeKeyFile(t, []byte("not pem at all\n")))
-		if err == nil || !strings.Contains(err.Error(), "no private key found") {
-			t.Fatalf("err = %v, want no private key found", err)
+		if err == nil || !strings.Contains(err.Error(), "no Ed25519 key") {
+			t.Fatalf("err = %v, want a refusal naming the missing Ed25519 key", err)
+		}
+	})
+
+	t.Run("one kind only is refused", func(t *testing.T) {
+		_, err := loadOperatorSigningKeys(writeKeyFile(t, pemPKCS8(t, edA)))
+		if err == nil || !strings.Contains(err.Error(), "no P-256 key") {
+			t.Fatalf("err = %v, want a refusal naming the missing P-256 key", err)
+		}
+		_, err = loadOperatorSigningKeys(writeKeyFile(t, pemPKCS8(t, ecA)))
+		if err == nil || !strings.Contains(err.Error(), "no Ed25519 key") {
+			t.Fatalf("err = %v, want a refusal naming the missing Ed25519 key", err)
 		}
 	})
 
@@ -233,6 +244,72 @@ func TestReconcileEd25519Keyring(t *testing.T) {
 		}
 	})
 
+	t.Run("rollback: previous key moved back to the front", func(t *testing.T) {
+		store := newStore(t)
+		if err := reconcileEd25519Keyring(ctx, store, []ed25519.PrivateKey{current, previous}, time.Hour); err != nil {
+			t.Fatalf("reconcile [current previous]: %v", err)
+		}
+		if err := reconcileEd25519Keyring(ctx, store, []ed25519.PrivateKey{previous, current}, time.Hour); err != nil {
+			t.Fatalf("reconcile [previous current]: %v", err)
+		}
+		_, gotPub, err := store.GetCurrentKey(ctx)
+		if err != nil {
+			t.Fatalf("GetCurrentKey: %v", err)
+		}
+		if !gotPub.Equal(pubOf(previous)) {
+			t.Fatalf("current key = %s, want %s (moved back to the front)", keyFingerprint(gotPub), keyFingerprint(pubOf(previous)))
+		}
+		if valid := validPubs(t, store); len(valid) != 2 {
+			t.Fatalf("valid keys = %d after the rollback, want 2", len(valid))
+		}
+	})
+
+	t.Run("persistent store: restart after the grace period", func(t *testing.T) {
+		// The store outlives the control plane (SQLite file, PostgreSQL). The
+		// operator published [current previous], the previous key was dropped
+		// from the file, its grace period ran out, and the control plane
+		// restarts on a file that lists it again as verifying: the expired
+		// row must not stop the start.
+		dbPath := filepath.Join(t.TempDir(), "cp.db")
+		store, err := storage.NewSQLStore("sqlite", dbPath)
+		if err != nil {
+			t.Fatalf("NewSQLStore: %v", err)
+		}
+		const grace = 20 * time.Millisecond
+		if err := reconcileEd25519Keyring(ctx, store, []ed25519.PrivateKey{current, previous}, grace); err != nil {
+			t.Fatalf("reconcile v1: %v", err)
+		}
+		if err := reconcileEd25519Keyring(ctx, store, []ed25519.PrivateKey{current}, grace); err != nil {
+			t.Fatalf("reconcile drop: %v", err)
+		}
+		time.Sleep(2 * grace)
+		if valid := validPubs(t, store); valid[string(pubOf(previous))] {
+			t.Fatal("dropped key still valid after its grace period")
+		}
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		store, err = storage.NewSQLStore("sqlite", dbPath)
+		if err != nil {
+			t.Fatalf("NewSQLStore (restart): %v", err)
+		}
+		defer func() { _ = store.Close() }()
+		if err := reconcileEd25519Keyring(ctx, store, []ed25519.PrivateKey{current, previous}, grace); err != nil {
+			t.Fatalf("reconcile after restart with an expired row of a listed key: %v", err)
+		}
+		valid := validPubs(t, store)
+		if len(valid) != 2 || !valid[string(pubOf(previous))] {
+			t.Fatalf("valid keys = %d after restart, want both listed keys", len(valid))
+		}
+		_, gotPub, err := store.GetCurrentKey(ctx)
+		if err != nil {
+			t.Fatalf("GetCurrentKey: %v", err)
+		}
+		if !gotPub.Equal(pubOf(current)) {
+			t.Fatalf("current key = %s, want %s", keyFingerprint(gotPub), keyFingerprint(pubOf(current)))
+		}
+	})
+
 	t.Run("operator rotation: new key first, previous kept", func(t *testing.T) {
 		store := newStore(t)
 		if err := reconcileEd25519Keyring(ctx, store, []ed25519.PrivateKey{previous}, time.Hour); err != nil {
@@ -296,7 +373,35 @@ func TestReconcileES256Keyring(t *testing.T) {
 		t.Fatalf("GetAllValidOIDCKeys: %v", err)
 	}
 	if len(all) != 2 {
-		t.Fatalf("valid ES256 keys = %d after rotation, want 2 (previous kept for the grace period)", len(all))
+		t.Fatalf("valid ES256 keys = %d after rotation, want 2 (previous kept while listed)", len(all))
+	}
+	// Rollback: v1 moved back to the front.
+	if err := reconcileES256Keyring(ctx, store, []*ecdsa.PrivateKey{v1, v2}, time.Hour); err != nil {
+		t.Fatalf("reconcile rollback: %v", err)
+	}
+	cur, err = store.GetCurrentOIDCKey(ctx)
+	if err != nil || cur == nil {
+		t.Fatalf("GetCurrentOIDCKey: %v (%v)", err, cur)
+	}
+	if cur.Kid != kidOf(t, v1) {
+		t.Fatalf("current kid after rollback = %s, want %s", cur.Kid, kidOf(t, v1))
+	}
+	// Drop v2 with a short grace, let it expire, list it again: the expired
+	// row is replaced, not a constraint error.
+	const grace = 20 * time.Millisecond
+	if err := reconcileES256Keyring(ctx, store, []*ecdsa.PrivateKey{v1}, grace); err != nil {
+		t.Fatalf("reconcile drop: %v", err)
+	}
+	time.Sleep(2 * grace)
+	if err := reconcileES256Keyring(ctx, store, []*ecdsa.PrivateKey{v1, v2}, grace); err != nil {
+		t.Fatalf("reconcile with an expired row of a listed key: %v", err)
+	}
+	all, err = store.GetAllValidOIDCKeys(ctx)
+	if err != nil {
+		t.Fatalf("GetAllValidOIDCKeys: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("valid ES256 keys = %d after relisting an expired key, want 2", len(all))
 	}
 }
 

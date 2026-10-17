@@ -383,9 +383,17 @@ func (n *AgentMeshNode) controlPlaneForgotUs(err error) bool {
 	return errors.As(err, &se) && se.Code == http.StatusUnauthorized
 }
 
+// reenrollCooldown bounds how often a node spends its bootstrap token on a
+// re-enrollment: a 401 is a claim by whoever answered the control plane
+// URL, and one attempt per cooldown is all it can cause. A package variable
+// so a test can shorten it.
+var reenrollCooldown = time.Minute
+
 // recoverEnrollment enrolls again with the bootstrap token at
-// Options.BootstrapTokenPath and reports whether it did. Without a path the
-// node leaves recovery to the renewal loop and says so once per failure.
+// Options.BootstrapTokenPath and reports whether it did. The answer must
+// verify under a control plane key this node already trusts, so a party
+// that merely answers the URL cannot replace the trust root. Without a path
+// the node leaves recovery to the renewal loop and says so once per failure.
 func (n *AgentMeshNode) recoverEnrollment(ctx context.Context) bool {
 	path := n.config.BootstrapTokenPath
 	if path == "" {
@@ -393,6 +401,16 @@ func (n *AgentMeshNode) recoverEnrollment(ctx context.Context) bool {
 		reenrollmentsTotal.WithLabelValues("no_token").Inc()
 		return false
 	}
+	n.reenrollMu.Lock()
+	since := time.Since(n.lastReenroll)
+	if !n.lastReenroll.IsZero() && since < reenrollCooldown {
+		n.reenrollMu.Unlock()
+		logger.Warnw("Control plane no longer recognizes this node's credential; a re-enrollment was attempted recently, not trying again yet", "since", since.Round(time.Second).String(), "cooldown", reenrollCooldown.String())
+		reenrollmentsTotal.WithLabelValues("cooldown").Inc()
+		return false
+	}
+	n.lastReenroll = time.Now()
+	n.reenrollMu.Unlock()
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		logger.Warnw("Control plane no longer recognizes this node's credential; bootstrap token unreadable", "path", path, "error", err)
@@ -411,7 +429,7 @@ func (n *AgentMeshNode) recoverEnrollment(ctx context.Context) bool {
 	enroll := n.enrollBootstrapFn
 	if enroll == nil {
 		enroll = func(ctx context.Context, controlPlaneURL, token string) error {
-			_, err := n.enrollBootstrapCredential(ctx, controlPlaneURL, token)
+			_, err := n.enrollBootstrapCredential(ctx, controlPlaneURL, token, true)
 			return err
 		}
 	}

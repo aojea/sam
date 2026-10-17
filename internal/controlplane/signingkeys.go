@@ -26,6 +26,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
+	"sort"
 	"time"
 
 	"github.com/google/agentmesh/api"
@@ -104,8 +106,13 @@ func parseOperatorSigningKeys(path string, data []byte) (*operatorSigningKeys, e
 			return nil, fmt.Errorf("signing keys %s: unsupported key type %T (want Ed25519 or P-256)", path, parsed)
 		}
 	}
-	if len(keys.ed25519) == 0 && len(keys.es256) == 0 {
-		return nil, fmt.Errorf("signing keys %s: no private key found", path)
+	// Owning the keys means owning both: a file with one kind would leave
+	// the other generated per store and no longer rotated by anyone.
+	if len(keys.ed25519) == 0 {
+		return nil, fmt.Errorf("signing keys %s: no Ed25519 key (the Biscuit signing key); the file must carry at least one key of each kind", path)
+	}
+	if len(keys.es256) == 0 {
+		return nil, fmt.Errorf("signing keys %s: no P-256 key (the ES256 key for /sts/token and /jwks); the file must carry at least one key of each kind", path)
 	}
 	return keys, nil
 }
@@ -118,58 +125,38 @@ func keyFingerprint(pub []byte) string {
 }
 
 // reconcileEd25519Keyring makes the store's Biscuit keyring reflect keys:
-// keys[0] current, the rest valid for verification until gracePeriod from
-// now. It goes through the same SaveInitialKey / RotateKeys path as
-// automatic rotation, so a store that already matches is left alone, a store
-// that holds a key the operator does not know (one the control plane
-// generated before the operator took over) keeps it valid for the grace
-// period, and every verifier learns the new set from /keys the usual way.
+// keys[0] current, the rest valid for verification while the operator lists
+// them, every other valid key (one the control plane generated before the
+// operator took over, one the operator dropped) kept for gracePeriod so that
+// credentials it signed keep verifying meanwhile. One store transaction; a
+// set already in place is a no-op, a key moved back to the front becomes
+// current again, and an expired row of a listed key is replaced.
 func reconcileEd25519Keyring(ctx context.Context, store storage.Store, keys []ed25519.PrivateKey, gracePeriod time.Duration) error {
 	if len(keys) == 0 {
 		return nil
 	}
-	valid, err := store.GetAllValidKeys(ctx)
+	before, err := store.GetAllValidKeys(ctx)
 	if err != nil && !errors.Is(err, storage.ErrNotFound) {
 		return fmt.Errorf("read keyring: %w", err)
 	}
-	known := func(pub ed25519.PublicKey) bool {
-		for _, k := range valid {
-			if k.Public.Equal(pub) {
-				return true
-			}
-		}
-		return false
+	pair := func(priv ed25519.PrivateKey) storage.KeyPair {
+		return storage.KeyPair{Private: priv, Public: priv.Public().(ed25519.PublicKey)}
 	}
-	// Oldest first, so that the first key in the file ends up current.
-	for i := len(keys) - 1; i >= 0; i-- {
-		priv := keys[i]
-		pub := priv.Public().(ed25519.PublicKey)
-		if known(pub) {
-			continue
-		}
-		if len(valid) == 0 {
-			if err := store.SaveInitialKey(ctx, priv, pub); err != nil {
-				return fmt.Errorf("save signing key %s: %w", keyFingerprint(pub), err)
-			}
-		} else if err := store.RotateKeys(ctx, priv, pub, gracePeriod); err != nil {
-			return fmt.Errorf("install signing key %s: %w", keyFingerprint(pub), err)
-		}
-		valid = append(valid, storage.KeyPair{Private: priv, Public: pub})
-		logger.Infow("Installed operator signing key", "algorithm", "ed25519", "fingerprint", keyFingerprint(pub))
+	verifying := make([]storage.KeyPair, 0, len(keys)-1)
+	for _, k := range keys[1:] {
+		verifying = append(verifying, pair(k))
 	}
-	_, currentPub, err := store.GetCurrentKey(ctx)
-	if err != nil {
-		return fmt.Errorf("read current signing key: %w", err)
+	current := pair(keys[0])
+	if err := store.SetKeyring(ctx, current, verifying, gracePeriod); err != nil {
+		return fmt.Errorf("set signing keys: %w", err)
 	}
-	if wantPub := keys[0].Public().(ed25519.PublicKey); !currentPub.Equal(wantPub) {
-		// The first key in the file is known but not current, which happens
-		// when the operator moves a previous key back to the front; the
-		// store's current key becomes a verification-only key.
-		if err := store.RotateKeys(ctx, keys[0], wantPub, gracePeriod); err != nil {
-			return fmt.Errorf("make signing key %s current: %w", keyFingerprint(wantPub), err)
+	logKeyringChange("ed25519", keyPairFingerprints(before), func() []string {
+		after, err := store.GetAllValidKeys(ctx)
+		if err != nil {
+			return nil
 		}
-		logger.Infow("Operator signing key made current", "algorithm", "ed25519", "fingerprint", keyFingerprint(wantPub))
-	}
+		return keyPairFingerprints(after)
+	}(), keyFingerprint(current.Public))
 	return nil
 }
 
@@ -180,58 +167,71 @@ func reconcileES256Keyring(ctx context.Context, store storage.Store, keys []*ecd
 	if len(keys) == 0 {
 		return nil
 	}
-	valid, err := store.GetAllValidOIDCKeys(ctx)
+	before, err := store.GetAllValidOIDCKeys(ctx)
 	if err != nil && !errors.Is(err, storage.ErrNotFound) {
 		return fmt.Errorf("read ES256 keyring: %w", err)
 	}
-	known := make(map[string]bool, len(valid))
-	for _, k := range valid {
-		known[k.Kid] = true
-	}
-	encode := func(priv *ecdsa.PrivateKey) (kid string, privBytes, pubBytes []byte, err error) {
-		pubBytes, err = priv.PublicKey.Bytes()
+	encode := func(priv *ecdsa.PrivateKey) (storage.OIDCKeyPair, error) {
+		pubBytes, err := priv.PublicKey.Bytes()
 		if err != nil || len(pubBytes) != 65 {
-			return "", nil, nil, fmt.Errorf("encode P-256 public key: %w", err)
+			return storage.OIDCKeyPair{}, fmt.Errorf("encode P-256 public key: %w", err)
 		}
-		privBytes, err = x509.MarshalECPrivateKey(priv)
+		privBytes, err := x509.MarshalECPrivateKey(priv)
 		if err != nil {
-			return "", nil, nil, fmt.Errorf("encode P-256 private key: %w", err)
+			return storage.OIDCKeyPair{}, fmt.Errorf("encode P-256 private key: %w", err)
 		}
-		return es256Kid(pubBytes), privBytes, pubBytes, nil
+		return storage.OIDCKeyPair{Kid: es256Kid(pubBytes), PrivateKey: privBytes, PublicKey: pubBytes}, nil
 	}
-	for i := len(keys) - 1; i >= 0; i-- {
-		kid, privBytes, pubBytes, err := encode(keys[i])
-		if err != nil {
-			return err
-		}
-		if known[kid] {
-			continue
-		}
-		if len(known) == 0 {
-			if err := store.SaveInitialOIDCKey(ctx, kid, privBytes, pubBytes); err != nil {
-				return fmt.Errorf("save ES256 key %s: %w", kid, err)
-			}
-		} else if err := store.RotateOIDCKeys(ctx, kid, privBytes, pubBytes, gracePeriod); err != nil {
-			return fmt.Errorf("install ES256 key %s: %w", kid, err)
-		}
-		known[kid] = true
-		logger.Infow("Installed operator signing key", "algorithm", "es256", "kid", kid)
-	}
-	wantKid, privBytes, pubBytes, err := encode(keys[0])
+	current, err := encode(keys[0])
 	if err != nil {
 		return err
 	}
-	current, err := store.GetCurrentOIDCKey(ctx)
-	if err != nil {
-		return fmt.Errorf("read current ES256 key: %w", err)
-	}
-	if current == nil || current.Kid != wantKid {
-		if err := store.RotateOIDCKeys(ctx, wantKid, privBytes, pubBytes, gracePeriod); err != nil {
-			return fmt.Errorf("make ES256 key %s current: %w", wantKid, err)
+	verifying := make([]storage.OIDCKeyPair, 0, len(keys)-1)
+	for _, k := range keys[1:] {
+		kp, err := encode(k)
+		if err != nil {
+			return err
 		}
-		logger.Infow("Operator signing key made current", "algorithm", "es256", "kid", wantKid)
+		verifying = append(verifying, kp)
 	}
+	if err := store.SetOIDCKeyring(ctx, current, verifying, gracePeriod); err != nil {
+		return fmt.Errorf("set ES256 keys: %w", err)
+	}
+	logKeyringChange("es256", oidcKids(before), func() []string {
+		after, err := store.GetAllValidOIDCKeys(ctx)
+		if err != nil {
+			return nil
+		}
+		return oidcKids(after)
+	}(), current.Kid)
 	return nil
+}
+
+func keyPairFingerprints(keys []storage.KeyPair) []string {
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, keyFingerprint(k.Public))
+	}
+	sort.Strings(out)
+	return out
+}
+
+func oidcKids(keys []storage.OIDCKeyPair) []string {
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, k.Kid)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// logKeyringChange says what the operator's file did to the keyring, in
+// public identifiers only, and nothing when it did nothing.
+func logKeyringChange(algorithm string, before, after []string, signing string) {
+	if slices.Equal(before, after) {
+		return
+	}
+	logger.Infow("Operator signing keys installed", "algorithm", algorithm, "signing", signing, "valid_before", before, "valid_after", after)
 }
 
 // installOperatorSigningKeys reconciles both keyrings from keys and reports

@@ -106,7 +106,7 @@ func newRefreshHarness(t *testing.T, refresh http.HandlerFunc) *refreshHarness {
 		Store:          store,
 		trustedKeys:    []TrustedKey{{Key: cpPub, ReceivedAt: time.Now()}},
 		BiscuitTimeout: 500 * time.Millisecond,
-		config:         Options{RequiredRole: api.RoleNode},
+		config:         Options{RequiredRole: api.RoleNode, PrivKey: privKey},
 	}
 	node.SetIdentityCache(current)
 	return &refreshHarness{node: node, cpPub: cpPub, cpPriv: cpPriv, peerID: peerID, identity: current}

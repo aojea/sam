@@ -18,6 +18,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -261,7 +264,7 @@ func (n *AgentMeshNode) joinRouters(ctx context.Context, controlPlaneURL string,
 // EnrollBootstrap enrolls the node with the control plane using a pre-shared bootstrap token.
 // If the enrollment status is PENDING, it polls the status endpoint until approved or rejected.
 func (n *AgentMeshNode) EnrollBootstrap(ctx context.Context, controlPlaneURL string, bootstrapToken string) error {
-	enrollResp, err := n.enrollBootstrapCredential(ctx, controlPlaneURL, bootstrapToken)
+	enrollResp, err := n.enrollBootstrapCredential(ctx, controlPlaneURL, bootstrapToken, false)
 	if err != nil {
 		return err
 	}
@@ -280,11 +283,22 @@ func (n *AgentMeshNode) EnrollBootstrap(ctx context.Context, controlPlaneURL str
 
 // enrollBootstrapCredential is the HTTP half of EnrollBootstrap: it obtains
 // a credential with the bootstrap token and persists it with the mesh
-// configuration, without attaching to routers. A node that is already on
-// the mesh and only needs the control plane to know it again (the control
-// plane lost its store) uses this half alone.
-func (n *AgentMeshNode) enrollBootstrapCredential(ctx context.Context, controlPlaneURL string, bootstrapToken string) (*api.BootstrapEnrollResponse, error) {
-	pubKey := n.Host.Peerstore().PubKey(n.Host.ID())
+// configuration, without attaching to routers. With trustedOnly, for a node
+// that already has a trust root and only needs the control plane to know it
+// again (the control plane lost its store), the answer must verify under a
+// key the node already trusts; without it, first enrollment, the key in
+// the answer is trusted on first use.
+func (n *AgentMeshNode) enrollBootstrapCredential(ctx context.Context, controlPlaneURL string, bootstrapToken string, trustedOnly bool) (*api.BootstrapEnrollResponse, error) {
+	// The identity is the node key; the host, when there is one, carries
+	// the same key.
+	if n.config.PrivKey == nil {
+		return nil, errors.New("node has no private key")
+	}
+	pubKey := n.config.PrivKey.GetPublic()
+	peerID, err := peer.IDFromPublicKey(pubKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive peer ID: %w", err)
+	}
 	pubBytes, err := crypto.MarshalPublicKey(pubKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal public key: %w", err)
@@ -298,13 +312,13 @@ func (n *AgentMeshNode) enrollBootstrapCredential(ctx context.Context, controlPl
 
 	client := controlPlaneHTTPClient(30 * time.Second)
 	resp, err := cpclient.DoWithChallengeRetry(ctx, client, time.Now, cpclient.DefaultEnrollBackoff, func(enrollTS int64) (*http.Request, error) {
-		enrollSig, err := n.config.PrivKey.Sign(api.EnrollChallenge(n.Host.ID().String(), enrollTS))
+		enrollSig, err := n.config.PrivKey.Sign(api.EnrollChallenge(peerID.String(), enrollTS))
 		if err != nil {
 			return nil, fmt.Errorf("failed to sign enrollment challenge: %w", err)
 		}
 		req := &api.BootstrapEnrollRequest{
 			BootstrapToken:     bootstrapToken,
-			PeerId:             n.Host.ID().String(),
+			PeerId:             peerID.String(),
 			PublicKey:          pubBytes,
 			RequestedRole:      n.config.RequiredRole,
 			Labels:             n.labels(),
@@ -355,7 +369,7 @@ func (n *AgentMeshNode) enrollBootstrapCredential(ctx context.Context, controlPl
 		}
 		u = u.JoinPath("enroll", "status")
 		q := u.Query()
-		q.Set("peer_id", n.Host.ID().String())
+		q.Set("peer_id", peerID.String())
 		u.RawQuery = q.Encode()
 		statusURL := u.String()
 		ticker := time.NewTicker(2 * time.Second)
@@ -374,7 +388,7 @@ func (n *AgentMeshNode) enrollBootstrapCredential(ctx context.Context, controlPl
 					if err != nil {
 						return nil, fmt.Errorf("failed to create status request: %w", err)
 					}
-					if err := cpclient.SetChallengeHeaders(hReq, n.config.PrivKey, api.EnrollStatusChallenge(n.Host.ID().String(), ts), ts); err != nil {
+					if err := cpclient.SetChallengeHeaders(hReq, n.config.PrivKey, api.EnrollStatusChallenge(peerID.String(), ts), ts); err != nil {
 						return nil, fmt.Errorf("failed to sign enrollment status challenge: %w", err)
 					}
 					return hReq, nil
@@ -426,7 +440,20 @@ func (n *AgentMeshNode) enrollBootstrapCredential(ctx context.Context, controlPl
 		return nil, fmt.Errorf("received invalid control plane public key size: %d bytes", len(enrollResp.ControlPlanePublicKey))
 	}
 
-	if err := identity.VerifyBiscuitRole(enrollResp.BiscuitToken, ed25519.PublicKey(enrollResp.ControlPlanePublicKey), n.config.RequiredRole, n.BiscuitTimeout); err != nil {
+	if trustedOnly {
+		// This node already has a trust root. Whoever answered may name any
+		// key in the response; only a credential that verifies under a key
+		// this node trusts, for this node, with the required role, replaces
+		// the one it holds, and a response naming another key is refused:
+		// a party able to answer the control plane URL would otherwise
+		// swap the trust root and the router list with a single 401.
+		if !n.isTrustedKey(enrollResp.ControlPlanePublicKey) {
+			return nil, fmt.Errorf("re-enrollment answer names a control plane key this node does not trust (%s); refusing to replace the trust root", keyFingerprintHex(enrollResp.ControlPlanePublicKey))
+		}
+		if err := n.verifyOwnBiscuit(enrollResp.BiscuitToken); err != nil {
+			return nil, fmt.Errorf("re-enrollment credential does not verify under a trusted control plane key: %w", err)
+		}
+	} else if err := identity.VerifyBiscuitRole(enrollResp.BiscuitToken, ed25519.PublicKey(enrollResp.ControlPlanePublicKey), n.config.RequiredRole, n.BiscuitTimeout); err != nil {
 		return nil, fmt.Errorf("enrolled biscuit token lacks required role %q: %w", n.config.RequiredRole, err)
 	}
 
@@ -445,4 +472,22 @@ func (n *AgentMeshNode) enrollBootstrapCredential(ctx context.Context, controlPl
 
 	n.adoptEnrolledKeys(ctx, controlPlaneURL, enrollResp.ControlPlanePublicKey)
 	return enrollResp, nil
+}
+
+// isTrustedKey reports whether pub is one of the control plane keys this
+// node trusts now.
+func (n *AgentMeshNode) isTrustedKey(pub []byte) bool {
+	for _, k := range n.getTrustedPublicKeys() {
+		if k.Equal(ed25519.PublicKey(pub)) {
+			return true
+		}
+	}
+	return false
+}
+
+// keyFingerprintHex identifies a public key in a message the way the
+// control plane and routers do in theirs.
+func keyFingerprintHex(pub []byte) string {
+	sum := sha256.Sum256(pub)
+	return hex.EncodeToString(sum[:8])
 }

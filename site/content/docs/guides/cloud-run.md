@@ -106,20 +106,24 @@ JWTs) the first key in the file signs and every later one only verifies.
    {"algorithm": "ed25519", "fingerprint": "…"}` and `Operator signing keys
    reloaded … "signing_key_changed": true`, `/keys` publishes both keys, new
    credentials are signed by the new one, and a `KEY_ROTATION` event tells
-   routers and nodes to refresh. Credentials signed by the previous key keep
-   verifying for `--control-plane-key-grace-period` (default 1h) from the
-   moment the new key was installed. Routers log `Control plane signing keys
-   changed` with the fingerprints they now trust.
-3. **Wait out the overlap**: at least the grace period, and at least as long
-   as the longest-lived credential the previous key signed (the Biscuit TTL
-   for Ed25519, the STS JWT lifetime for P-256).
+   routers and nodes to refresh. A key stays valid for verification for as
+   long as you list it. Routers log `Control plane signing keys changed`
+   with the fingerprints they now trust.
+3. **Wait out the overlap**: at least as long as the longest-lived
+   credential the previous key signed (the Biscuit TTL for Ed25519, the STS
+   JWT lifetime for P-256).
 4. **Drop the previous key** the same way:
    ```bash
    cat ed25519-v2.pem p256-v1.pem | gcloud secrets versions add mesh-signing-keys --data-file=-
    gcloud secrets versions destroy 1 --secret=mesh-signing-keys   # when nothing may ever need it again
    ```
-   On a running instance the dropped key stays valid until its grace period
-   ends; a new instance never installs it.
+   A running instance gives the dropped key `--control-plane-key-grace-period`
+   (default 1h) before it stops verifying; a new instance never installs it.
+   Moving a previous key back to the front makes it the signing key again.
+
+The file must carry at least one key of each kind: owning the keys means
+owning both, and a file with only one kind is refused rather than leaving
+the other generated and unrotated.
 
 What a verifier accepts is always `/keys`, signed by every valid key, so a
 node still holding the previous key accepts the response that announces the

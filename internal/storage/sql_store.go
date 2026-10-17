@@ -914,6 +914,59 @@ func (s *SQLStore) RotateKeys(ctx context.Context, newPriv ed25519.PrivateKey, n
 	return tx.Commit()
 }
 
+// operatorKeyNoExpiry marks a key the operator lists for verification: valid
+// until the operator drops it, at which point SetKeyring gives it a grace
+// period. Far enough that no clock reaches it, finite so that the column
+// stays "not current".
+var operatorKeyNoExpiry = time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
+
+// SetKeyring implements Store.
+func (s *SQLStore) SetKeyring(ctx context.Context, current KeyPair, verifying []KeyPair, gracePeriod time.Duration) error {
+	if len(current.Public) == 0 {
+		return errors.New("SetKeyring: no current key")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now()
+
+	if _, err := tx.ExecContext(ctx, s.rebind(`DELETE FROM keyring WHERE expiration IS NOT NULL AND expiration <= ?`), now.UnixMilli()); err != nil {
+		return err
+	}
+	upsert := s.rebind(`INSERT INTO keyring (private_key, public_key, expiration, created_at) VALUES (?, ?, ?, ?)
+		ON CONFLICT (public_key) DO UPDATE SET private_key = excluded.private_key, expiration = excluded.expiration`)
+	for _, k := range verifying {
+		if _, err := tx.ExecContext(ctx, upsert, []byte(k.Private), []byte(k.Public), operatorKeyNoExpiry.UnixMilli(), now.UnixMilli()); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, upsert, []byte(current.Private), []byte(current.Public), nil, now.UnixMilli()); err != nil {
+		return err
+	}
+
+	// Every other key that is still valid: the one that was current before,
+	// or one the operator dropped from the file; both get the grace period
+	// unless they are already expiring sooner.
+	listed := make([]any, 0, len(verifying)+1)
+	placeholders := make([]string, 0, len(verifying)+1)
+	for _, k := range verifying {
+		listed = append(listed, []byte(k.Public))
+		placeholders = append(placeholders, "?")
+	}
+	listed = append(listed, []byte(current.Public))
+	placeholders = append(placeholders, "?")
+	grace := now.Add(gracePeriod).UnixMilli()
+	args := append([]any{grace}, listed...)
+	args = append(args, grace)
+	retire := s.rebind(`UPDATE keyring SET expiration = ? WHERE public_key NOT IN (` + strings.Join(placeholders, ", ") + `) AND (expiration IS NULL OR expiration > ?)`)
+	if _, err := tx.ExecContext(ctx, retire, args...); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // SaveInitialKey implements Store.
 func (s *SQLStore) SaveInitialKey(ctx context.Context, priv ed25519.PrivateKey, pub ed25519.PublicKey) error {
 	query := s.rebind(`INSERT INTO keyring (private_key, public_key, created_at) VALUES (?, ?, ?)`)
@@ -2183,6 +2236,49 @@ func (s *SQLStore) SaveInitialOIDCKey(ctx context.Context, kid string, priv, pub
 	}
 	_, err := s.db.ExecContext(ctx, query, kid, priv, pub, time.Now().UnixMilli())
 	return err
+}
+
+// SetOIDCKeyring implements Store.
+func (s *SQLStore) SetOIDCKeyring(ctx context.Context, current OIDCKeyPair, verifying []OIDCKeyPair, gracePeriod time.Duration) error {
+	if current.Kid == "" {
+		return errors.New("SetOIDCKeyring: no current key")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now()
+
+	if _, err := tx.ExecContext(ctx, s.rebind(`DELETE FROM oidc_keyring WHERE expiration IS NOT NULL AND expiration <= ?`), now.UnixMilli()); err != nil {
+		return err
+	}
+	upsert := s.rebind(`INSERT INTO oidc_keyring (kid, private_key, public_key, expiration, created_at) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (kid) DO UPDATE SET private_key = excluded.private_key, public_key = excluded.public_key, expiration = excluded.expiration`)
+	for _, k := range verifying {
+		if _, err := tx.ExecContext(ctx, upsert, k.Kid, k.PrivateKey, k.PublicKey, operatorKeyNoExpiry.UnixMilli(), now.UnixMilli()); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, upsert, current.Kid, current.PrivateKey, current.PublicKey, nil, now.UnixMilli()); err != nil {
+		return err
+	}
+	listed := make([]any, 0, len(verifying)+1)
+	placeholders := make([]string, 0, len(verifying)+1)
+	for _, k := range verifying {
+		listed = append(listed, k.Kid)
+		placeholders = append(placeholders, "?")
+	}
+	listed = append(listed, current.Kid)
+	placeholders = append(placeholders, "?")
+	grace := now.Add(gracePeriod).UnixMilli()
+	args := append([]any{grace}, listed...)
+	args = append(args, grace)
+	retire := s.rebind(`UPDATE oidc_keyring SET expiration = ? WHERE kid NOT IN (` + strings.Join(placeholders, ", ") + `) AND (expiration IS NULL OR expiration > ?)`)
+	if _, err := tx.ExecContext(ctx, retire, args...); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // RotateOIDCKeys implements Store.

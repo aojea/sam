@@ -260,6 +260,16 @@ type Store interface {
 	// SaveInitialKey sets the initial key pair if no keys exist yet.
 	SaveInitialKey(ctx context.Context, priv ed25519.PrivateKey, pub ed25519.PublicKey) error
 
+	// SetKeyring makes the keyring reflect a set the operator owns, in one
+	// transaction: current becomes the signing key, each of verifying stays
+	// valid for verification for as long as the operator lists it, and any
+	// other key still valid in the store is given gracePeriod to expire so
+	// that credentials it signed keep verifying meanwhile. Keys already
+	// present are updated in place, so the same set applied twice is a
+	// no-op and a key moved back to the front becomes current again.
+	// Expired rows are purged first.
+	SetKeyring(ctx context.Context, current KeyPair, verifying []KeyPair, gracePeriod time.Duration) error
+
 	// SaveUser creates or updates a User.
 	SaveUser(ctx context.Context, user *User) error
 
@@ -435,6 +445,9 @@ type Store interface {
 
 	// RotateOIDCKeys rotates the current ES256 key to a new key pair and sets the expiration of the old key.
 	RotateOIDCKeys(ctx context.Context, kid string, newPriv, newPub []byte, gracePeriod time.Duration) error
+
+	// SetOIDCKeyring is SetKeyring for the ES256 keyring, keyed by kid.
+	SetOIDCKeyring(ctx context.Context, current OIDCKeyPair, verifying []OIDCKeyPair, gracePeriod time.Duration) error
 
 	// SaveRevokedBiscuit persists a Biscuit revocation ID until its expiration time.
 	SaveRevokedBiscuit(ctx context.Context, revocationID string, expiresAt time.Time) error
