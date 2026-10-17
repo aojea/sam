@@ -83,11 +83,12 @@ file, keep the previous one until every credential it signed has expired
 (the Biscuit TTL for Ed25519, the STS JWT lifetime for P-256), publish the new
 secret version, roll a revision, then drop the old key the same way.
 
-What this does not keep is the enrollment records: a node's own calls to the
+What this does not keep is the enrollment records. A node's own calls to the
 control plane (policy sync, catalog, refresh) answer `401 node credential
-required` after a revision until the node re-enrolls, which it does at its
-next renewal with the bootstrap token. The data plane is unaffected in the
-meantime. PostgreSQL keeps the records too.
+required` after a revision; a node started with `--bootstrap-token-path`
+notices that at its next sync and enrolls again with the token, without a
+restart, and the data plane is unaffected in the meantime. PostgreSQL keeps
+the records too.
 
 Why each Cloud Run flag matters:
 

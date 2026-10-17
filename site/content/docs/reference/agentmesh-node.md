@@ -58,7 +58,7 @@ bootstrap token, `join` runs an interactive OIDC login.
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--bootstrap-token-path` | | File containing a bootstrap token. |
+| `--bootstrap-token-path` | | File containing a bootstrap token. A node that keeps this file can also recover on its own: when the control plane answers `401` to one of its authenticated calls (a control plane that lost its store, such as a new Cloud Run revision without a database), the node reads the token again and enrolls again at the next sync, without a restart; `agentmesh_node_reenrollments_total{result}` counts it. |
 | `--bootstrap-token` | | The token as a value. Visible in process listings. The file form is preferred. |
 | `--offline-access` | `false` | Request an OIDC refresh token, so that the node can re-enroll on its own when its credential expires. |
 | `--allow-loopback` | `false` | Advertise and dial loopback and link-local addresses. For several nodes on one host. |

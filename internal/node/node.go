@@ -144,7 +144,9 @@ func (n *AgentMeshNode) isAdmitted(p peer.ID) bool {
 }
 
 type AgentMeshNode struct {
-	config               Options
+	config Options
+	// enrollBootstrapFn is EnrollBootstrap unless a test injects the step.
+	enrollBootstrapFn    func(ctx context.Context, controlPlaneURL, bootstrapToken string) error
 	Host                 host.Host
 	Directory            Directory
 	PubSub               *pubsub.PubSub

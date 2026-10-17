@@ -56,6 +56,23 @@ var ErrBodyTooLarge = errors.New("control plane answer exceeds the body cap")
 // release check for it, so a newer node works against an older control plane.
 var ErrNotFound = errors.New("control plane does not serve this endpoint")
 
+// StatusError is a control plane answer other than success, with the status
+// code a caller can act on (a 401 on an authenticated endpoint says the
+// control plane does not know this node any more) and the body it sent.
+type StatusError struct {
+	Code   int
+	Status string
+	Body   string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("control plane returned status %s: %s", e.Status, e.Body)
+}
+
+func newStatusError(resp *http.Response, body []byte) *StatusError {
+	return &StatusError{Code: resp.StatusCode, Status: resp.Status, Body: strings.TrimSpace(string(body))}
+}
+
 // ReadBody reads a control plane response body of at most MaxBodyBytes and
 // reports ErrBodyTooLarge for anything larger.
 func ReadBody(r io.Reader) ([]byte, error) {
@@ -269,7 +286,7 @@ func (c *Client) ReportCatalog(ctx context.Context, biscuit []byte, services []*
 
 	if resp.StatusCode != http.StatusNoContent {
 		body, _ := ReadBody(resp.Body)
-		return fmt.Errorf("control plane returned status %s: %s", resp.Status, string(body))
+		return newStatusError(resp, body)
 	}
 	return nil
 }
@@ -351,7 +368,7 @@ func (c *Client) get(ctx context.Context, path string, biscuit []byte, challenge
 		return fmt.Errorf("%w: %s", ErrNotFound, path)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("control plane returned status %s: %s", resp.Status, string(body))
+		return newStatusError(resp, body)
 	}
 	if err := proto.Unmarshal(body, msg); err != nil {
 		return fmt.Errorf("failed to decode %s response: %w", path, err)
@@ -392,7 +409,7 @@ func (c *Client) postWithChallenge(ctx context.Context, path string, biscuit []b
 		return fmt.Errorf("%w: %s", ErrNotFound, path)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("control plane returned status %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return newStatusError(resp, body)
 	}
 	if err := proto.Unmarshal(body, respMsg); err != nil {
 		return fmt.Errorf("failed to decode %s response: %w", path, err)

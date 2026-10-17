@@ -463,6 +463,7 @@ func main() {
 					RouterConnectTimeout:     routerConnectTimeoutFlag,
 					RequiredRole:             api.RoleNode,
 					ControlPlaneSyncInterval: controlPlaneSyncIntervalFlag,
+					BootstrapTokenPath:       bootstrapTokenPathFlag,
 					DHTLookupLimit:           dhtLookupLimitFlag,
 					DiscoveryConcurrency:     discoveryConcurrencyFlag,
 					BackendProbeTimeout:      backendProbeTimeoutFlag,
@@ -758,6 +759,7 @@ func main() {
 				RouterConnectTimeout:     routerConnectTimeoutFlag,
 				RequiredRole:             api.RoleNode,
 				ControlPlaneSyncInterval: controlPlaneSyncIntervalFlag,
+				BootstrapTokenPath:       bootstrapTokenPathFlag,
 			})
 			if err != nil {
 				logger.Fatalf("Failed to initialize node for enrollment: %v", err)

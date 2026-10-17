@@ -142,6 +142,13 @@ type Options struct {
 	// with the fleet's cadence, or a policy update on a large mesh is a
 	// stampede.
 	ControlPlaneSyncJitter time.Duration
+	// BootstrapTokenPath is the file the node's bootstrap (join) token is
+	// read from. A node that has it can enroll again on its own when the
+	// control plane answers 401 to an authenticated call, which is what a
+	// control plane that lost its store (a new Cloud Run revision without a
+	// database) does; the token is read again each time so a rotated token
+	// is picked up. Empty leaves recovery to the renewal loop.
+	BootstrapTokenPath string
 	// BackendProbeTimeout bounds how long a command-spawned service backend
 	// (agentmesh-node.yaml's `command`, spawned as a local subprocess) is given to
 	// answer before the service is registered but withheld from

@@ -20,11 +20,16 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	cpclient "github.com/google/agentmesh/internal/controlplane/client"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 // The node reads three things from the control plane while it runs: the
@@ -328,6 +333,9 @@ func (n *AgentMeshNode) startControlPlaneSyncLoop(ctx context.Context, interval 
 			timer.Reset(interval + time.Duration(rand.Int63n(int64(interval/10)+1)))
 
 			err := n.SyncControlPlane(ctx)
+			if err != nil && n.controlPlaneForgotUs(err) && n.recoverEnrollment(ctx) {
+				err = n.SyncControlPlane(ctx)
+			}
 			switch {
 			case err != nil && failures == 0:
 				logger.Warnf("Control plane sync failed: %v", err)
@@ -343,4 +351,66 @@ func (n *AgentMeshNode) startControlPlaneSyncLoop(ctx context.Context, interval 
 			}
 		}
 	}()
+}
+
+// reenrollmentsTotal counts the times this node enrolled again on its own
+// after the control plane stopped recognizing its credential.
+var reenrollmentsTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "agentmesh_node_reenrollments_total",
+		Help: "Times this node enrolled again with its bootstrap token after the control plane answered 401 to an authenticated call, by result",
+	},
+	[]string{"result"},
+)
+
+// controlPlaneForgotUs reports whether err is the control plane refusing this
+// node's credential outright (401 on an authenticated endpoint). A control
+// plane that lost its store, such as a new Cloud Run revision without a
+// database, answers that to a node whose Biscuit still verifies everywhere
+// else: the signing key is the same, the enrollment record is gone.
+func (n *AgentMeshNode) controlPlaneForgotUs(err error) bool {
+	var se *cpclient.StatusError
+	return errors.As(err, &se) && se.Code == http.StatusUnauthorized
+}
+
+// recoverEnrollment enrolls again with the bootstrap token at
+// Options.BootstrapTokenPath and reports whether it did. Without a path the
+// node leaves recovery to the renewal loop and says so once per failure.
+func (n *AgentMeshNode) recoverEnrollment(ctx context.Context) bool {
+	path := n.config.BootstrapTokenPath
+	if path == "" {
+		logger.Warn("Control plane no longer recognizes this node's credential and no --bootstrap-token-path is configured; waiting for the renewal loop")
+		reenrollmentsTotal.WithLabelValues("no_token").Inc()
+		return false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		logger.Warnw("Control plane no longer recognizes this node's credential; bootstrap token unreadable", "path", path, "error", err)
+		reenrollmentsTotal.WithLabelValues("no_token").Inc()
+		return false
+	}
+	controlPlaneURL, err := n.Store.LoadControlPlaneURL()
+	if err != nil {
+		logger.Warnw("Control plane no longer recognizes this node's credential; control plane URL unknown", "error", err)
+		reenrollmentsTotal.WithLabelValues("failed").Inc()
+		return false
+	}
+	logger.Warnw("Control plane no longer recognizes this node's credential; enrolling again with the bootstrap token", "control_plane", controlPlaneURL)
+	// The credential half only: this node is already attached to its
+	// routers, and its own loop keeps it so.
+	enroll := n.enrollBootstrapFn
+	if enroll == nil {
+		enroll = func(ctx context.Context, controlPlaneURL, token string) error {
+			_, err := n.enrollBootstrapCredential(ctx, controlPlaneURL, token)
+			return err
+		}
+	}
+	if err := enroll(ctx, controlPlaneURL, strings.TrimSpace(string(raw))); err != nil {
+		logger.Errorw("Re-enrollment with the bootstrap token failed", "error", err)
+		reenrollmentsTotal.WithLabelValues("failed").Inc()
+		return false
+	}
+	logger.Info("Re-enrolled with the bootstrap token; the control plane knows this node again")
+	reenrollmentsTotal.WithLabelValues("ok").Inc()
+	return true
 }

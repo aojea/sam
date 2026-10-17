@@ -261,14 +261,37 @@ func (n *AgentMeshNode) joinRouters(ctx context.Context, controlPlaneURL string,
 // EnrollBootstrap enrolls the node with the control plane using a pre-shared bootstrap token.
 // If the enrollment status is PENDING, it polls the status endpoint until approved or rejected.
 func (n *AgentMeshNode) EnrollBootstrap(ctx context.Context, controlPlaneURL string, bootstrapToken string) error {
+	enrollResp, err := n.enrollBootstrapCredential(ctx, controlPlaneURL, bootstrapToken)
+	if err != nil {
+		return err
+	}
+
+	// Connect and Auth to router after enrollment to join the mesh
+	if len(enrollResp.RouterAddresses) == 0 {
+		return fmt.Errorf("failed to connect and authenticate after bootstrap enrollment: control plane returned no router addresses")
+	}
+	if err := n.joinRouters(ctx, controlPlaneURL, enrollResp.RouterAddresses); err != nil {
+		return fmt.Errorf("failed to connect/auth with router after bootstrap enrollment: %w", err)
+	}
+
+	logger.Info("Successfully enrolled via Bootstrap token and joined mesh.")
+	return nil
+}
+
+// enrollBootstrapCredential is the HTTP half of EnrollBootstrap: it obtains
+// a credential with the bootstrap token and persists it with the mesh
+// configuration, without attaching to routers. A node that is already on
+// the mesh and only needs the control plane to know it again (the control
+// plane lost its store) uses this half alone.
+func (n *AgentMeshNode) enrollBootstrapCredential(ctx context.Context, controlPlaneURL string, bootstrapToken string) (*api.BootstrapEnrollResponse, error) {
 	pubKey := n.Host.Peerstore().PubKey(n.Host.ID())
 	pubBytes, err := crypto.MarshalPublicKey(pubKey)
 	if err != nil {
-		return fmt.Errorf("failed to marshal public key: %w", err)
+		return nil, fmt.Errorf("failed to marshal public key: %w", err)
 	}
 
 	if !strings.HasPrefix(controlPlaneURL, "http://") && !strings.HasPrefix(controlPlaneURL, "https://") {
-		return fmt.Errorf("control plane address must be an HTTP or HTTPS URL for enrollment: %s", controlPlaneURL)
+		return nil, fmt.Errorf("control plane address must be an HTTP or HTTPS URL for enrollment: %s", controlPlaneURL)
 	}
 	enrollURL := controlPlaneURL + "/enroll"
 	logger.Infof("Enrolling via Bootstrap token at %s", enrollURL)
@@ -300,27 +323,27 @@ func (n *AgentMeshNode) EnrollBootstrap(ctx context.Context, controlPlaneURL str
 		return httpReq, nil
 	})
 	if err != nil {
-		return fmt.Errorf("HTTP request failed: %w", err)
+		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxControlPlaneBodyBytes))
-		return fmt.Errorf("enrollment failed with status %s: %s", resp.Status, string(body))
+		return nil, fmt.Errorf("enrollment failed with status %s: %s", resp.Status, string(body))
 	}
 
 	respData, err := cpclient.ReadBody(resp.Body)
 	if err != nil {
-		return fmt.Errorf("bootstrap enrollment response: %w", err)
+		return nil, fmt.Errorf("bootstrap enrollment response: %w", err)
 	}
 
 	enrollResp := &api.BootstrapEnrollResponse{}
 	if err := proto.Unmarshal(respData, enrollResp); err != nil {
-		return fmt.Errorf("failed to unmarshal response: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	if enrollResp.ErrorMessage != "" {
-		return fmt.Errorf("enrollment failed: %s", enrollResp.ErrorMessage)
+		return nil, fmt.Errorf("enrollment failed: %s", enrollResp.ErrorMessage)
 	}
 
 	if enrollResp.Status == api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING {
@@ -328,7 +351,7 @@ func (n *AgentMeshNode) EnrollBootstrap(ctx context.Context, controlPlaneURL str
 
 		u, err := url.Parse(controlPlaneURL)
 		if err != nil {
-			return fmt.Errorf("invalid control plane URL: %w", err)
+			return nil, fmt.Errorf("invalid control plane URL: %w", err)
 		}
 		u = u.JoinPath("enroll", "status")
 		q := u.Query()
@@ -342,7 +365,7 @@ func (n *AgentMeshNode) EnrollBootstrap(ctx context.Context, controlPlaneURL str
 		for {
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return nil, ctx.Err()
 			case <-ticker.C:
 				// Prove possession of the enrollment key on every poll; the
 				// control plane returns the biscuit only to the enrollee.
@@ -382,54 +405,44 @@ func (n *AgentMeshNode) EnrollBootstrap(ctx context.Context, controlPlaneURL str
 				}
 
 				if statusResp.ErrorMessage != "" {
-					return fmt.Errorf("enrollment failed: %s", statusResp.ErrorMessage)
+					return nil, fmt.Errorf("enrollment failed: %s", statusResp.ErrorMessage)
 				}
 
 				if statusResp.Status == api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED {
 					enrollResp = statusResp
 					break pollLoop
 				} else if statusResp.Status == api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED {
-					return fmt.Errorf("enrollment was rejected by administrator")
+					return nil, fmt.Errorf("enrollment was rejected by administrator")
 				}
 			}
 		}
 	}
 
 	if len(enrollResp.BiscuitToken) == 0 {
-		return fmt.Errorf("received empty biscuit token from enrollment response")
+		return nil, fmt.Errorf("received empty biscuit token from enrollment response")
 	}
 
 	if len(enrollResp.ControlPlanePublicKey) != ed25519.PublicKeySize {
-		return fmt.Errorf("received invalid control plane public key size: %d bytes", len(enrollResp.ControlPlanePublicKey))
+		return nil, fmt.Errorf("received invalid control plane public key size: %d bytes", len(enrollResp.ControlPlanePublicKey))
 	}
 
 	if err := identity.VerifyBiscuitRole(enrollResp.BiscuitToken, ed25519.PublicKey(enrollResp.ControlPlanePublicKey), n.config.RequiredRole, n.BiscuitTimeout); err != nil {
-		return fmt.Errorf("enrolled biscuit token lacks required role %q: %w", n.config.RequiredRole, err)
+		return nil, fmt.Errorf("enrolled biscuit token lacks required role %q: %w", n.config.RequiredRole, err)
 	}
 
 	if err := n.Store.SaveIdentity(enrollResp.BiscuitToken); err != nil {
-		return fmt.Errorf("failed to save identity: %v", err)
+		return nil, fmt.Errorf("failed to save identity: %v", err)
 	}
 	n.SetIdentityCache(enrollResp.BiscuitToken)
 
 	if err := n.Store.SaveIdentityExpiration(expireUnix(enrollResp.ExpireTime)); err != nil {
-		return fmt.Errorf("failed to save identity expiration: %v", err)
+		return nil, fmt.Errorf("failed to save identity expiration: %v", err)
 	}
 
 	if err := n.Store.SaveMeshConfig(enrollResp.ControlPlanePublicKey, enrollResp.RouterAddresses); err != nil {
-		return fmt.Errorf("failed to save mesh config: %v", err)
+		return nil, fmt.Errorf("failed to save mesh config: %v", err)
 	}
 
 	n.adoptEnrolledKeys(ctx, controlPlaneURL, enrollResp.ControlPlanePublicKey)
-
-	// Connect and Auth to router after enrollment to join the mesh
-	if len(enrollResp.RouterAddresses) == 0 {
-		return fmt.Errorf("failed to connect and authenticate after bootstrap enrollment: control plane returned no router addresses")
-	}
-	if err := n.joinRouters(ctx, controlPlaneURL, enrollResp.RouterAddresses); err != nil {
-		return fmt.Errorf("failed to connect/auth with router after bootstrap enrollment: %w", err)
-	}
-
-	logger.Info("Successfully enrolled via Bootstrap token and joined mesh.")
-	return nil
+	return enrollResp, nil
 }
