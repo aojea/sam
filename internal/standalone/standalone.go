@@ -42,6 +42,7 @@ import (
 	"github.com/google/agentmesh/internal/storage"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -820,11 +821,13 @@ func prependInferredRouterAddr(path string, body []byte, inferredAddr string) ([
 		// flat list (candidatesFromInfo), so the entry for this router must
 		// carry the inferred address too or the member dials only what the
 		// router could announce itself, which behind a PaaS front end is its
-		// loopback listener.
-		peerID := inferredAddrPeerID(inferredAddr)
-		for _, r := range msg.Routers {
-			if r.GetPeerId() == peerID {
-				r.Addresses = prepend(r.Addresses)
+		// loopback listener. Peer IDs are compared as decoded values, never
+		// as strings: a peer ID has several valid string encodings.
+		if info, err := peer.AddrInfoFromString(inferredAddr); err == nil {
+			for _, r := range msg.Routers {
+				if id, err := peer.Decode(r.GetPeerId()); err == nil && id == info.ID {
+					r.Addresses = prepend(r.Addresses)
+				}
 			}
 		}
 		b, err := proto.Marshal(&msg)
@@ -848,17 +851,6 @@ func prependInferredRouterAddr(path string, body []byte, inferredAddr string) ([
 	default:
 		return nil, false
 	}
-}
-
-// inferredAddrPeerID returns the peer ID an inferred multiaddr ends in
-// (`.../p2p/<peerID>`), or "" when it has none.
-func inferredAddrPeerID(addr string) string {
-	const sep = "/p2p/"
-	i := strings.LastIndex(addr, sep)
-	if i < 0 {
-		return ""
-	}
-	return addr[i+len(sep):]
 }
 
 // inferredRequestMultiaddr derives `/dns4/<host>/tcp/<port>/ws(s)/p2p/<peerID>`

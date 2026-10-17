@@ -169,9 +169,12 @@ func TestPrependInferredRouterAddr(t *testing.T) {
 	const inferred = "/dns4/agentmesh-one-xyz.a.run.app/tcp/443/wss/p2p/12D3KooWBzUDQCkZhz2rWrYBhpjcCH8VnrRNcwCW6DoF36iADYrY"
 	const local = "/ip4/127.0.0.1/tcp/8080/ws/p2p/12D3KooWBzUDQCkZhz2rWrYBhpjcCH8VnrRNcwCW6DoF36iADYrY"
 
-	enrollIn, _ := proto.Marshal(&api.BootstrapEnrollResponse{
+	enrollIn, err := proto.Marshal(&api.BootstrapEnrollResponse{
 		RouterAddresses: []string{local},
 	})
+	if err != nil {
+		t.Fatalf("Marshal BootstrapEnrollResponse: %v", err)
+	}
 	enrollOutBytes, ok := prependInferredRouterAddr("/enroll", enrollIn, inferred)
 	if !ok {
 		t.Fatal("prependInferredRouterAddr(/enroll) returned false")
@@ -184,10 +187,13 @@ func TestPrependInferredRouterAddr(t *testing.T) {
 		t.Fatalf("BootstrapEnrollResponse.RouterAddresses = %v, want [%s %s]", enrollOut.RouterAddresses, inferred, local)
 	}
 
-	regIn, _ := proto.Marshal(&api.EnrollResponse{
+	regIn, err := proto.Marshal(&api.EnrollResponse{
 		BiscuitToken:    []byte("tok"),
 		RouterAddresses: []string{local},
 	})
+	if err != nil {
+		t.Fatalf("Marshal EnrollResponse: %v", err)
+	}
 	regOutBytes, ok := prependInferredRouterAddr("/register", regIn, inferred)
 	if !ok {
 		t.Fatal("prependInferredRouterAddr(/register) returned false")
@@ -204,13 +210,17 @@ func TestPrependInferredRouterAddr(t *testing.T) {
 	// router gets the inferred address, another router's entry is untouched.
 	const otherPeer = "12D3KooWDk5pWkyxVERi6kt3TyRZCaXWqg441QEQxaGkn5rWHB21"
 	const otherAddr = "/dns4/router-b.example.com/tcp/443/wss/p2p/" + otherPeer
-	infoIn, _ := proto.Marshal(&api.ControlPlaneInfoResponse{
+	infoIn, err := proto.Marshal(&api.ControlPlaneInfoResponse{
 		RouterAddresses: []string{local},
 		Routers: []*api.RouterInfo{
 			{PeerId: "12D3KooWBzUDQCkZhz2rWrYBhpjcCH8VnrRNcwCW6DoF36iADYrY", Addresses: []string{local}},
 			{PeerId: otherPeer, Addresses: []string{otherAddr}},
+			{PeerId: "not-a-peer-id", Addresses: []string{"/ip4/10.0.0.1/tcp/1/ws"}},
 		},
 	})
+	if err != nil {
+		t.Fatalf("Marshal ControlPlaneInfoResponse: %v", err)
+	}
 	infoOutBytes, ok := prependInferredRouterAddr("/info", infoIn, inferred)
 	if !ok {
 		t.Fatal("prependInferredRouterAddr(/info) returned false")
@@ -222,14 +232,17 @@ func TestPrependInferredRouterAddr(t *testing.T) {
 	if len(infoOut.RouterAddresses) != 2 || infoOut.RouterAddresses[0] != inferred || infoOut.RouterAddresses[1] != local {
 		t.Fatalf("ControlPlaneInfoResponse.RouterAddresses = %v, want [%s %s]", infoOut.RouterAddresses, inferred, local)
 	}
-	if len(infoOut.Routers) != 2 {
-		t.Fatalf("ControlPlaneInfoResponse.Routers has %d entries, want 2", len(infoOut.Routers))
+	if len(infoOut.Routers) != 3 {
+		t.Fatalf("ControlPlaneInfoResponse.Routers has %d entries, want 3", len(infoOut.Routers))
 	}
 	if got := infoOut.Routers[0].Addresses; len(got) != 2 || got[0] != inferred || got[1] != local {
 		t.Fatalf("Routers[0].Addresses = %v, want [%s %s]", got, inferred, local)
 	}
 	if got := infoOut.Routers[1].Addresses; len(got) != 1 || got[0] != otherAddr {
 		t.Fatalf("Routers[1].Addresses = %v, want [%s] (another router's entry must not change)", got, otherAddr)
+	}
+	if got := infoOut.Routers[2].Addresses; len(got) != 1 || got[0] != "/ip4/10.0.0.1/tcp/1/ws" {
+		t.Fatalf("Routers[2].Addresses = %v, want the entry with an undecodable peer id untouched", got)
 	}
 
 	if returnsRouterAddresses("/refresh") {
