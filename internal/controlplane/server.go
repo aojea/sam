@@ -137,7 +137,11 @@ type Server struct {
 	meshMu sync.RWMutex
 	mesh   MeshAdapter
 
-	providersMu           sync.RWMutex
+	providersMu sync.RWMutex
+	// resolving holds the workload issuers a background resolver is working
+	// on, so that a second pass over the configuration (Init is exported for
+	// embedders) starts no second resolver for the same issuer.
+	resolving             map[string]bool
 	providers             map[string]*oidc.Provider
 	workloadIssuers       map[string]bool
 	workloadEmailSuffixes map[string][]string
@@ -449,17 +453,45 @@ func (s *Server) discoverProviders() error {
 		s.setProvider(iss, provider)
 	}
 	for _, iss := range deferred {
+		if s.providerKnown(iss) {
+			continue
+		}
 		workloadIssuerReady.WithLabelValues(iss).Set(0)
 		provider, err := s.discoverProvider(iss)
 		if err != nil {
 			logger.Warnw("Workload issuer not resolved; tokens from it are refused until it answers", "issuer", iss, "error", err)
-			s.wg.Add(1)
-			go s.resolveWorkloadIssuer(iss)
+			if s.markResolving(iss) {
+				s.wg.Add(1)
+				go s.resolveWorkloadIssuer(iss)
+			}
 			continue
 		}
 		s.setProvider(iss, provider)
 	}
 	return nil
+}
+
+// providerKnown reports whether iss is resolved or has a resolver running.
+func (s *Server) providerKnown(iss string) bool {
+	s.providersMu.RLock()
+	defer s.providersMu.RUnlock()
+	_, resolved := s.providers[iss]
+	return resolved || s.resolving[iss]
+}
+
+// markResolving records that a resolver for iss is starting and reports
+// whether the caller is the one that should start it.
+func (s *Server) markResolving(iss string) bool {
+	s.providersMu.Lock()
+	defer s.providersMu.Unlock()
+	if s.resolving == nil {
+		s.resolving = make(map[string]bool)
+	}
+	if s.resolving[iss] {
+		return false
+	}
+	s.resolving[iss] = true
+	return true
 }
 
 // discoverProvider runs one bounded discovery of iss with the server's HTTP
@@ -482,6 +514,7 @@ func (s *Server) setProvider(iss string, provider *oidc.Provider) {
 	s.providersMu.Lock()
 	defer s.providersMu.Unlock()
 	s.providers[iss] = provider
+	delete(s.resolving, iss)
 	if s.workloadIssuers[iss] || len(s.workloadEmailSuffixes[iss]) > 0 {
 		workloadIssuerReady.WithLabelValues(iss).Set(1)
 	}
@@ -510,6 +543,9 @@ func (s *Server) resolveWorkloadIssuer(iss string) {
 		select {
 		case <-s.ctx.Done():
 			timer.Stop()
+			s.providersMu.Lock()
+			delete(s.resolving, iss)
+			s.providersMu.Unlock()
 			return
 		case <-timer.C:
 		}

@@ -4916,6 +4916,17 @@ func TestWorkloadIssuerResolvedInBackground(t *testing.T) {
 	if _, ok := srv.getProviders()[workloadIss]; ok {
 		t.Fatalf("provider for %s present although its discovery never answered", workloadIss)
 	}
+	// A second pass over the configuration (Init is exported for embedders)
+	// must not start a second resolver for the same issuer.
+	if err := srv.discoverProviders(); err != nil {
+		t.Fatalf("second discoverProviders: %v", err)
+	}
+	srv.providersMu.RLock()
+	resolving := len(srv.resolving)
+	srv.providersMu.RUnlock()
+	if resolving != 1 {
+		t.Fatalf("%d resolvers after two discovery passes, want 1", resolving)
+	}
 
 	ctx := context.Background()
 	if err := store.SavePolicyDocument(ctx,
@@ -4979,6 +4990,12 @@ func TestWorkloadIssuerResolvedInBackground(t *testing.T) {
 	}
 	if got := gaugeValue(t, workloadIssuerReady.WithLabelValues(workloadIss)); got != 1 {
 		t.Fatalf("workload_issuer_ready{%s} = %v after resolution, want 1", workloadIss, got)
+	}
+	srv.providersMu.RLock()
+	resolving = len(srv.resolving)
+	srv.providersMu.RUnlock()
+	if resolving != 0 {
+		t.Fatalf("%d resolvers still recorded after resolution, want 0", resolving)
 	}
 	if code, body := exchange(); code != http.StatusOK {
 		t.Fatalf("exchange after the issuer resolved returned %d %q, want 200", code, body)
