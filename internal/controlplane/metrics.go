@@ -68,6 +68,15 @@ var (
 		},
 		[]string{"algorithm"},
 	)
+
+	// operatorSigningKeysReloadErrors counts the times the key file changed
+	// but could not be read, parsed or installed; the keys in use stay.
+	operatorSigningKeysReloadErrors = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "agentmesh_control_plane_operator_signing_keys_reload_errors_total",
+			Help: "Times the operator signing key file could not be reloaded; the keys already in use were kept",
+		},
+	)
 )
 
 // observeRoute counts and times requests to one registered mux pattern. The

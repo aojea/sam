@@ -58,7 +58,8 @@ Without PostgreSQL every revision starts from an empty store, which means
 new signing keys: every credential the mesh issued stops verifying until each
 node re-enrolls. If you want the root of trust in your hands anyway, keep the
 keys in Secret Manager (wrap the secret with your own Cloud KMS key if you
-want) and mount them as a file; do the same with the policy:
+want: `--kms-key-name` on `gcloud secrets create`) and mount them as a file;
+do the same with the policy:
 
 ```bash
 openssl genpkey -algorithm ed25519 -out ed25519-v1.pem
@@ -76,19 +77,57 @@ gcloud run services update agentmesh-one --project "$PROJECT" --region "$REGION"
 
 (Cloud Run mounts one secret per directory, hence the two paths.) The
 control plane installs the keys and seeds the policy on every start, so a new
-revision changes neither; credentials issued before it keep verifying, and
-`/keys` and `/jwks` publish the same keys. Automatic rotation is off while the
-file is present; **you rotate**: generate the new key, put it first in the
-file, keep the previous one until every credential it signed has expired
-(the Biscuit TTL for Ed25519, the STS JWT lifetime for P-256), publish the new
-secret version, roll a revision, then drop the old key the same way.
+revision changes neither: credentials issued before it keep verifying, and
+`/keys` and `/jwks` publish the same keys. While the file is present the
+control plane never generates or rotates a key on its own; it re-reads the
+file every 30 seconds and installs what changed, and the log says
+`Signing keys are operator-managed; automatic key rotation is off`.
 
-What this does not keep is the enrollment records. A node's own calls to the
-control plane (policy sync, catalog, refresh) answer `401 node credential
-required` after a revision; a node started with `--bootstrap-token-path`
-notices that at its next sync and enrolls again with the token, without a
-restart, and the data plane is unaffected in the meantime. PostgreSQL keeps
-the records too.
+Nodes started with `--bootstrap-token-path` complete the picture: after a
+revision the control plane does not know them (enrollment records live in
+the store), they notice at their next sync (`401 node credential required`)
+and enroll again with the token, without a restart. PostgreSQL keeps the
+records too, and is what you want for durable revocations.
+
+#### Rotating the keys
+
+Rotation is yours, and it is an edit to the file; nothing is restarted or
+redeployed. For each kind of key (Ed25519 for Biscuits, P-256 for the ES256
+JWTs) the first key in the file signs and every later one only verifies.
+
+1. **Generate** the new key where you keep keys (never on the control plane):
+   `openssl genpkey -algorithm ed25519 -out ed25519-v2.pem`.
+2. **Publish the overlap**: new key first, the previous one kept after it.
+   ```bash
+   cat ed25519-v2.pem ed25519-v1.pem p256-v1.pem | gcloud secrets versions add mesh-signing-keys --data-file=-
+   ```
+   Cloud Run updates the mounted `latest` in the running instance; within
+   about a minute the control plane logs `Installed operator signing key
+   {"algorithm": "ed25519", "fingerprint": "…"}` and `Operator signing keys
+   reloaded … "signing_key_changed": true`, `/keys` publishes both keys, new
+   credentials are signed by the new one, and a `KEY_ROTATION` event tells
+   routers and nodes to refresh. Credentials signed by the previous key keep
+   verifying for `--control-plane-key-grace-period` (default 1h) from the
+   moment the new key was installed. Routers log `Control plane signing keys
+   changed` with the fingerprints they now trust.
+3. **Wait out the overlap**: at least the grace period, and at least as long
+   as the longest-lived credential the previous key signed (the Biscuit TTL
+   for Ed25519, the STS JWT lifetime for P-256).
+4. **Drop the previous key** the same way:
+   ```bash
+   cat ed25519-v2.pem p256-v1.pem | gcloud secrets versions add mesh-signing-keys --data-file=-
+   gcloud secrets versions destroy 1 --secret=mesh-signing-keys   # when nothing may ever need it again
+   ```
+   On a running instance the dropped key stays valid until its grace period
+   ends; a new instance never installs it.
+
+What a verifier accepts is always `/keys`, signed by every valid key, so a
+node still holding the previous key accepts the response that announces the
+new one. The two kinds of key rotate independently.
+
+The whole procedure, including a control plane that restarts with an empty
+store between steps, is exercised by
+`TestOperatorSigningKeyRotationProcess` in `tests/integration`.
 
 Why each Cloud Run flag matters:
 

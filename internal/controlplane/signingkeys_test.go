@@ -378,3 +378,96 @@ func firstKid(jwks JSONWebKeySet) string {
 	}
 	return jwks.Keys[0].Kid
 }
+
+// TestOperatorSigningKeysReload is a rotation as the operator performs it:
+// the file changes under a running control plane and nothing is restarted.
+// The new first key becomes the signing key, the previous one stays for
+// verification, and a file that does not parse leaves the keys in use.
+func TestOperatorSigningKeysReload(t *testing.T) {
+	issuer, _ := startCustomMockOIDC(t)
+	v1, v2 := newEd25519(t), newEd25519(t)
+	ec := newP256(t)
+	path := writeKeyFile(t, pemPKCS8(t, v1), pemPKCS8(t, ec))
+
+	srv, store, baseURL := setupTestServer(t, issuer, func(o *Options) {
+		o.SigningKeyPath = path
+	})
+	defer func() { _ = srv.Close() }()
+	ctx := context.Background()
+	pub := func(k ed25519.PrivateKey) ed25519.PublicKey { return k.Public().(ed25519.PublicKey) }
+	keysOnWire := func(t *testing.T) map[string]bool {
+		t.Helper()
+		resp, err := http.Get(baseURL + "/keys")
+		if err != nil {
+			t.Fatalf("GET /keys: %v", err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			t.Fatalf("read /keys: %v", err)
+		}
+		var keys api.KeysResponse
+		if err := proto.Unmarshal(body, &keys); err != nil {
+			t.Fatalf("Unmarshal KeysResponse: %v", err)
+		}
+		out := map[string]bool{}
+		for _, k := range keys.PublicKeys {
+			out[string(k)] = true
+		}
+		return out
+	}
+
+	// No change: a reload pass installs nothing.
+	srv.reloadOperatorSigningKeys()
+	if got := keysOnWire(t); len(got) != 1 || !got[string(pub(v1))] {
+		t.Fatalf("/keys after a no-op reload = %d keys, want only v1", len(got))
+	}
+
+	// A file that does not parse is refused and the keys in use stay.
+	if err := os.WriteFile(path, []byte("-----BEGIN GARBAGE-----\nAAAA\n-----END GARBAGE-----\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv.reloadOperatorSigningKeys()
+	if got := keysOnWire(t); len(got) != 1 || !got[string(pub(v1))] {
+		t.Fatalf("/keys after a bad file = %d keys, want only v1 kept", len(got))
+	}
+
+	// The rotation: v2 first, v1 kept.
+	if err := os.WriteFile(path, append(append(pemPKCS8(t, v2), pemPKCS8(t, v1)...), pemPKCS8(t, ec)...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv.reloadOperatorSigningKeys()
+	got := keysOnWire(t)
+	if len(got) != 2 || !got[string(pub(v1))] || !got[string(pub(v2))] {
+		t.Fatalf("/keys after rotation = %d keys, want v1 and v2", len(got))
+	}
+	_, current, err := store.GetCurrentKey(ctx)
+	if err != nil {
+		t.Fatalf("GetCurrentKey: %v", err)
+	}
+	if !current.Equal(pub(v2)) {
+		t.Fatalf("signing key after rotation = %s, want %s (v2, first in the file)", keyFingerprint(current), keyFingerprint(pub(v2)))
+	}
+	// The ES256 key did not change and was not reinstalled.
+	all, err := store.GetAllValidOIDCKeys(ctx)
+	if err != nil {
+		t.Fatalf("GetAllValidOIDCKeys: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("ES256 keys after a rotation of the Ed25519 key = %d, want 1", len(all))
+	}
+
+	// Dropping v1 from the file: v2 stays current, v1 keeps verifying until
+	// its grace period ends (the store's business, not the file's).
+	if err := os.WriteFile(path, append(pemPKCS8(t, v2), pemPKCS8(t, ec)...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv.reloadOperatorSigningKeys()
+	_, current, err = store.GetCurrentKey(ctx)
+	if err != nil {
+		t.Fatalf("GetCurrentKey: %v", err)
+	}
+	if !current.Equal(pub(v2)) {
+		t.Fatalf("signing key after dropping v1 = %s, want %s (v2)", keyFingerprint(current), keyFingerprint(pub(v2)))
+	}
+}

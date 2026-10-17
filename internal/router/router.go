@@ -18,7 +18,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -912,10 +914,21 @@ func (r *Router) syncKeys() error {
 	}
 
 	r.keysMu.Lock()
+	changed := !samePublicKeys(r.trustedPublicKeys, newKeys)
 	r.trustedPublicKeys = newKeys
 	r.credential.pin(newKeys)
 	refresh := r.credential.predatesRotation(newKeys)
 	r.keysMu.Unlock()
+	if changed {
+		// The set a member's credential is verified against; a refusal
+		// with "no valid key found" is read against this line.
+		fps := make([]string, 0, len(newKeys))
+		for _, k := range newKeys {
+			sum := sha256.Sum256(k)
+			fps = append(fps, hex.EncodeToString(sum[:8]))
+		}
+		logger.Infow("Control plane signing keys changed", "keys", len(newKeys), "fingerprints", fps, "credential_refresh", refresh)
+	}
 
 	if refresh {
 		if err := r.RefreshEnrollment(r.ctx); err != nil {
@@ -1999,4 +2012,21 @@ func (r *Router) verifyOwnBiscuit(token []byte, peerID peer.ID) error {
 		return err
 	}
 	return identity.VerifyBiscuitRole(token, key, r.config.RequiredRole, r.config.BiscuitTimeout)
+}
+
+// samePublicKeys reports whether a and b hold the same keys in any order.
+func samePublicKeys(a, b []ed25519.PublicKey) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]bool, len(a))
+	for _, k := range a {
+		seen[string(k)] = true
+	}
+	for _, k := range b {
+		if !seen[string(k)] {
+			return false
+		}
+	}
+	return true
 }

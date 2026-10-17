@@ -471,6 +471,10 @@ func (s *Server) PublicURL() string {
 // AdminToken returns the resolved admin API token.
 func (s *Server) AdminToken() string { return s.adminToken }
 
+// ReloadOperatorSigningKeys re-reads the operator's signing key file now
+// instead of at the watcher's next tick. A no-op without --signing-key-path.
+func (s *Server) ReloadOperatorSigningKeys() { s.cp.ReloadOperatorSigningKeys() }
+
 // JoinToken returns the resolved cluster join token, or "" when the server
 // runs with DisableJoinToken.
 func (s *Server) JoinToken() string { return s.joinToken }

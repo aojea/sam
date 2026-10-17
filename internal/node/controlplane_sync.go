@@ -45,7 +45,20 @@ import (
 // stop a key rotation from landing; the errors are reported together. Called
 // once before Start, so the node dials the routers the control plane knows
 // now and enforces the bans it holds now, and then by the sync loop.
+//
+// A 401 to this node's own calls means the control plane no longer knows
+// it (a control plane that lost its store but kept its keys); with a
+// bootstrap token at hand the node enrolls again and the pull is repeated
+// once.
 func (n *AgentMeshNode) SyncControlPlane(ctx context.Context) error {
+	err := n.syncControlPlaneOnce(ctx)
+	if err != nil && n.controlPlaneForgotUs(err) && n.recoverEnrollment(ctx) {
+		return n.syncControlPlaneOnce(ctx)
+	}
+	return err
+}
+
+func (n *AgentMeshNode) syncControlPlaneOnce(ctx context.Context) error {
 	if n.Store == nil {
 		return errors.New("node has no store")
 	}
@@ -333,9 +346,6 @@ func (n *AgentMeshNode) startControlPlaneSyncLoop(ctx context.Context, interval 
 			timer.Reset(interval + time.Duration(rand.Int63n(int64(interval/10)+1)))
 
 			err := n.SyncControlPlane(ctx)
-			if err != nil && n.controlPlaneForgotUs(err) && n.recoverEnrollment(ctx) {
-				err = n.SyncControlPlane(ctx)
-			}
 			switch {
 			case err != nil && failures == 0:
 				logger.Warnf("Control plane sync failed: %v", err)

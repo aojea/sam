@@ -28,6 +28,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/agentmesh/api"
 	"github.com/google/agentmesh/internal/storage"
 )
 
@@ -46,6 +47,18 @@ import (
 type operatorSigningKeys struct {
 	ed25519 []ed25519.PrivateKey
 	es256   []*ecdsa.PrivateKey
+	// digest of the file content these keys came from, so the watcher
+	// reconciles only when the operator published something new.
+	digest [sha256.Size]byte
+}
+
+// currentEd25519 is the public key the file names as the Biscuit signing
+// key, nil when the file carries no Ed25519 key.
+func (k *operatorSigningKeys) currentEd25519() ed25519.PublicKey {
+	if k == nil || len(k.ed25519) == 0 {
+		return nil
+	}
+	return k.ed25519[0].Public().(ed25519.PublicKey)
 }
 
 // loadOperatorSigningKeys reads and validates the PEM file at path.
@@ -54,6 +67,17 @@ func loadOperatorSigningKeys(path string) (*operatorSigningKeys, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read signing keys: %w", err)
 	}
+	keys, err := parseOperatorSigningKeys(path, data)
+	if err != nil {
+		return nil, err
+	}
+	keys.digest = sha256.Sum256(data)
+	return keys, nil
+}
+
+// parseOperatorSigningKeys validates the PEM content of the file at path.
+func parseOperatorSigningKeys(path string, data []byte) (*operatorSigningKeys, error) {
+	var err error
 	keys := &operatorSigningKeys{}
 	for block, rest := pem.Decode(data); block != nil; block, rest = pem.Decode(rest) {
 		var parsed any
@@ -208,4 +232,90 @@ func reconcileES256Keyring(ctx context.Context, store storage.Store, keys []*ecd
 		logger.Infow("Operator signing key made current", "algorithm", "es256", "kid", wantKid)
 	}
 	return nil
+}
+
+// installOperatorSigningKeys reconciles both keyrings from keys and reports
+// whether the Biscuit signing key changed, so the caller can announce it.
+func (s *Server) installOperatorSigningKeys(ctx context.Context, keys *operatorSigningKeys) (bool, error) {
+	_, before, err := s.store.GetCurrentKey(ctx)
+	if err != nil && !errors.Is(err, storage.ErrNotFound) {
+		return false, fmt.Errorf("read current signing key: %w", err)
+	}
+	if err := reconcileES256Keyring(ctx, s.store, keys.es256, s.config.KeyGracePeriod); err != nil {
+		return false, err
+	}
+	if err := reconcileEd25519Keyring(ctx, s.store, keys.ed25519, s.config.KeyGracePeriod); err != nil {
+		return false, err
+	}
+	operatorSigningKeysGauge.WithLabelValues("ed25519").Set(float64(len(keys.ed25519)))
+	operatorSigningKeysGauge.WithLabelValues("es256").Set(float64(len(keys.es256)))
+	now := keys.currentEd25519()
+	return now != nil && !before.Equal(now), nil
+}
+
+// operatorSigningKeysReloadInterval is how often the control plane looks at
+// the key file for a change. A package variable so a test can shorten it.
+var operatorSigningKeysReloadInterval = 30 * time.Second
+
+// watchOperatorSigningKeys re-reads the key file on a timer and installs
+// what changed, so that a rotation is the operator publishing a new file
+// and nothing else: no restart, no redeploy. Polling rather than inotify,
+// because a Kubernetes Secret volume updates through an atomic symlink swap
+// and a Cloud Run secret volume through the platform, neither of which a
+// watch on the file itself sees reliably. A file that fails to parse keeps
+// the keys in use and is counted and logged; a change of the signing key
+// is announced to the mesh the way automatic rotation announces one.
+func (s *Server) watchOperatorSigningKeys() {
+	defer s.wg.Done()
+	ticker := time.NewTicker(operatorSigningKeysReloadInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		s.reloadOperatorSigningKeys()
+	}
+}
+
+// ReloadOperatorSigningKeys is one pass of the key file watcher, for callers
+// that cannot wait for its timer (tests, an operator signal).
+func (s *Server) ReloadOperatorSigningKeys() {
+	if s.operatorKeys == nil {
+		return
+	}
+	s.reloadOperatorSigningKeys()
+}
+
+// reloadOperatorSigningKeys is one pass of watchOperatorSigningKeys.
+func (s *Server) reloadOperatorSigningKeys() {
+	keys, err := loadOperatorSigningKeys(s.config.SigningKeyPath)
+	if err != nil {
+		operatorSigningKeysReloadErrors.Inc()
+		logger.Warnw("Operator signing keys not reloaded; keeping the keys in use", "path", s.config.SigningKeyPath, "error", err)
+		return
+	}
+	s.operatorKeysMu.Lock()
+	unchanged := s.operatorKeys != nil && keys.digest == s.operatorKeys.digest
+	s.operatorKeysMu.Unlock()
+	if unchanged {
+		return
+	}
+	changed, err := s.installOperatorSigningKeys(s.ctx, keys)
+	if err != nil {
+		operatorSigningKeysReloadErrors.Inc()
+		logger.Errorw("Operator signing keys changed but could not be installed", "path", s.config.SigningKeyPath, "error", err)
+		return
+	}
+	s.operatorKeysMu.Lock()
+	s.operatorKeys = keys
+	s.operatorKeysMu.Unlock()
+	logger.Infow("Operator signing keys reloaded", "path", s.config.SigningKeyPath,
+		"ed25519_keys", len(keys.ed25519), "es256_keys", len(keys.es256), "signing_key_changed", changed)
+	if changed {
+		if err := s.getMeshAdapter().PublishEvent(s.ctx, api.MeshEvent_KEY_ROTATION, "", keys.currentEd25519()); err != nil {
+			logger.Warnf("Failed to publish KEY_ROTATION event to mesh: %v", err)
+		}
+	}
 }

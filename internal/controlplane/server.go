@@ -143,8 +143,10 @@ type Server struct {
 	// embedders) starts no second resolver for the same issuer.
 	resolving map[string]bool
 	// operatorKeys are the signing keys the operator supplied, nil when the
-	// control plane generates and rotates its own.
+	// control plane generates and rotates its own; operatorKeysMu guards it
+	// against the file watcher.
 	operatorKeys          *operatorSigningKeys
+	operatorKeysMu        sync.Mutex
 	providers             map[string]*oidc.Provider
 	workloadIssuers       map[string]bool
 	workloadEmailSuffixes map[string][]string
@@ -309,16 +311,20 @@ func (s *Server) Init() error {
 	// Initialize Keyring
 	ctx := context.Background()
 	if s.operatorKeys != nil {
-		if err := reconcileEd25519Keyring(ctx, s.store, s.operatorKeys.ed25519, s.config.KeyGracePeriod); err != nil {
+		// The ES256 half was installed in NewServer, before the signer loaded
+		// from the store; this installs the Ed25519 half and is a no-op for
+		// the other.
+		if _, err := s.installOperatorSigningKeys(ctx, s.operatorKeys); err != nil {
 			return fmt.Errorf("operator signing keys: %w", err)
 		}
-		operatorSigningKeysGauge.WithLabelValues("ed25519").Set(float64(len(s.operatorKeys.ed25519)))
-		operatorSigningKeysGauge.WithLabelValues("es256").Set(float64(len(s.operatorKeys.es256)))
 		logger.Infow("Signing keys are operator-managed; automatic key rotation is off",
 			"path", s.config.SigningKeyPath,
 			"ed25519_keys", len(s.operatorKeys.ed25519),
 			"es256_keys", len(s.operatorKeys.es256),
+			"reload_interval", operatorSigningKeysReloadInterval.String(),
 			"rotation", "put the new key first in the file and keep the previous one for the grace period")
+		s.wg.Add(1)
+		go s.watchOperatorSigningKeys()
 	}
 	_, _, err := s.store.GetCurrentKey(ctx)
 	if err == storage.ErrNotFound {

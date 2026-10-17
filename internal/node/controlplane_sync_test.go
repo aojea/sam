@@ -72,18 +72,16 @@ func TestSyncRecoversWhenControlPlaneForgotNode(t *testing.T) {
 			return nil
 		}
 
-		err := harness.node.SyncControlPlane(context.Background())
+		err := harness.node.syncControlPlaneOnce(context.Background())
 		if !harness.node.controlPlaneForgotUs(err) {
 			t.Fatalf("sync error = %v, want a 401 the node recognizes as a forgotten enrollment", err)
 		}
-		if !harness.node.recoverEnrollment(context.Background()) {
-			t.Fatal("recoverEnrollment returned false with a readable bootstrap token")
+		// One SyncControlPlane recovers and completes the pull.
+		if err := harness.node.SyncControlPlane(context.Background()); err != nil {
+			t.Fatalf("sync with recovery: %v", err)
 		}
 		if enrolledWith != "mesh_tok_test" {
 			t.Fatalf("enrolled with %q, want the trimmed token from the file", enrolledWith)
-		}
-		if err := harness.node.SyncControlPlane(context.Background()); err != nil {
-			t.Fatalf("sync after re-enrollment: %v", err)
 		}
 	})
 
@@ -93,10 +91,7 @@ func TestSyncRecoversWhenControlPlaneForgotNode(t *testing.T) {
 		harness.node.enrollBootstrapFn = func(context.Context, string, string) error { called = true; return nil }
 		err := harness.node.SyncControlPlane(context.Background())
 		if !harness.node.controlPlaneForgotUs(err) {
-			t.Fatalf("sync error = %v, want a recognized 401", err)
-		}
-		if harness.node.recoverEnrollment(context.Background()) {
-			t.Fatal("recoverEnrollment returned true without a bootstrap token path")
+			t.Fatalf("sync error = %v, want the 401 passed through when there is no token to recover with", err)
 		}
 		if called {
 			t.Fatal("enrollment attempted without a token")
