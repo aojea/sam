@@ -467,6 +467,9 @@ func (s *Server) discoverProviders() error {
 func (s *Server) discoverProvider(iss string) (*oidc.Provider, error) {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: s.config.InsecureSkipTLSVerify}
+	// The transport is per attempt and the resolver calls this for as long
+	// as the issuer stays down; release its idle connections each time.
+	defer tr.CloseIdleConnections()
 	client := &http.Client{
 		Timeout:   30 * time.Second,
 		Transport: tr,
@@ -493,16 +496,22 @@ var (
 
 // resolveWorkloadIssuer keeps trying the discovery of iss until it succeeds
 // or the server stops, with exponential backoff capped at
-// workloadIssuerRetryMax. Each failure is logged so the gap is readable from
-// the logs as well as from the gauge.
+// workloadIssuerRetryMax. It does not give up: the issuer is configured, so
+// the only ways out are that it answers or that the operator removes it, and
+// stopping would leave a provider silently dead behind green probes (the
+// failure #266 fixed in the console). At the cap this is one request per
+// issuer per workloadIssuerRetryMax; each failure is logged so the gap is
+// readable from the logs as well as from the gauge.
 func (s *Server) resolveWorkloadIssuer(iss string) {
 	defer s.wg.Done()
 	delay := workloadIssuerRetryBase
 	for attempt := 1; ; attempt++ {
+		timer := time.NewTimer(delay)
 		select {
 		case <-s.ctx.Done():
+			timer.Stop()
 			return
-		case <-time.After(delay):
+		case <-timer.C:
 		}
 		provider, err := s.discoverProvider(iss)
 		if err == nil {
@@ -510,10 +519,10 @@ func (s *Server) resolveWorkloadIssuer(iss string) {
 			logger.Infow("Workload issuer resolved; tokens from it are accepted", "issuer", iss, "attempts", attempt)
 			return
 		}
-		logger.Warnw("Workload issuer still not resolved", "issuer", iss, "attempt", attempt, "next_retry", delay.String(), "error", err)
 		if delay *= 2; delay > workloadIssuerRetryMax {
 			delay = workloadIssuerRetryMax
 		}
+		logger.Warnw("Workload issuer still not resolved", "issuer", iss, "attempt", attempt, "next_retry", delay.String(), "error", err)
 	}
 }
 
