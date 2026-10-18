@@ -141,14 +141,49 @@ Why each Cloud Run flag matters:
 
 - `--min-instances 1 --max-instances 1`: the router's DHT and relay state
   live in the single process. Two instances would form two separate meshes
-  behind one URL.
+  behind one URL. See [A revision rollout runs two instances](#a-revision-rollout-runs-two-instances)
+  for the one time Cloud Run runs two anyway.
 - `--no-cpu-throttling`: the router runs background loops (lease renewal,
   key sync, DHT maintenance) between HTTP requests.
 - `--timeout 3600`: Cloud Run bounds the lifetime of a streaming request,
   and each node's WebSocket connection is one. Nodes reconnect automatically
-  when the limit closes a connection.
+  when the limit closes a connection. The same value bounds how long a
+  rollout keeps members on the previous instance (below).
 - `--allow-unauthenticated`: the mesh authenticates its own callers using
   Biscuit credentials and tokens.
+
+### A revision rollout runs two instances
+
+`--max-instances 1` holds within a revision. When you deploy a new one
+(`gcloud run deploy`, `gcloud run services update`, a new secret version
+with `--update-secrets`), Cloud Run starts the new instance, moves all new
+requests to it, and keeps the old instance alive until every request it is
+serving has ended. A member's WebSocket connection to the router is such a
+request, so the old instance stays up with its members attached until each
+connection reaches `--timeout`, counted from when that connection was
+opened, not from the rollout. Cloud Run sends SIGTERM only then; the
+router's shutdown drain (`GoAway DRAINING`) finds no member left, as each
+one has already reconnected on its own.
+
+Until that happens the mesh has two directories: members attached to the
+old instance announce and look up there, members that attach after the
+rollout (new ones, restarted ones, and each existing one as its connection
+is cut) do so on the new instance, and neither side sees the other's
+services. HTTP requests are not affected: they go to the new instance,
+which without PostgreSQL answers `401 node credential required` until the
+node re-enrolls (see
+[Operator-owned signing keys and policy without a database](#operator-owned-signing-keys-and-policy-without-a-database));
+the control plane counts those in
+`agentmesh_control_plane_member_auth_refusals_total{reason="unknown_node"}`.
+
+The bound is yours to choose. `--timeout 3600` means a rollout can take up
+to an hour to converge, with each member reconnecting once an hour in
+steady state; `--timeout 600` converges within ten minutes, with each
+member reconnecting every ten. A reconnect is a redial, a handshake and a
+re-announcement of the member's services, so pick the longest timeout
+whose convergence window you can live with. To converge at once, restart
+the members (`kubectl rollout restart deployment/<node>`): a restarted
+member always attaches to the live instance.
 
 ## 2. Obtain your Control Plane URL
 
