@@ -16,9 +16,19 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -71,7 +81,7 @@ func fakeNode(t *testing.T, s *signer, bound string, calls *atomic.Int32) *httpt
 
 func newTestProvider(t *testing.T, node string, ttl time.Duration) (*provider, *signer) {
 	t.Helper()
-	s, err := newSigner("http://provider.test", "agentmesh")
+	s, err := newSigner("http://provider.test", "agentmesh", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,11 +172,11 @@ func TestCacheHonoursTTL(t *testing.T) {
 }
 
 func TestDiscoveryDocument(t *testing.T) {
-	s, err := newSigner("http://provider.test", "agentmesh")
+	s, err := newSigner("http://provider.test", "agentmesh", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(s.handler())
+	srv := httptest.NewServer(s.handler(func() int { return 0 }))
 	defer srv.Close()
 	resp, err := http.Get(srv.URL + "/.well-known/openid-configuration")
 	if err != nil {
@@ -194,5 +204,121 @@ func TestDiscoveryDocument(t *testing.T) {
 	}
 	if err := json.NewDecoder(keys.Body).Decode(&set); err != nil || len(set.Keys) != 1 || set.Keys[0]["kid"] != s.kid || set.Keys[0]["crv"] != "P-256" {
 		t.Fatalf("jwks: %v %+v", err, set)
+	}
+}
+
+// TestSignerPersistentKeyAndStaticDiscovery is the issuer-on-a-bucket case:
+// the same key file yields the same JWKS across runs, the discovery document
+// names the bucket's JWKS, and an assertion signed in one run verifies with
+// the JWKS written by another.
+func TestSignerPersistentKeyAndStaticDiscovery(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(t.TempDir(), "p256.pem")
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const issuer = "https://storage.googleapis.com/bucket/issuer"
+	const jwksURI = issuer + "/keys"
+
+	first, err := newSigner(issuer, "agentmesh", keyPath, jwksURI)
+	if err != nil {
+		t.Fatalf("newSigner: %v", err)
+	}
+	second, err := newSigner(issuer, "agentmesh", keyPath, jwksURI)
+	if err != nil {
+		t.Fatalf("newSigner (second run): %v", err)
+	}
+	if string(first.jwks) != string(second.jwks) || first.kid != second.kid {
+		t.Fatal("two runs on the same key file produced different JWKS; the published documents would not match the signer")
+	}
+	dir := t.TempDir()
+	if err := first.writeDiscovery(dir); err != nil {
+		t.Fatalf("writeDiscovery: %v", err)
+	}
+	disc, err := os.ReadFile(filepath.Join(dir, ".well-known", "openid-configuration"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(disc, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc["issuer"] != issuer || doc["jwks_uri"] != jwksURI {
+		t.Fatalf("discovery = %v, want issuer %s and jwks_uri %s", doc, issuer, jwksURI)
+	}
+	jwksFile, err := os.ReadFile(filepath.Join(dir, "keys"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(jwksFile) != string(second.jwks) {
+		t.Fatal("the JWKS written for publishing differs from the one a later run would sign under")
+	}
+
+	assertion, err := second.assertion("spiffe://substrate-actor.local/actor/a/b", nil)
+	if err != nil {
+		t.Fatalf("assertion: %v", err)
+	}
+	parsed, err := jwt.Parse(assertion, func(tok *jwt.Token) (any, error) {
+		if kid, _ := tok.Header["kid"].(string); kid != first.kid {
+			return nil, fmt.Errorf("kid %q not in the published JWKS", kid)
+		}
+		return &key.PublicKey, nil
+	}, jwt.WithValidMethods([]string{"ES256"}))
+	if err != nil || !parsed.Valid {
+		t.Fatalf("assertion does not verify against the published key: %v", err)
+	}
+
+	if _, err := newSigner(issuer, "agentmesh", filepath.Join(t.TempDir(), "absent.pem"), ""); err == nil {
+		t.Fatal("newSigner with a missing key file returned nil")
+	}
+}
+
+// /metrics reports the actors with a cached credential from the live map:
+// one after a mint, still one after a second request for the same actor,
+// two after a request for another actor.
+func TestMetricsReportLiveCacheSize(t *testing.T) {
+	s, err := newSigner("http://provider.test", "agentmesh", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &provider{name: "agentmesh", instance: "mesh", trustDomain: "substrate-actor.local", signer: s,
+		cacheTTL: time.Minute, cache: map[string]*cached{}}
+	srv := httptest.NewServer(s.handler(p.cacheSize))
+	defer srv.Close()
+	read := func(t *testing.T) string {
+		t.Helper()
+		resp, err := http.Get(srv.URL + "/metrics")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		for _, line := range strings.Split(string(body), "\n") {
+			if strings.HasPrefix(line, "agentmesh_credential_provider_cached_actors ") {
+				return strings.TrimPrefix(line, "agentmesh_credential_provider_cached_actors ")
+			}
+		}
+		t.Fatalf("no gauge line in %q", body)
+		return ""
+	}
+	if got := read(t); got != "0" {
+		t.Fatalf("empty cache: gauge %s, want 0", got)
+	}
+	for _, actor := range []string{"spiffe://substrate-actor.local/actor/a/one", "spiffe://substrate-actor.local/actor/a/one", "spiffe://substrate-actor.local/actor/a/two"} {
+		p.mu.Lock()
+		if _, ok := p.cache[actor]; !ok {
+			p.cache[actor] = &cached{token: []byte("t"), expires: time.Now().Add(time.Minute)}
+		}
+		p.mu.Unlock()
+	}
+	if got := read(t); got != "2" {
+		t.Fatalf("two actors cached: gauge %s, want 2", got)
 	}
 }
