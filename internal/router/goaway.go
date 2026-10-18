@@ -136,6 +136,7 @@ func (r *Router) drainMembers() {
 	}
 	members := r.members()
 	if len(members) == 0 {
+		logger.Info("[GoAway] Draining: no members attached, nothing to send away")
 		return
 	}
 	retryAfter := r.config.ShutdownLeaseTTL

@@ -184,3 +184,15 @@ with `403`). The console uses these routes.
 by role and state, active routers, mesh-connected peers as reported by
 router leases, rows per store table, service reports held in memory,
 per-route request counts and latencies, and the Go runtime.
+
+A member whose request on a mesh endpoint (`/policies`, `/egress`,
+`/revocations`, `/token/exchange`, `/sts/token`, ...) is answered 401 is
+counted in `agentmesh_control_plane_member_auth_refusals_total{reason}` and
+logged with the same reason: `malformed` (not a base64 credential),
+`invalid_biscuit` (not signed by a key this control plane trusts, or
+expired), `unknown_node` (the credential verifies but the store has no
+enrollment record for the node: the store was reset, or the node was
+removed), `banned`, `session_expired`. `unknown_node` is the one to look
+at after a control plane restart on an empty store: every node then
+refused is a node that needs a bootstrap token
+(`--bootstrap-token-path`) to enroll again on its own.

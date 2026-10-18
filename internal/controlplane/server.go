@@ -1904,7 +1904,10 @@ func (s *Server) admittedNodeWithChallenge(w http.ResponseWriter, r *http.Reques
 // admittedNode returns the enrolled, admitted node whose biscuit the request
 // bears, or nil when the request carries no such credential. The error is a
 // store that could not be read, which says nothing about the credential;
-// the caller answers it as an outage, not as a refusal.
+// the caller answers it as an outage, not as a refusal. A credential that
+// was presented and not accepted is counted and logged with its reason, so
+// that a member's 401 can be read from the control plane and not inferred
+// from the member.
 func (s *Server) admittedNode(r *http.Request) (*storage.EnrolledNode, error) {
 	authHeader := r.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "Bearer ") {
@@ -1912,6 +1915,7 @@ func (s *Server) admittedNode(r *http.Request) (*storage.EnrolledNode, error) {
 	}
 	biscuitBytes, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(authHeader, "Bearer "))
 	if err != nil {
+		refuseMember(r, refusalMalformed, "", err)
 		return nil, nil
 	}
 	trustedKeys, err := s.store.GetAllValidPublicKeys(r.Context())
@@ -1920,16 +1924,42 @@ func (s *Server) admittedNode(r *http.Request) (*storage.EnrolledNode, error) {
 	}
 	peerID, err := identity.VerifyAndExtractPeerID(trustedKeys, biscuitBytes, s.config.BiscuitTimeout)
 	if err != nil {
+		refuseMember(r, refusalInvalidBiscuit, "", err)
 		return nil, nil
 	}
 	nodeRecord, err := s.store.GetNode(r.Context(), peerID.String())
 	if err != nil && !errors.Is(err, storage.ErrNotFound) {
 		return nil, fmt.Errorf("node %s: %w", peerID, err)
 	}
-	if nodeRecord == nil || nodeRecord.CheckAdmission(time.Now()) != nil {
+	if nodeRecord == nil {
+		refuseMember(r, refusalUnknownNode, peerID.String(), errors.New("no enrollment record: the store was reset or the node was removed"))
+		return nil, nil
+	}
+	if err := nodeRecord.CheckAdmission(time.Now()); err != nil {
+		reason := refusalSessionExpired
+		if errors.Is(err, storage.ErrNodeBanned) {
+			reason = refusalBanned
+		}
+		refuseMember(r, reason, peerID.String(), err)
 		return nil, nil
 	}
 	return nodeRecord, nil
+}
+
+// refuseMember records a member credential that was presented and not
+// accepted. A credential the keys do not verify or a session that lapsed
+// is the member's to renew; a node this store does not know, or has
+// banned, is the operator's to look at.
+func refuseMember(r *http.Request, reason, peerID string, err error) {
+	memberAuthRefusalsTotal.WithLabelValues(reason).Inc()
+	switch reason {
+	case refusalUnknownNode, refusalBanned:
+		logger.Warnw("Member credential refused", "reason", reason, "path", r.URL.Path, "peer_id", peerID, "error", err)
+	case refusalMalformed:
+		logger.Debugw("Member credential refused", "reason", reason, "path", r.URL.Path, "error", err)
+	default:
+		logger.Infow("Member credential refused", "reason", reason, "path", r.URL.Path, "peer_id", peerID, "error", err)
+	}
 }
 
 // writeStoreUnavailable answers a mesh request the control plane could not

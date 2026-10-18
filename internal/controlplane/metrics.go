@@ -77,7 +77,37 @@ var (
 			Help: "Times the operator signing key file could not be reloaded; the keys already in use were kept",
 		},
 	)
+
+	// memberAuthRefusalsTotal counts the member credentials presented on a
+	// mesh endpoint that the control plane did not accept, by reason. A
+	// request with no credential is not counted: on /oauth/token that is
+	// the anonymous flow, and elsewhere the 401 alone says what to send.
+	memberAuthRefusalsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "agentmesh_control_plane_member_auth_refusals_total",
+			Help: "Member credentials presented on mesh endpoints and refused, by reason (malformed, invalid_biscuit, unknown_node, banned, session_expired)",
+		},
+		[]string{"reason"},
+	)
 )
+
+// Member credential refusal reasons. unknown_node is the one an operator
+// acts on: the credential verifies under this control plane's keys, but
+// the store has no enrollment record for the node, so the store was reset
+// or the node was removed.
+const (
+	refusalMalformed      = "malformed"
+	refusalInvalidBiscuit = "invalid_biscuit"
+	refusalUnknownNode    = "unknown_node"
+	refusalBanned         = "banned"
+	refusalSessionExpired = "session_expired"
+)
+
+func init() {
+	for _, reason := range []string{refusalMalformed, refusalInvalidBiscuit, refusalUnknownNode, refusalBanned, refusalSessionExpired} {
+		memberAuthRefusalsTotal.WithLabelValues(reason)
+	}
+}
 
 // observeRoute counts and times requests to one registered mux pattern. The
 // pattern, not the request path, is the label: paths carry peer ids and token
