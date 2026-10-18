@@ -133,6 +133,10 @@ The whole procedure, including a control plane that restarts with an empty
 store between steps, is exercised by
 `TestOperatorSigningKeyRotationProcess` in `tests/integration`.
 
+Several issuers on Cloud Run: `--args` splits on commas, so either repeat
+the flag (`--workload-issuer=A,--workload-issuer=B` inside `--args`, each a
+separate argument) or switch the delimiter: `--args="^;^--port=8080;--workload-issuer=A,B;..."`.
+
 Why each Cloud Run flag matters:
 
 - `--min-instances 1 --max-instances 1`: the router's DHT and relay state

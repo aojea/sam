@@ -41,8 +41,7 @@ var (
 	dbDriver               string
 	dbDSN                  string
 	dbDSNPath              string
-	oidcIssuer             string
-	workloadIssuer         string
+	issuerFlags            controlplane.IssuerFlags
 	oidcClientID           string
 	allowedAudiencesFlag   string
 	keyRotationInterval    time.Duration
@@ -86,7 +85,7 @@ func main() {
 		Run: func(cmd *cobra.Command, args []string) {
 			logging.Setup(logging.Options{Level: logLevel, Format: logFormat})
 
-			if oidcIssuer == "" && workloadIssuer == "" {
+			if issuerFlags.Empty() {
 				logger.Fatalf("OIDC issuer is required (use --issuer or --workload-issuer flag)")
 			}
 			if insecureSkipTLSVerify {
@@ -134,8 +133,8 @@ func main() {
 				ListenAddr:             bindAddress,
 				DriverName:             dbDriver,
 				DataSourceName:         dbDSN,
-				OIDCIssuer:             oidcIssuer,
-				WorkloadIssuer:         workloadIssuer,
+				OIDCIssuer:             issuerFlags.OIDCIssuer(),
+				WorkloadIssuer:         issuerFlags.WorkloadIssuer(),
 				OIDCClientID:           oidcClientID,
 				AllowedAudiences:       auds,
 				LeaseDuration:          leaseDuration,
@@ -201,8 +200,7 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&dbDriver, "db-driver", "sqlite", "Database driver (sqlite or postgres)")
 	rootCmd.PersistentFlags().StringVar(&dbDSN, "db-dsn", "control-plane.db", "Database DSN/Connection URL (avoid for postgres: embeds a password; prefer --db-dsn-path or AGENTMESH_DB_DSN)")
 	rootCmd.PersistentFlags().StringVar(&dbDSNPath, "db-dsn-path", "", "Path to file containing the database DSN/Connection URL (overrides --db-dsn; or env AGENTMESH_DB_DSN)")
-	rootCmd.Flags().StringVar(&oidcIssuer, "issuer", "", "OIDC Issuer URL (comma-separated)")
-	rootCmd.Flags().StringVar(&workloadIssuer, "workload-issuer", "", "Workload OIDC Issuer URL or '<issuer>=<email-suffix>' (comma-separated); accepted at /register, /refresh and /token/exchange, refused at /user/* and /oauth/authorize")
+	issuerFlags.Register(rootCmd.Flags(), "")
 	rootCmd.Flags().StringVar(&oidcClientID, "oidc-client-id", "", "OAuth client ID advertised to joining nodes via /info (defaults to the first allowed audience)")
 	rootCmd.Flags().StringVar(&allowedAudiencesFlag, "allowed-audiences", api.DefaultAudience, "Comma-separated list of allowed OIDC audiences")
 	rootCmd.Flags().DurationVar(&keyRotationInterval, "key-rotation-interval", 24*time.Hour, "Key rotation interval (e.g. 24h). 0 disables rotation.")

@@ -29,6 +29,7 @@ import (
 	"syscall"
 
 	"github.com/google/agentmesh/api"
+	"github.com/google/agentmesh/internal/controlplane"
 	"github.com/google/agentmesh/internal/logging"
 	"github.com/google/agentmesh/internal/router"
 	"github.com/google/agentmesh/internal/standalone"
@@ -54,8 +55,7 @@ func main() {
 		noJoinToken          bool
 		adminTokenPath       string
 		policyFile           string
-		oidcIssuer           string
-		workloadIssuer       string
+		issuerFlags          controlplane.IssuerFlags
 		oidcClientID         string
 		allowedAudiencesFlag string
 		logLevel             string
@@ -155,8 +155,8 @@ func main() {
 				DisableJoinToken: noJoinToken,
 				AdminToken:       adminToken,
 				PolicyFile:       policyFile,
-				OIDCIssuer:       oidcIssuer,
-				WorkloadIssuer:   workloadIssuer,
+				OIDCIssuer:       issuerFlags.OIDCIssuer(),
+				WorkloadIssuer:   issuerFlags.WorkloadIssuer(),
 				OIDCClientID:     oidcClientID,
 				AllowedAudiences: auds,
 				ControlPlane:     cpTunables,
@@ -210,8 +210,7 @@ func main() {
 	rootCmd.Flags().BoolVar(&noJoinToken, "no-join-token", false, "Run without a standing join token; devices enroll only with minted bootstrap tokens (token create/qr) or OIDC")
 	rootCmd.Flags().StringVar(&adminTokenPath, "admin-token-path", "", "File containing the admin API bearer token (or env AGENTMESH_ADMIN_TOKEN; auto-generated and persisted in --data-dir if neither is set)")
 	rootCmd.Flags().StringVar(&policyFile, "policy-file", "", "Path to a protojson PolicyConfig seeding the mesh policy on first boot only")
-	rootCmd.Flags().StringVar(&oidcIssuer, "issuer", "", "Optional external OIDC issuer URL (comma-separated)")
-	rootCmd.Flags().StringVar(&workloadIssuer, "workload-issuer", "", "Optional workload OIDC issuer URL or '<issuer>=<email-suffix>' (comma-separated); accepted at /register, /refresh and /token/exchange, refused at /user/* and /oauth/authorize")
+	issuerFlags.Register(rootCmd.Flags(), "Optional ")
 	rootCmd.Flags().StringVar(&oidcClientID, "oidc-client-id", "", "OAuth client id advertised via /info (defaults to the first allowed audience)")
 	rootCmd.Flags().StringVar(&allowedAudiencesFlag, "allowed-audiences", api.DefaultAudience, "Comma-separated list of allowed OIDC audiences")
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")

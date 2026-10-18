@@ -44,7 +44,7 @@ downloaded tunnel connector.
 | `--policy-file` | | Protojson `PolicyConfig` that seeds the mesh policy on first boot. Ignored once the database has a policy. Without it, first boot seeds an open development policy and logs a warning. |
 | `--issuer` | | External OIDC issuer(s), comma-separated. Optional. Without an issuer, enrollment works by token only. |
 | `--signing-key-path` | | PEM file with operator-owned signing keys (Ed25519 for Biscuits, P-256 for ES256 JWTs; first of each kind signs, later ones verify). Automatic key rotation is off while set; rotate by publishing a new first key and keeping the previous one for the grace period. See the control plane reference. |
-| `--workload-issuer` | | Workload OIDC issuer(s), comma-separated (`<issuer>` or `<issuer>=<email-suffix>`). Automatically added to `--issuer` and refused at `/user/*` and `/oauth/authorize`. One that does not answer at start-up is resolved in the background and its tokens refused until then (`agentmesh_control_plane_workload_issuer_ready{issuer}`); a `--issuer` that does not answer is fatal. |
+| `--workload-issuer` | | Workload OIDC issuer(s), repeatable or comma-separated (`<issuer>` or `<issuer>=<email-suffix>`). Automatically added to `--issuer` and refused at `/user/*` and `/oauth/authorize`. One that does not answer at start-up is resolved in the background and its tokens refused until then (`agentmesh_control_plane_workload_issuer_ready{issuer}`); a `--issuer` that does not answer is fatal. |
 | `--oidc-client-id` | first audience | Client ID advertised on `/info`. |
 | `--allowed-audiences` | `agentmesh-audience` | Accepted OIDC audiences. |
 | `--enroll-qr` | when stdout is a terminal | Print a device-enrollment QR code at startup. Only for `https` URLs. |
