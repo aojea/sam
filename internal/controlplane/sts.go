@@ -328,14 +328,19 @@ func isValidHostHeader(host string) bool {
 	return true
 }
 
-// oidcIssuerURL returns the canonical OIDC issuer URL for this control plane.
+// oidcIssuerURL returns the canonical OIDC issuer URL for this control plane:
+// STSIssuerURL when the operator stated it, else this listener as the
+// request reached it. Nothing is read from X-Forwarded-* headers: behind a
+// TLS-terminating proxy the operator states the public URL (--sts-issuer-url,
+// or --external-url on agentmesh-one), so that the issuer is one value for
+// every client and not whatever a request claimed.
 func (s *Server) oidcIssuerURL(r *http.Request) string {
 	if iss := strings.TrimRight(strings.TrimSpace(s.config.STSIssuerURL), "/"); iss != "" {
 		return iss
 	}
 	scheme := "http"
 	if r != nil {
-		if r.TLS != nil || (s.config.TrustForwardedHeaders && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")) {
+		if r.TLS != nil {
 			scheme = "https"
 		}
 		if host := strings.TrimSpace(r.Host); isValidHostHeader(host) {

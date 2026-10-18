@@ -8,11 +8,13 @@ aliases:
 
 `agentmesh-one` serves its HTTP API, the web console, and the router's WebSocket
 transport on a single port (`8080`), and ships as a pre-built container image
-(`ghcr.io/google/agentmesh-one:latest`). Because `agentmesh-one` automatically infers its
-public `wss://` router address from Cloud Run's `Host` and `X-Forwarded-Proto`
-headers on `/info` and `/enroll` and derives a deterministic router `PeerID`
-from `AGENTMESH_ADMIN_TOKEN`, you can deploy a standalone control plane and router to
-Google Cloud Run in a single command.
+(`ghcr.io/google/agentmesh-one:latest`). It derives a deterministic router `PeerID`
+from `AGENTMESH_ADMIN_TOKEN`, and a Cloud Run service URL is known before the
+service exists (`https://<service>-<project number>.<region>.run.app`), so you
+can deploy a standalone control plane and router to Google Cloud Run in a
+single command. The URL goes in `--external-url`: it is the router address
+members dial and the OIDC issuer the control plane signs with, and
+`agentmesh-one` never infers either from request headers.
 
 *(Note: For multi-cloud VM deployments on GCP, AWS, Azure, OCI, or Kubernetes,
 see the [SkyPilot guide](../skypilot/).)*
@@ -24,6 +26,8 @@ PROJECT=my-gcp-project
 REGION=us-central1
 JOIN_TOKEN="mesh_tok_$(openssl rand -hex 16)"
 ADMIN_TOKEN="mesh_adm_$(openssl rand -hex 16)"
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
+EXTERNAL_URL="https://agentmesh-one-${PROJECT_NUMBER}.${REGION}.run.app"
 
 gcloud run deploy agentmesh-one \
   --project "$PROJECT" --region "$REGION" \
@@ -33,8 +37,14 @@ gcloud run deploy agentmesh-one \
   --port 8080 \
   --no-cpu-throttling \
   --timeout 3600 \
-  --set-env-vars "AGENTMESH_TOKEN=${JOIN_TOKEN},AGENTMESH_ADMIN_TOKEN=${ADMIN_TOKEN}"
+  --set-env-vars "AGENTMESH_TOKEN=${JOIN_TOKEN},AGENTMESH_ADMIN_TOKEN=${ADMIN_TOKEN},AGENTMESH_EXTERNAL_URL=${EXTERNAL_URL}"
 ```
+
+Without `--external-url` (or `AGENTMESH_EXTERNAL_URL`) the instance advertises
+its own listener, which nothing outside Cloud Run can reach. The first request
+that arrives through the front door then logs
+`Requests arrive through a reverse proxy but --external-url is not set`, and
+`agentmesh_one_proxied_requests_without_external_url_total` counts them.
 
 ### Production persistence with PostgreSQL
 
