@@ -1924,7 +1924,13 @@ func (s *Server) admittedNode(r *http.Request) (*storage.EnrolledNode, error) {
 	}
 	peerID, err := identity.VerifyAndExtractPeerID(trustedKeys, biscuitBytes, s.config.BiscuitTimeout)
 	if err != nil {
-		refuseMember(r, refusalInvalidBiscuit, "", err)
+		// For the log line only: a credential this control plane signed
+		// and that has since expired still names its node.
+		var signedBy string
+		if pID, signedErr := identity.VerifyExpiredAndExtractPeerID(trustedKeys, biscuitBytes, s.config.BiscuitTimeout); signedErr == nil {
+			signedBy = pID.String()
+		}
+		refuseMember(r, refusalInvalidBiscuit, signedBy, err)
 		return nil, nil
 	}
 	nodeRecord, err := s.store.GetNode(r.Context(), peerID.String())
