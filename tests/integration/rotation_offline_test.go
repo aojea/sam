@@ -99,7 +99,10 @@ func TestKeyRotationPastGraceWhileMembersOffline(t *testing.T) {
 	ctx := context.Background()
 	members := enrollMembersThenStop(t, mesh)
 
-	newPub := rotateSigningKey(t, ctx, mesh, 250*time.Millisecond)
+	// The grace period must outlast the online routers' /keys sync,
+	// credential refresh, and waitForRoutersUnderKey probe under -race
+	// before waitForKeysRetired waits for it to lapse.
+	newPub := rotateSigningKey(t, ctx, mesh, 2*time.Second)
 	waitForKeysRetired(t, mesh.cpPort, [][]byte{mesh.cpPub})
 
 	// The node comes back with a fresh platform token on disk.
@@ -339,7 +342,7 @@ func waitForRoutersUnderKey(t *testing.T, ctx context.Context, mesh *sdkMesh, pu
 			if time.Now().After(deadline) {
 				t.Fatalf("router %s did not refresh its credential under the new key", info.ID)
 			}
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 		}
 	}
 }
