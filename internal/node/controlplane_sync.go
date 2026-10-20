@@ -385,9 +385,8 @@ func (n *AgentMeshNode) controlPlaneForgotUs(err error) bool {
 
 // reenrollCooldown bounds how often a node spends its bootstrap token on a
 // re-enrollment: a 401 is a claim by whoever answered the control plane
-// URL, and one attempt per cooldown is all it can cause. A package variable
-// so a test can shorten it.
-var reenrollCooldown = time.Minute
+// URL, and one attempt per cooldown is all it can cause.
+const reenrollCooldown = time.Minute
 
 // recoverEnrollment enrolls again with the bootstrap token at
 // Options.BootstrapTokenPath and reports whether it did. The answer must
