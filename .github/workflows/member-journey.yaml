@@ -118,6 +118,7 @@ jobs:
               --bind-addr= \
               --socket-path "$dir/node.sock" \
               --metrics-addr "127.0.0.1:1909$i" \
+              --backend-probe-timeout 10s \
               --allow-loopback \
               --listen /ip4/127.0.0.1/tcp/0 \
               > "$RUNNER_TEMP/provider-$i.log" 2>&1 &
