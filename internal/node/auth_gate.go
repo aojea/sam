@@ -72,17 +72,18 @@ func (n *AgentMeshNode) isPeerAuthenticated(p peer.ID) bool {
 	return n.isAuthenticatedAndConnected(p) || n.isAdmitted(p)
 }
 
-// ensurePeerAuthenticated returns once p is authenticated: for a router the
-// control plane lists, by running the handshake (one at a time per router,
-// shared with the one the connection notifee started). Any other peer
-// authenticates with this node when it calls it; until it has, nothing is
-// sent to it, and a lookup is not held waiting for a peer it cannot vouch
-// for.
+// ensurePeerAuthenticated returns once p is authenticated: for an unattached
+// router the control plane lists, by running the handshake (one at a time per
+// router). A router this node is already attached to whose session dropped is
+// left to redialRouter and the connection monitor rather than re-dialled by an
+// in-flight directory or gossip stream. Any other peer authenticates with this
+// node when it calls it; until it has, nothing is sent to it, and a lookup is
+// not held waiting for a peer it cannot vouch for.
 func (n *AgentMeshNode) ensurePeerAuthenticated(ctx context.Context, p peer.ID) error {
 	if n.isPeerAuthenticated(p) {
 		return nil
 	}
-	if !n.isCatalogRouter(p) {
+	if !n.isCatalogRouter(p) || n.isAttached(p) {
 		return fmt.Errorf("%s: %w", p, errNotAuthenticated)
 	}
 	biscuitBytes, err := n.loadIdentityForAuth()
