@@ -967,11 +967,24 @@ func (s *SQLStore) SetKeyring(ctx context.Context, current KeyPair, verifying []
 	return tx.Commit()
 }
 
-// SaveInitialKey implements Store.
+// SaveInitialKey implements Store. It serializes on rotation_lock and only
+// inserts when no active (unexpired) key exists, so concurrent control-plane
+// replicas starting against an empty store converge on one initial key.
 func (s *SQLStore) SaveInitialKey(ctx context.Context, priv ed25519.PrivateKey, pub ed25519.PublicKey) error {
-	query := s.rebind(`INSERT INTO keyring (private_key, public_key, created_at) VALUES (?, ?, ?)`)
-	_, err := s.db.ExecContext(ctx, query, []byte(priv), []byte(pub), time.Now().UnixMilli())
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `UPDATE rotation_lock SET next_rotation_at = next_rotation_at WHERE id = 1`); err != nil {
+		return err
+	}
+	query := s.rebind(`INSERT INTO keyring (private_key, public_key, created_at) SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM keyring WHERE expiration IS NULL)`)
+	if _, err := tx.ExecContext(ctx, query, []byte(priv), []byte(pub), time.Now().UnixMilli()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // EnrollNode implements Store.
@@ -2226,16 +2239,24 @@ func (s *SQLStore) GetAllValidOIDCKeys(ctx context.Context) ([]OIDCKeyPair, erro
 	return keys, rows.Err()
 }
 
-// SaveInitialOIDCKey implements Store.
+// SaveInitialOIDCKey implements Store. It serializes on rotation_lock and only
+// inserts when no active OIDC key exists, so concurrent control-plane replicas
+// starting against an empty store converge on one initial OIDC key.
 func (s *SQLStore) SaveInitialOIDCKey(ctx context.Context, kid string, priv, pub []byte) error {
-	var query string
-	if s.isPostgres() {
-		query = s.rebind(`INSERT INTO oidc_keyring (kid, private_key, public_key, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (kid) DO NOTHING`)
-	} else {
-		query = s.rebind(`INSERT OR IGNORE INTO oidc_keyring (kid, private_key, public_key, created_at) VALUES (?, ?, ?, ?)`)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
-	_, err := s.db.ExecContext(ctx, query, kid, priv, pub, time.Now().UnixMilli())
-	return err
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `UPDATE rotation_lock SET next_rotation_at = next_rotation_at WHERE id = 1`); err != nil {
+		return err
+	}
+	query := s.rebind(`INSERT INTO oidc_keyring (kid, private_key, public_key, created_at) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM oidc_keyring WHERE expiration IS NULL)`)
+	if _, err := tx.ExecContext(ctx, query, kid, priv, pub, time.Now().UnixMilli()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SetOIDCKeyring implements Store.

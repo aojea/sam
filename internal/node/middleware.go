@@ -16,6 +16,7 @@ package node
 
 import (
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 	"runtime/debug"
 	"sync/atomic"
@@ -234,6 +235,9 @@ func (n *AgentMeshNode) verifyBiscuitTokenWithRules(biscuitBytes []byte, reqCtx 
 			break
 		} else {
 			lastErr = err
+			if !errors.Is(err, biscuit.ErrInvalidSignature) {
+				break
+			}
 		}
 	}
 
