@@ -1,0 +1,42 @@
+{
+  "roles": [
+    {
+      "name": "mesh:role:node",
+      "allowed_services": [
+        "system://mesh.catalog",
+        "inference://private-llm",
+        "mcp://erp-db",
+        "egress://compliance.internal"
+      ],
+      "allowed_publish": [
+        "inference://private-llm",
+        "mcp://erp-db",
+        "mcp://payroll-vault"
+      ],
+      "allowed_targets": ["*"],
+      "allowed_labels": [
+        "residency=on-prem",
+        "zone=workstation",
+        "zone=gpu-pool",
+        "zone=vault",
+        "dept=finance",
+        "dept=external"
+      ],
+      "http": [
+        {
+          "service": "egress://compliance.internal",
+          "methods": ["GET"],
+          "paths": ["/v1/vendors/*"]
+        }
+      ]
+    }
+  ],
+  "egress": [
+    {
+      "name": "compliance.internal",
+      "target_url": "http://127.0.0.1:18891",
+      "credential": "compliance-api-key",
+      "served_by": ["zone=vault"]
+    }
+  ]
+}

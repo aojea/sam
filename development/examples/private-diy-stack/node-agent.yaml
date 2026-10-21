@@ -1,0 +1,16 @@
+# Agent Workstation Sidecar Node (node-agent.yaml).
+#
+# Sits directly beside the self-hosted agent harness (agent_harness.py).
+# Exposes the corporate mesh to the local agent as:
+#   - a local MCP server (http://127.0.0.1:19101/mcp)
+#   - a local OpenAI-compatible inference API (http://127.0.0.1:19101/v1)
+# Enforces an outbound floor (egress.require_labels: {residency: on-prem})
+# so no prompt or tool call ever leaves the on-premises private boundary.
+version: "v1alpha1"
+labels:
+  residency: on-prem
+  zone: workstation
+  dept: finance
+egress:
+  require_labels:
+    residency: on-prem

@@ -1,0 +1,9 @@
+# External / Non-Finance Node (node-external.yaml).
+#
+# Enrolled with dept=external. Used in Act 3 to prove that even within the same
+# mesh, the Vault Tool Node rejects callers whose Biscuit lacks dept=finance.
+version: "v1alpha1"
+labels:
+  residency: on-prem
+  zone: workstation
+  dept: external

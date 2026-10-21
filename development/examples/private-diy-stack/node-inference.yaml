@@ -1,0 +1,19 @@
+# Bare-Metal GPU Reasoning Sidecar Node (node-inference.yaml).
+#
+# Sits beside the self-hosted open-weights LLM server (Ollama / vLLM serving
+# DeepSeek-R1 or Gemma 3) and publishes it to the mesh as inference://private-llm.
+# Enforces an inbound Datalog check so only on-premises private nodes may
+# consume GPU inference capacity.
+version: "v1alpha1"
+labels:
+  residency: on-prem
+  zone: gpu-pool
+  dept: finance
+attenuation:
+  checks:
+    - 'check if label("residency", "on-prem");'
+services:
+  - type: inference
+    name: private-llm
+    description: "Self-hosted DeepSeek-R1 / Gemma 3 reasoning engine on bare-metal GPU"
+    target_url: "http://127.0.0.1:18892"

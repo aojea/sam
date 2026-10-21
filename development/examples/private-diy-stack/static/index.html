@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Private DIY Enterprise Stack — Agent Mesh Live Workbench</title>
+  <meta name="description" content="Interactive zero-trust hybrid AI workbench connecting Gemma/DeepSeek reasoning, a self-hosted Agent Harness, and private SQLite ERP tools safely across on-premises and cloud over Agent Mesh sidecars." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-group">
+      <div class="brand-mark">SAM</div>
+      <div class="brand-title">
+        <h1>Private DIY Enterprise Stack — Live Mesh Workbench</h1>
+        <div class="brand-subtitle">
+          Self-Hosted Reasoning (<code>deepseek-r1:1.5b</code> / <code>gemma3</code>) + Agent Harness + <code>agentmesh-node</code> Sidecars (Safely On-Premises &amp; in Cloud)
+        </div>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <div id="mesh-health-indicator" class="mesh-health-badge">
+        <span class="status-dot"></span>
+        <span id="mesh-status-text">Mesh Online · 4 Sidecars Enrolled</span>
+      </div>
+      <button id="btn-run-all-acts" class="btn btn-primary" type="button">
+        ▶ Run All 4 Acts Automatically
+      </button>
+      <button id="btn-refresh-state" class="btn" type="button">
+        ↻ Sync State
+      </button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <!-- Left Column: Act 1 Topology & Act 2 ReAct Agent Execution -->
+    <div class="column">
+      <!-- Act 1: Sidecar Node Architecture -->
+      <section class="panel" aria-labelledby="heading-act1">
+        <div class="panel-header">
+          <div class="panel-title-group">
+            <span class="act-tag">Act 1</span>
+            <h2 id="heading-act1">The "Sidecar" Node Architecture &amp; P2P Discovery</h2>
+          </div>
+          <button id="btn-act1-discover" class="btn" type="button">
+            Discover Mesh Catalog (/mcp)
+          </button>
+        </div>
+        <div class="panel-body topology-wrap">
+          <svg class="topology-svg" viewBox="0 0 760 230" role="img" aria-label="Agent Mesh Sidecar Topology">
+            <!-- Links -->
+            <line id="link-cp-agent" class="topo-link" x1="380" y1="48" x2="145" y2="115" />
+            <line id="link-cp-gpu" class="topo-link" x1="380" y1="48" x2="615" y2="95" />
+            <line id="link-cp-vault" class="topo-link" x1="380" y1="48" x2="615" y2="178" />
+            <line id="link-agent-gpu" class="topo-link" x1="255" y1="128" x2="495" y2="95" />
+            <line id="link-agent-vault" class="topo-link" x1="255" y1="152" x2="495" y2="178" />
+
+            <!-- Control Plane Box -->
+            <rect id="box-cp" class="topo-node-box" x="235" y="10" width="290" height="42" rx="6" />
+            <text x="380" y="28" text-anchor="middle" font-size="11.5" font-weight="600" fill="#0f172a">Control Plane &amp; Router (agentmesh-one)</text>
+            <text x="380" y="43" text-anchor="middle" font-size="10" font-family="JetBrains Mono, monospace" fill="#475569">Biscuit Authority · Datalog RBAC policy.json</text>
+
+            <!-- Workstation / Cloud Agent Sidecar -->
+            <rect id="box-agent" class="topo-node-box" x="20" y="95" width="235" height="96" rx="6" />
+            <text x="32" y="115" font-size="11.5" font-weight="600" fill="#0f172a">1. Cloud / Workstation (node-agent)</text>
+            <text x="32" y="132" font-size="10" font-family="JetBrains Mono, monospace" fill="#334155">agent_harness.py → 127.0.0.1:19101</text>
+            <text x="32" y="148" font-size="10" font-family="JetBrains Mono, monospace" fill="#0369a1">• Loopback MCP (/mcp)</text>
+            <text x="32" y="163" font-size="10" font-family="JetBrains Mono, monospace" fill="#0369a1">• Loopback OpenAI (/v1)</text>
+            <text x="32" y="179" font-size="9.5" font-family="JetBrains Mono, monospace" fill="#64748b">residency=on-prem · dept=finance</text>
+
+            <!-- GPU Reasoning Sidecar -->
+            <rect id="box-gpu" class="topo-node-box" x="495" y="60" width="245" height="72" rx="6" />
+            <text x="507" y="80" font-size="11.5" font-weight="600" fill="#0f172a">2. Cloud / On-Prem GPU (node-inference)</text>
+            <text x="507" y="97" font-size="10" font-family="JetBrains Mono, monospace" fill="#0369a1">inference://private-llm (Gemma/DeepSeek)</text>
+            <text x="507" y="114" font-size="9.5" font-family="JetBrains Mono, monospace" fill="#64748b">check if label("residency", "on-prem")</text>
+
+            <!-- Vault Tool Sidecar -->
+            <rect id="box-vault" class="topo-node-box" x="495" y="144" width="245" height="76" rx="6" />
+            <text x="507" y="163" font-size="11.5" font-weight="600" fill="#0f172a">3. On-Prem Vault Zone (node-tools)</text>
+            <text x="507" y="179" font-size="10" font-family="JetBrains Mono, monospace" fill="#0369a1">mcp://erp-db · mcp://payroll-vault</text>
+            <text x="507" y="194" font-size="10" font-family="JetBrains Mono, monospace" fill="#0369a1">egress://compliance.internal (+Secret)</text>
+            <text x="507" y="209" font-size="9.5" font-family="JetBrains Mono, monospace" fill="#64748b">check if label("dept", "finance")</text>
+          </svg>
+
+          <div id="node-cards-container" class="node-cards-row"></div>
+          <pre id="act1-catalog-output" class="code-output">Click "Discover Mesh Catalog (/mcp)" or "Run All 4 Acts Automatically" to inspect live Kademlia DHT &amp; GossipSub discovery from 127.0.0.1:19101/mcp.</pre>
+        </div>
+      </section>
+
+      <!-- Act 2: Private DIY Execution -->
+      <section class="panel" aria-labelledby="heading-act2">
+        <div class="panel-header">
+          <div class="panel-title-group">
+            <span class="act-tag">Act 2</span>
+            <h2 id="heading-act2">Private DIY Execution — DeepSeek Reasoning + Harness + Mesh</h2>
+          </div>
+          <button id="btn-act2-run" class="btn btn-primary" type="button">
+            Run Agent ReAct Loop
+          </button>
+        </div>
+        <div class="panel-body">
+          <div class="prompt-bar">
+            <input
+              id="input-agent-task"
+              class="prompt-input"
+              type="text"
+              value="Audit Invoice INV-2026-089 for Acme Robotics, verify SKU-GPU-H200 warehouse stock, and check vendor ACME-01 compliance."
+              aria-label="Agent Task Prompt"
+            />
+          </div>
+          <div id="act2-steps-container" class="react-steps">
+            <div class="step-card">
+              <div class="step-card-header">
+                <span>Ready to Execute Self-Hosted ReAct Loop (<code>agent_harness.py</code>)</span>
+                <span class="chip">127.0.0.1:19101</span>
+              </div>
+              <div class="guardrail-desc">
+                The agent process holds zero database credentials and zero peer IP addresses. It queries its local sidecar at <code>127.0.0.1:19101/mcp</code> for tools and <code>127.0.0.1:19101/v1/chat/completions</code> for <code>deepseek-r1:1.5b</code> reasoning.
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Right Column: Act 3 Zero-Trust Guardrails & Act 4 Audit + Kill-Switch -->
+    <div class="column">
+      <!-- Act 3: Zero-Trust Identity & Default-Deny Policy -->
+      <section class="panel" aria-labelledby="heading-act3">
+        <div class="panel-header">
+          <div class="panel-title-group">
+            <span class="act-tag">Act 3</span>
+            <h2 id="heading-act3">Zero-Trust Identity &amp; Default-Deny Policy Simulator</h2>
+          </div>
+          <button id="btn-act3-run-all" class="btn" type="button">
+            Run All 4 Guardrail Checks
+          </button>
+        </div>
+        <div class="panel-body">
+          <div class="guardrail-grid">
+            <!-- 3a -->
+            <div class="guardrail-card">
+              <div>
+                <h3>3a. Default-Deny Service Name</h3>
+                <p class="guardrail-desc">
+                  Call <code>mcp://payroll-vault</code> hosted on the same Vault sidecar as <code>mcp://erp-db</code>.
+                </p>
+              </div>
+              <div id="result-3a" class="guardrail-result">Not tested yet.</div>
+              <button id="btn-test-3a" class="btn btn-danger" type="button">
+                Test Unpermitted Service (payroll-vault)
+              </button>
+            </div>
+
+            <!-- 3b -->
+            <div class="guardrail-card">
+              <div>
+                <h3>3b. HTTP Method/Path Guardrail</h3>
+                <p class="guardrail-desc">
+                  <code>policy.json</code> allows <code>GET /v1/vendors/*</code> on <code>egress://compliance.internal</code>, blocking <code>POST</code>.
+                </p>
+              </div>
+              <div id="result-3b" class="guardrail-result">Not tested yet.</div>
+              <button id="btn-test-3b" class="btn btn-danger" type="button">
+                Test POST /v1/vendors/ACME-01
+              </button>
+            </div>
+
+            <!-- 3c -->
+            <div class="guardrail-card">
+              <div>
+                <h3>3c. Department Isolation Boundary</h3>
+                <p class="guardrail-desc">
+                  Caller enrolled with <code>dept=external</code> attempts to invoke <code>mcp://erp-db</code> on the Finance Vault node.
+                </p>
+              </div>
+              <div id="result-3c" class="guardrail-result">Not tested yet.</div>
+              <button id="btn-test-3c" class="btn btn-danger" type="button">
+                Test Cross-Dept Call (dept=external)
+              </button>
+            </div>
+
+            <!-- 3d -->
+            <div class="guardrail-card">
+              <div>
+                <h3>3d. Per-Task Sealed Biscuit (<code>tar_block</code>)</h3>
+                <p class="guardrail-desc">
+                  Mint RFC 8693 Task Biscuit narrowed to read tools; block prompt-injected <code>execute_wire_transfer</code>.
+                </p>
+              </div>
+              <div id="result-3d" class="guardrail-result">Not tested yet.</div>
+              <button id="btn-test-3d" class="btn btn-danger" type="button">
+                Test Prompt-Injected Wire Transfer
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Act 4: Live SQLite State, Correlated Audit Trail & Kill-Switch -->
+      <section class="panel" aria-labelledby="heading-act4">
+        <div class="panel-header">
+          <div class="panel-title-group">
+            <span class="act-tag">Act 4</span>
+            <h2 id="heading-act4">Correlated Sidecar Audit Trail &amp; Mesh-Wide Kill-Switch</h2>
+          </div>
+          <button id="btn-act4-ban" class="btn btn-danger" type="button">
+            Ban External Peer (admin ban)
+          </button>
+        </div>
+        <div class="panel-body">
+          <div class="db-summary-row">
+            <div class="metric-box">
+              <div class="metric-label">ERP Invoices (SQLite)</div>
+              <div id="metric-invoices" class="metric-value">2 rows</div>
+            </div>
+            <div class="metric-box">
+              <div class="metric-label">Wire Transfers Executed</div>
+              <div id="metric-wires" class="metric-value">0 rows (Protected)</div>
+            </div>
+            <div class="metric-box">
+              <div class="metric-label">External Peer Status</div>
+              <div id="metric-ban-status" class="metric-value">Enrolled</div>
+            </div>
+          </div>
+
+          <div class="audit-table-wrap">
+            <table class="audit-table" aria-label="Sidecar Audit Decisions">
+              <thead>
+                <tr>
+                  <th>Decision</th>
+                  <th>Caller / Policy Layer</th>
+                  <th>Method / Operation</th>
+                  <th>Target Service</th>
+                </tr>
+              </thead>
+              <tbody id="audit-table-body">
+                <tr>
+                  <td colspan="4">Waiting for mesh activity...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

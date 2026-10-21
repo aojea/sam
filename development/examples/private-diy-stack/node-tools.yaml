@@ -1,0 +1,27 @@
+# Data Center Vault Tool Sidecar Node (node-tools.yaml).
+#
+# Sits beside private company databases (SQLite ERP & Payroll MCP servers) and
+# internal REST APIs. Registers mcp://erp-db and mcp://payroll-vault into the
+# mesh directory and serves egress://compliance.internal by injecting the
+# vault secret (secrets/compliance-api-key) on the host side.
+#
+# Enforces positive inbound Datalog checks requiring both residency=on-prem
+# and dept=finance in the caller's Control-Plane-signed Biscuit.
+version: "v1alpha1"
+labels:
+  residency: on-prem
+  zone: vault
+  dept: finance
+attenuation:
+  checks:
+    - 'check if label("residency", "on-prem");'
+    - 'check if label("dept", "finance");'
+services:
+  - type: mcp
+    name: erp-db
+    description: "Private Corporate ERP Database (Invoices, Inventory & Wire Transfers)"
+    target_url: "http://127.0.0.1:18890/mcp"
+  - type: mcp
+    name: payroll-vault
+    description: "Restricted Executive Payroll Database (Default-Deny in policy.json)"
+    target_url: "http://127.0.0.1:18890/payroll-mcp"
